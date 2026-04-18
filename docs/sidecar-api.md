@@ -256,6 +256,44 @@ Q&A Agent 會話（Module 8，D-016）。async。
 
 ---
 
+### `GET /reasoning?after_step_id=`（IA §13 · SSE reconnect 支援）
+
+Agent console 的 SSE 斷線重連用。前端記最後收到的 `step_id`，reconnect 時打這個 endpoint 取漏收的步驟一次補齊，再重新訂閱 `GET /tasks/{id}/events` 接續新事件。
+
+**Request query**
+- `task_id`（必要）：要取哪個 task 的 reasoning log
+- `after_step_id`（必要）：從這個 step_id 之後的開始回（不含此 id）
+- `limit`（選用，預設 100）：上限筆數，防瀏覽器塞爆
+
+**Response**
+```json
+{
+  "task_id": "explore_def456",
+  "entries": [
+    {
+      "step_id": 7,
+      "ts": "...",
+      "phase": "explore",
+      "thought": "...",
+      "tool_call": { "tool": "find_callers", "args": {...} },
+      "tool_result": { "observation": "...", "tokens_used": 1240 },
+      "judge_verdict": { "relevance": 0.92, "reason": "..." },
+      "usage": { "prompt_tokens": 1240, "completion_tokens": 180 }
+    }
+  ],
+  "has_more": false,
+  "latest_step_id": 14
+}
+```
+
+**語意**
+- `entries` 按 `step_id` 升序排列；前端 append 到 console，不清空舊的
+- `has_more: true` 時 UI 繼續用最新 `step_id` 再打一次
+- 資料源為 `reasoning_log.jsonl`（D-017）— reconnect 時不重跑 Agent，純讀檔
+- `step_id` = 0 時回整個 task 的 log（冷啟進 audit tab 看歷史用）
+
+---
+
 ### `GET /tasks/{id}/status`
 ```json
 {
@@ -267,6 +305,95 @@ Q&A Agent 會話（Module 8，D-016）。async。
 ```
 
 `state`：`queued` / `running` / `done` / `failed` / `cancelled`
+
+---
+
+### Audit Mode endpoints（C+ · O-05 Sanitizer Diff 支援）
+
+稽核解鎖是「看 raw 原文」的唯一合法路徑。未解鎖時 diff endpoint 的 `raw` 欄位為 null，UI 顯示遮罩。
+
+#### `POST /audit/unlock`
+使用者在 `/audit` route 點「🔓 解鎖原值」觸發。寫 `sanitize_audit.jsonl` 的 `audit_unlock` event，回傳 `audit_session_id`（後續 diff 請求帶此 id）。
+```json
+// Response
+{
+  "audit_session_id": "auds_9f2e",
+  "unlocked_at": "2026-04-18T10:22:00Z",
+  "timeout_sec": 900
+}
+```
+
+#### `POST /audit/relock`
+使用者點「🔒 重新鎖定」或離開 route 時觸發。寫配對的 `audit_relock` event。
+```json
+// Request
+{ "audit_session_id": "auds_9f2e", "trigger": "user_manual_button" }
+// Response
+{ "relocked_at": "...", "duration_sec": 142 }
+```
+`trigger`：`user_manual_button` / `route_left` / `timeout`
+
+#### `GET /audit/sanitize/files`
+O-05 左欄檔案樹資料源。列出所有有 sanitize 動作的檔案，依嚴重度降序 + kind 分組。
+```json
+{
+  "files": [
+    { "path": "src/config.py", "kinds": { "secret": 2, "email": 1 },
+      "severity": "high", "last_scanned": "..." },
+    { "path": "src/adapters/s3.ts", "kinds": { "email": 3, "domain": 1 },
+      "severity": "medium", "last_scanned": "..." }
+  ]
+}
+```
+
+#### `GET /audit/sanitize/diff`
+O-05 右上 diff view 資料源。依 `audit_session_id` 的有效性與 scope 回三態（`raw` / `raw_masked` / 都 null）。
+
+**三態語意**（LEFT pane 渲染邏輯）
+
+| 狀態 | `audit_session_id` | scope 是否涵蓋此檔 | `raw` | `raw_masked` |
+|---|---|---|---|---|
+| **LOCKED** | 無 / 過期 / `relock` 已寫 | — | `null` | 非 null（結構保留遮罩） |
+| **UNLOCKED · in-scope** | 有效 | 是（`file` scope 指向本檔，或 `all_placeholders`） | 完整原文 | `null` |
+| **UNLOCKED · out-of-scope** | 有效 | 否（`file` scope 指向別檔） | `null` | 非 null（等同 LOCKED 對此檔） |
+
+```json
+// Request query: ?file=src/adapters/s3.ts&audit_session_id=auds_9f2e
+{
+  "file": "src/adapters/s3.ts",
+  "scrubbed": "// Copyright ... <REDACTED:email#1> ...",
+  "raw": "// Copyright ... john@example.com ...",
+  "raw_masked": null,
+  "placeholders": [
+    { "id": "email#1", "kind": "email", "line": 2, "col": 35,
+      "rule_id": "pii_email_v1", "offset_raw": [150, 168] }
+  ],
+  "rule_stats": {
+    "pii_email_v1": { "matched": 23, "flagged": 0 },
+    "aws_access_key": { "matched": 1, "flagged": 0 }
+  },
+  "timeline": [
+    { "ts": "...", "rule_id": "pii_email_v1", "kind": "email",
+      "placeholder_id": "email#1", "pass": "scanner" }
+  ]
+}
+```
+
+**`raw_masked` 生成規則**
+- 由 sidecar 以 `placeholders[].offset_raw` 為界產生，非 placeholder 區段保留原字元（註解、import、語法結構可讀），placeholder 區段替為 `░` × `round(len × 0.75)`，下限 4 字元
+- 生成後 `raw` 資料不得殘留在同一 response — 互斥
+- 前端永遠直接 render `raw ?? raw_masked`，不在 client 端做遮罩運算（避免客端程式碼意外接觸原文）
+
+**`rule_stats` 語意**
+- key 為 `rule_id`，對應 RIGHT pane card 的 `matched: N · flagged: M` 顯示
+- `matched` = **本 session（workspace open→close 內）此規則共命中幾次**，跨檔加總（見 `sanitizer.md §十一`）
+- `flagged` = 使用者於稽核頁面標記「這筆不該替換」的反饋數；MVP 恆為 `0`（反饋回路留 post-MVP）
+
+**Security 對齊**
+- `raw` 欄位是前端唯一合法取得原文的路徑，回傳前必驗 `audit_session_id` 有效且未 expire 且 scope 涵蓋
+- `raw_masked` 為結構保留遮罩，不洩漏原值任一字元（非 placeholder 區段才可見）
+- Timeline entry **不含** `matched_substring`（原值片段只走 `raw` 欄位，不雙通道洩漏）
+- sidecar 內部 `raw` 從**檔案系統即時 re-read**，不從 KB 或 log 拉（KB/log 都是 scrubbed 版本）
 
 ---
 

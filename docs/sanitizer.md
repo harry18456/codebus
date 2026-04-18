@@ -112,6 +112,42 @@ Pre-flight pass 另記：
 }
 ```
 
+### Audit Mode 解鎖/鎖定事件（C+ · O-05 支援）
+
+`/audit` 路由的「🔓 解鎖原值」按鈕觸發 — 使用者在稽核頁面主動解鎖才能看 raw diff。解鎖/鎖定成對寫 `sanitize_audit.jsonl`：
+
+```json
+// 主動解鎖
+{
+  "ts": "...",
+  "pass": "audit",
+  "event": "audit_unlock",
+  "session_id": "sess_...",
+  "audit_session_id": "auds_...",
+  "actor": "local_user",
+  "scope": "all_placeholders",
+  "reason": "user_clicked_unlock"
+}
+
+// 配對的 re-lock
+{
+  "ts": "...",
+  "pass": "audit",
+  "event": "audit_relock",
+  "session_id": "sess_...",
+  "audit_session_id": "auds_...",
+  "trigger": "user_manual_button",
+  "duration_sec": 142
+}
+```
+
+規則：
+- `audit_session_id` 綁一次解鎖週期，`unlock` / `relock` 事件成對出現
+- **連稽核事件本身都不記原值**、不記解鎖期間看了哪些 placeholder（只記解鎖/關閉事件本身）
+- `trigger` 三種：`user_manual_button`（點 🔒 重新鎖定按鈕）/ `route_left`（切走 audit route 自動）/ `timeout`（預設 15 分鐘無操作，可 config）
+- UI 對應：O-05 topbar banner「🔓 Audit mode · unlocked at 10:22 · duration 2m 22s · [🔒 重新鎖定]」的 duration 從 `audit_unlock.ts` 算起
+- Audit mode 解鎖時，`GET /audit/sanitize/diff` 才會回 raw 內容；未解鎖時 raw 欄位為 null
+
 ---
 
 ## 四、處理策略
@@ -326,3 +362,31 @@ Sanitizer 規則改動 → 跑所有 fixture → 對比預期 placeholder 輸出
 - Reverse mapping（placeholder → 原值）
 - 多 workspace 共用 config（每個 workspace 獨立）
 - Sanitizer 規則熱更新（改 config 要重啟 App）
+
+---
+
+## 十一、Rule 統計與反饋欄位（O-05 RIGHT pane 支援）
+
+O-05 placeholder card 展開後顯示 `matched: 23 · 0 flagged`，資料來源為 sidecar 的 rule-level in-memory counter（每 `session_id` 獨立）。
+
+### 欄位定義
+
+| 欄位 | 型別 | 語意 |
+|---|---|---|
+| `rule_id` | string | 規則穩定識別碼（如 `pii_email_v1` / `aws_access_key`），版本改動升號 |
+| `matched` | int | 本 session 此規則總命中次數（Pass 1 / 2 / 3 合計，**跨檔加總**） |
+| `flagged` | int | 使用者於稽核頁標記「這筆不該替換」的次數（反饋回路） |
+| `last_matched_at` | string (ISO) | 最近一次命中時間（可選，UI 暫未使用） |
+
+### Counter 更新時機
+- 每次 Sanitizer 替換字串成功後，`matched += 命中次數`（同檔同值多次命中累加）
+- `flagged` 欄位 MVP **恆為 0**；反饋 UI（使用者點「這不該替換」）留 post-MVP
+- Workspace 關閉時 counter 清零（per-session）；不跨 session 累計
+
+### 傳輸路徑
+- `GET /audit/sanitize/diff` response 的 `rule_stats` 欄位直接回
+- 不獨立 endpoint（避免前端雙打），因為 O-05 RIGHT pane 永遠與 diff view 綁同一個 file scope
+
+### 為何不做跨 session 累計
+- 避免儲存「這個 workspace 歷史上有過什麼 secret」的 metadata — 一旦外洩仍算資料暴露
+- Counter 僅作為稽核頁的當次 demo / 說服力素材，不需要跨 session 一致性
