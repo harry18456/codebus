@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# uv
+.uv/
+
+# Node
+node_modules/
+.nuxt/
+.output/
+dist/
+.pnpm-store/
+*.log
+
+# Rust / Tauri
+target/
+Cargo.lock.bak
+src-tauri/target/
+src-tauri/gen/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Qdrant local storage
+kb/
+*.qdrant/
+
+# CodeBus workspace artifacts
+codebus-workspace/
+reasoning_log.jsonl
+tool_audit.jsonl
+sanitize_audit.jsonl
+kb_growth.jsonl
+generator_log.jsonl
+
+# PyInstaller
+build/
+*.spec
