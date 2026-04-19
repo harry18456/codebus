@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
+import sys
 
 import uvicorn
 
-from codebus_agent import auth, handshake, net
+from codebus_agent import auth, handshake, healthz, net
 from codebus_agent.api import create_app
 from codebus_agent.watchdog import watch_parent
 
@@ -29,7 +31,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="pid of the parent Tauri process; sidecar exits if this pid disappears",
     )
-    # --healthz lands in 8.5.
+    parser.add_argument(
+        "--healthz",
+        action="store_true",
+        help=(
+            "run the packaged self-check: probe each dependency once, "
+            "emit a single JSON line to stdout, exit 0 (status=\"ok\"|\"degraded\")"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -57,8 +66,24 @@ async def _serve(app, sock, port: int, bearer: str, parent_pid: int | None) -> N
     await server.serve(sockets=[sock])
 
 
+def run_healthz() -> int:
+    """CLI self-check: probe dependencies, print one JSON line, return 0.
+
+    Backs openspec/changes/m1-power-on/specs/app-packaging/spec.md
+      Requirement: Packaged binary health check
+    Exit code is intentionally 0 even when degraded — the distinction
+    lives in the ``status`` field so CI can separate "binary crashed"
+    from "Qdrant not running yet".
+    """
+    report = asyncio.run(healthz.run_self_check())
+    print(json.dumps(report.to_dict(), ensure_ascii=False))
+    return 0
+
+
 def run(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
+    if args.healthz:
+        sys.exit(run_healthz())
     bearer = auth.generate_token()
     sock, port = net.bind_ephemeral_loopback()
     app = create_app(bearer_token=bearer)

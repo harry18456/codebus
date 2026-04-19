@@ -57,6 +57,8 @@ generator_log.jsonl
 # PyInstaller
 build/
 *.spec
+# …but keep the sidecar's hand-written spec file (checked in; builds the binary)
+!sidecar/codebus-sidecar.spec
 .spectra/
 openspec/.vector-search.db*
 

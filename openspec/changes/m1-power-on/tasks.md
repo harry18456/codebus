@@ -68,12 +68,12 @@
 
 ## 8. App packaging：PyInstaller + Tauri externalBin（implementation-plan 步驟 #6）
 
-- [ ] 8.1 撰寫 `sidecar/codebus-sidecar.spec`（PyInstaller），hidden imports 至少列 `uvicorn.protocols.http.auto` / `instructor` / `qdrant_client`，落實 design 決策「D-local-5：PyInstaller 用 onefile 模式、entry 是 `codebus_agent.api.main:run`」（spec: PyInstaller onefile sidecar binary）
-- [ ] 8.2 執行 `pyinstaller sidecar/codebus-sidecar.spec` 產出 `sidecar/dist/codebus-sidecar(.exe)` 單檔
-- [ ] 8.3 [P] 先寫測試：packaged binary `--healthz` 在依賴齊備時 exit 0 + 輸出含 `"status": "ok"`（spec: Packaged binary health check）
-- [ ] 8.4 [P] 先寫測試：packaged binary `--healthz` 在 Qdrant 未起時 exit 0 + 輸出含 `"status": "degraded"`
-- [ ] 8.5 實作 sidecar `--healthz` 分支（不啟 HTTP server，只跑自檢），讓 8.3 / 8.4 測試轉綠
-- [ ] 8.6 更新 `tauri/src-tauri/tauri.conf.json`，`tauri.bundle.externalBin` 指向 packaged binary（spec: Tauri external binary integration）
+- [x] 8.1 撰寫 `sidecar/codebus-sidecar.spec`（PyInstaller），hidden imports 至少列 `uvicorn.protocols.http.auto` / `instructor` / `qdrant_client`，落實 design 決策「D-local-5：PyInstaller 用 onefile 模式、entry 是 `codebus_agent.api.main:run`」（spec: PyInstaller onefile sidecar binary）
+- [x] 8.2 執行 `pyinstaller sidecar/codebus-sidecar.spec` 產出 `sidecar/dist/codebus-sidecar(.exe)` 單檔
+- [x] 8.3 [P] 先寫測試：packaged binary `--healthz` 在依賴齊備時 exit 0 + 輸出含 `"status": "ok"`（spec: Packaged binary health check）
+- [x] 8.4 [P] 先寫測試：packaged binary `--healthz` 在 Qdrant 未起時 exit 0 + 輸出含 `"status": "degraded"`
+- [x] 8.5 實作 sidecar `--healthz` 分支（不啟 HTTP server，只跑自檢），讓 8.3 / 8.4 測試轉綠
+- [x] 8.6 更新 `tauri/src-tauri/tauri.conf.json`，`tauri.bundle.externalBin` 指向 packaged binary（spec: Tauri external binary integration）
 - [ ] 8.7 執行 `cargo tauri build` 產生安裝檔；launch bundled app 後 sidecar 10 秒內完成 stdout handshake
 
 ## 9. M1 整體驗收
