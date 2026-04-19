@@ -11,16 +11,16 @@
 
 ## 2. Sidecar runtime、Bearer、Handshake（implementation-plan 步驟 #3 + #4）
 
-- [ ] 2.1 [P] 先寫測試：`socket.bind(('127.0.0.1', 0))` 連續兩次取得相異 port；非 loopback 介面連線應失敗（spec: FastAPI sidecar binds ephemeral loopback port）
-- [ ] 2.2 實作 FastAPI app factory 與 ephemeral port bind；測試應轉綠
-- [ ] 2.3 [P] 先寫測試：bearer token 三情境 — missing → 401、wrong → 401、correct → 200（spec: Bearer token authentication）
-- [ ] 2.4 實作 bearer 中介層；token 用 `secrets.token_urlsafe(32)` 一次性生成，落實 design 決策「D-local-2：Bearer token 用啟動時一次性生成、記憶體常駐、不落盤」
-- [ ] 2.5 [P] 先寫測試：`GET /healthz` 在依賴齊備時回 `{"status":"ok"}`；Qdrant 未起時回 `{"status":"degraded", "dependencies": ...}`（spec: Health endpoint）
-- [ ] 2.6 實作 `/healthz` endpoint，納入 Qdrant 連通檢查
-- [ ] 2.7 [P] 先寫測試：sidecar 啟動後 stdout 首行為合法 JSON，含 `port` int 與長度 ≥32 的 `bearer` 字串（spec: Handshake via stdout first line）
-- [ ] 2.8 實作 stdout handshake 首行輸出，落實 design 決策「D-local-1：Sidecar port 採隨機埠 + Tauri 啟動時注入」
-- [ ] 2.9 [P] 先寫測試：以 `--parent-pid <pid>` 啟動 sidecar，parent 消失後 5 秒內 sidecar 自殺且釋放 port（spec: Parent-process watchdog）
-- [ ] 2.10 實作 `--parent-pid` watchdog loop
+- [x] 2.1 [P] 先寫測試：`socket.bind(('127.0.0.1', 0))` 連續兩次取得相異 port；非 loopback 介面連線應失敗（spec: FastAPI sidecar binds ephemeral loopback port）
+- [x] 2.2 實作 FastAPI app factory 與 ephemeral port bind；測試應轉綠
+- [x] 2.3 [P] 先寫測試：bearer token 三情境 — missing → 401、wrong → 401、correct → 200（spec: Bearer token authentication）
+- [x] 2.4 實作 bearer 中介層；token 用 `secrets.token_urlsafe(32)` 一次性生成，落實 design 決策「D-local-2：Bearer token 用啟動時一次性生成、記憶體常駐、不落盤」
+- [x] 2.5 [P] 先寫測試：`GET /healthz` 在依賴齊備時回 `{"status":"ok"}`；Qdrant 未起時回 `{"status":"degraded", "dependencies": ...}`（spec: Health endpoint）
+- [x] 2.6 實作 `/healthz` endpoint，納入 Qdrant 連通檢查
+- [x] 2.7 [P] 先寫測試：sidecar 啟動後 stdout 首行為合法 JSON，含 `port` int 與長度 ≥32 的 `bearer` 字串（spec: Handshake via stdout first line）
+- [x] 2.8 實作 stdout handshake 首行輸出，落實 design 決策「D-local-1：Sidecar port 採隨機埠 + Tauri 啟動時注入」
+- [x] 2.9 [P] 先寫測試：以 `--parent-pid <pid>` 啟動 sidecar，parent 消失後 5 秒內 sidecar 自殺且釋放 port（spec: Parent-process watchdog）
+- [x] 2.10 實作 `--parent-pid` watchdog loop
 
 ## 3. Tool sandbox（implementation-plan 步驟 #5；D-017）
 
