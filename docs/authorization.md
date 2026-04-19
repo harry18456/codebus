@@ -300,7 +300,7 @@ Provider: Anthropic · Claude Haiku 4.5 · outbound HTTPS → api.anthropic.com
 **行為**：
 - 寫 `grant_denied` event (`reason: "user_cancelled"`)
 - 關閉 O-01 modal
-- **返回 workspace 選擇頁**（不停留在 disabled 狀態）
+- **返回 R-00 Start Page**（見 `workspace-lifecycle.md §六`）— 不停留在 disabled 狀態
 - 使用者可隨時重開 O-01 再試
 
 **不做的事**：

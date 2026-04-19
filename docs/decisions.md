@@ -703,6 +703,124 @@ Module 1（資料夾掃描）只寫「過濾垃圾檔案」，實際坑很多。
 
 ---
 
+## D-023: Topic mode 綁容器資料夾 + 四層誤刪防線
+
+**狀態**：✅ 已決（2026-04-19）— **Topic mode 的 workspace 從 day 1 綁定一個實體容器資料夾**（預設 `~/.codebus/topics/{slug}/`），所有 per-workspace 資源住裡面；以四層防線（modal 明寫 / README.txt / Settings 入口 / 孤兒偵測）防止使用者誤刪。
+**實作細節**：見 `workspace-lifecycle.md §三` + `§七`。
+
+### 脈絡
+Topic mode 原本只定義抽象的 `workspace_source: { query, seed_urls, domain_allowlist }`（D-002 / `authorization.md §一`），沒說 KB / audit log / tutorials 落地到哪。若分散存（App-level 加 workspace_id 目錄），使用者完全看不到 Topic workspace 存在於磁碟上 —— 誤刪 `~/.codebus/` 會直接帶走所有 topic 的 audit 紀錄，且缺乏「workspace 實體錨點」的心智模型。
+
+### 選項
+
+| 選項 | 優 | 缺 |
+|---|---|---|
+| A. Topic 不綁資料夾，一切住 App-level 加 workspace_id 目錄 | 使用者零心智負擔 | 誤刪風險高、看不到 workspace 實體、備份/搬家無目標 |
+| B. Topic 一律綁容器資料夾，使用者自選位置 | 心智模型最清楚 | 摩擦高（「我只想學 uv 幹嘛選資料夾」） |
+| **C. 隱式建 `~/.codebus/topics/{slug}/` 為預設容器，進階可變更** | 低摩擦 + 心智模型統一 + 備份直觀 | 需做誤刪防線 |
+
+### 決策：C + 四層防線
+
+1. **O-01 Modal 明寫容器路徑**（可複製可點擊）
+   > 將在 `~/.codebus/topics/uv/` 建立 workspace — 包含知識庫、教材、稽核紀錄。
+2. **容器內放 `README.txt`** — 使用者真的打開資料夾第一眼看到警告與正確操作方式
+3. **Settings → Workspace 列表** — 正式刪除入口（含二次確認），避免「只能手動刪」
+4. **啟動孤兒偵測** — 發現 `~/.codebus/topics/*/` 裡有 `.codebus-workspace.json` 但不在 `workspaces.json` 的，在 R-00 通知使用者
+
+### 連動更新
+- [x] 新建 `docs/workspace-lifecycle.md`（本 ADR 的 spec 細節）
+- [ ] `sidecar-api.md §三` Phase 2 實作期：`POST /scan` topic mode 的 `workspace_source` 加 `path` 欄位
+- [ ] `authorization.md §一` Phase 2：topic mode 授權涵蓋「容器資料夾路徑」而非只是 URL
+- [ ] `tool-sandbox.md §三` Phase 2：topic 模式的 `workspace_root` = 容器資料夾路徑
+- [ ] R-00 Start Page Design mockup（額度回來再做）
+
+---
+
+## D-024: Workspace 資料分級儲存（App-level / Workspace-level / Pointer）
+
+**狀態**：✅ 已決（2026-04-19）— **三層切分**：App-level 資料在 `~/.codebus/` 根、Workspace-level 資料住 workspace 自己的資料夾內、Folder mode 用 Pointer（repo 根的 `.codebus/pointer.json`）當視覺錨點。
+**實作細節**：見 `workspace-lifecycle.md §二`。
+
+### 脈絡
+前身：`README.md §六` 的 `codebus-workspace/` 結構暗示把 KB / tutorials 放進使用者 repo；`dev-setup.md` 卻用 `CODEBUS_WORKSPACE=~/.codebus`。兩者不一致，且 folder mode 若直接把 Qdrant storage（幾百 MB）塞進使用者 repo 有三個雷：
+
+1. Git 掃到會卡
+2. 污染使用者 repo（.gitignore 要強制）
+3. 部分 repo 是 network mount / 唯讀 Docker volume，沒寫入權
+
+### 選項
+
+| 選項 | 優 | 缺 |
+|---|---|---|
+| A. 一切住 `~/.codebus/`，使用者 repo 零污染 | repo 乾淨 | 使用者看不到「這個 repo 有 CodeBus workspace」、備份不直觀 |
+| B. 一切住使用者 repo（`.codebus/` 內） | 搬家直觀、git sync | Qdrant storage 大、污染 repo、唯讀 mount 不能用 |
+| **C. 混合：repo 放 pointer、實質資料在 `~/.codebus/workspaces/{id}/`** | 視覺錨點 + 不污染 + 相容唯讀 mount | 兩邊遺失情境要處理（→ D-025） |
+
+### 決策：C + Topic 特例
+
+- **Folder mode**：pointer in repo（`.codebus/pointer.json` < 1KB）+ 實質資料 `~/.codebus/workspaces/{id}/`
+- **Topic mode**：容器資料夾 = workspace root，實質資料直接住裡面（見 D-023）
+- **App-level**（永遠 `~/.codebus/` 根）：`authorization_audit.jsonl` / `sanitizer.local.yaml` 全域預設 / `workspaces.json` registry / `sanitizer_rules_meta.json`
+
+### 關鍵不變式
+1. **Qdrant storage 不進使用者 repo** — 只放輕量 pointer
+2. **Workspace-level audit 跟著 workspace 搬家**（folder mode 也搬 `~/.codebus/workspaces/{id}/` 這份）
+3. **App-level audit 跨 workspace 所以住 user home**
+4. **Pointer 是視覺錨點不是資料本身**
+
+### 連動更新
+- [x] 新建 `docs/workspace-lifecycle.md`（本 ADR 的 spec 細節）
+- [ ] `README.md §六` 更新資料夾結構說明（目前仍是舊版，實作期前改）
+- [ ] `security.md §二` 七層 audit 路徑對齊（六層 workspace-level + 一層 App-level）
+- [ ] `.gitignore` 模板：新建 workspace 時自動寫 repo 根 `.codebus/.gitignore`
+
+---
+
+## D-025: Workspace 整合性與遺失恢復策略
+
+**狀態**：✅ 已決（2026-04-19）— **六種遺失情境各自定義修復選項，遵守五條鐵律（不靜默修復 / 不重建 audit / 不自動刪 / 啟動時 integrity check / 孤兒掃描）**。
+**實作細節**：見 `workspace-lifecycle.md §七` + `§八`（audit 事件 schema）。
+
+### 脈絡
+D-024 的 folder mode 混合策略帶來「pointer + 實質資料兩邊」的代價：任一邊遺失都要有明確處理。Topic mode 雖然單一容器但容器本身也可能被刪。另外 `workspaces.json` registry 與 `authorization_audit.jsonl` 也有獨立遺失風險。
+
+### 六種情境 + 處理（完整表見 `workspace-lifecycle.md §七`）
+
+| 情境 | 處理 |
+|---|---|
+| A. Pointer 孤（folder） | R-00 卡片標 🔴，三選一：重 scan / 重授權 / 移除 pointer |
+| B. 實質孤（folder） | R-00 孤兒通知，三選一：指定新 repo / detached / 刪除 |
+| C. Path 不一致（folder repo 搬家） | 開啟時 modal 確認 + 寫 `workspace_path_updated` audit |
+| D. Topic 容器遺失 | R-00 卡片標 🔴，從 `topic_seed` 重爬 / 移除 |
+| E. Registry 遺失 | Walk 目錄重建 + 寫 `registry_rebuilt` audit |
+| F. App-level audit 遺失 | **不補寫**，新檔記 `audit_log_initialized{prior_log_lost:true}` + R-00 全域 warning |
+
+### 五條鐵律
+
+1. **永遠不靜默修復** — 任何不一致在 R-00 讓使用者看到決策點（情境 E 例外但仍寫 audit）
+2. **永遠不重建 audit log 內容** — 合規紀錄斷鏈寧可明告也不偷補
+3. **永遠不自動刪** — 只標 broken / detached，刪除走使用者 + 二次確認
+4. **啟動時 integrity check** — walk `workspaces.json` 驗兩邊健在，broken 標記不 crash
+5. **孤兒掃描納入啟動流程** — `~/.codebus/workspaces/*/` + `~/.codebus/topics/*/` 沒在 registry 的通知使用者
+
+### 新增 Audit 事件（寫入 `~/.codebus/authorization_audit.jsonl`）
+- `workspace_path_updated` / `registry_rebuilt` / `audit_log_initialized` / `workspace_tombstoned` / `workspace_deleted`
+
+### R-00 卡片健全性 Badge
+🔴 `pointer_orphan` / 🟡 `data_orphan` / 🟠 `path_moved` / 🔵 `detached` / ⚫ `tombstone`（使用者刪除後保留 14 天供後悔）
+
+### MVP 範圍
+- 必做：情境 A / C / E / F + 墓碑機制
+- Phase 2：情境 B 的修復 UX（MVP 只做偵測 + 通知）、跨機器備份匯入匯出
+
+### 連動更新
+- [x] 新建 `docs/workspace-lifecycle.md`
+- [ ] `security.md §二` 七層 audit 補 App-level `authorization_audit.jsonl` 的新事件
+- [ ] `sidecar-api.md` Phase B 實作期加入 `GET /workspaces` / `POST /workspaces/integrity-check` / `POST /workspaces/{id}/tombstone` 等 endpoints
+- [ ] R-00 修復頁 Design mockup（額度回來再做）
+
+---
+
 ### 需要決策動作
 - [x] D-001：定技術棧（混合架構）（2026-04-17）
 - [x] D-003：決定 Ollama 路徑（Provider 抽象 + 只接指定 LLM 供應商 API）（2026-04-17）
@@ -719,6 +837,9 @@ Module 1（資料夾掃描）只寫「過濾垃圾檔案」，實際坑很多。
 - [x] D-020：Module 6 介入控制器延後至前端實作階段（2026-04-17）
 - [x] D-021：LLM Token / Cost 追蹤（UsageTracker，第五層稽核 JSONL）（2026-04-18）
 - [x] D-022：LLM Call Inspector（全 request/response 稽核，第六層 JSONL + UI 分頁）（2026-04-18）
+- [x] D-023：Topic mode 綁容器資料夾 + 四層誤刪防線（2026-04-19）
+- [x] D-024：Workspace 資料分級儲存（App-level / Workspace-level / Pointer）（2026-04-19）
+- [x] D-025：Workspace 整合性與遺失恢復策略（六情境 + 五鐵律 + R-00 badge）（2026-04-19）
 
 ### 需要 spec 動作（實作前再做）
 - [ ] D-008：三階段進度元件 Vue spec（Vue 實作）

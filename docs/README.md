@@ -24,6 +24,8 @@
 | [`tool-sandbox.md`](tool-sandbox.md) | Agent 工具執行邊界、路徑白名單、Sandbox helper（D-017） |
 | [`llm-provider.md`](llm-provider.md) | LLM Provider 抽象 Protocol（D-003） |
 | [`sidecar-api.md`](sidecar-api.md) | Python Sidecar HTTP API + SSE 事件 schema |
+| [`authorization.md`](authorization.md) | O-01 授權 Modal spec + `authorization_audit.jsonl` 事件（D-008） |
+| [`workspace-lifecycle.md`](workspace-lifecycle.md) | Workspace 資料分級 / R-00 Start Page / 遺失恢復策略（D-023 / D-024 / D-025） |
 
 ### D. Agent 設計
 | 文件 | 一句話 |
@@ -105,3 +107,4 @@
 | 教材互動 | `interactive-tutorial.md` + `module-5-generator.md` §四 |
 | 合規對映 | `security.md` + `tool-sandbox.md` §十二 + `sanitizer.md` §七 |
 | Golden sample 機制 | `decisions.md` D-006 + `tests/golden/*/ideal-route.md` |
+| Workspace 生命週期 | `workspace-lifecycle.md` + `authorization.md` + `decisions.md` D-023 / D-024 / D-025 |
