@@ -54,7 +54,9 @@
 
 ### workspace_root 定義
 
-使用者在首次授權 modal（`sanitizer.md` §七）選定的資料夾，經 `Path.resolve(strict=True)` 處理後存入 `ToolContext.workspace_root`。整個 sidecar session 期間不可變。
+使用者在 O-01 授權 modal（見 `authorization.md`）選定的資料夾，經 `Path.resolve(strict=True)` 處理後存入 `ToolContext.workspace_root`。整個 sidecar session 期間不可變。
+
+**僅適用 `workspace_type: "folder"`（MVP 唯一支援）**。Phase 2 topic mode 進來時，`ToolContext` 新增 `workspace_topic` 欄位（`seed_urls` + `domain_allowlist`），路徑白名單改由 URL scheme + domain 判斷取代（D-002 對齊）。
 
 ### 額外允許位置
 

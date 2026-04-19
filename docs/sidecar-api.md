@@ -48,18 +48,28 @@
 ## 三、REST endpoints
 
 ### `POST /scan`
-掃描資料夾（Module 1）。同步呼叫，小資料夾秒回；大資料夾走 async 版（見下）。
+掃描 workspace 內容（Module 1）。同步呼叫，小資料夾秒回；大資料夾走 async 版（見下）。
 
-**Request**
+**Request**（MVP · `workspace_type: "folder"`）
 ```json
 {
-  "path": "/abs/path/to/repo",
+  "workspace_type": "folder",
+  "workspace_source": { "path": "/abs/path/to/repo" },
   "options": {
     "respect_gitignore": true,
     "max_file_size_kb": 512
   }
 }
 ```
+
+**雙模 schema**（對齊 `authorization.md §一` · D-002）
+
+| `workspace_type` | `workspace_source` 形態 | 何時支援 |
+|---|---|---|
+| `"folder"` | `{ "path": "<abs_path>" }` | **MVP** |
+| `"topic"` | `{ "query": "...", "seed_urls": [...], "domain_allowlist": [...] }` | Phase 2 |
+
+`workspace_type` discriminator 從 day 1 寫入，Phase 2 加 topic 不需 schema breaking change。
 
 **Response**（對齊 `module-1-scanner.md` §十一 `ScanResult` schema）
 ```json
