@@ -16,6 +16,7 @@ DEFAULT_STORAGE="${HOME}/.codebus/kb"
 
 bin_path="${CODEBUS_QDRANT_BIN:-${DEFAULT_BIN}}"
 storage_path="${CODEBUS_QDRANT_STORAGE:-${DEFAULT_STORAGE}}"
+snapshots_path="${storage_path}/snapshots"
 
 if [[ ! -x "${bin_path}" ]]; then
   cat >&2 <<EOF
@@ -31,6 +32,10 @@ EOF
   exit 1
 fi
 
-mkdir -p "${storage_path}"
+mkdir -p "${storage_path}" "${snapshots_path}"
 
-exec "${bin_path}" --storage-path "${storage_path}" "$@"
+# Qdrant configures storage via env vars, not CLI flags (as of v1.17).
+# Set both storage + snapshots paths so nothing pollutes $CWD.
+export QDRANT__STORAGE__STORAGE_PATH="${storage_path}"
+export QDRANT__STORAGE__SNAPSHOTS_PATH="${snapshots_path}"
+exec "${bin_path}" "$@"

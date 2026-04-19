@@ -81,11 +81,15 @@ def test_smoke_create_upsert_search(client) -> None:
         points=[PointStruct(id=point_id, vector=vector, payload=payload)],
     )
 
-    hits = client.search(
+    # qdrant-client 1.11+ replaced `.search()` with `.query_points()`;
+    # M1 is pinned to qdrant-client 1.17.x, so use the current API.
+    response = client.query_points(
         collection_name=COLLECTION,
-        query_vector=vector,
+        query=vector,
         limit=1,
+        with_payload=True,
     )
+    hits = response.points
     assert len(hits) == 1
     assert str(hits[0].id) == point_id
     assert hits[0].payload == payload

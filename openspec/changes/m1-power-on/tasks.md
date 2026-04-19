@@ -46,7 +46,7 @@
 - [x] 5.2 [P] 保留 `sidecar/docker-compose.qdrant.yml` 作 fallback：`qdrant` 服務綁 `./kb/` 持久化（spec: Docker Compose remains available as a fallback）
 - [x] 5.3 [P] 先寫測試：binary 缺失時 `start-qdrant` 回非零 exit 且 stderr 帶下載連結；binary 存在時 30 秒內 `GET :6333/readyz` 回 200（spec: Script emits actionable error when binary is missing + Qdrant becomes reachable after the launch script runs）
 - [x] 5.4 [P] 先寫 smoke test：連線用 `CODEBUS_QDRANT_URL`（預設 `http://127.0.0.1:6333`）→ 建 `m1-smoke` collection（vector size 8）→ upsert 已知 point → search 同 vector 取回相同 id 與 payload → delete collection（spec: qdrant-client connectivity smoke test）
-- [ ] 5.5 實際跑 smoke test 轉綠（需使用者先下載 Qdrant binary 或跑 `docker compose` fallback）；確認重跑 idempotent；兩條啟動路徑皆可（延至 Phase 9 整體驗收時執行）
+- [x] 5.5 實際跑 smoke test 轉綠（Qdrant 1.17.1 binary 已下載至 `~/.codebus/bin/qdrant.exe`）；驗證時順手修掉 `start-qdrant.sh` / `.ps1` 的 `--storage-path` 錯誤旗標（Qdrant 自 v1.0+ 走 `QDRANT__STORAGE__STORAGE_PATH` env var），以及 `test_smoke.py` 的 `client.search` → `client.query_points`（qdrant-client 1.11+ 起 search 被 query_points 取代）；兩次連跑同 suite 皆 2 passed，證實 idempotent；binary 主路徑驗證通過，docker compose fallback 保留 YAML 不回歸測試
 
 ## 6. LLM provider：Protocol、Mock、Instructor（implementation-plan 步驟 #8）
 

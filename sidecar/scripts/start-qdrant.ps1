@@ -16,6 +16,7 @@ $DefaultStorage = Join-Path $HOME '.codebus\kb'
 
 $binPath = if ($env:CODEBUS_QDRANT_BIN) { $env:CODEBUS_QDRANT_BIN } else { $DefaultBin }
 $storagePath = if ($env:CODEBUS_QDRANT_STORAGE) { $env:CODEBUS_QDRANT_STORAGE } else { $DefaultStorage }
+$snapshotsPath = Join-Path $storagePath 'snapshots'
 
 if (-not (Test-Path -LiteralPath $binPath -PathType Leaf)) {
     $msg = @"
@@ -33,6 +34,11 @@ or set `$env:CODEBUS_QDRANT_BIN to its absolute path.
 }
 
 New-Item -ItemType Directory -Force -Path $storagePath | Out-Null
+New-Item -ItemType Directory -Force -Path $snapshotsPath | Out-Null
 
-& $binPath --storage-path $storagePath @args
+# Qdrant configures storage via env vars, not CLI flags (as of v1.17).
+# Set both storage + snapshots paths so nothing pollutes $PWD.
+$env:QDRANT__STORAGE__STORAGE_PATH = $storagePath
+$env:QDRANT__STORAGE__SNAPSHOTS_PATH = $snapshotsPath
+& $binPath @args
 exit $LASTEXITCODE

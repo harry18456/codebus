@@ -45,6 +45,7 @@ Thumbs.db
 # Qdrant local storage
 kb/
 *.qdrant/
+.qdrant-initialized
 
 # CodeBus workspace artifacts
 codebus-workspace/
