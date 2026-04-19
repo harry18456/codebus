@@ -74,13 +74,13 @@
 - [x] 8.4 [P] 先寫測試：packaged binary `--healthz` 在 Qdrant 未起時 exit 0 + 輸出含 `"status": "degraded"`
 - [x] 8.5 實作 sidecar `--healthz` 分支（不啟 HTTP server，只跑自檢），讓 8.3 / 8.4 測試轉綠
 - [x] 8.6 更新 `tauri/src-tauri/tauri.conf.json`，`tauri.bundle.externalBin` 指向 packaged binary（spec: Tauri external binary integration）
-- [ ] 8.7 執行 `cargo tauri build` 產生安裝檔；launch bundled app 後 sidecar 10 秒內完成 stdout handshake
+- [x] 8.7 執行 `cargo tauri build` 產生安裝檔；launch bundled app 後 sidecar 10 秒內完成 stdout handshake（build 產出 `codebus.exe` + MSI + NSIS，使用者手動啟動 release exe，ping 回 ok；驗證時順手在 `sidecar::sidecar_ping` 加上 Windows `CREATE_NO_WINDOW` flag，避免 PyInstaller console-mode binary 被 GUI 宿主 spawn 時彈出黑色 terminal 視窗）
 
 ## 9. M1 整體驗收
 
 - [x] 9.1 跑 `uv run pytest sidecar/tests/` 全綠（含 red team / smoke / mock / tracker 全部）
-- [ ] 9.2 跑 `cargo tauri dev`，UI 顯示 `CodeBus`、點按鈕可看到 sidecar ping 成功
-- [ ] 9.3 跑 `cargo tauri build` → 啟動 bundled app → 手動確認端對端 ping 成功
+- [x] 9.2 跑 `cargo tauri dev`，UI 顯示 `CodeBus`、點按鈕可看到 sidecar ping 成功（使用者手動驗證：ping 回 `status=ok port=54058`）
+- [x] 9.3 跑 `cargo tauri build` → 啟動 bundled app → 手動確認端對端 ping 成功（使用者自編譯並手動驗證：release exe 點按鈕後 ping 回 ok、無 terminal 視窗殘影）
 - [x] 9.4 打開任一 workspace，確認 `token_usage.jsonl` 與 `llm_calls.jsonl` 首次寫入即符合 spec 欄位（以 `tests/test_phase9_jsonl_acceptance.py` 自動化：模擬全新 workspace 跑 chat + embed + 失敗 chat，逐欄位斷言 required keys、`sanitizer_pass2_applied=false` 不變式、embed `output_tokens=0`、失敗 row 的 `error.class` / `error.message`）
 - [x] 9.5 以故意違規（trailing whitespace + JSON 格式錯）commit 一次，確認 Claude Code commit-gate hook 與 git 原生 `pre-commit install` 兩層皆擋下
 - [x] 9.6 手動 review `openspec/changes/m1-power-on/` 下所有 spec 驗證實作與 SHALL 條款一致，若有落差回頭 bump spec 或新增 D-XXX 後再過

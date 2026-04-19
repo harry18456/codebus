@@ -81,13 +81,24 @@ pub async fn sidecar_ping(sidecar_path: &str) -> Result<PingResult, PingError> {
     use std::io::{BufRead, BufReader};
 
     let parent_pid = std::process::id().to_string();
-    let mut child = std::process::Command::new(sidecar_path)
-        .arg("--parent-pid")
+    let mut cmd = std::process::Command::new(sidecar_path);
+    cmd.arg("--parent-pid")
         .arg(&parent_pid)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| PingError::Spawn(e.to_string()))?;
+        .stderr(Stdio::piped());
+
+    // On Windows, PyInstaller console-mode binaries pop up a black
+    // terminal when spawned from a GUI process.  CREATE_NO_WINDOW
+    // suppresses the console while keeping stdout/stderr piping intact
+    // for the handshake.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| PingError::Spawn(e.to_string()))?;
 
     let stdout = child
         .stdout
