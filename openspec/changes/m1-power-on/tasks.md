@@ -40,12 +40,13 @@
 - [x] 4.5 Tauri Rust 端實作 `invoke('sidecar_ping')`：spawn packaged sidecar → 讀 stdout 首行 handshake → `GET /healthz` 帶 bearer
 - [x] 4.6 前端按鈕觸發 `sidecar_ping` 並顯示結果；端對端 ping 回 200 為 M1「通電」成功證據
 
-## 5. Qdrant client connectivity（implementation-plan 步驟 #7）
+## 5. Qdrant client connectivity（implementation-plan 步驟 #7；D-027 起走 binary 主路徑）
 
-- [ ] 5.1 [P] 撰寫 `sidecar/docker-compose.qdrant.yml`，`qdrant` 服務綁 `./kb/` 持久化（spec: Local Qdrant launch recipe），落實 design 決策「D-local-6：Qdrant 用 Docker Compose 啟動、不走 embedded」
-- [ ] 5.2 [P] 先寫測試：`docker compose up -d` 後 30 秒內 `GET :6333/readyz` 回 200
-- [ ] 5.3 [P] 先寫 smoke test：建立 `m1-smoke` collection（vector size 8）→ upsert 已知 point → search 同 vector 取回相同 id 與 payload → delete collection（spec: qdrant-client connectivity smoke test）
-- [ ] 5.4 實作 smoke test 通過；確認重跑 idempotent
+- [x] 5.1 [P] 撰寫 `sidecar/scripts/start-qdrant.sh` 與 `sidecar/scripts/start-qdrant.ps1`：從 `$CODEBUS_QDRANT_BIN` / `~/.codebus/bin/qdrant(.exe)` 解析 binary 位置、存放 `~/.codebus/kb/`；binary 缺失時 exit 非零 + 印官方下載連結（spec: Local Qdrant launch recipe；落實 `docs/decisions.md` D-027 與 design 決策 D-local-6）
+- [x] 5.2 [P] 保留 `sidecar/docker-compose.qdrant.yml` 作 fallback：`qdrant` 服務綁 `./kb/` 持久化（spec: Docker Compose remains available as a fallback）
+- [x] 5.3 [P] 先寫測試：binary 缺失時 `start-qdrant` 回非零 exit 且 stderr 帶下載連結；binary 存在時 30 秒內 `GET :6333/readyz` 回 200（spec: Script emits actionable error when binary is missing + Qdrant becomes reachable after the launch script runs）
+- [x] 5.4 [P] 先寫 smoke test：連線用 `CODEBUS_QDRANT_URL`（預設 `http://127.0.0.1:6333`）→ 建 `m1-smoke` collection（vector size 8）→ upsert 已知 point → search 同 vector 取回相同 id 與 payload → delete collection（spec: qdrant-client connectivity smoke test）
+- [ ] 5.5 實際跑 smoke test 轉綠（需使用者先下載 Qdrant binary 或跑 `docker compose` fallback）；確認重跑 idempotent；兩條啟動路徑皆可（延至 Phase 9 整體驗收時執行）
 
 ## 6. LLM provider：Protocol、Mock、Instructor（implementation-plan 步驟 #8）
 

@@ -869,6 +869,54 @@ npm test                        # vitest
 
 ---
 
+## D-027: Qdrant 走 standalone binary（推翻 m1-power-on D-local-6 的 Docker Compose 預設）
+
+**狀態**：✅ 已決（2026-04-19）— **M1 起以 Qdrant 官方 standalone binary 為主路徑；Docker Compose 降為 fallback**。Binary 由使用者獨立下載放 known path，**不** 打包進 PyInstaller。
+
+### 脈絡
+`openspec/changes/m1-power-on/design.md` D-local-6 原選 Docker Compose，理由有二：
+1. Embedded rust binary 打包到 PyInstaller 約 +100 MB，跨平台還要多份
+2. Qdrant cloud 違背 D-009「本地優先」claim
+
+實作期才暴露的代價：Docker Desktop 在 Windows / macOS 上入門門檻不低（~700 MB+ 安裝、需啟 WSL2、商用授權非免費）。「插好電」的 M1 驗收卡在裝 Docker，與「降低上手門檻」的專案定位衝突。
+
+重新評估後發現 D-local-6 把「embed into PyInstaller」與「由使用者本機運行」綁在一起討論，是錯誤的二分。第三條路：**使用者獨立放 binary（非 embed）+ sidecar 以 HTTP 連線（與啟動方式解耦）** 同時解掉 embed 體積與 Docker 門檻兩個問題。
+
+### 選項
+
+| 選項 | 優 | 缺 |
+|---|---|---|
+| A. Docker Compose（原 D-local-6） | 版本隔離乾淨、一指令拉起 | 使用者需裝 Docker Desktop（Windows / macOS ~700 MB + WSL2） |
+| B. Embedded rust crate 打包進 PyInstaller | 使用者零裝設 | PyInstaller 體積 +~100 MB × 平台份數；Qdrant 升版綁 app 升版 |
+| **C. Standalone binary 由使用者本機放 known path** | 無 Docker 門檻、體積不進 PyInstaller、升版獨立 | 第一次啟動要走「下載解壓」一次性步驟 |
+
+### 決策：C + Docker Compose 作 fallback
+
+- **主路徑**：使用者從 Qdrant 官方 release 下載對應平台 binary（Win `.zip` / mac `.tar.gz` / Linux `.tar.gz`），解壓到 `~/.codebus/bin/qdrant(.exe)` 或 `$CODEBUS_QDRANT_BIN` 指向之路徑
+- **啟動腳本**：`sidecar/scripts/start-qdrant.{ps1,sh}` 在 foreground 跑 binary 指向 `~/.codebus/kb/`
+- **Fallback**：`sidecar/docker-compose.qdrant.yml` 保留，`dev-setup.md` 列為 CI / advanced 選項
+- **sidecar 側**：透過 `CODEBUS_QDRANT_URL`（預設 `http://127.0.0.1:6333`）連線，**與啟動方式完全解耦** — binary 跟 Docker 二擇一皆可
+
+### 關鍵不變式
+
+1. **Qdrant binary 不進 PyInstaller** — 使用者獨立管理，升版不綁 app 升版
+2. **Qdrant binary 不進 git repo** — 只進 `.gitignore`；README / dev-setup 列下載指引
+3. **sidecar 只看 HTTP endpoint** — 啟動來源（binary / compose / 遠端 dev Qdrant）對 sidecar 透明
+4. **Compose 檔仍存在** — CI 以及偏好 Docker 的 advanced user 路徑不斷
+5. **health check 仍檢 Qdrant 連通** — `GET /healthz` 的 `dependencies.qdrant` 欄位不因啟動方式改變而刪
+
+### 連動更新
+
+- [x] `openspec/changes/m1-power-on/design.md` D-local-6 翻轉主路徑、把 Docker Compose 降為 fallback
+- [x] `openspec/changes/m1-power-on/specs/qdrant-client/spec.md` SHALL 條款改「啟動腳本 + binary 路徑」為主、compose 為備
+- [x] `openspec/changes/m1-power-on/tasks.md` Phase 5 task 改走 binary
+- [ ] `docs/dev-setup.md` 新增 Qdrant binary 下載 / 解壓 / 啟動段落，Docker compose 降為「備援」章節
+- [ ] `docs/module-2-kb-builder.md §三` 提到 Qdrant 的句子改中性（HTTP endpoint），不綁 Docker
+- [ ] `.gitignore` 補 `*.qdrant-bin/` / `bin/qdrant*` 模板
+- [ ] README workspace 結構圖補 `~/.codebus/bin/` 目錄
+
+---
+
 ### 需要決策動作
 - [x] D-001：定技術棧（混合架構）（2026-04-17）
 - [x] D-003：決定 Ollama 路徑（Provider 抽象 + 只接指定 LLM 供應商 API）（2026-04-17）
@@ -888,6 +936,8 @@ npm test                        # vitest
 - [x] D-023：Topic mode 綁容器資料夾 + 四層誤刪防線（2026-04-19）
 - [x] D-024：Workspace 資料分級儲存（App-level / Workspace-level / Pointer）（2026-04-19）
 - [x] D-025：Workspace 整合性與遺失恢復策略（六情境 + 五鐵律 + R-00 badge）（2026-04-19）
+- [x] D-026：Web toolchain 改 npm 取代 Bun（2026-04-19）
+- [x] D-027：Qdrant standalone binary 取代 Docker Compose 為主路徑（2026-04-19）
 
 ### 需要 spec 動作（實作前再做）
 - [ ] D-008：三階段進度元件 Vue spec（Vue 實作）

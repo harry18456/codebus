@@ -36,4 +36,5 @@ asyncio_mode = "auto"
 addopts = "-ra --strict-markers"
 markers = [
     "slow: integration tests that spawn a real subprocess (≥ seconds)",
+    "qdrant: requires a reachable Qdrant instance; skipped automatically when CODEBUS_QDRANT_URL is unreachable",
 ]

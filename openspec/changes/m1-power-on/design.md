@@ -84,16 +84,23 @@ M1 通電是 repo 從 spec-first 跨進 code 的第一步。Proposal 已說明 *
 
 **風險 → 緩解**：隱藏 import 漏抓 → M1 smoke 測要 binary 級驗證（`./codebus-sidecar --healthz` 回 OK 才算過），不能只測 source 版；onefile 解壓到 temp 目錄會觸發防毒警報 → 文件註記，不阻止 M1。
 
-### D-local-6：Qdrant 用 Docker Compose 啟動、不走 embedded
+### D-local-6：Qdrant 走 standalone binary（主路徑）+ Docker Compose（fallback）
 
-**決定**：`sidecar/docker-compose.qdrant.yml` 管 Qdrant 生命週期，預設 port `6333`（可覆寫），持久化 `./kb/` 目錄；sidecar 啟動前假設 Qdrant 已 up；M1 smoke 測使用 `qdrant-client` 建一個 dummy collection 做 upsert / search。
+> **更新（2026-04-19，D-027）**：原本主路徑為 Docker Compose，實作期發現 Docker Desktop 在 Windows / macOS 上門檻過高（~700 MB + WSL2 + 商用授權），違背「降低上手門檻」的專案定位。重新盤點後發現原反對 embedded binary 的理由（打包進 PyInstaller ~100 MB 爆 + 跨平台多份）並不適用於「**由使用者本機放 standalone binary**」的第三條路。故翻轉 D-local-6 主路徑為 standalone binary，Docker Compose 降為 fallback。見 `docs/decisions.md` D-027。
 
-**為何**（vs 選項 A embedded rust binary、選項 B Qdrant cloud）：
-- Embedded binary 打包進 PyInstaller 體積會爆（Qdrant binary ~100MB），且跨平台需多份
+**決定**：
+- **主路徑**：使用者從 Qdrant 官方 release 下載對應平台 binary（Win `.zip` / mac `.tar.gz` / Linux `.tar.gz`），解壓至 `~/.codebus/bin/qdrant(.exe)` 或 `$CODEBUS_QDRANT_BIN` 指向之路徑
+- **啟動腳本**：`sidecar/scripts/start-qdrant.{ps1,sh}` 在 foreground 跑 binary 指向 `~/.codebus/kb/` 為 storage
+- **Fallback**：`sidecar/docker-compose.qdrant.yml` 保留，`docs/dev-setup.md` 列為 CI / advanced 選項
+- **sidecar 側**：透過 `CODEBUS_QDRANT_URL`（預設 `http://127.0.0.1:6333`）連線，**與啟動方式完全解耦** — binary 或 Docker 皆可；M1 smoke 測使用 `qdrant-client` 建 dummy collection 做 upsert / search
+
+**為何**（vs 選項 A embedded rust binary、選項 B Qdrant cloud、選項 C Docker Compose）：
+- Embedded binary 打包進 PyInstaller 體積會爆（~100 MB × 平台份數），且 Qdrant 升版綁 app 升版
 - Qdrant cloud 違背「本地優先」D-009 claim
-- Docker Compose 跨平台一致、重啟清理簡單，符合 dev 體驗
+- Docker Compose 門檻過高（~700 MB Docker Desktop + WSL2 + 商用授權），M1 評審環境不可用
+- Standalone binary 無 Docker 門檻、體積不進 PyInstaller、升版獨立 — 三個問題同時解
 
-**風險 → 緩解**：使用者無 Docker → `docs/dev-setup.md` 提供 standalone binary fallback；正式打包用嵌入式方案延到後續 change，M1 不處理。
+**風險 → 緩解**：首次啟動多一步「下載解壓」 → 啟動腳本偵測缺 binary 即印 `--help` 樣式訊息給下載連結；使用者若有既有 Docker 偏好 → compose 檔仍在，切換只需 `CODEBUS_QDRANT_URL` 環境變數。
 
 ### D-local-7：`.pre-commit-config.yaml` M1 期間只掛 stage-0 hook
 
