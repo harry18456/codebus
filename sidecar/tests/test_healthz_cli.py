@@ -25,15 +25,21 @@ from typing import Iterator
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_BINARY_CANDIDATES = [
-    _REPO_ROOT / "dist" / "codebus-sidecar.exe",
-    _REPO_ROOT / "dist" / "codebus-sidecar",
-]
+_DIST_DIR = _REPO_ROOT / "dist"
 
 
 def _find_binary() -> Path | None:
-    for candidate in _BINARY_CANDIDATES:
-        if candidate.exists():
+    """Locate the PyInstaller artifact in ``sidecar/dist/``.
+
+    The spec emits a target-triple-suffixed filename (matching Tauri's
+    externalBin lookup), so we glob rather than hard-code the suffix —
+    ``codebus-sidecar*`` matches Windows / macOS / Linux triples.
+    """
+    if not _DIST_DIR.exists():
+        return None
+    candidates = sorted(_DIST_DIR.glob("codebus-sidecar*"))
+    for candidate in candidates:
+        if candidate.is_file():
             return candidate
     return None
 
