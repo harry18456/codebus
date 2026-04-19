@@ -1,0 +1,15 @@
+# Stage-0 hooks only — see docs/decisions.md D-local-7 (m1-power-on).
+# Language-specific linters (ruff / pyright / eslint / cargo fmt / cargo clippy)
+# are deferred until each language capability lands; this config keeps the
+# commit gate alive without blocking bootstrap commits.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]

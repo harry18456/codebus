@@ -1,13 +1,13 @@
 ## 1. Repo layout、uv 與 commit gate（implementation-plan 步驟 #1）
 
-- [ ] 1.0 `uv tool install pre-commit` 在使用者 PATH（`~/.local/bin/`）裝上 pre-commit binary；驗證 `pre-commit --version` 可執行。此 task 讓新 clone 的開發者不必依賴本機預裝狀態，apply 流程 self-contained
-- [ ] 1.1 建立 `tauri/` / `sidecar/` / `web/` / `tests/fixtures/` 目錄與 placeholder README（spec: Monorepo directory layout）
-- [ ] 1.2 `cd sidecar && uv init` 產出 `pyproject.toml` 與 `uv.lock`；加入 fastapi / uvicorn / pydantic / instructor / qdrant-client / pyinstaller / pytest / pytest-asyncio 依賴（spec: Python toolchain managed by uv）
-- [ ] 1.3 [P] 建 `tauri/src-tauri/Cargo.toml` 骨架，加入 tauri 2.x / serde / tokio 依賴
-- [ ] 1.4 [P] 建 `web/package.json`（nuxt 3.x / @nuxtjs/tailwindcss / typescript）並 `npm install` 產 `package-lock.json`（D-026 取代原 bun 預設）
-- [ ] 1.5 撰寫 `.pre-commit-config.yaml` 僅掛 stage-0 hook（trailing-whitespace / end-of-file-fixer / check-yaml / check-json / check-merge-conflict / mixed-line-ending `--fix=lf`），實踐 design 決策「D-local-7：`.pre-commit-config.yaml` M1 期間只掛 stage-0 hook」
-- [ ] 1.6 撰寫 `tests/precommit_gate_test.sh`（或等價 pytest）驗證 `pre-commit run --all-files` 在乾淨 repo 上全綠（spec: Pre-commit stage-0 hooks configured）
-- [ ] 1.7 `pre-commit install` 裝 git 原生 hook；手動驗收：Claude Code PreToolUse hook + git 原生 pre-commit 雙層 gate 皆攔得到故意違規的 commit
+- [x] 1.0 `uv tool install pre-commit` 在使用者 PATH（`~/.local/bin/`）裝上 pre-commit binary；驗證 `pre-commit --version` 可執行。此 task 讓新 clone 的開發者不必依賴本機預裝狀態，apply 流程 self-contained
+- [x] 1.1 建立 `tauri/` / `sidecar/` / `web/` / `tests/fixtures/` 目錄與 placeholder README（spec: Monorepo directory layout）
+- [x] 1.2 `cd sidecar && uv init` 產出 `pyproject.toml` 與 `uv.lock`；加入 fastapi / uvicorn / pydantic / instructor / qdrant-client / pyinstaller / pytest / pytest-asyncio 依賴（spec: Python toolchain managed by uv）
+- [x] 1.3 [P] 建 `tauri/src-tauri/Cargo.toml` 骨架，加入 tauri 2.x / serde / tokio 依賴
+- [x] 1.4 [P] 建 `web/package.json`（nuxt 3.x / @nuxtjs/tailwindcss / typescript）並 `npm install` 產 `package-lock.json`（D-026 取代原 bun 預設）
+- [x] 1.5 撰寫 `.pre-commit-config.yaml` 僅掛 stage-0 hook（trailing-whitespace / end-of-file-fixer / check-yaml / check-json / check-merge-conflict / mixed-line-ending `--fix=lf`），實踐 design 決策「D-local-7：`.pre-commit-config.yaml` M1 期間只掛 stage-0 hook」
+- [x] 1.6 撰寫 `tests/precommit_gate_test.sh`（或等價 pytest）驗證 `pre-commit run --all-files` 在乾淨 repo 上全綠（spec: Pre-commit stage-0 hooks configured）
+- [x] 1.7 `pre-commit install` 裝 git 原生 hook；手動驗收：Claude Code PreToolUse hook + git 原生 pre-commit 雙層 gate 皆攔得到故意違規的 commit
 
 ## 2. Sidecar runtime、Bearer、Handshake（implementation-plan 步驟 #3 + #4）
 

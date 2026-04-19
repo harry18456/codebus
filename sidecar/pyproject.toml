@@ -1,0 +1,34 @@
+[project]
+name = "codebus-agent"
+version = "0.1.0"
+description = "CodeBus sidecar — FastAPI + Instructor + qdrant-client; spawned by Tauri shell over loopback HTTP"
+authors = [
+    { name = "harry18456", email = "harry18456@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.136.0",
+    "instructor>=1.15.1",
+    "pydantic>=2.13.2",
+    "qdrant-client>=1.17.1",
+    "uvicorn>=0.44.0",
+]
+
+[project.scripts]
+codebus-agent = "codebus_agent:main"
+
+[build-system]
+requires = ["uv_build>=0.9.27,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.19.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers"

@@ -78,7 +78,7 @@
 ### 隱式建立預設
 首次建立 Topic workspace 時 App 自動在 `~/.codebus/topics/{slug}/` 建好（slug = topic 正規化後的短碼）。O-01 modal 顯示：
 
-> 將在 `~/.codebus/topics/uv/` 建立 workspace — 包含知識庫、教材、稽核紀錄。  
+> 將在 `~/.codebus/topics/uv/` 建立 workspace — 包含知識庫、教材、稽核紀錄。
 > [📁 開啟資料夾] [📍 變更位置] [繼續]
 
 進階使用者點「變更位置」可選其他路徑（例如 `~/Documents/codebus/uv/` 方便跟 Dropbox / iCloud 同步）。
