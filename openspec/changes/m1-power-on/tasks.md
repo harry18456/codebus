@@ -81,6 +81,6 @@
 - [x] 9.1 跑 `uv run pytest sidecar/tests/` 全綠（含 red team / smoke / mock / tracker 全部）
 - [ ] 9.2 跑 `cargo tauri dev`，UI 顯示 `CodeBus`、點按鈕可看到 sidecar ping 成功
 - [ ] 9.3 跑 `cargo tauri build` → 啟動 bundled app → 手動確認端對端 ping 成功
-- [ ] 9.4 打開任一 workspace，確認 `token_usage.jsonl` 與 `llm_calls.jsonl` 首次寫入即符合 spec 欄位
+- [x] 9.4 打開任一 workspace，確認 `token_usage.jsonl` 與 `llm_calls.jsonl` 首次寫入即符合 spec 欄位（以 `tests/test_phase9_jsonl_acceptance.py` 自動化：模擬全新 workspace 跑 chat + embed + 失敗 chat，逐欄位斷言 required keys、`sanitizer_pass2_applied=false` 不變式、embed `output_tokens=0`、失敗 row 的 `error.class` / `error.message`）
 - [x] 9.5 以故意違規（trailing whitespace + JSON 格式錯）commit 一次，確認 Claude Code commit-gate hook 與 git 原生 `pre-commit install` 兩層皆擋下
 - [x] 9.6 手動 review `openspec/changes/m1-power-on/` 下所有 spec 驗證實作與 SHALL 條款一致，若有落差回頭 bump spec 或新增 D-XXX 後再過

@@ -1,13 +1,41 @@
 pub mod sidecar;
 
+use std::path::PathBuf;
+
+/// Resolve the packaged sidecar binary path.
+///
+/// Tauri's `externalBin` copies the PyInstaller onefile next to the main
+/// executable (stripping the target-triple suffix). In release mode the
+/// bundled `codebus.exe` finds `codebus-sidecar.exe` as a sibling; in
+/// `cargo tauri dev` it lands beside the debug binary in `target/debug`.
+/// If neither is present (e.g. `cargo run` without prior bundling) we
+/// fall back to the bare name so PATH lookup can still succeed.
+fn resolve_sidecar_path() -> PathBuf {
+    let name = if cfg!(windows) {
+        "codebus-sidecar.exe"
+    } else {
+        "codebus-sidecar"
+    };
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(dir) = current_exe.parent() {
+            let candidate = dir.join(name);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from(name)
+}
+
 #[tauri::command]
 async fn sidecar_ping() -> Result<sidecar::PingResult, String> {
-  // M1 dev assumption: packaged sidecar binary sits at `codebus-sidecar`
-  // on PATH.  Phase 8 replaces this with the Tauri externalBin resolved
-  // path so prod launches land the onefile binary.
-  sidecar::sidecar_ping("codebus-sidecar")
-    .await
-    .map_err(|e| e.to_string())
+    let path = resolve_sidecar_path();
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "sidecar path contains non-UTF-8 characters".to_string())?;
+    sidecar::sidecar_ping(path_str)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

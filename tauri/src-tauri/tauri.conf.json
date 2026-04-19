@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../../web/.output/public",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "npm --prefix ../../web run dev",
-    "beforeBuildCommand": "npm --prefix ../../web run generate"
+    "beforeDevCommand": "npm --prefix ../web run dev",
+    "beforeBuildCommand": "npm --prefix ../web run generate"
   },
   "app": {
     "windows": [
