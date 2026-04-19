@@ -24,12 +24,12 @@
 
 ## 3. Tool sandbox（implementation-plan 步驟 #5；D-017）
 
-- [ ] 3.1 [P] 先寫測試：`ToolContext(workspace_type="folder")` 與 `ToolContext(workspace_type="topic")` 均通過驗證；其他字串 raise ValidationError（spec: ToolContext carries workspace type discriminator；落實 design 決策「D-local-8：`workspace_type` 雙模 discriminator 的 M1 具體出現位置」）
-- [ ] 3.2 實作 `ToolContext` Pydantic model
-- [ ] 3.3 [P] 先寫測試：`ensure_in_workspace` 五類情境 — in-scope path 回 normalized Path；`..` 逃逸 raise；symlink 逃逸 raise；Windows UNC 非 workspace raise；`\\?\` long-path prefix 指向 workspace 內接受（spec: ensure_in_workspace blocks path escape；落實 design 決策「D-local-3：`ensure_in_workspace` 先 resolve real path 再比對，阻擋所有 Windows 路徑變體」）
-- [ ] 3.4 實作 `ensure_in_workspace(path, ctx)` 用 `Path.resolve(strict=False)` + `is_relative_to`
-- [ ] 3.5 [P] 撰寫 red team fixture 覆蓋 `docs/tool-sandbox.md §十五` 所有 attack vector（相對 `..`、絕對、symlink、junction、UNC、`\\?\`、case-only、trailing-dot/space）（spec: Red team fixture covers known attack vectors）
-- [ ] 3.6 執行 `uv run pytest tests/sandbox/` 驗證紅隊全綠
+- [x] 3.1 [P] 先寫測試：`ToolContext(workspace_type="folder")` 與 `ToolContext(workspace_type="topic")` 均通過驗證；其他字串 raise ValidationError（spec: ToolContext carries workspace type discriminator；落實 design 決策「D-local-8：`workspace_type` 雙模 discriminator 的 M1 具體出現位置」）
+- [x] 3.2 實作 `ToolContext` Pydantic model
+- [x] 3.3 [P] 先寫測試：`ensure_in_workspace` 五類情境 — in-scope path 回 normalized Path；`..` 逃逸 raise；symlink 逃逸 raise；Windows UNC 非 workspace raise；`\\?\` long-path prefix 指向 workspace 內接受（spec: ensure_in_workspace blocks path escape；落實 design 決策「D-local-3：`ensure_in_workspace` 先 resolve real path 再比對，阻擋所有 Windows 路徑變體」）
+- [x] 3.4 實作 `ensure_in_workspace(path, ctx)` 用 `Path.resolve(strict=False)` + `is_relative_to`
+- [x] 3.5 [P] 撰寫 red team fixture 覆蓋 `docs/tool-sandbox.md §十五` 所有 attack vector（相對 `..`、絕對、symlink、junction、UNC、`\\?\`、case-only、trailing-dot/space）（spec: Red team fixture covers known attack vectors）
+- [x] 3.6 執行 `uv run pytest tests/sandbox/` 驗證紅隊全綠
 
 ## 4. Tauri shell、fs.scope、ping handshake（implementation-plan 步驟 #2）
 
