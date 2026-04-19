@@ -37,7 +37,7 @@
 | 惡意行為禁制 | 禁 Deepfake / 社交工程 | N/A |
 | 惡意行為禁制 | 遵守相關法律（如刑法 358-362） | Topic mode 禁破付費牆、禁規避驗證 |
 | 資料保護 | PII 去識別化 / 不送公有雲 LLM | **D-015 Sanitizer 三段防線**：Scanner 入庫 + Provider pre-flight + Q&A `add_to_kb`；placeholder 統一 `<REDACTED:kind#N>`（詳見 `sanitizer.md`） |
-| 資料保護 | 稽核 trail 可供查驗 | 六層 JSONL 稽核：`sanitize_audit.jsonl` / `tool_audit.jsonl`（D-017）/ `kb_growth.jsonl`（D-016）/ `reasoning_log.jsonl` / `token_usage.jsonl`（D-021）/ `llm_calls.jsonl`（D-022，完整 request/response post-sanitize）；UI 稽核 tab 六分頁 |
+| 資料保護 | 稽核 trail 可供查驗 | **七層 JSONL 稽核** = workspace-level 六層（`sanitize_audit.jsonl` / `tool_audit.jsonl` D-017 / `kb_growth.jsonl` D-016 / `reasoning_log.jsonl` / `token_usage.jsonl` D-021 / `llm_calls.jsonl` D-022，完整 request/response post-sanitize）+ App-level 一層（`~/.codebus/authorization_audit.jsonl`，授權 D-008 + workspace 生命週期事件 D-025：`workspace_path_updated` / `registry_rebuilt` / `audit_log_initialized` / `workspace_tombstoned` / `workspace_deleted`）；UI 稽核 tab 六分頁（workspace-level），App-level 走 Settings → Audit |
 | 資料保護 | 合法資料來源 | Phase 2 Topic mode 遵守 robots.txt |
 | 資料保護 | API Key 保密 + 使用後銷毀 | 使用者端管理，專案結束由使用者清除 |
 | 資料保護 | 限用模擬資料、不涉機敏名稱 | Demo repo 選擇時確認 |
