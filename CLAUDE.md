@@ -1,3 +1,31 @@
+<!-- SPECTRA:START v1.0.1 -->
+
+# Spectra Instructions
+
+This project uses Spectra for Spec-Driven Development(SDD). Specs live in `openspec/specs/`, change proposals in `openspec/changes/`.
+
+## Use `/spectra:*` skills when:
+
+- A discussion needs structure before coding → `/spectra:discuss`
+- User wants to plan, propose, or design a change → `/spectra:propose`
+- Tasks are ready to implement → `/spectra:apply`
+- There's an in-progress change to continue → `/spectra:ingest`
+- User asks about specs or how something works → `/spectra:ask`
+- Implementation is done → `/spectra:archive`
+
+## Workflow
+
+discuss? → propose → apply ⇄ ingest → archive
+
+- `discuss` is optional — skip if requirements are clear
+- Requirements change mid-work? Plan mode → `ingest` → resume `apply`
+
+## Parked Changes
+
+Changes can be parked（暫存）— temporarily moved out of `openspec/changes/`. Parked changes won't appear in `spectra list` but can be found with `spectra list --parked`. To restore: `spectra unpark <name>`. The `/spectra:apply` and `/spectra:ingest` skills handle parked changes automatically.
+
+<!-- SPECTRA:END -->
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -5,9 +33,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Repo 現況
 
 **Spec-first，尚未進實作**。目前只有：
-- `docs/` — 16 份 spec（Module / Agent / 橫切層 / 部署）+ `decisions.md` ADR 日誌
-- `design/` — Phase A Trust Layer 的 4 份 HTML mockup + 14 張截圖（見 `design/README.md`）
-- `tests/golden/demo-synthetic/` — 比賽 demo / regression 用的合成 fixture（見該資料夾 README）
+- `docs/` — 19 份文件（14 份 Module / Agent / 橫切層 spec + `decisions.md` ADR + `README.md` / `dev-setup.md` / `implementation-plan.md` / `prompts.md`）
+- `design/` — Phase A Trust Layer 的 3 份 HTML mockup（`r-01` / `o-01` / `o-05`；O-04 為 R-01 內 slide-in panel）+ 14 張截圖（見 `design/README.md`）
+- `tests/golden/` — `demo-synthetic/`（比賽 demo / regression 合成 fixture）+ `timeline-gdrive-adapter/`（參考實作）
+- `openspec/` — Spectra SDD：`specs/` 目前空、`changes/` 僅 `archive/`，尚未開 proposal
 
 **實作目錄（`tauri/` `sidecar/` `web/`）尚未建立**，會在 Phase B 起手建。
 
@@ -49,6 +78,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **LLM 看到的一定是 Sanitize 過的**：`llm_calls.jsonl` 記的是 post-Sanitizer Pass 2 版本，不還原 pre-sanitize 原文（D-022）。
 4. **檔名 kebab-case**：`docs/*.md`、`design/*.html`、`design/screenshots/*.png` 一律 `{代號}-{語意}`。舊版直接刪，不留 `-v1` 後綴（歷史去 git log 找）。
 5. **Spec 為主、mockup 其次**：`design/*.html` 與 `docs/*.md` 衝突時以 spec 為準，回頭修 mockup。
+6. **Sanitizer rules 改動必 bump version**：`docs/sanitizer.md` 的 rule pattern 有任何增減，必須同步 bump rules version；`docs/authorization.md §六` 規定使用者同意需依版本重取。不得「靜默改 rule」——會造成既有 workspace 套用新 rule 但未重授權，稽核鏈斷裂。
 
 ## 決策記憶 — `docs/decisions.md`
 

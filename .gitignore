@@ -57,3 +57,5 @@ generator_log.jsonl
 # PyInstaller
 build/
 *.spec
+.spectra/
+openspec/.vector-search.db*
