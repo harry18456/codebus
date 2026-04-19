@@ -33,12 +33,12 @@
 
 ## 4. Tauri shell、fs.scope、ping handshake（implementation-plan 步驟 #2）
 
-- [ ] 4.1 [P] `cargo tauri init` 在 `tauri/` 生成 src-tauri 骨架
-- [ ] 4.2 實作 Tauri window 配置，window title 設為 `CodeBus`（spec: Tauri 2.0 application shell）
-- [ ] 4.3 [P] Nuxt3 首頁元件渲染文字 `CodeBus`，至少套一個 Tailwind utility class（spec: Nuxt3 landing page）
-- [ ] 4.4 [P] `tauri.conf.json` 設 `fs.scope` 白名單指向 workspace 根；先寫測試驗證未授權路徑被拒、白名單路徑被放行（spec: Filesystem scope restricts access）
-- [ ] 4.5 Tauri Rust 端實作 `invoke('sidecar_ping')`：spawn packaged sidecar → 讀 stdout 首行 handshake → `GET /healthz` 帶 bearer
-- [ ] 4.6 前端按鈕觸發 `sidecar_ping` 並顯示結果；端對端 ping 回 200 為 M1「通電」成功證據
+- [x] 4.1 [P] `cargo tauri init` 在 `tauri/` 生成 src-tauri 骨架
+- [x] 4.2 實作 Tauri window 配置，window title 設為 `CodeBus`（spec: Tauri 2.0 application shell）
+- [x] 4.3 [P] Nuxt3 首頁元件渲染文字 `CodeBus`，至少套一個 Tailwind utility class（spec: Nuxt3 landing page）
+- [x] 4.4 [P] `tauri.conf.json` 設 `fs.scope` 白名單指向 workspace 根；先寫測試驗證未授權路徑被拒、白名單路徑被放行（spec: Filesystem scope restricts access）
+- [x] 4.5 Tauri Rust 端實作 `invoke('sidecar_ping')`：spawn packaged sidecar → 讀 stdout 首行 handshake → `GET /healthz` 帶 bearer
+- [x] 4.6 前端按鈕觸發 `sidecar_ping` 並顯示結果；端對端 ping 回 200 為 M1「通電」成功證據
 
 ## 5. Qdrant client connectivity（implementation-plan 步驟 #7）
 

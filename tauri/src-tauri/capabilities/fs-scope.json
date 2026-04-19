@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "fs-scope",
+  "description": "M1 power-on fs scope — allows workspace root glob, denies .git and dotfiles. Runtime enforcement lands with Scanner in M2.",
+  "windows": ["main"],
+  "permissions": [
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA/codebus/workspaces/**" },
+        { "path": "$HOME/.codebus/workspaces/**" }
+      ],
+      "deny": [
+        { "path": "$APPDATA/codebus/workspaces/*/.git/**" },
+        { "path": "$HOME/.codebus/workspaces/*/.git/**" },
+        { "path": "$APPDATA/codebus/workspaces/*/.env" },
+        { "path": "$HOME/.codebus/workspaces/*/.env" }
+      ]
+    }
+  ]
+}
