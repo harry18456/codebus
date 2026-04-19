@@ -50,12 +50,12 @@
 
 ## 6. LLM provider：Protocol、Mock、Instructor（implementation-plan 步驟 #8）
 
-- [ ] 6.1 [P] 先寫測試：`LLMProvider` Protocol 具 `chat(messages, response_model)` 與 `embed(texts)` 兩方法；實作類通過 runtime `isinstance(..., LLMProvider)` 檢查（spec: LLMProvider protocol）
-- [ ] 6.2 實作 `LLMProvider` Protocol（`typing.Protocol` + `runtime_checkable`）
-- [ ] 6.3 [P] 先寫測試：`MockProvider.chat` 無 MockScript 時依 `response_model` 自動生成合法 Pydantic instance；MockScript 指定時回 pinned payload 並消耗 entry；`embed` 同輸入回同向量（spec: Mock provider returns Instructor-compatible output；落實 design 決策「D-local-4：Mock provider 輸出走 Instructor 真實 parsing 路徑、不 stub Pydantic」）
-- [ ] 6.4 實作 `MockProvider` + `MockScript` 類別，`chat` 走 Instructor 真 parsing 路徑
-- [ ] 6.5 [P] 先寫測試：M1 期間完整 test suite 中無任何 outbound HTTP request 離開 sidecar 行程（用 network-interception fixture 例如 `respx` 或 socket patch）（spec: No outbound LLM traffic during M1）
-- [ ] 6.6 實作 provider registry 僅註冊 `MockProvider`；registry 啟動 guard 拒絕任何嘗試註冊真 provider 類
+- [x] 6.1 [P] 先寫測試：`LLMProvider` Protocol 具 `chat(messages, response_model)` 與 `embed(texts)` 兩方法；實作類通過 runtime `isinstance(..., LLMProvider)` 檢查（spec: LLMProvider protocol）
+- [x] 6.2 實作 `LLMProvider` Protocol（`typing.Protocol` + `runtime_checkable`）
+- [x] 6.3 [P] 先寫測試：`MockProvider.chat` 無 MockScript 時依 `response_model` 自動生成合法 Pydantic instance；MockScript 指定時回 pinned payload 並消耗 entry；`embed` 同輸入回同向量（spec: Mock provider returns Instructor-compatible output；落實 design 決策「D-local-4：Mock provider 輸出走 Instructor 真實 parsing 路徑、不 stub Pydantic」）
+- [x] 6.4 實作 `MockProvider` + `MockScript` 類別，`chat` 走 Instructor 真 parsing 路徑
+- [x] 6.5 [P] 先寫測試：M1 期間完整 test suite 中無任何 outbound HTTP request 離開 sidecar 行程（用 network-interception fixture 例如 `respx` 或 socket patch）（spec: No outbound LLM traffic during M1）
+- [x] 6.6 實作 provider registry 僅註冊 `MockProvider`；registry 啟動 guard 拒絕任何嘗試註冊真 provider 類
 
 ## 7. Usage tracking：UsageTracker / LLMCallLogger / TrackedProvider（implementation-plan 步驟 #8.5）
 
