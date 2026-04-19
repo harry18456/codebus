@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · O-05 Sanitizer Diff</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #13161b;
+    --panel-2: #191d24;
+    --panel-3: #1f242c;
+    --panel-4: #262c35;
+    --border: #262c35;
+    --border-soft: #1c2129;
+    --text: #e6e8eb;
+    --text-dim: #9aa3ae;
+    --text-mute: #636b76;
+    --accent: oklch(72% 0.12 210);
+    --accent-2: oklch(72% 0.12 85);
+    --red: oklch(68% 0.17 25);
+    --orange: oklch(73% 0.15 55);
+    --yellow: oklch(78% 0.13 95);
+    --green: oklch(72% 0.12 155);
+    --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    --sans: 'Inter', 'Noto Sans TC', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 13px; line-height: 1.55; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+  /* ──────────── APP CHROME ──────────── */
+  .app { display: grid; grid-template-rows: 44px auto auto 1fr; height: 100vh; }
+  .topbar { display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--panel); gap: 14px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: -0.01em; }
+  .brand .logo { width: 20px; height: 20px; border-radius: 5px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: grid; place-items: center; font-size: 11px; }
+  .ws-switch { display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  .ws-switch:hover { border-color: var(--panel-4); color: var(--text); }
+  .ws-switch .caret { color: var(--text-mute); }
+  .route-tabs { display: flex; gap: 2px; margin-left: 8px; }
+  .route-tabs button { padding: 5px 12px; border-radius: 6px; color: var(--text-mute); font-size: 12.5px; }
+  .route-tabs button.active { background: var(--panel-2); color: var(--text); }
+  .route-tabs button:hover:not(.active) { color: var(--text-dim); }
+  .spacer { flex: 1; }
+
+  /* session widget (passive) */
+  .session { display: flex; align-items: center; gap: 0; padding: 0 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); height: 28px; overflow: hidden; }
+  .session .seg { padding: 0 10px; font-family: var(--mono); font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 5px; height: 100%; border-right: 1px solid var(--border); cursor: pointer; }
+  .session .seg:last-child { border-right: none; }
+  .session .seg:hover { background: var(--panel-3); color: var(--text); }
+  .session .seg .val { color: var(--text); font-weight: 500; }
+  .session .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .session .dot.red { background: var(--red); }
+  .session .dot.orange { background: var(--orange); }
+  .session .dot.yellow { background: var(--yellow); }
+  .session .dot.gray { background: #636b76; }
+  .session .dot.accent { background: var(--accent); }
+  .session .seg.active { background: var(--panel-3); color: var(--text); }
+  .session .seg.active .val { color: var(--accent); }
+
+  .kill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border: 1px solid color-mix(in oklab, var(--red) 35%, var(--border));
+    border-radius: 6px; color: var(--text-dim); font-family: var(--mono); font-size: 11px;
+    background: color-mix(in oklab, var(--red) 6%, transparent);
+  }
+  .kill .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+  .kill:hover { border-color: var(--red); color: var(--red); }
+
+  /* ──────────── AUDIT BANNER (dual state) ──────────── */
+  .banner { border-bottom: 1px solid var(--border); padding: 12px 22px; display: flex; align-items: center; gap: 14px; background: var(--panel); font-family: var(--mono); font-size: 12px; }
+  .banner .ico { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; font-size: 14px; flex-shrink: 0; }
+  .banner .msg { color: var(--text-dim); }
+  .banner .msg strong { color: var(--text); font-weight: 500; }
+  .banner .sep { color: var(--text-mute); margin: 0 2px; }
+  .banner .actions { margin-left: auto; display: flex; gap: 8px; }
+  .banner .btn-bn { padding: 6px 14px; border-radius: 6px; font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--border); color: var(--text-dim); background: var(--panel-2); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .banner .btn-bn:hover { background: var(--panel-3); color: var(--text); }
+  .banner .btn-bn.primary { background: color-mix(in oklab, var(--accent) 12%, var(--panel-2)); color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, var(--border)); }
+  .banner .btn-bn.primary:hover { background: color-mix(in oklab, var(--accent) 20%, var(--panel-2)); }
+  .banner .btn-bn.danger { color: var(--red); border-color: color-mix(in oklab, var(--red) 35%, var(--border)); background: color-mix(in oklab, var(--red) 6%, transparent); }
+
+  /* LOCKED */
+  .banner.locked { background: var(--panel); border-bottom-color: var(--border); }
+  .banner.locked .ico { background: color-mix(in oklab, var(--text-mute) 18%, transparent); color: var(--text-dim); }
+
+  /* UNLOCKED */
+  .banner.unlocked { background: color-mix(in oklab, var(--red) 5%, var(--panel)); border-bottom: 1px solid color-mix(in oklab, var(--red) 30%, var(--border)); }
+  .banner.unlocked .ico { background: color-mix(in oklab, var(--red) 15%, transparent); color: var(--red); }
+  .banner.unlocked .scope-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 3px; font-size: 11px; color: var(--text); margin-left: 4px; cursor: pointer; }
+  .banner.unlocked .scope-chip:hover { border-color: var(--panel-4); }
+  .banner.unlocked .scope-chip.danger { color: var(--red); border-color: color-mix(in oklab, var(--red) 35%, var(--border)); background: color-mix(in oklab, var(--red) 8%, transparent); }
+  .banner.unlocked .countdown { font-family: var(--mono); color: var(--text); display: inline-flex; align-items: center; gap: 5px; }
+  .banner.unlocked .countdown.warn { color: var(--red); animation: pulse-warn 1s infinite; }
+  @keyframes pulse-warn { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+  /* ──────────── FILE STRIP ──────────── */
+  .filestrip { border-bottom: 1px solid var(--border); background: var(--panel); padding: 8px 22px; display: flex; align-items: center; gap: 6px; overflow-x: auto; }
+  .filestrip .lbl { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; color: var(--text-mute); text-transform: uppercase; margin-right: 8px; flex-shrink: 0; }
+  .filestrip .tab { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--text-dim); font-family: var(--mono); font-size: 11px; cursor: pointer; flex-shrink: 0; }
+  .filestrip .tab:hover { border-color: var(--panel-4); color: var(--text); }
+  .filestrip .tab.active { background: var(--bg); border-color: var(--border); color: var(--text); }
+  .filestrip .tab .cnt { display: inline-flex; gap: 3px; }
+  .filestrip .tab .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .filestrip .tab .dot.red { background: var(--red); }
+  .filestrip .tab .dot.orange { background: var(--orange); }
+  .filestrip .tab .dot.yellow { background: var(--yellow); }
+  .filestrip .tab .dot.gray { background: #636b76; }
+  .filestrip .tab .num { color: var(--text-mute); font-size: 10.5px; }
+  .filestrip .tab.active .num { color: var(--text-dim); }
+
+  /* ──────────── 3-PANE DIFF ──────────── */
+  .diff { display: grid; grid-template-columns: 1fr 1fr 360px; overflow: hidden; }
+  .pane { display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
+  .pane:last-child { border-right: none; }
+
+  .pane-head { padding: 10px 16px; border-bottom: 1px solid var(--border-soft); background: var(--panel); display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .pane-head .pt { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-mute); }
+  .pane-head .pt.accent { color: var(--accent); }
+  .pane-head .sub { font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); margin-left: 2px; }
+  .pane-head .chip { margin-left: auto; font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.04em; }
+  .pane-head .chip.lock { background: color-mix(in oklab, var(--text-mute) 16%, transparent); color: var(--text-dim); border: 1px solid var(--border-soft); }
+  .pane-head .chip.unlock { background: color-mix(in oklab, var(--red) 12%, transparent); color: var(--red); border: 1px solid color-mix(in oklab, var(--red) 30%, transparent); }
+
+  /* code body */
+  .codebody { flex: 1; overflow: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; padding: 12px 0; background: var(--bg); }
+  .codeline { display: grid; grid-template-columns: 48px 1fr; padding: 0 16px 0 0; }
+  .codeline:hover { background: color-mix(in oklab, var(--accent) 4%, transparent); }
+  .codeline .ln { color: var(--text-mute); text-align: right; padding-right: 14px; user-select: none; font-size: 11px; line-height: 1.7; }
+  .codeline .lc { color: var(--text); white-space: pre; }
+  .codeline .lc .s { color: var(--text); }
+  .codeline .lc .k { color: var(--accent); }
+  .codeline .lc .st { color: var(--accent-2); }
+  .codeline .lc .cm { color: var(--text-mute); font-style: italic; }
+  .codeline .lc .v { color: var(--text-dim); }
+
+  .codeline.hl { background: color-mix(in oklab, var(--accent) 10%, transparent); }
+  .codeline.hl .ln { color: var(--accent); }
+
+  /* placeholder chip (in CENTER pane) */
+  .ph { display: inline-flex; align-items: center; padding: 0 5px; border-radius: 3px; font-family: var(--mono); font-size: 11px; line-height: 1.4; position: relative; cursor: pointer; font-weight: 500; }
+  .ph.red    { background: color-mix(in oklab, var(--red) 18%, transparent);    color: var(--red);    border: 1px solid color-mix(in oklab, var(--red) 45%, transparent); }
+  .ph.orange { background: color-mix(in oklab, var(--orange) 18%, transparent); color: var(--orange); border: 1px solid color-mix(in oklab, var(--orange) 45%, transparent); }
+  .ph.yellow { background: color-mix(in oklab, var(--yellow) 16%, transparent); color: var(--yellow); border: 1px solid color-mix(in oklab, var(--yellow) 40%, transparent); }
+  .ph.gray   { background: var(--panel-3); color: var(--text-dim); border: 1px solid var(--border-soft); }
+
+  /* raw chip (LEFT pane when unlocked) */
+  .raw { display: inline-flex; align-items: center; padding: 0 5px; border-radius: 3px; font-family: var(--mono); font-size: 11px; line-height: 1.4; font-weight: 500; }
+  .raw.red    { background: color-mix(in oklab, var(--red) 10%, transparent);    color: var(--red);    border: 1px dashed color-mix(in oklab, var(--red) 40%, transparent); }
+  .raw.orange { background: color-mix(in oklab, var(--orange) 10%, transparent); color: var(--orange); border: 1px dashed color-mix(in oklab, var(--orange) 40%, transparent); }
+  .raw.yellow { background: color-mix(in oklab, var(--yellow) 10%, transparent); color: var(--yellow); border: 1px dashed color-mix(in oklab, var(--yellow) 38%, transparent); }
+  .raw.gray   { background: color-mix(in oklab, var(--text-mute) 10%, transparent); color: var(--text-dim); border: 1px dashed var(--border); }
+
+  /* masked block (LEFT pane when locked) */
+  .mask { display: inline-flex; align-items: center; padding: 0 5px; border-radius: 3px; font-family: var(--mono); font-size: 11px; line-height: 1.4; background: color-mix(in oklab, var(--text-mute) 12%, transparent); color: var(--text-mute); letter-spacing: 0.05em; border: 1px solid var(--border-soft); }
+
+  /* cross-pane highlight on hover */
+  body[data-hl="1"] .ph:not([data-hl="1"]),
+  body[data-hl="1"] .raw:not([data-hl="1"]),
+  body[data-hl="1"] .mask:not([data-hl="1"]) { opacity: 0.35; }
+  body[data-hl="1"] .ph[data-hl="1"],
+  body[data-hl="1"] .raw[data-hl="1"],
+  body[data-hl="1"] .mask[data-hl="1"] { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+  body[data-hl="1"] .pl-card[data-hl="1"] { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 10%, var(--panel-2)); }
+  body[data-hl="1"] .codeline[data-hl="1"] { background: color-mix(in oklab, var(--accent) 8%, transparent); }
+
+  /* ──────────── RIGHT PANE · placeholder list ──────────── */
+  .pl-list { flex: 1; overflow-y: auto; padding: 12px 14px; background: var(--panel); }
+  .pl-summary { padding: 10px 12px; margin-bottom: 10px; background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 6px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .pl-summary .cell { text-align: center; cursor: pointer; }
+  .pl-summary .cell:hover .lbl { color: var(--text); }
+  .pl-summary .cell .cnt { font-family: var(--mono); font-size: 18px; font-weight: 500; display: inline-flex; align-items: center; gap: 5px; line-height: 1; }
+  .pl-summary .cell .cnt .d { width: 7px; height: 7px; border-radius: 50%; }
+  .pl-summary .cell .cnt .d.red { background: var(--red); }
+  .pl-summary .cell .cnt .d.orange { background: var(--orange); }
+  .pl-summary .cell .cnt .d.yellow { background: var(--yellow); }
+  .pl-summary .cell .cnt .d.gray { background: #636b76; }
+  .pl-summary .cell .cnt .red { color: var(--red); }
+  .pl-summary .cell .cnt .orange { color: var(--orange); }
+  .pl-summary .cell .cnt .yellow { color: var(--yellow); }
+  .pl-summary .cell .cnt .gray { color: var(--text-dim); }
+  .pl-summary .cell .lbl { font-family: var(--mono); font-size: 9.5px; color: var(--text-mute); letter-spacing: 0.1em; text-transform: uppercase; margin-top: 3px; }
+
+  .pl-card { padding: 10px 12px; margin-bottom: 8px; background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 6px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+  .pl-card:hover { border-color: var(--panel-4); }
+  .pl-card .row1 { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .pl-card .tok { font-family: var(--mono); font-size: 11.5px; padding: 1px 6px; border-radius: 3px; font-weight: 500; }
+  .pl-card .tok.red    { background: color-mix(in oklab, var(--red) 16%, transparent);    color: var(--red); }
+  .pl-card .tok.orange { background: color-mix(in oklab, var(--orange) 16%, transparent); color: var(--orange); }
+  .pl-card .tok.yellow { background: color-mix(in oklab, var(--yellow) 14%, transparent); color: var(--yellow); }
+  .pl-card .tok.gray   { background: var(--panel-3); color: var(--text-dim); }
+  .pl-card .rule { font-family: var(--mono); font-size: 10px; color: var(--text-mute); margin-left: auto; letter-spacing: 0.04em; }
+  .pl-card .desc { font-size: 11.5px; color: var(--text-dim); margin-bottom: 3px; font-family: var(--sans); }
+  .pl-card .meta { font-family: var(--mono); font-size: 10px; color: var(--text-mute); display: flex; gap: 10px; }
+  .pl-card .meta .locate { color: var(--accent); cursor: pointer; }
+  .pl-card .meta .locate:hover { text-decoration: underline; }
+  .pl-card.expanded { background: var(--panel-3); border-color: var(--panel-4); }
+  .pl-card.expanded .expand { display: block; }
+  .pl-card .expand { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
+  .pl-card .ex-row { display: grid; grid-template-columns: 72px 1fr; gap: 6px; margin-bottom: 6px; font-family: var(--mono); font-size: 10.5px; }
+  .pl-card .ex-row .k { color: var(--text-mute); letter-spacing: 0.05em; }
+  .pl-card .ex-row .v { color: var(--text-dim); word-break: break-all; }
+  .pl-card .regex { background: var(--bg); border: 1px solid var(--border-soft); border-radius: 4px; padding: 8px 10px; font-family: var(--mono); font-size: 10.5px; color: var(--accent-2); margin-top: 6px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+  .pl-card .regex-toggle { font-family: var(--mono); font-size: 10px; color: var(--accent); cursor: pointer; margin-top: 6px; display: inline-block; }
+  .pl-card .regex-toggle:hover { text-decoration: underline; }
+  .pl-card .regex.hidden { display: none; }
+  .pl-card .ex-footer { font-family: var(--mono); font-size: 10px; color: var(--text-mute); margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-soft); }
+  .pl-card .ex-footer .flagged-0 { color: var(--green); }
+
+  /* ──────────── MODALS / TOASTS ──────────── */
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 300; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  body.modal-open .scrim { opacity: 1; pointer-events: auto; }
+
+  .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.96); z-index: 310; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0; width: 520px; max-width: 92vw; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; box-shadow: 0 24px 80px rgba(0,0,0,0.5); }
+  body.modal-open .modal { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+  .modal .mh { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  .modal .mh .ic { width: 32px; height: 32px; border-radius: 7px; display: grid; place-items: center; background: color-mix(in oklab, var(--red) 15%, transparent); color: var(--red); font-size: 16px; }
+  .modal .mh .t { font-size: 14px; font-weight: 500; }
+  .modal .mh .t .sub { font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); font-weight: 400; display: block; margin-top: 2px; letter-spacing: 0.05em; }
+  .modal .mb { padding: 16px 20px; color: var(--text-dim); font-size: 13px; }
+  .modal .mb p { margin: 0 0 10px; }
+  .modal .mb p:last-child { margin-bottom: 0; }
+  .modal .mb strong { color: var(--text); }
+  .modal .scope-opts { margin: 14px 0 4px; display: flex; flex-direction: column; gap: 8px; }
+  .modal .scope-opt { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--panel-2); align-items: flex-start; }
+  .modal .scope-opt:hover { border-color: var(--panel-4); }
+  .modal .scope-opt.on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, var(--panel-2)); }
+  .modal .scope-opt.on.danger { border-color: var(--red); background: color-mix(in oklab, var(--red) 8%, var(--panel-2)); }
+  .modal .scope-opt .radio { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--text-mute); margin-top: 1px; flex-shrink: 0; display: grid; place-items: center; }
+  .modal .scope-opt.on .radio { border-color: var(--accent); }
+  .modal .scope-opt.on.danger .radio { border-color: var(--red); }
+  .modal .scope-opt.on .radio::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .modal .scope-opt.on.danger .radio::after { background: var(--red); }
+  .modal .scope-opt .info .tt { color: var(--text); font-size: 13px; margin-bottom: 3px; font-weight: 500; }
+  .modal .scope-opt .info .dd { color: var(--text-dim); font-size: 11.5px; line-height: 1.5; }
+  .modal .scope-opt .info .dd code { font-family: var(--mono); color: var(--text); background: var(--panel-3); padding: 1px 5px; border-radius: 3px; font-size: 10.5px; }
+  .modal .scope-opt .tag { margin-left: auto; font-family: var(--mono); font-size: 9.5px; padding: 2px 6px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase; background: var(--panel-3); color: var(--text-mute); }
+  .modal .scope-opt.on .tag { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent); }
+  .modal .scope-opt.on.danger .tag { background: color-mix(in oklab, var(--red) 16%, transparent); color: var(--red); }
+  .modal .audit-note { margin-top: 14px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); line-height: 1.55; }
+  .modal .audit-note .ico { color: var(--accent); margin-right: 4px; }
+  .modal .audit-note .ev { color: var(--text-dim); }
+  .modal .mf { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+  .modal .mf .btn-m { padding: 7px 14px; border-radius: 6px; font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--border); color: var(--text-dim); background: var(--panel-2); cursor: pointer; }
+  .modal .mf .btn-m:hover { background: var(--panel-3); color: var(--text); }
+  .modal .mf .btn-m.danger { background: color-mix(in oklab, var(--red) 18%, var(--panel-2)); color: var(--red); border-color: color-mix(in oklab, var(--red) 40%, var(--border)); }
+  .modal .mf .btn-m.danger:hover { background: color-mix(in oklab, var(--red) 26%, var(--panel-2)); }
+
+  /* toast */
+  .toast { position: fixed; right: 22px; bottom: 22px; z-index: 280; background: var(--panel); border: 1px solid color-mix(in oklab, var(--red) 35%, var(--border)); border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; width: 380px; box-shadow: 0 12px 36px rgba(0,0,0,0.4); opacity: 0; pointer-events: none; transform: translateY(10px); transition: opacity .2s, transform .2s; }
+  body.toast-on .toast { opacity: 1; pointer-events: auto; transform: translateY(0); }
+  .toast .ico { width: 28px; height: 28px; border-radius: 6px; background: color-mix(in oklab, var(--red) 15%, transparent); color: var(--red); display: grid; place-items: center; flex-shrink: 0; font-size: 14px; }
+  .toast .msg { flex: 1; font-size: 12px; color: var(--text); }
+  .toast .msg .sub { font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); margin-top: 2px; }
+  .toast .btn-t { padding: 5px 12px; border-radius: 5px; background: color-mix(in oklab, var(--accent) 12%, var(--panel-2)); color: var(--accent); border: 1px solid color-mix(in oklab, var(--accent) 35%, var(--border)); font-family: var(--mono); font-size: 11px; cursor: pointer; flex-shrink: 0; }
+
+  /* scrollbars */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--panel-3); border-radius: 5px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--panel-4); }
+
+  /* hint annotation (reused) */
+  .hint { position: absolute; background: color-mix(in oklab, var(--accent-2) 8%, var(--panel-2)); border: 1px dashed color-mix(in oklab, var(--accent-2) 50%, transparent); color: var(--accent-2); padding: 5px 9px; border-radius: 5px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; z-index: 100; pointer-events: none; max-width: 240px; line-height: 1.4; display: none; }
+  body.hints-on .hint { display: block; }
+  .hint-toggle { position: fixed; right: 16px; bottom: 16px; z-index: 200; background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim); padding: 6px 12px; border-radius: 20px; font-family: var(--mono); font-size: 11px; cursor: pointer; }
+  .hint-toggle.on { border-color: var(--accent-2); color: var(--accent-2); }
+
+  /* state toggle in topbar (mock helper) */
+  .state-toggle { display: inline-flex; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; font-family: var(--mono); font-size: 10.5px; }
+  .state-toggle button { padding: 4px 9px; color: var(--text-mute); letter-spacing: 0.04em; text-transform: uppercase; }
+  .state-toggle button.on { background: var(--panel-3); color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ═══════ TOPBAR ═══════ -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">🚌</div>
+      <span>CodeBus</span>
+    </div>
+
+    <button class="ws-switch" title="workspace">
+      <span style="color:var(--accent);">●</span>
+      <span>timeline-api</span>
+      <span class="caret">⌄</span>
+    </button>
+
+    <div class="route-tabs">
+      <button>Workspace</button>
+      <button class="active">Audit</button>
+      <button>Settings</button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <!-- state toggle (MOCKUP HELPER ONLY · production removes this) -->
+    <div class="state-toggle" title="Mockup helper — production removes this" style="position:relative;">
+      <button id="st-locked" class="on" onclick="setState('locked')">locked</button>
+      <button id="st-unlocked" onclick="setState('unlocked')">unlocked</button>
+      <span style="position:absolute;top:-8px;right:-4px;font-family:var(--mono);font-size:8.5px;color:var(--accent-2);background:var(--bg);padding:0 4px;border-radius:3px;letter-spacing:0.1em;border:1px dashed color-mix(in oklab,var(--accent-2) 40%,transparent);">MOCK</span>
+    </div>
+
+    <div class="session">
+      <div class="seg active" title="sanitize (this tab)"><span class="dot accent"></span><span class="val">91</span><span>sanit.</span></div>
+      <div class="seg" title="tool"><span class="dot gray"></span><span class="val">127</span><span>tool</span></div>
+      <div class="seg" title="reasoning"><span class="dot yellow"></span><span class="val">14</span><span>rsn.</span></div>
+      <div class="seg" title="llm_calls"><span class="dot orange"></span><span class="val">18</span><span>llm</span></div>
+    </div>
+
+    <button class="kill" title="全局中斷">
+      <span class="pulse"></span>
+      <span>KILL</span>
+    </button>
+  </div>
+
+  <!-- ═══════ AUDIT BANNER · LOCKED STATE ═══════ -->
+  <div class="banner locked" id="banner-locked">
+    <div class="ico">🔒</div>
+    <div class="msg">
+      <strong>Audit mode · raw values hidden.</strong>
+      <span class="sep">·</span>
+      3 files sanitized this session, 91 placeholders emitted. Raw content never leaves the sidecar unless you explicitly unlock.
+    </div>
+    <div class="actions">
+      <button class="btn-bn" onclick="document.querySelector('.session').scrollIntoView()">📑 view logs</button>
+      <button class="btn-bn primary" onclick="openUnlockModal()">🔓 解鎖原值</button>
+    </div>
+  </div>
+
+  <!-- ═══════ AUDIT BANNER · UNLOCKED STATE ═══════ -->
+  <div class="banner unlocked" id="banner-unlocked" style="display:none;">
+    <div class="ico">🔓</div>
+    <div class="msg">
+      <strong>Unlocked</strong>
+      <span class="sep">·</span>
+      scope: <span class="scope-chip" id="scope-chip" onclick="openUnlockModal()">📁 src/adapters/s3.ts</span>
+      <span class="sep">·</span>
+      unlocked at <span style="color:var(--text);" id="unlock-at">10:22:47</span>
+      <span class="sep">·</span>
+      auto-relock in <span class="countdown" id="countdown">⏱ 14:58</span>
+      <span class="sep">·</span>
+      audit_session: <span style="font-family:var(--mono);color:var(--text-mute);font-size:10.5px;">auds_9f2e…</span>
+    </div>
+    <div class="actions">
+      <button class="btn-bn danger" onclick="relock('user_manual_button')">🔒 重新鎖定</button>
+    </div>
+  </div>
+
+  <!-- ═══════ FILE STRIP ═══════ -->
+  <div class="filestrip">
+    <span class="lbl">SANITIZED FILES</span>
+    <div class="tab active">
+      <span>src/adapters/s3.ts</span>
+      <span class="cnt">
+        <span class="dot red"></span><span class="num">1</span>
+        <span class="dot orange"></span><span class="num">2</span>
+        <span class="dot yellow"></span><span class="num">1</span>
+      </span>
+    </div>
+    <div class="tab">
+      <span>config/auth.prod.env</span>
+      <span class="cnt">
+        <span class="dot red"></span><span class="num">3</span>
+        <span class="dot orange"></span><span class="num">1</span>
+      </span>
+    </div>
+    <div class="tab">
+      <span>README.md</span>
+      <span class="cnt">
+        <span class="dot orange"></span><span class="num">2</span>
+        <span class="dot yellow"></span><span class="num">4</span>
+        <span class="dot gray"></span><span class="num">3</span>
+      </span>
+    </div>
+    <div style="margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--text-mute);">
+      17 placeholders total in this file
+    </div>
+  </div>
+
+  <!-- ═══════ 3-PANE DIFF ═══════ -->
+  <div class="diff">
+
+    <!-- ───── LEFT: original (masked when locked, raw when unlocked) ───── -->
+    <div class="pane">
+      <div class="pane-head">
+        <span class="pt">Left</span>
+        <span class="sub">original</span>
+        <span class="chip lock" id="chip-lock">🔒 masked</span>
+        <span class="chip unlock" id="chip-unlock" style="display:none;">🔓 raw</span>
+      </div>
+      <div class="codebody" id="left-body">
+        <!-- lines rendered by JS -->
+      </div>
+    </div>
+
+    <!-- ───── CENTER: scrubbed (what the LLM sees) ───── -->
+    <div class="pane">
+      <div class="pane-head">
+        <span class="pt accent">Center</span>
+        <span class="sub">scrubbed · what the LLM sees</span>
+        <span class="chip" style="background:color-mix(in oklab,var(--accent) 12%,transparent);color:var(--accent);border:1px solid color-mix(in oklab,var(--accent) 30%,transparent);">always visible</span>
+      </div>
+      <div class="codebody" id="center-body">
+        <!-- lines rendered by JS -->
+      </div>
+    </div>
+
+    <!-- ───── RIGHT: placeholder list + rule tooltip ───── -->
+    <div class="pane">
+      <div class="pane-head">
+        <span class="pt">Right</span>
+        <span class="sub">placeholders · rules</span>
+      </div>
+      <div class="pl-list">
+
+        <div class="pl-summary">
+          <div class="cell"><div class="cnt"><span class="d red"></span><span class="red">1</span></div><div class="lbl">secret</div></div>
+          <div class="cell"><div class="cnt"><span class="d orange"></span><span class="orange">2</span></div><div class="lbl">pii</div></div>
+          <div class="cell"><div class="cnt"><span class="d yellow"></span><span class="yellow">1</span></div><div class="lbl">internal</div></div>
+          <div class="cell"><div class="cnt"><span class="d gray"></span><span class="gray">0</span></div><div class="lbl">other</div></div>
+        </div>
+
+        <div style="padding:8px 10px;margin-bottom:10px;background:color-mix(in oklab,var(--accent-2) 5%,var(--panel-2));border:1px dashed color-mix(in oklab,var(--accent-2) 30%,var(--border));border-radius:6px;font-size:10.5px;color:var(--text-dim);line-height:1.5;">💡 Hover 任一 pane 的 placeholder / 原值 / 遮罩，三方會聯動高亮 &middot; click 可展開對應 rule 卡</div>
+
+        <!-- card · red · secret -->
+        <div class="pl-card" data-placeholder="aws_key#1" onclick="toggleCard(this)">
+          <div class="row1">
+            <span class="tok red">&lt;REDACTED:aws_key#1&gt;</span>
+            <span class="rule">aws_access_key</span>
+          </div>
+          <div class="desc">AWS access key (static credential, embedded in source)</div>
+          <div class="meta">
+            <span>line 8</span>
+            <span class="locate" onclick="event.stopPropagation();locate('aws_key#1')">↗ locate</span>
+          </div>
+          <div class="expand">
+            <div class="ex-row"><span class="k">rule</span><span class="v">aws_access_key</span></div>
+            <div class="ex-row"><span class="k">kind</span><span class="v" style="color:var(--red);">secret</span></div>
+            <div class="ex-row"><span class="k">source</span><span class="v">rules/secrets.yaml:3</span></div>
+            <div class="ex-row"><span class="k">applies</span><span class="v">*.ts, *.py, *.env, *.yaml, *.md</span></div>
+            <div class="ex-row"><span class="k">matched</span><span class="v">23 times this session · <span class="flagged-0" style="color:var(--green);">0 flagged</span></span></div>
+            <span class="regex-toggle" onclick="event.stopPropagation();toggleRegex(this)">[展開 regex ▾]</span>
+            <div class="regex hidden">AKIA[0-9A-Z]{16}</div>
+          </div>
+        </div>
+
+        <!-- card · orange · email -->
+        <div class="pl-card" data-placeholder="email#1" onclick="toggleCard(this)">
+          <div class="row1">
+            <span class="tok orange">&lt;REDACTED:email#1&gt;</span>
+            <span class="rule">email_rfc5322</span>
+          </div>
+          <div class="desc">RFC 5322 email address</div>
+          <div class="meta">
+            <span>line 2</span>
+            <span class="locate" onclick="event.stopPropagation();locate('email#1')">↗ locate</span>
+          </div>
+          <div class="expand">
+            <div class="ex-row"><span class="k">rule</span><span class="v">email_rfc5322</span></div>
+            <div class="ex-row"><span class="k">kind</span><span class="v" style="color:var(--orange);">pii</span></div>
+            <div class="ex-row"><span class="k">source</span><span class="v">rules/pii.yaml:14</span></div>
+            <div class="ex-row"><span class="k">applies</span><span class="v">*.ts, *.py, *.md, *.env</span></div>
+            <div class="ex-row"><span class="k">matched</span><span class="v">23 times this session · <span class="flagged-0" style="color:var(--green);">0 flagged</span></span></div>
+            <span class="regex-toggle" onclick="event.stopPropagation();toggleRegex(this)">[展開 regex ▾]</span>
+            <div class="regex hidden">(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)</div>
+          </div>
+        </div>
+
+        <!-- card · orange · email (#2) -->
+        <div class="pl-card" data-placeholder="email#2" onclick="toggleCard(this)">
+          <div class="row1">
+            <span class="tok orange">&lt;REDACTED:email#2&gt;</span>
+            <span class="rule">email_rfc5322</span>
+          </div>
+          <div class="desc">RFC 5322 email address</div>
+          <div class="meta">
+            <span>line 14</span>
+            <span class="locate" onclick="event.stopPropagation();locate('email#2')">↗ locate</span>
+          </div>
+          <div class="expand">
+            <div class="ex-row"><span class="k">rule</span><span class="v">email_rfc5322</span></div>
+            <div class="ex-row"><span class="k">kind</span><span class="v" style="color:var(--orange);">pii</span></div>
+            <div class="ex-row"><span class="k">source</span><span class="v">rules/pii.yaml:14</span></div>
+            <div class="ex-row"><span class="k">applies</span><span class="v">*.ts, *.py, *.md, *.env</span></div>
+            <div class="ex-row"><span class="k">matched</span><span class="v">23 times this session · <span class="flagged-0" style="color:var(--green);">0 flagged</span></span></div>
+          </div>
+        </div>
+
+        <!-- card · yellow · internal domain -->
+        <div class="pl-card" data-placeholder="domain#1" onclick="toggleCard(this)">
+          <div class="row1">
+            <span class="tok yellow">&lt;REDACTED:domain#1&gt;</span>
+            <span class="rule">internal_domain</span>
+          </div>
+          <div class="desc">Internal hostname (matches company TLD list)</div>
+          <div class="meta">
+            <span>line 3</span>
+            <span class="locate" onclick="event.stopPropagation();locate('domain#1')">↗ locate</span>
+          </div>
+          <div class="expand">
+            <div class="ex-row"><span class="k">rule</span><span class="v">internal_domain</span></div>
+            <div class="ex-row"><span class="k">kind</span><span class="v" style="color:var(--yellow);">internal</span></div>
+            <div class="ex-row"><span class="k">source</span><span class="v">rules/internal.yaml:7</span></div>
+            <div class="ex-row"><span class="k">applies</span><span class="v">*.ts, *.md, *.yaml, *.env</span></div>
+            <div class="ex-row"><span class="k">matched</span><span class="v">11 times this session · <span class="flagged-0" style="color:var(--green);">0 flagged</span></span></div>
+            <span class="regex-toggle" onclick="event.stopPropagation();toggleRegex(this)">[展開 regex ▾]</span>
+            <div class="regex hidden">[a-z0-9-]+\.(timeline-internal|tl-corp)\.(io|net|com)</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ UNLOCK MODAL ═══════ -->
+<div class="scrim" onclick="closeUnlockModal()"></div>
+<div class="modal" id="unlock-modal">
+  <div class="mh">
+    <div class="ic">⚠</div>
+    <div class="t">
+      解鎖原值 · 高風險操作
+      <span class="sub">GRANT · audit mode · raw value exposure</span>
+    </div>
+  </div>
+  <div class="mb">
+    <p>解鎖後原始 secret / PII / 內部識別碼將可見。所有解鎖行為會寫入 <strong>sanitize_audit.jsonl</strong>，並綁定一個 <code style="font-family:var(--mono);color:var(--text);background:var(--panel-3);padding:1px 5px;border-radius:3px;font-size:10.5px;">audit_session_id</code> 供稽核追蹤。</p>
+
+    <div class="scope-opts">
+      <label class="scope-opt on" onclick="pickScope(this, 'file')">
+        <div class="radio"></div>
+        <div class="info">
+          <div class="tt">📁 只解鎖此檔案</div>
+          <div class="dd">scope: <code>file:src/adapters/s3.ts</code> · 4 placeholders</div>
+        </div>
+        <span class="tag">default</span>
+      </label>
+      <label class="scope-opt" onclick="pickScope(this, 'all')">
+        <div class="radio"></div>
+        <div class="info">
+          <div class="tt">📂 解鎖整個 session 的所有 placeholder</div>
+          <div class="dd">scope: <code>all_placeholders</code> · <span style="color:var(--red);">3 files · 91 placeholders</span></div>
+        </div>
+        <span class="tag">high risk</span>
+      </label>
+    </div>
+
+    <div class="audit-note">
+      <span class="ico">▸</span> audit_unlock event 將寫入 · <span class="ev">reason=user_clicked_unlock</span> · 15 分鐘無操作自動 relock · 任何互動不 reset 倒數
+    </div>
+  </div>
+  <div class="mf">
+    <button class="btn-m" onclick="closeUnlockModal()">取消</button>
+    <button class="btn-m danger" onclick="confirmUnlock()">🔓 確認解鎖</button>
+  </div>
+</div>
+
+<!-- ═══════ COUNTDOWN WARNING TOAST ═══════ -->
+<div class="toast">
+  <div class="ico">⏱</div>
+  <div class="msg">
+    30 秒後自動重鎖
+    <div class="sub">任何互動不會延長倒數 · 點「延長一次」寫入新的 audit_unlock</div>
+  </div>
+  <button class="btn-t" onclick="extendSession()">延長一次</button>
+</div>
+
+<!-- ═══════ HINTS ═══════ -->
+<button class="hint-toggle" id="hint-toggle" onclick="toggleHints()">✦ hints</button>
+
+<script>
+  // ──────── state helpers (mockup) ────────
+  let scope = 'file';
+
+  function setState(s) {
+    document.getElementById('banner-locked').style.display = (s === 'locked') ? '' : 'none';
+    document.getElementById('banner-unlocked').style.display = (s === 'unlocked') ? '' : 'none';
+    document.getElementById('chip-lock').style.display = (s === 'locked') ? '' : 'none';
+    document.getElementById('chip-unlock').style.display = (s === 'unlocked') ? '' : 'none';
+    document.getElementById('st-locked').classList.toggle('on', s === 'locked');
+    document.getElementById('st-unlocked').classList.toggle('on', s === 'unlocked');
+    renderLeft(s);
+    // toggle warning toast demo when flipping to unlocked quickly
+    if (s === 'unlocked') {
+      startCountdownDemo();
+    } else {
+      document.body.classList.remove('toast-on');
+    }
+  }
+
+  // ──────── countdown demo ────────
+  let countdownTick = null;
+  function startCountdownDemo() {
+    let sec = 14 * 60 + 58;
+    clearInterval(countdownTick);
+    const cd = document.getElementById('countdown');
+    const chipU = document.getElementById('chip-unlock');
+    countdownTick = setInterval(() => {
+      sec -= 1;
+      if (sec < 0) { clearInterval(countdownTick); return; }
+      const m = String(Math.floor(sec / 60)).padStart(2, '0');
+      const s = String(sec % 60).padStart(2, '0');
+      cd.textContent = `⏱ ${m}:${s}`;
+      // chip.unlock stays simple ("🔓 raw") — countdown is single-sourced by banner
+      if (sec <= 30) {
+        cd.classList.add('warn');
+        document.body.classList.add('toast-on');
+      }
+    }, 1000);
+  }
+
+  // ──────── unlock modal ────────
+  function openUnlockModal() {
+    document.body.classList.add('modal-open');
+  }
+  function closeUnlockModal() {
+    document.body.classList.remove('modal-open');
+  }
+  function pickScope(el, s) {
+    document.querySelectorAll('.scope-opt').forEach(x => x.classList.remove('on', 'danger'));
+    el.classList.add('on');
+    if (s === 'all') el.classList.add('danger');
+    scope = s;
+  }
+  function confirmUnlock() {
+    closeUnlockModal();
+    // update scope chip
+    const chip = document.getElementById('scope-chip');
+    if (scope === 'all') {
+      chip.innerHTML = '📂 ALL (3 files, 91 placeholders)';
+      chip.classList.add('danger');
+    } else {
+      chip.innerHTML = '📁 src/adapters/s3.ts';
+      chip.classList.remove('danger');
+    }
+    setState('unlocked');
+  }
+  function relock(trigger) {
+    setState('locked');
+  }
+  function extendSession() {
+    // restart a fresh countdown (new audit_session_id would be emitted)
+    document.body.classList.remove('toast-on');
+    document.getElementById('countdown').classList.remove('warn');
+    startCountdownDemo();
+  }
+
+  // ──────── card expand ────────
+  function toggleCard(el) {
+    document.querySelectorAll('.pl-card').forEach(c => { if (c !== el) c.classList.remove('expanded'); });
+    el.classList.toggle('expanded');
+  }
+  function toggleRegex(el) {
+    const rx = el.nextElementSibling;
+    rx.classList.toggle('hidden');
+    el.textContent = rx.classList.contains('hidden') ? '[展開 regex ▾]' : '[收起 regex ▴]';
+  }
+
+  // ──────── cross-pane highlight ────────
+  function hlOn(ph) {
+    document.body.dataset.hl = '1';
+    document.querySelectorAll(`[data-ph="${ph}"]`).forEach(n => n.dataset.hl = '1');
+    document.querySelectorAll(`[data-placeholder="${ph}"]`).forEach(n => n.dataset.hl = '1');
+    document.querySelectorAll(`[data-line-ph="${ph}"]`).forEach(n => n.dataset.hl = '1');
+  }
+  function hlOff() {
+    document.body.dataset.hl = '0';
+    document.querySelectorAll('[data-hl]').forEach(n => { if (n !== document.body) n.removeAttribute('data-hl'); });
+  }
+
+  function locate(ph) {
+    const el = document.querySelector(`#center-body [data-ph="${ph}"]`);
+    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    hlOn(ph);
+    setTimeout(hlOff, 1600);
+  }
+
+  // ──────── render LEFT / CENTER panes ────────
+  // mock source: src/adapters/s3.ts (truncated)
+  const lines = [
+    { n: 1, type: 'code', center: [{s:"// S3 adapter · static credentials (legacy path)", c:'cm'}] },
+    { n: 2, type: 'ph', raw: 'dev@timeline.example', ph: 'email#1', kind: 'orange',
+      prefix: '// Copyright (c) 2024 Timeline Inc. Contact: ', suffix: '' },
+    { n: 3, type: 'ph', raw: 'auth.timeline-internal.io', ph: 'domain#1', kind: 'yellow',
+      prefix: '// Auth docs: https://', suffix: '/docs' },
+    { n: 4, type: 'code', center: [{s:"", c:''}] },
+    { n: 5, type: 'code', center: [{s:"import ", c:'k'},{s:"{ StaticCredentialsProvider }", c:'v'},{s:" from ", c:'k'},{s:"'../core/auth/credentials'", c:'st'},{s:";", c:''}] },
+    { n: 6, type: 'code', center: [{s:"import ", c:'k'},{s:"{ S3Client }", c:'v'},{s:" from ", c:'k'},{s:"'@aws-sdk/client-s3'", c:'st'},{s:";", c:''}] },
+    { n: 7, type: 'code', center: [{s:"", c:''}] },
+    { n: 8, type: 'ph', raw: 'AKIAIOSFODNN7EXAMPLE', ph: 'aws_key#1', kind: 'red',
+      prefix: 'const ACCESS_KEY = "', suffix: '";' },
+    { n: 9, type: 'code', center: [{s:"const ", c:'k'},{s:"client ", c:'v'},{s:"= ", c:'k'},{s:"new ", c:'k'},{s:"S3Client({", c:''}] },
+    { n:10, type: 'code', center: [{s:"  region: ", c:'v'},{s:"'us-east-1'", c:'st'},{s:",", c:''}] },
+    { n:11, type: 'code', center: [{s:"  credentials: ", c:'v'},{s:"new ", c:'k'},{s:"StaticCredentialsProvider({", c:''}] },
+    { n:12, type: 'code', center: [{s:"    accessKeyId: ACCESS_KEY,", c:'v'}] },
+    { n:13, type: 'code', center: [{s:"  }),", c:'v'}] },
+    { n:14, type: 'ph', raw: 'support@timeline.example', ph: 'email#2', kind: 'orange',
+      prefix: '  // Support email: ', suffix: '' },
+    { n:15, type: 'code', center: [{s:"});", c:''}] },
+  ];
+
+  function maskFor(len) {
+    // visual density 比原值略短
+    const target = Math.max(4, Math.round(len * 0.75));
+    return '░'.repeat(target);
+  }
+
+  function renderPane(side, state) {
+    const body = document.getElementById(side + '-body');
+    body.innerHTML = '';
+    lines.forEach(l => {
+      const row = document.createElement('div');
+      row.className = 'codeline';
+      row.innerHTML = `<div class="ln">${l.n}</div><div class="lc"></div>`;
+      const lc = row.querySelector('.lc');
+      if (l.type === 'code') {
+        l.center.forEach(seg => {
+          const span = document.createElement('span');
+          span.className = seg.c || 's';
+          span.textContent = seg.s;
+          lc.appendChild(span);
+        });
+      } else {
+        // ph row : prefix + [chip or mask or raw] + suffix
+        const pre = document.createElement('span');
+        pre.className = 'cm';
+        pre.textContent = l.prefix;
+        lc.appendChild(pre);
+
+        if (side === 'center') {
+          const chip = document.createElement('span');
+          chip.className = 'ph ' + l.kind;
+          chip.textContent = `<REDACTED:${l.ph}>`;
+          chip.dataset.ph = l.ph;
+          chip.addEventListener('mouseenter', () => hlOn(l.ph));
+          chip.addEventListener('mouseleave', () => hlOff());
+          chip.addEventListener('click', () => {
+            const card = document.querySelector(`.pl-card[data-placeholder="${l.ph}"]`);
+            if (card) { toggleCard(card); card.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+          });
+          lc.appendChild(chip);
+        } else {
+          if (state === 'locked') {
+            const mask = document.createElement('span');
+            mask.className = 'mask';
+            mask.textContent = maskFor(l.raw.length);
+            mask.dataset.ph = l.ph;
+            mask.title = 'locked · click 🔓 解鎖原值 to reveal';
+            mask.addEventListener('mouseenter', () => hlOn(l.ph));
+            mask.addEventListener('mouseleave', () => hlOff());
+            lc.appendChild(mask);
+          } else {
+            const raw = document.createElement('span');
+            raw.className = 'raw ' + l.kind;
+            raw.textContent = l.raw;
+            raw.dataset.ph = l.ph;
+            raw.addEventListener('mouseenter', () => hlOn(l.ph));
+            raw.addEventListener('mouseleave', () => hlOff());
+            lc.appendChild(raw);
+          }
+        }
+
+        const suf = document.createElement('span');
+        suf.className = 'cm';
+        suf.textContent = l.suffix;
+        lc.appendChild(suf);
+      }
+      body.appendChild(row);
+    });
+  }
+
+  function renderLeft(state) {
+    renderPane('left', state);
+  }
+
+  // initial render
+  renderPane('center', 'locked');
+  renderPane('left', 'locked');
+
+  // sync scroll between left / center
+  const L = document.getElementById('left-body');
+  const C = document.getElementById('center-body');
+  let syncing = false;
+  function bindSync(a, b) {
+    a.addEventListener('scroll', () => {
+      if (syncing) return;
+      syncing = true;
+      b.scrollTop = a.scrollTop;
+      requestAnimationFrame(() => syncing = false);
+    });
+  }
+  bindSync(L, C);
+  bindSync(C, L);
+
+  // ──────── hints ────────
+  function toggleHints() {
+    document.body.classList.toggle('hints-on');
+    document.getElementById('hint-toggle').classList.toggle('on');
+  }
+</script>
+
+</body>
+</html>
