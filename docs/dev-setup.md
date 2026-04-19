@@ -1,7 +1,7 @@
 # Dev Setup — 開發環境與 CodeBus 啟動指南
 
 > 從 clone 到跑起來的 onboarding 指南。
-> 關聯決策：D-001（混合架構）、D-013（monorepo）、D-014（uv toolchain）。
+> 關聯決策：D-001（混合架構）、D-013（monorepo）、D-014（uv toolchain）、D-026（web 用 npm）。
 
 ---
 
@@ -10,8 +10,7 @@
 | 工具 | 版本 | 用途 |
 |---|---|---|
 | Rust | >= 1.80（stable） | Tauri 殼編譯 |
-| Node | >= 20 | Nuxt3 前端（優先建議 Bun） |
-| Bun | >= 1.1 | `web/` 套件管理 / 執行（取代 npm） |
+| Node | >= 20 | Nuxt3 前端 + 內建 npm（D-026） |
 | Python | >= 3.11 | Sidecar runtime（uv 會處理） |
 | uv | latest | Python 套件 + venv（D-014） |
 | Docker（或 Qdrant binary） | — | 本地 Qdrant（dev 便利） |
@@ -23,8 +22,9 @@
 # Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Bun
-curl -fsSL https://bun.sh/install | bash
+# Node（含 npm）— 用 nvm 範例；macOS / Linux 也可用 brew / package manager
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+nvm install 20 && nvm use 20
 
 # uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -33,7 +33,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 docker run -p 6333:6333 -p 6334:6334 -v $(pwd)/qdrant_storage:/qdrant/storage qdrant/qdrant
 ```
 
-Windows：Rust / Bun / uv / Docker 皆有 Windows installer，參官方。
+Windows：Rust / Node / uv / Docker 皆有 Windows installer，參官方。
 
 ---
 
@@ -104,13 +104,13 @@ CODEBUS_WORKSPACE=~/.codebus
 ```bash
 cd web
 
-bun install          # 首次
-bun run dev          # http://localhost:3000
-bun run typecheck
-bun run lint
+npm install          # 首次
+npm run dev          # http://localhost:3000
+npm run typecheck
+npm run lint
 ```
 
-前端開發期間可脫離 Tauri 殼直接跑 `bun run dev`，sidecar URL 用 `.env.local` 指到 dev sidecar。
+前端開發期間可脫離 Tauri 殼直接跑 `npm run dev`，sidecar URL 用 `.env.local` 指到 dev sidecar。
 
 ---
 
@@ -130,7 +130,7 @@ cargo tauri dev      # 起整個 app（自動 spawn sidecar + web）
 
 ### `tauri.conf.json` 關鍵
 
-- `build.beforeDevCommand`：`cd ../web && bun run dev`
+- `build.beforeDevCommand`：`cd ../web && npm run dev`
 - `build.frontendDist`：`../web/dist`
 - `bundle.externalBin`：`../sidecar/dist/codebus_agent`（PyInstaller 產物）
 - `plugins.fs.scope`：見 `tool-sandbox.md` §四
@@ -223,7 +223,7 @@ cargo test
 ### 前端
 ```bash
 cd web
-bun test
+npm test
 ```
 
 ### Red Team（Sandbox）
@@ -277,7 +277,7 @@ cargo tauri build
 ### Pre-commit hook 失敗
 - Python：`uv run ruff check --fix .` + `uv run pyright`
 - Rust：`cargo fmt && cargo clippy`
-- Frontend：`bun run lint --fix`
+- Frontend：`npm run lint -- --fix`
 
 ---
 
@@ -289,7 +289,7 @@ cargo tauri build
 |---|---|
 | python-check | `uv sync --frozen` + ruff + pyright + pytest |
 | rust-check | `cargo fmt --check` + clippy + test |
-| web-check | `bun install --frozen-lockfile` + typecheck + lint + test |
+| web-check | `npm ci` + typecheck + lint + test |
 | golden-regression | 對 Timeline + GDrive fixture 跑 Explorer + Generator，比對 baseline |
 | red-team | `tests/sandbox/` 全跑 |
 | build-smoke | `cargo tauri build` + 驗 binary 可啟動 |

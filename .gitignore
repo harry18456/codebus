@@ -59,3 +59,6 @@ build/
 *.spec
 .spectra/
 openspec/.vector-search.db*
+
+# Claude
+.claude/settings.local.json

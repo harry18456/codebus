@@ -1,20 +1,46 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Domain: CodeBus — 本地端程式碼 onboarding agent（Trust Layer 敘事核心）。
+  Tech stack:
+    - Tauri 2.0 殼（Rust）
+    - Python sidecar（uv toolchain · FastAPI · Instructor/Pydantic）
+    - Nuxt3 前端（TypeScript · Tailwind · npm — D-026）
+    - Qdrant 本地向量 DB
+  架構文件：`docs/`（19 份 spec + `decisions.md` ADR）、`design/`（Phase A Trust Layer mockup）。
+  語言約定：
+    - spec 內文、proposal、tasks、design、使用者溝通一律 zh-TW
+    - commit message / code identifier / filename 一律 en-US
+    - 檔名一律 kebab-case（`{代號}-{語意}`），舊版刪不留 `-v1` 後綴
+  決策記憶：
+    - 所有非 trivial 技術取捨寫成 `docs/decisions.md` D-XXX ADR
+    - Spec 首行必引相關 D-XXX
+    - 改決策先改 `decisions.md`，再改引用它的 spec
+  Commit gate（風格檢查）：
+    - commit 前必過 `pre-commit run`
+    - `.pre-commit-config.yaml` 由各語言 linter 組成（ruff / pyright / eslint / cargo fmt / cargo clippy）
+  Spectra 流程：
+    - `tdd: true` — 所有實作 task 走 test-first
+    - `worktree: true` — propose / apply 會在 `.spectra/worktrees/` 分岔 branch
+    - `parallel_tasks: true` — apply 會並行 subtask
+  核心不變式（違反即資料外流 / 稽核鏈斷裂）：
+    - 雙模 discriminator day 1：`workspace_type: "folder" | "topic"` 從一開始就在 schema（MVP 只實作 folder）
+    - Sanitizer 單向替換：placeholder `<REDACTED:kind#N>` 無 reverse mapping，原值不儲存
+    - LLM 看到的一定是 sanitize 過的：`llm_calls.jsonl` 記 post-Sanitizer Pass 2 版本
+    - Sanitizer rules 改動必 bump version：使用者同意依版本重取
+  七層 Audit JSONL（workspace-level 六層 + App-level 一層）：
+    sanitize_audit / tool_audit / kb_growth / reasoning_log / token_usage / llm_calls
+    + `~/.codebus/authorization_audit.jsonl`
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  proposal:
+    - 首段必引關聯 D-XXX ADR；新增決策先寫 `docs/decisions.md`
+    - 必須列出 Non-goals（避免範圍蔓延）
+    - 對齊 `docs/implementation-plan.md` 的階段 / 步驟編號
+  tasks:
+    - 走 test-first（Spectra `tdd: true`）
+    - 每項任務對應 `implementation-plan.md` 步驟編號或 spec 章節
+    - 粒度 ≤ 半天；超過要再拆
+  design:
+    - 只寫 proposal 無法涵蓋的設計決策（trade-off / 方案比較）
+    - 不重複 spec 已寫的內容，用引用

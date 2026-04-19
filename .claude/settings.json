@@ -1,3 +1,18 @@
 {
-  "includeGitInstructions": false
+  "includeGitInstructions": false,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(python -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('command',''))\" 2>/dev/null); case \" $cmd \" in *\" git commit \"*) ;; *) exit 0 ;; esac; if [ -f .pre-commit-config.yaml ] && command -v pre-commit >/dev/null 2>&1; then pre-commit run --hook-stage pre-commit 1>&2 || exit 2; else echo \"[commit-gate] pre-commit config/binary not ready; skipping style check (will activate after m1-power-on).\" >&2; fi; exit 0",
+            "timeout": 120,
+            "statusMessage": "commit-gate: running style check..."
+          }
+        ]
+      }
+    ]
+  }
 }

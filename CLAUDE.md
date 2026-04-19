@@ -104,13 +104,13 @@ uv run pyright
 uv run python -m codebus_agent.api --dev   # 單獨啟 sidecar
 ```
 
-**前端**（`web/`，Bun）
+**前端**（`web/`，npm — 見 D-026）
 ```bash
-bun install
-bun run dev          # http://localhost:3000
-bun run typecheck
-bun run lint
-bun test
+npm install
+npm run dev          # http://localhost:3000
+npm run typecheck
+npm run lint
+npm test
 ```
 
 **Tauri 殼**（`tauri/`，Rust）
