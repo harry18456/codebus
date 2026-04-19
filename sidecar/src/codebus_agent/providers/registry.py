@@ -5,18 +5,22 @@ openspec/changes/m1-power-on/specs/llm-provider/spec.md
   Requirement: No outbound LLM traffic during M1
     Scenario: Only MockProvider registered
 
-The registry is the single point where a `LLMProvider` instance can
-be made discoverable to the rest of the sidecar.  During M1 the
-allow-list contains only `MockProvider`, so any attempt to register
-an OpenAI / Anthropic / Gemini / Ollama adapter raises before an
-outbound HTTP client is ever constructed.
+and openspec/changes/m1-power-on/specs/usage-tracking/spec.md
+  Requirement: TrackedProvider wraps every provider
+    Scenario: Direct provider use forbidden
+    Scenario: Skipping wrapper emits test failure
+
+The registry accepts only `TrackedProvider` instances.  Combined with
+`TrackedProvider.ALLOWED_INNER_TYPES` (= `{MockProvider}`), this gives
+two independent checks that must both pass before any `chat` / `embed`
+call is reachable from application code.
 """
 from __future__ import annotations
 
 from typing import ClassVar
 
-from .mock import MockProvider
 from .protocol import LLMProvider
+from .tracked import TrackedProvider
 
 
 class ProviderRegistryError(RuntimeError):
@@ -24,7 +28,7 @@ class ProviderRegistryError(RuntimeError):
 
 
 class ProviderRegistry:
-    ALLOWED_TYPES: ClassVar[frozenset[type]] = frozenset({MockProvider})
+    ALLOWED_TYPES: ClassVar[frozenset[type]] = frozenset({TrackedProvider})
 
     def __init__(self) -> None:
         self._providers: dict[str, LLMProvider] = {}
@@ -34,7 +38,7 @@ class ProviderRegistry:
             raise ProviderRegistryError(
                 f"M1 invariant: only {{{', '.join(t.__name__ for t in self.ALLOWED_TYPES)}}} "
                 f"may be registered; got {type(provider).__name__}. "
-                "No outbound LLM traffic is permitted during M1."
+                "Wrap the inner provider in TrackedProvider before registering."
             )
         if not isinstance(provider, LLMProvider):
             raise ProviderRegistryError(
@@ -43,7 +47,7 @@ class ProviderRegistry:
         name = getattr(provider, "name", None)
         if not isinstance(name, str) or not name:
             raise ProviderRegistryError(
-                f"provider instance must expose a non-empty `name` attribute"
+                "provider instance must expose a non-empty `name` attribute"
             )
         self._providers[name] = provider
 

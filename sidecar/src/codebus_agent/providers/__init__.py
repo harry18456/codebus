@@ -1,23 +1,32 @@
 """LLM provider abstraction — `docs/llm-provider.md`, D-003.
 
-M1 scope (`openspec/changes/m1-power-on/specs/llm-provider/spec.md`):
+M1 scope (`openspec/changes/m1-power-on/specs/llm-provider/spec.md`
+ + `openspec/changes/m1-power-on/specs/usage-tracking/spec.md`):
   - Protocol with `chat(messages, response_model)` and `embed(texts)`
-  - `MockProvider` that exercises the real Instructor / Pydantic parsing path
-  - Registry guard rejecting any non-Mock provider (no outbound LLM traffic)
+  - `MockProvider` exercising the real Pydantic parsing path (D-local-4)
+  - `UsageTracker` → `token_usage.jsonl` (D-021)
+  - `LLMCallLogger` → `llm_calls.jsonl` (D-022)
+  - `TrackedProvider` wrapping every provider, enforced by registry guard
 """
 from __future__ import annotations
 
+from .llm_call_logger import LLMCallLogger
 from .mock import MockProvider, MockScript
 from .protocol import EmbedResponse, LLMProvider, Message, Usage
 from .registry import ProviderRegistry, ProviderRegistryError
+from .tracked import TrackedProvider
+from .usage_tracker import UsageTracker
 
 __all__ = [
     "EmbedResponse",
+    "LLMCallLogger",
     "LLMProvider",
     "Message",
     "MockProvider",
     "MockScript",
     "ProviderRegistry",
     "ProviderRegistryError",
+    "TrackedProvider",
     "Usage",
+    "UsageTracker",
 ]

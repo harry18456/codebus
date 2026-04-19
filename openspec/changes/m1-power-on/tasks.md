@@ -59,12 +59,12 @@
 
 ## 7. Usage tracking：UsageTracker / LLMCallLogger / TrackedProvider（implementation-plan 步驟 #8.5）
 
-- [ ] 7.1 [P] 先寫測試：每個 `chat` / `embed` 呼叫經 TrackedProvider 後，`<workspace>/token_usage.jsonl` 追加一行，含 `timestamp` / `provider` / `model` / `operation` / `input_tokens` / `output_tokens` / `cost_usd` 全欄（spec: UsageTracker writes token_usage.jsonl）
-- [ ] 7.2 實作 `UsageTracker`（append-only JSONL writer + 基本成本查表）
-- [ ] 7.3 [P] 先寫測試：每個 `chat` 呼叫追加一行到 `llm_calls.jsonl`，含 `request` / `response` / `sanitizer_pass2_applied: false`；呼叫擲例外時 `response: null` 且 `error` 具類別與訊息（spec: LLMCallLogger writes llm_calls.jsonl）
-- [ ] 7.4 實作 `LLMCallLogger`（append-only JSONL writer + exception 捕獲與還原擲出）
-- [ ] 7.5 [P] 先寫測試：`TrackedProvider(MockProvider())` 通過 `isinstance(..., LLMProvider)`；registry 載入未包 `TrackedProvider` 的 provider 時應於實例化階段 raise（spec: TrackedProvider wraps every provider）
-- [ ] 7.6 實作 `TrackedProvider` 裝飾器與 registry enforcement guard
+- [x] 7.1 [P] 先寫測試：每個 `chat` / `embed` 呼叫經 TrackedProvider 後，`<workspace>/token_usage.jsonl` 追加一行，含 `timestamp` / `provider` / `model` / `operation` / `input_tokens` / `output_tokens` / `cost_usd` 全欄（spec: UsageTracker writes token_usage.jsonl）
+- [x] 7.2 實作 `UsageTracker`（append-only JSONL writer + 基本成本查表）
+- [x] 7.3 [P] 先寫測試：每個 `chat` 呼叫追加一行到 `llm_calls.jsonl`，含 `request` / `response` / `sanitizer_pass2_applied: false`；呼叫擲例外時 `response: null` 且 `error` 具類別與訊息（spec: LLMCallLogger writes llm_calls.jsonl）
+- [x] 7.4 實作 `LLMCallLogger`（append-only JSONL writer + exception 捕獲與還原擲出）
+- [x] 7.5 [P] 先寫測試：`TrackedProvider(MockProvider())` 通過 `isinstance(..., LLMProvider)`；registry 載入未包 `TrackedProvider` 的 provider 時應於實例化階段 raise（spec: TrackedProvider wraps every provider）
+- [x] 7.6 實作 `TrackedProvider` 裝飾器與 registry enforcement guard
 
 ## 8. App packaging：PyInstaller + Tauri externalBin（implementation-plan 步驟 #6）
 
