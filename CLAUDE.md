@@ -47,7 +47,9 @@ M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19
 - `tests/golden/` — `demo-synthetic/`（比賽 demo / regression fixture）+ `timeline-gdrive-adapter/`（參考實作）
 - `tests/fixtures/` — `precommit-violations/`（commit-gate 負測 fixture）
 
-接下來里程碑在 `docs/implementation-plan.md`；下一條通常先從 Module 1 Scanner 或 Qdrant lifecycle bootstrap（D-028 候選）起。
+接下來里程碑在 `docs/implementation-plan.md`；下一條通常先從 Module 1 Scanner 或 Qdrant lifecycle bootstrap 起（下個未指派 D 編號）。
+
+最近一筆 archive：`2026-04-20-llm-role-routing`（provider role-based dispatch；見架構快照「LLM 呼叫鏈」段 + `openspec/specs/llm-provider/spec.md`）。
 
 ## 架構快照
 
@@ -58,10 +60,11 @@ M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19
 **八大 Module**（`README.md §五`，M2+ 才動工）：
 - Module 1 Scanner → Module 2 KB Builder → Module 4 Explorer Agent → Module 5 Generator → Module 7 前端 → Module 8 Q&A Agent
 - Module 3（Topic Explorer）Phase 2；Module 6（Intervention）前端實作期決定
+- Module 5 輸出多檔（D-029）：`tutorials/{task_id}/tutorial.md`（MOC 索引）+ `stations/s{NN}-slug.md`（每站一檔，含 YAML frontmatter + stable station id；跨檔用標準 markdown link，禁 wikilinks）
 
 **Agent 核心**（D-012）：自寫 ReAct loop + Instructor/Pydantic structured output。Explorer 與 Q&A Agent **共用** ReAct core，靠 `ExplorerTools` / `Judge` / `CoverageChecker` Protocol 抽象（`docs/agent-explorer-spec.md §十二`）。
 
-**LLM 呼叫鏈**（M1 已實作）：registry 只能註冊 `MockProvider`（zero outbound 不變式，M1 測試 suite 靠 `respx`/socket patch 守門），且所有 provider 必須包 `TrackedProvider` 裝飾器——registry 在實例化階段 raise 拒絕 unwrapped provider。`TrackedProvider` 呼叫 `UsageTracker`（寫 `token_usage.jsonl`）與 `LLMCallLogger`（寫 `llm_calls.jsonl`，含 `sanitizer_pass2_applied` 欄位，M1 一律 false）。
+**LLM 呼叫鏈**（M1 已實作 + llm-role-routing archive）：registry 只能註冊 `MockProvider`（zero outbound 不變式，M1 測試 suite 靠 `respx`/socket patch 守門），且所有 provider 必須包 `TrackedProvider` 裝飾器——registry 在實例化階段 raise 拒絕 unwrapped provider。分派機制走 `ProviderRole`（`chat` / `reasoning` / `judge` / `embedding`）：呼叫端用 `registry.get(role)` 取對應 provider；`TrackedProvider` 建構必帶 `role` kwarg，`token_usage.jsonl` / `llm_calls.jsonl` 每筆都帶 `role` 欄位。`TrackedProvider` 同步寫 `UsageTracker`（`token_usage.jsonl`）與 `LLMCallLogger`（`llm_calls.jsonl`，含 `sanitizer_pass2_applied` 欄位，M1 一律 false）。
 
 **Trust Layer 四站**（Phase A，敘事核心 — 評審會停在這邊）：
 - **R-01** Workspace（主畫面 + 六層 audit 面板）
@@ -95,12 +98,14 @@ M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19
 ## 決策記憶 — `docs/decisions.md`
 
 所有非 trivial 的技術取捨都寫成 **D-XXX ADR**（脈絡 / 選項 / 理由 / 後續）。Spec 首行必引相關 D-XXX。改決策時**先改 `decisions.md`，再改引用它的 spec**。常查：
-- D-001 混合架構 / D-002 Topic mode 不進 MVP / D-003 LLM Provider 抽象
+- D-001 混合架構 / D-002 Topic mode 不進 MVP / D-003 LLM Provider 抽象（2026-04-20 role routing 落地）
 - D-011 資安 / D-012 自寫 ReAct / D-014 uv toolchain
 - D-015 Sanitizer / D-016 Q&A add_to_kb / D-017 ToolSandbox
 - D-021 token_usage / D-022 llm_calls
 - D-026 前端 toolchain 改 npm（原本 bun）
 - D-027 Qdrant 走 local binary 主路徑（docker compose 降為 fallback）
+- D-028 LLM Vision 延後至 Phase 2（介面不預埋 Capability enum）
+- D-029 Module 5 多檔輸出（MOC + `stations/s0X-slug.md` + frontmatter + stable station id）+ 拒絕 Obsidian 整合
 
 ## 常用指令
 
