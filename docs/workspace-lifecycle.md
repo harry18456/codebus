@@ -1,7 +1,7 @@
 # Workspace Lifecycle Spec — 資料分級 / R-00 / 遺失恢復
 
 > CodeBus workspace 的資料存放規則、Start Page（R-00）介面、以及檔案遺失時的恢復策略。
-> 關聯決策：D-002（雙模 discriminator）、D-023（Topic 綁容器）、D-024（資料分級儲存）、D-025（整合性與遺失恢復）。
+> 關聯決策：D-002（雙模 discriminator）、D-023（Topic 綁容器）、D-024（資料分級儲存）、D-025（整合性與遺失恢復）、D-029（`tutorials/{task_id}/stations/` 多檔結構）。
 > 對應 UI：R-00 Start Page（Phase A 待 Design mockup）、O-01 修復子流程。
 
 ---
@@ -60,10 +60,15 @@
 ~/.codebus/topics/uv/
 ├── kb/                            # Qdrant collection storage
 ├── tutorials/
-│   └── {task_id}/
-│       ├── tutorial.md
+│   └── {task_id}/                 # 多檔教材（D-029）
+│       ├── tutorial.md            # MOC 索引
+│       ├── stations/              # 每站一檔
+│       │   ├── s01-<slug>.md
+│       │   ├── s02-<slug>.md
+│       │   └── ...
 │       ├── route.json
-│       └── progress.json
+│       ├── progress.json
+│       └── generator_log.jsonl
 ├── sanitize_audit.jsonl           ┐
 ├── tool_audit.jsonl               │
 ├── kb_growth.jsonl                │ 六層 workspace-level audit
@@ -137,7 +142,14 @@ Pointer 在 repo 根，實質資料在 `~/.codebus/workspaces/{id}/`。
 ```
 ~/.codebus/workspaces/ws_abc123/
 ├── kb/
-├── tutorials/
+├── tutorials/                      # 多檔教材結構同 §三（D-029）
+│   └── {task_id}/
+│       ├── tutorial.md
+│       ├── stations/
+│       │   └── s0X-<slug>.md
+│       ├── route.json
+│       ├── progress.json
+│       └── generator_log.jsonl
 ├── sanitize_audit.jsonl
 ├── tool_audit.jsonl
 ├── kb_growth.jsonl

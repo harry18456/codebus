@@ -24,7 +24,19 @@
 - `route.json` — 結構化路線（含 `station_id` 與 `file_path`，見 §八）
 - `generator_log.jsonl` — 每站生成過程、重試、degraded 紀錄
 
-**輸出根目錄**：`<workspace-data>/artifacts/<run-id>/`（結構由 `workspace-lifecycle.md` 定義）。
+**輸出根目錄**：`<workspace-root>/tutorials/{task_id}/`（見 `workspace-lifecycle.md §三`）。實際 layout：
+
+```
+tutorials/{task_id}/
+├── tutorial.md              # MOC 索引
+├── stations/
+│   ├── s01-repo-overview.md
+│   ├── s02-storage-contract.md
+│   └── s03-adapter-pattern.md
+├── route.json
+├── progress.json            # 前端讀寫（§ interactive-tutorial 五）
+└── generator_log.jsonl
+```
 
 **檔名不可變式**（D-029 §十六.2）：station 檔一經寫出不改名；slug 碰撞時後綴 `-2`, `-3`（e.g. `s03-storage-contract-2`）。
 

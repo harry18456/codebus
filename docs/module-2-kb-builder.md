@@ -100,7 +100,15 @@ class KBPayload(BaseModel):
     # 稽核
     sanitize_stats: dict[str, int] = Field(default_factory=dict)  # {"email": 0, ...}
     # Scanner pass 1 會填；qa_agent 若 scrub 不回 stats 允許空 dict
+
+    # Station 脈絡（D-029）
+    related_stations: list[str] = Field(default_factory=list)
+    # Module 5 stable station id（`s{NN}-slug`，見 module-5-generator.md §7.4）。
+    # Scanner 產出為空 []；qa_agent 透過 add_to_kb 寫入時填（見 qa-agent.md §三）。
+    # 格式驗證 regex：^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$
 ```
+
+**Payload index**（Qdrant payload_schema）：`related_stations` 建 keyword index，讓 `kb_search` 可做 `filter={"related_stations": "s02-storage-contract"}` 的 station-scoped 查詢（`qa-agent.md §三` 依賴此能力）。
 
 ---
 

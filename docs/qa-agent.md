@@ -49,13 +49,29 @@
 
 ### Q&A 專用新增
 
-#### `kb_search(query, top_k=5)`
+#### `kb_search(query, top_k=5, station_filter=None)`
 ```python
-@tool(name="kb_search", description="向量查詢 KB")
+class KBSearchArgs(BaseModel):
+    query: str
+    top_k: int = 5
+    station_filter: list[str] | None = None   # D-029：過濾 related_stations 包含任一 id 的 chunk
+
+@tool(name="kb_search", description="向量查詢 KB，可 station 範圍過濾")
 async def kb_search(args: KBSearchArgs, ctx: ToolContext) -> str:
-    hits = await ctx.kb.query(args.query, top_k=args.top_k)
-    return _format_hits(hits)  # file:line + snippet + score
+    qdrant_filter = None
+    if args.station_filter:
+        qdrant_filter = {"should": [
+            {"key": "related_stations", "match": {"value": sid}}
+            for sid in args.station_filter
+        ]}
+    hits = await ctx.kb.query(args.query, top_k=args.top_k, filter=qdrant_filter)
+    return _format_hits(hits)   # 每筆 hit 格式：
+                                 # "file:line | score=0.82 | stations=[s02-storage-contract]
+                                 #   <snippet>"
+                                 # 無 related_stations 時 stations= 段省略
 ```
+
+**station_filter 用途**：當 Q&A session 源自某站 `<QAEntry>`，Agent 可先用 `station_filter=[originating_station_id]` 做範圍 RAG，hit 不足再擴全庫。
 
 #### `add_to_kb(chunks, source, reason)`
 
