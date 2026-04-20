@@ -177,8 +177,11 @@ class ExplorerAction(BaseModel):
     tool_calls: list[ToolCall] = Field(default_factory=list)
     stop: bool = False  # Agent 主動宣告收斂
 
-async def _think(state, provider, tools) -> tuple[str, list[ToolCall]]:
+async def _think(state, registry, tools) -> tuple[str, list[ToolCall]]:
     prompt = render_explorer_prompt(state, tools.specs())
+
+    # Explorer 屬 REASONING role（llm-role-routing，2026-04-20 落地）
+    provider = registry.get(ProviderRole.REASONING)
 
     # Instructor 自動驗證 + retry
     action: ExplorerAction = await provider.chat_structured(
@@ -188,6 +191,8 @@ async def _think(state, provider, tools) -> tuple[str, list[ToolCall]]:
     )
     return action.thought, action.tool_calls
 ```
+
+**Role 分派**：`run_explorer` 從 `ProviderRegistry` 取 `ProviderRole.REASONING`（Opus 等級）。Judge / Coverage 走 `ProviderRole.JUDGE`（Haiku 等級，見 §七）；四個 role 的 routing 與 config 見 `llm-provider.md` §二 / §五。
 
 **為什麼 Instructor 值得引**
 - Schema 驗不過自動重試（帶錯誤訊息再問一次）
@@ -283,16 +288,17 @@ async def _execute_one(call, tools, ctx) -> ToolResult:
 
 ```python
 class Judge:
-    def __init__(self, provider: LLMProvider):
-        self._provider = provider
+    def __init__(self, registry: ProviderRegistry):
+        self._registry = registry
 
     async def evaluate(
         self,
         state: ExplorerState,
         results: list[ToolResult],
-        provider: LLMProvider,
     ) -> JudgeVerdict:
         prompt = render_judge_prompt(state.task, results)
+        # Judge / Coverage 屬 JUDGE role（Haiku 等級，低溫）
+        provider = self._registry.get(ProviderRole.JUDGE)
         return await provider.chat_structured(
             messages=[Message(role="user", content=prompt)],
             response_model=JudgeVerdict,
@@ -300,8 +306,12 @@ class Judge:
 
 
 class CoverageChecker:
-    async def check(self, state: ExplorerState, provider: LLMProvider) -> list[Gap]:
+    def __init__(self, registry: ProviderRegistry):
+        self._registry = registry
+
+    async def check(self, state: ExplorerState) -> list[Gap]:
         prompt = render_coverage_prompt(state.task, state.stations)
+        provider = self._registry.get(ProviderRole.JUDGE)
         result: CoverageResult = await provider.chat_structured(
             messages=[Message(role="user", content=prompt)],
             response_model=CoverageResult,
@@ -524,9 +534,20 @@ class UsageTracker:
 
 ```python
 class TrackedProvider(LLMProvider):
-    """Wrapper：每次 call 後呼叫 tracker.record。
-    module 由 context var（`current_module`）標記，Explorer / Judge / Coverage / Generator / Q&A 各自 enter 自己的 module context。
+    """Wrapper：每次 call 後呼叫 tracker.record 與 call_logger.log。
+
+    `role` 為建構期必填參數（llm-role-routing，2026-04-20 落地），
+    `TrackedProvider` 自動把 role 向下傳給 `LLMCallLogger`，呼叫端
+    簽章不變。module 仍由 context var（`current_module`）標記。
     """
+    def __init__(
+        self,
+        inner: LLMProvider,
+        *,
+        tracker: UsageTracker,
+        logger: LLMCallLogger,
+        role: ProviderRole,
+    ): ...
 ```
 
 **2. ToolContext 第 9 欄**（`tool-sandbox.md §五`）
@@ -581,6 +602,7 @@ class LLMCallRecord(BaseModel):
     session_id: str
     module: str
     step_id: int | None
+    role: ProviderRole               # llm-role-routing — 由 TrackedProvider 綁入
     provider: str
     model: str
     call_type: Literal["chat", "chat_structured", "chat_stream", "embed"]
@@ -625,12 +647,15 @@ class TrackedProvider(LLMProvider):
     def __init__(
         self,
         inner: LLMProvider,
-        usage_tracker: UsageTracker,
-        call_logger: LLMCallLogger,
+        *,
+        tracker: UsageTracker,
+        logger: LLMCallLogger,
+        role: ProviderRole,          # llm-role-routing — 建構期必填
     ):
         self._inner = inner
-        self._usage = usage_tracker
-        self._calls = call_logger
+        self._usage = tracker
+        self._calls = logger
+        self._role = role
 
     async def chat_structured(self, messages, *, response_model, **kw):
         req_id = f"llm_{short_uuid()}"
@@ -666,7 +691,7 @@ class TrackedProvider(LLMProvider):
 ### `llm_calls.jsonl` 範例
 
 ```json
-{"request_id":"llm_abc123","ts":"2026-04-18T10:00:01Z","session_id":"sess_xyz","module":"explorer","step_id":3,"provider":"contest-openai","model":"gpt-4o","call_type":"chat_structured","request":{"messages":[{"role":"system","content":"You are an Explorer..."},{"role":"user","content":"task: 新增 GoogleDrive Adapter ... <REDACTED:email#0>..."}],"tools":[{"name":"search"},...],"temperature":0.2,"response_format":{"type":"json_schema","json_schema":{...}}},"response":{"content":{"thought":"...","tool_calls":[{"name":"search","args":{"query":"IStorageService"}}],"stop":false}},"usage":{"prompt_tokens":1240,"completion_tokens":180,"cost_usd":0.0042,"estimated":false},"latency_ms":1842,"truncated":false,"error":null}
+{"request_id":"llm_abc123","ts":"2026-04-18T10:00:01Z","session_id":"sess_xyz","module":"explorer","step_id":3,"role":"reasoning","provider":"contest-openai","model":"gpt-4o","call_type":"chat_structured","request":{"messages":[{"role":"system","content":"You are an Explorer..."},{"role":"user","content":"task: 新增 GoogleDrive Adapter ... <REDACTED:email#0>..."}],"tools":[{"name":"search"},...],"temperature":0.2,"response_format":{"type":"json_schema","json_schema":{...}}},"response":{"content":{"thought":"...","tool_calls":[{"name":"search","args":{"query":"IStorageService"}}],"stop":false}},"usage":{"prompt_tokens":1240,"completion_tokens":180,"cost_usd":0.0042,"estimated":false},"latency_ms":1842,"truncated":false,"error":null}
 ```
 
 ### SSE event

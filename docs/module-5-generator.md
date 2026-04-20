@@ -115,6 +115,18 @@ for station in stations:
 </Reveal>
 ```
 
+### 圖片引用（D-028 — MVP 範圍）
+
+MVP 只允許 **inline markdown `![]()` 相對路徑** 引用 workspace 內既有圖片
+（e.g. `![架構圖](docs/arch.png)`），**不對圖做 LLM 解讀**：
+
+- Generator **不把圖像餵進 LLM**——provider 介面（`llm-provider.md §二`）沒有
+  `images` 參數，也沒有 `supports_vision` capability（D-028 已決不預埋）
+- Scanner 仍保留圖片檔的 path / size / mtime metadata，但不做 OCR / captioning
+- 圖片路徑仍要過 workspace sandbox 驗證（§三 `ensure_in_workspace`），禁 `..` 逃逸
+- Phase 2 若要支援 vision，走 additive 擴充：Provider Protocol 加 `images` 參數、
+  `RoleConfig` 加對應 role、Generator 才開放圖像解讀 prompt
+
 ---
 
 ## 五、格式驗證

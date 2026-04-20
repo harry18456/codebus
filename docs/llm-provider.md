@@ -20,12 +20,47 @@
 ```python
 from typing import Protocol, AsyncIterator, Literal
 from dataclasses import dataclass
+from enum import StrEnum
 
 @dataclass
 class Message:
     role: Literal["system", "user", "assistant", "tool"]
     content: str
     tool_call_id: str | None = None
+
+
+class ProviderRole(StrEnum):
+    """呼叫端語意分類（llm-role-routing change，2026-04-20 落地）。
+
+    四值固定，不含 vision / multimodal 維度（D-028）。呼叫端不再
+    直接抓「chat provider」，而是 `registry.get(ProviderRole.X)`。
+    """
+    REASONING = "reasoning"  # Explorer ReAct / Tutorial Generator（Module 5）— Opus 等級
+    JUDGE     = "judge"      # Relevance Judge / Coverage Checker — Haiku 等級
+    CHAT      = "chat"       # Q&A ReAct — Sonnet 等級
+    EMBED     = "embed"      # Scanner / Q&A embedding — 獨立 embedding model
+
+
+@dataclass(frozen=True)
+class RoleConfig:
+    """綁一個 `ProviderRole` 到具體的 provider + 預設參數。
+
+    Role 級預設值由 llm-role-routing design §2 定死：
+
+    | Role      | temperature | max_tokens |
+    |-----------|------------:|-----------:|
+    | REASONING |         0.2 |       8192 |
+    | JUDGE     |         0.0 |        256 |
+    | CHAT      |         0.3 |       4096 |
+    | EMBED     |           — |          — |
+
+    `temperature=0.2` / `max_tokens=None` 為欄位層級 fallback；
+    載入 config 時若未指定則套 role 預設值。
+    """
+    provider_id: str
+    model: str
+    temperature: float = 0.2
+    max_tokens: int | None = None
 
 @dataclass
 class ToolSpec:
@@ -158,23 +193,32 @@ class OllamaProvider(LLMProvider):
 
 ---
 
-## 五、Provider 選擇規則
+## 五、Provider 選擇規則（role map — llm-role-routing）
 
-`config.json`：
+`config.json` 採 `llm.roles` 映射（llm-role-routing design §4）：每個
+`ProviderRole` 綁一個 `provider_id` + `model`，呼叫端用
+`registry.get(ProviderRole.X)` 分發，不再走平面的
+`chat_provider` / `embed_provider` 欄位。
 
 ```json
 {
   "llm": {
-    "chat_provider": "contest",
-    "embed_provider": "contest",
-    "allow_fallback": false
+    "llm_disabled": false,
+    "roles": {
+      "reasoning": { "provider_id": "mock", "model": "mock-reasoning" },
+      "judge":     { "provider_id": "mock", "model": "mock-judge" },
+      "chat":      { "provider_id": "mock", "model": "mock-chat" },
+      "embed":     { "provider_id": "mock", "model": "mock-embed" }
+    }
   }
 }
 ```
 
-MVP 固定 `contest`。Phase 2 可擴：
-- `"chat_provider": "ollama"` 本地
-- `allow_fallback: true` → 本地失敗降級到雲端（但要再次觸發授權 modal，不能默默送）
+- `llm_disabled: true` → kill switch，所有 provider call 直接丟 `LLMDisabledError`（本節下方 §六 還有說明）
+- M1 四 role 全指向 `mock`；真 vendor adapter（M3 前另開 change）接上後只需改 `provider_id` 與 `model`，registry 結構不動
+- Role 級預設 `temperature` / `max_tokens` 定義見 §二 `RoleConfig`；payload 可 override
+- 未知 role key（e.g. `"vision"`）parse 時 raise `ValueError` 並列出四個合法值（D-028 不預埋 capability 維度）
+- Phase 2 `OllamaProvider`：`"chat": { "provider_id": "ollama", "model": "..." }` 即可切本地，不需動 registry API
 
 ---
 
@@ -214,3 +258,4 @@ response = await provider.chat(clean_messages, ...)
 | 多 provider 動態 fallback | 複雜度 vs MVP 價值 |
 | Token 級 streaming tool call | LLM 供應商 API 支援度不一，MVP 等整段回 |
 | Fine-tune / LoRA 管理 | 超出範圍 |
+| Vision / 多模態 | 延後至 Phase 2，見 D-028（Scanner 已保留圖片 metadata、Protocol 擴充為 additive） |
