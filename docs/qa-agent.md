@@ -1,8 +1,8 @@
 # Q&A Agent Spec — 教材完成後的互動問答
 
 > 使用者完成學習路線後可繼續問問題；Agent 走 RAG + 必要時即時補查並自動沉澱進 KB。
-> 關聯決策：**D-016（Q&A 互動 + KB 自動成長）**、D-002（trait 抽象）、D-015（Sanitizer）、D-011（資安）。
-> 關聯文件：`agent-explorer-spec.md`（trait 介面）、`agent-core.md`（ReAct loop 實作）、`sanitizer.md`。
+> 關聯決策：**D-016（Q&A 互動 + KB 自動成長）**、D-002（trait 抽象）、D-015（Sanitizer）、D-011（資安）、**D-029（stable station id 引用）**。
+> 關聯文件：`agent-explorer-spec.md`（trait 介面）、`agent-core.md`（ReAct loop 實作）、`sanitizer.md`、`module-5-generator.md §7.4`（stable station id 規則）。
 
 ---
 
@@ -13,9 +13,11 @@
 1. 先走 **RAG（KB 查詢）** 回答
 2. KB 不夠 → 決策**在 workspace 內即時補查**（read_file / search / trace_import / find_callers）
 3. 拿到新資料 → 判斷**是否值得沉澱**進 KB
-4. 值得 → 過 Sanitizer → `add_to_kb` → KB 永久累積
+4. 值得 → 過 Sanitizer → `add_to_kb` → KB 永久累積（附 stable station id 引用，跨 session 可追溯脈絡）
 
 **核心賣點**：KB 不是一次性建好、之後凍結——**問答本身就是 KB 成長機制**。完美契合「持久化知識庫」賣點與「Agentic」敘事（使用者端持續可感）。
+
+**Station 脈絡保留**（D-029）：當 Q&A 從教材站點的 `<QAEntry>` 發起、或問題明顯關聯某站時，`add_to_kb` 會把 stable station id（`s{NN}-slug`）寫進 chunk metadata；後續檢索可過濾到相關站點，UI 也能顯示「此 KB 記錄源自 s02-storage-contract」。
 
 ---
 
@@ -56,6 +58,23 @@ async def kb_search(args: KBSearchArgs, ctx: ToolContext) -> str:
 ```
 
 #### `add_to_kb(chunks, source, reason)`
+
+**Chunk schema**（Pydantic）：
+
+```python
+class AddToKBChunk(BaseModel):
+    text: str
+    source: str                                       # "src/foo.py:120-180"（必填）
+    related_stations: list[str] = Field(default_factory=list)  # stable station ids，D-029
+```
+
+- `related_stations`: 0..N 個 stable station id（`s{NN}-slug` 格式，見 `module-5-generator.md §7.4`）
+- Agent 何時該填：
+  - 當 Q&A session 從 `<QAEntry>` 發起（前端會在 `/qa` request 夾 originating `station_id`，寫進 `QAState.originating_station_id`）
+  - 當問題內容明顯關聯某站（e.g. 使用者問「剛剛 storage 那段...」）
+  - 當 ReAct loop 中 Agent 從 `kb_search` hit 的 chunk metadata 看到既有 station 關聯，延伸 chunk 應繼承
+- 格式驗證：每個 id 必須符合 `^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$`；不符則 tool 回 validation error，prompt 要求重填
+
 ```python
 @tool(name="add_to_kb", description="將新資訊加入 KB 供未來查詢")
 async def add_to_kb(args: AddToKBArgs, ctx: ToolContext) -> str:
@@ -67,7 +86,12 @@ async def add_to_kb(args: AddToKBArgs, ctx: ToolContext) -> str:
             added.append("skipped_empty")
             continue
 
-        # 2. 組 payload；embed + Layer 1 hash dedup + Layer 2 similarity dedup
+        # 2. 驗 related_stations 格式（D-029）
+        for sid in chunk.related_stations:
+            if not STATION_ID_REGEX.match(sid):
+                return f"invalid station_id: {sid}"
+
+        # 3. 組 payload；embed + Layer 1 hash dedup + Layer 2 similarity dedup
         #    全部封裝在 KB 層（見 module-2-kb-builder.md §五、§七）
         file_path, line_start, line_end = _split_source(chunk.source)  # "path:start-end" → triple
         payload = KBPayload(
@@ -82,6 +106,7 @@ async def add_to_kb(args: AddToKBArgs, ctx: ToolContext) -> str:
             chunk_index=0,
             chunk_total=1,                           # add_to_kb 為單 chunk 上傳
             created_at=utcnow(),
+            related_stations=chunk.related_stations, # D-029：stable station id 脈絡
             # sanitize_stats 由 KB 層或呼叫者填；若 scrub 不回 stats 用 default {}
         )
         try:
@@ -89,13 +114,15 @@ async def add_to_kb(args: AddToKBArgs, ctx: ToolContext) -> str:
         except KBGrowthExceeded as e:
             return f"budget exhausted: {e}"
 
-        # 3. 寫稽核 log（kb_growth.jsonl，UI 可看 / rollback）
+        # 4. 寫稽核 log（kb_growth.jsonl，UI 可看 / rollback）
         await ctx.kb_growth_log.write(point_id, chunk, args.reason)
         added.append(point_id)
     return f"added {len(added)} chunks: {added}"
 ```
 
 **寫入權限邊界**：`add_to_kb` 只寫本地 Qdrant 集合，不碰 codebase、不碰外部。Tool Sandbox 視為 read-only tool（對 code 而言），不需要新 exec 能力。
+
+**檢索脈絡還原**（D-029）：`kb_search` 回傳的 hit 除 `file:line + snippet + score` 外，也一併帶 `related_stations`；Agent prompt 指示「若 hit 有 related_stations，回答時附『此資訊源自 [站名]』引用，並可在 UI 生成 `[text](../stations/{station_id}.md)` 反連」。
 
 ---
 
@@ -154,8 +181,15 @@ Agent 呼叫 `add_to_kb` 前，prompt 要求它先自我確認。規則寫進 Q&
    若 kb_search 找到相似內容 → 不加
    （系統也會用向量相似度 > 0.95 自動去重，但你應先判斷）
 
+Station 脈絡（D-029，選填但建議）：
+- 若問題從某站 `<QAEntry>` 發起 → `related_stations` 填該站 `station_id`
+- 若問題內容明顯關聯某站主題 → 加該站 `station_id`
+- 若延伸自既有 KB hit 且 hit 帶 related_stations → 繼承
+- 格式：`s{NN}-slug`（e.g. `["s02-storage-contract"]`）
+- 不填不算錯；填錯格式會被 tool 擋下要求重填
+
 呼叫格式：
-add_to_kb(chunks=[{text, source}], reason="why worth keeping")
+add_to_kb(chunks=[{text, source, related_stations?}], reason="why worth keeping")
 ```
 
 Dedup 交給兩層：Agent 判斷（粗）+ 向量相似度（細）。
@@ -171,14 +205,19 @@ Dedup 交給兩層：Agent 判斷（粗）+ 向量相似度（細）。
   "ts": "2026-04-17T14:20:00Z",
   "session_id": "qa_sess_abc",
   "question": "PaymentService 怎麼處理退款？",
+  "originating_station_id": "s04-payment-flow",
   "entry_id": "qdrant-id-xyz",
   "source": "src/services/payment.ts:120-180",
+  "related_stations": ["s04-payment-flow"],
   "reason": "PaymentService.refund() 的 state machine 在 KB 沒涵蓋",
   "sanitize_stats": { "email": 0, "secret": 0 },
   "chunk_size_chars": 842,
   "dedup_skipped": false
 }
 ```
+
+- `originating_station_id`：session 發起點（前端從 `<QAEntry>` 帶入），為 null 表示從全域 QA 入口發起
+- `related_stations`：chunk metadata 上的 D-029 station 引用（與 KBPayload 同步）
 
 ### UI 稽核頁（延伸 Sanitizer 那頁）
 
@@ -216,21 +255,25 @@ Dedup 交給兩層：Agent 判斷（粗）+ 向量相似度（細）。
 ### 基本元件
 - 對話氣泡（使用者 / Agent）
 - Agent 氣泡下方顯示**引用**（file:line，可點開 side panel 看原檔）
+- Agent 氣泡下方可顯示 **Station 引用** badge（D-029）：若回答內容源自帶 `related_stations` 的 KB hit，顯示「📍 s02-storage-contract」等可點擊 badge，跳教材對應站
 - 每輪對話可展開看 Agent 的 reasoning log（reuse Explorer Agent console）
 - 輸入框 + 送出
 
 ### 訊息流（透過 Sidecar SSE）
 
 ```
-POST /qa        → 建立 session + 回 task_id
+POST /qa        → body: {question, originating_station_id?} → 建立 session + 回 task_id
 GET /tasks/{id}/events  (SSE)
-    ├─ {"type": "rag_hits", "hits": [...]}
+    ├─ {"type": "rag_hits", "hits": [{..., "related_stations": [...]}]}
     ├─ {"type": "agent_thought", ...}
     ├─ {"type": "agent_action_result", ...}
-    ├─ {"type": "kb_growth", "entry_id": "...", "source": "..."}
+    ├─ {"type": "kb_growth", "entry_id": "...", "source": "...", "related_stations": [...]}
     ├─ {"type": "answer_stream", "delta": "..."}
     └─ {"type": "done"}
 ```
+
+- `POST /qa` 新增 optional `originating_station_id`：前端從 `<QAEntry>` 點擊時夾帶所在 station 檔的 `station_id`，Agent 看到會在 system prompt 注入「本 session 源自 {station_id}」脈絡
+- `rag_hits` / `kb_growth` 事件都附 `related_stations`，前端即可渲染 station badge
 
 **KB growth 事件即時推給前端**，UI 在答案下方或側欄即時顯示「📚 KB 新增 1 筆」，使用者看得到 KB 在長。
 
