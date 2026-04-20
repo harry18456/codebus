@@ -917,6 +917,63 @@ npm test                        # vitest
 
 ---
 
+## D-028: LLM Vision 能力延後至 Phase 2（MVP 不做、但介面保留 additive 擴充空間）
+
+**狀態**：✅ 已決（2026-04-20）— **MVP 不實作 vision，但 Scanner 已保留圖片 metadata、Provider 介面未來可 additive 擴充**。
+
+### 脈絡
+討論 `ProviderRole` 路由時（見 llm-provider.md 即將更新版本）延伸出「LLM 是否要看得懂圖」問題。列出 call site 後發現：
+- Scanner（Module 1）已把 `.png .jpg` 等圖片歸 `binary`，`content: None`，不進 KB、不送 LLM
+- Explorer / Judge / Q&A / Generator 所有 call site 輸入都是 **code + text markdown**，沒有一個實際需要看圖
+- 使用者不會上傳圖——只指一個資料夾
+
+唯一「可能」需要 vision 的情境：repo 有 `docs/architecture.png` 這類純圖檔，Generator 若要替學生「解讀」該圖，則需看得到內容。但此為**非核心學習循環的延伸**，MVP 不值得現在挖坑。
+
+### 選項
+
+| 選項 | 優 | 缺 |
+|---|---|---|
+| A. MVP 就做 vision（Capability probe + Provider capability flag + Generator 雙模式） | 未來無需改動 | 工期 +1.5~2d、複雜度高、實際用到的 call site 僅 Module 5 部分情境 |
+| B. MVP 不做 vision，**介面也不預埋** capability 機制 | 工期省、複雜度低；未來要做時 Provider Protocol 是 additive 擴充（加屬性 / 參數）不 breaking | 未來補做要動 spec + 實作 + 測試約 1.5~2d |
+| C. MVP 介面預埋 `Capability` enum，但不實作 vision | 介面「看起來」完整 | YAGNI；未實際使用的抽象容易設計錯；未來還是要改 |
+
+### 決策：B — MVP 不做、介面不預埋
+
+**主要理由**：
+1. **Scanner 已保留資料**：圖片的 `path / size / sha256` 記在 `ScanResult` entry 裡（`kind: "binary"`），未來要處理不需要回頭重掃
+2. **Provider 介面擴充 additive**：未來在 `LLMProvider` Protocol 加 `supports_vision: bool` 屬性、`chat()` 加 `images: list[ImageInput] | None = None` 參數，舊呼叫端不動、新呼叫端才用
+3. **Role-level config 擴充 additive**：未來在 `roles.reasoning` 加 `"vision": true` 旗標，沒設就維持純文字
+4. **僅 Generator 需要改**：未來實作時只有 Module 5 Generator 的「引用圖片那一站」要動，其他 call site 皆不碰
+5. **Tutorial 引用圖不需要 vision**：Generator 在 markdown 寫 `![Arch](docs/arch.png)` 讓前端渲染 → 學生自己看圖。這條路 MVP 已可行
+
+### 關鍵不變式
+
+1. **Scanner 不丟圖片 metadata** — 即使 `content: None`，entry 仍保留 path / size / sha256，為未來 vision 保留入口
+2. **Provider Protocol 不預埋 Capability enum** — 真要做 vision 時才加，避免未實際使用的抽象設計錯
+3. **未來加 vision 是 additive 改動** — 所有既有 call site 不受影響，僅 Module 5 Generator 擴充雙模式（純文字 / 帶圖）
+4. **Vision 不影響 Sanitizer 不變式** — 圖片內容送 LLM 前仍須經 Sanitizer Pass 2；屆時需決定「圖片 PII 如何 scrub」（blur 臉 / OCR 後 regex / 拒送），此為 Phase 2 子議題
+
+### 連動更新（MVP 階段 — 現在只需做這些）
+
+- [ ] `docs/llm-provider.md` §八 MVP 不做表補一行「Vision / 多模態 — 延後至 Phase 2，見 D-028」
+- [ ] `docs/module-5-generator.md` 引用圖片段落明寫「MVP 只 inline markdown `![]()` 相對路徑，不對圖做 LLM 解讀」
+
+### Phase 2 觸發條件（到那時再開新 change）
+
+- 使用者反饋「希望 tutorial 能幫我看懂架構圖」
+- 目標 repo 大量依賴純圖檔文件（罕見，多數 OSS 會用 mermaid）
+- 或 Provider 原生支援 vision 成本降到與純文字同量級
+
+### 預估未來工期（真要做時）
+
+- Protocol 擴充（`supports_vision` + `images` 參數）：0.5d
+- Module 5 Generator 雙模式：0.5d
+- Sanitizer 圖片處理策略決策 + 實作：0.5d
+- 測試 + 稽核 log 擴充：0.5d
+- **總計：約 2d**
+
+---
+
 ### 需要決策動作
 - [x] D-001：定技術棧（混合架構）（2026-04-17）
 - [x] D-003：決定 Ollama 路徑（Provider 抽象 + 只接指定 LLM 供應商 API）（2026-04-17）
@@ -938,6 +995,7 @@ npm test                        # vitest
 - [x] D-025：Workspace 整合性與遺失恢復策略（六情境 + 五鐵律 + R-00 badge）（2026-04-19）
 - [x] D-026：Web toolchain 改 npm 取代 Bun（2026-04-19）
 - [x] D-027：Qdrant standalone binary 取代 Docker Compose 為主路徑（2026-04-19）
+- [x] D-028：LLM Vision 能力延後至 Phase 2（MVP 不做、介面不預埋 Capability enum）（2026-04-20）
 
 ### 需要 spec 動作（實作前再做）
 - [ ] D-008：三階段進度元件 Vue spec（Vue 實作）
