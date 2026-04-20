@@ -977,6 +977,85 @@ npm test                        # vitest
 
 ---
 
+## D-029: Module 5 輸出多檔結構（拒絕 Obsidian 整合）
+
+**狀態**：✅ 已決（2026-04-20）— **Module 5 改多檔輸出（stations/s0X-slug.md + MOC + frontmatter + stable IDs）；不做 Obsidian-specific 整合**。
+
+### 脈絡
+
+討論「CodeBus 要不要結合 Obsidian 提升使用者體驗」時列出可能整合點（Canvas export、wikilinks、vault dual-write、跨 workspace vault），ultra-think 後發現：
+
+- Obsidian 是**編輯器 + 檔案格式慣例**，不是資料庫也不是 runtime，不能替換 Qdrant 或 App
+- 工程師使用 Obsidian 的比例約 5–15%，會把 CodeBus 輸出拖進 personal vault 的 audience 更小（<5%）
+- 但使用者原問題裡的一條子直覺「**多檔才能形成 map**」是對的 —— 只是實現 map 價值不需要 Obsidian
+- 實際需要的是：Module 5 單檔 `tutorial.md` 拆成多檔（每站一檔）+ frontmatter + stable IDs；這些獨立於 Obsidian 也有工程價值
+
+CodeBus 核心敘事是 **Agentic Exploration > Naive RAG**（見 `agent-explorer-spec.md:13-16`），pre-MVP 階段該把資源投進驗證核心假設，不是借殼外部工具做錦上添花。
+
+### 選項
+
+| 選項 | 優 | 缺 |
+|---|---|---|
+| A. 全面整合 Obsidian（Canvas + wikilinks + vault dual-write + 跨 workspace vault） | audience 感受「跟上流行」；demo 有 graph money shot | 借殼外部 UI 稀釋 Agentic 敘事；綁 Obsidian 版本演進；跨 workspace 踩 D-002 隔離不變式；audience <5% |
+| B. 部分整合（Obsidian flavor markdown：frontmatter + wikilinks + `#tag`；單檔輸出不變） | 成本低 | 單檔仍是孤立節點，Obsidian graph / backlinks 無處發揮；wikilinks 非標準 markdown 語法，降低 portability |
+| **C. Module 5 拆檔 + frontmatter + stable IDs（標準 markdown），拒絕 Obsidian-specific 整合** | 拆檔本身有獨立工程好處；標準 markdown 每個 renderer 都吃；map 價值在 App 內原生實現（未來評估） | audience 期待「一鍵 Obsidian vault」體驗落空（但這 audience <5%） |
+
+### 決策：C — 拆檔 + 標準 markdown，不綁 Obsidian
+
+**✅ 做**
+
+1. **Module 5 拆檔**：`stations/s0X-slug.md`（每站一檔）+ `tutorial.md`（MOC 索引頁）
+2. **frontmatter 結構化 metadata**：`{repo, task, generated_at, station_id, tags, related_stations}` — 對 App 內搜尋、Q&A Agent 引用、腳本處理都有用
+3. **Stable station IDs**：`s0X-slug` 作為跨檔引用錨點，不依賴 heading 名（heading 改名不會破壞 Q&A 引用）
+4. **標準 markdown link**：`[text](./s02-localfileadapter.md)` 而非 `[[wikilinks]]`（portable、每個 renderer 都吃）
+
+**❌ 不做**
+
+1. **Obsidian Canvas 輸出（`.canvas`）** —— 借殼別人 UI，demo money shot 該在 CodeBus App 內
+2. **Obsidian `[[wikilinks]]` 語法** —— Obsidian-specific，標準 markdown link 更 portable
+3. **`add_to_kb` 雙寫 `vault/grown/*.md`** —— `kb_growth.jsonl` 已是稽核 trail；多寫一份 md 增加 Sanitizer Pass 3 表面積與 race condition，只服務 <5% audience
+4. **跨 workspace vault（`~/CodeBusVault/`）** —— 踩 D-002 per-workspace 隔離不變式，授權模型要重新設計，成本超大
+5. **「Obsidian-compatible」當 Trust Layer 賣點** —— manufactured；標準 markdown 輸出本身就已 portable，不需 Obsidian 認證
+
+### 主要理由
+
+1. **拆檔獨立於 Obsidian 也是更好的設計**：版本控制粒度、degraded fallback 隔離（`module-5-generator.md` P0）、URL-per-station 路由、per-station cache / hash —— 純工程好處
+2. **標準 markdown 已足夠 portable**：frontmatter 是 YAML、link 是 `[text](path)`，VS Code / Obsidian / Joplin / Notion import / 純 viewer 都吃；無須借 Obsidian flavor 換 portability
+3. **Agentic 敘事保護**：CodeBus 是「Agent 探索 code 產教材」，不是「填充你 Obsidian vault 的工具」；錯位定位會讓評審看不出差異化
+4. **pre-MVP 資源配置**：核心假設（Agentic > Naive RAG）尚未驗證，該把工期花在 Module 1-8 把 demo 跑通，不是外部工具整合
+5. **map 價值在 App 內原生可得**：站點關係視覺化、跨 session 累積、站間 backlinks 都能在 App 做，且能跟 reasoning_log / Judge 分數深度整合，比 Obsidian generic graph 更適合 code 學習場景
+
+### 關鍵不變式
+
+1. **輸出使用標準 markdown** —— 不引入 Obsidian-specific 語法（`[[]]` / `%%comment%%` / `==highlight==`）；frontmatter 用通用 YAML
+2. **stations/ 檔名穩定** —— `s0X-slug` 一旦生成不改名；slug 用 kebab-case；Q&A 引用依賴此穩定性
+3. **MOC `tutorial.md` 是純索引** —— 內容只有 station 列表、metadata、延伸連結；不重複 station 內容
+4. **frontmatter schema 版本化** —— 未來擴充欄位為 additive；移除欄位前需 bump schema version
+
+### 連動更新（近期）
+
+- [ ] `docs/module-5-generator.md` 輸出段改寫為多檔結構：`stations/s0X-slug.md` + `tutorial.md` (MOC) + frontmatter schema；degraded fallback 策略改為 per-station
+- [ ] `docs/interactive-tutorial.md` 投影片模式改為「檔案 = 一頁」，URL 路由用 `s0X-slug` 穩定 id
+- [ ] `docs/qa-agent.md` `add_to_kb` 描述補 stable station id 引用能力（便於跨 session 連結）
+- [ ] `docs/implementation-plan.md` M3 polish 階段候選加「App 內原生 graph view」（評估、非承諾；實作前另開 decision）
+
+### 未來可能重開條件（目前 Phase 2 都不建議）
+
+- Obsidian audience 在 CodeBus 使用者中占比實測 >30%（需真實使用者資料，非推測）
+- 有實際 user feedback 說「希望把教材帶進既有 vault」（至少 N=5 獨立來源）
+- App 內原生 graph view 被證明工期過大（>1 週），退而求其次借 Canvas
+
+### 預估工期（近期連動更新）
+
+- `module-5-generator.md` 多檔輸出段重寫：0.5d
+- `interactive-tutorial.md` 投影片路由改檔案制：0.25d
+- `qa-agent.md` stable station id 引用補充：0.25d
+- **總計：約 1d**
+
+（Module 5 實作時的拆檔工期已涵蓋在 `implementation-plan.md` 原排期；此 decision 不改工期總量，只改輸出結構）
+
+---
+
 ### 需要決策動作
 - [x] D-001：定技術棧（混合架構）（2026-04-17）
 - [x] D-003：決定 Ollama 路徑（Provider 抽象 + 只接指定 LLM 供應商 API）（2026-04-17）
@@ -999,6 +1078,7 @@ npm test                        # vitest
 - [x] D-026：Web toolchain 改 npm 取代 Bun（2026-04-19）
 - [x] D-027：Qdrant standalone binary 取代 Docker Compose 為主路徑（2026-04-19）
 - [x] D-028：LLM Vision 能力延後至 Phase 2（MVP 不做、介面不預埋 Capability enum）（2026-04-20）
+- [x] D-029：Module 5 輸出多檔結構（拆檔 + frontmatter + stable station id，拒絕 Obsidian 整合）（2026-04-20）
 
 ### 需要 spec 動作（實作前再做）
 - [ ] D-008：三階段進度元件 Vue spec（Vue 實作）
