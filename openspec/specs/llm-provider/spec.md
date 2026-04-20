@@ -72,14 +72,6 @@ While this change is active, the sidecar SHALL NOT send any network request to a
 - **WHEN** the integration test suite runs against the role-aware registry
 - **THEN** it MUST assert that no outbound HTTP request leaves the sidecar process during any test, for any role, using a network-interception fixture
 
-<!-- @trace
-source: llm-role-routing
-updated: 2026-04-20
-code:
-  - sidecar/src/codebus_agent/providers/__init__.py
-  - sidecar/src/codebus_agent/providers/registry.py
--->
-
 ---
 ### Requirement: ProviderRole enumerates call-site categories
 
