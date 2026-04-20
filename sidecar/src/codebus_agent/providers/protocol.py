@@ -6,17 +6,58 @@ openspec/changes/m1-power-on/specs/llm-provider/spec.md
     Scenario: Protocol methods present
     Scenario: Protocol is checkable at type level
 
+and openspec/changes/llm-role-routing/specs/llm-provider/spec.md
+  Requirement: ProviderRole enumerates call-site categories
+    Scenario: ProviderRole exposes four members
+    Scenario: ProviderRole is a StrEnum
+  Requirement: RoleConfig binds provider, model, and default parameters per role
+    Scenario: RoleConfig exposes required fields
+    Scenario: RoleConfig is frozen
+
 The M1 Protocol is a deliberate subset of `docs/llm-provider.md §二`:
 only `chat(messages, response_model)` and `embed(texts)` are required,
 because M1 exercises the structured-output path end-to-end without
 introducing streaming, tool-calling, or multi-provider routing.
+
+`ProviderRole` + `RoleConfig` land the llm-role-routing change
+(D-003 follow-up): role dispatch replaces the flat chat/embed split
+before Sanitizer Pass 2 wires its pre-flight hook.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel
+
+
+class ProviderRole(StrEnum):
+    """Semantic call-site category — see llm-role-routing design §1.
+
+    Exactly four members; vision / multimodal is intentionally out of
+    scope per D-028 and remains an additive future extension.
+    """
+
+    REASONING = "reasoning"
+    JUDGE = "judge"
+    CHAT = "chat"
+    EMBED = "embed"
+
+
+@dataclass(frozen=True)
+class RoleConfig:
+    """Binds a `ProviderRole` to a concrete provider + default params.
+
+    Defaults reflect llm-role-routing design §2: `temperature=0.2`
+    covers chat-like roles conservatively; `max_tokens=None` defers to
+    the underlying provider's own default until a caller opts in.
+    """
+
+    provider_id: str
+    model: str
+    temperature: float = 0.2
+    max_tokens: int | None = None
 
 
 @dataclass

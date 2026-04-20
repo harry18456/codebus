@@ -7,10 +7,16 @@ openspec/changes/m1-power-on/specs/usage-tracking/spec.md
     Scenario: Sanitizer-ready field reserved
     Scenario: Failure still logged
 
+and openspec/changes/llm-role-routing/specs/llm-provider/spec.md
+  Requirement: TrackedProvider records role in audit log
+    Scenario: Audit record contains role field
+    Scenario: Role field is additive to existing audit schema
+
 Implements `docs/decisions.md` D-022 (LLM Call Inspector audit trail).
-The `sanitizer_pass2_applied` field is reserved for the Sanitizer
-Pass 2 layer that future changes will wire in; during M1 it is
-always ``false``.
+The per-call record carries the full wire payload needed by the
+O-04 Trust Layer Inspector: role, provider_id, model, token counts,
+plus the original request / response.  The `sanitizer_pass2_applied`
+field is reserved for Sanitizer Pass 2 (M2); M1 always writes `false`.
 """
 from __future__ import annotations
 
@@ -18,6 +24,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from .protocol import ProviderRole
 
 
 class LLMCallLogger:
@@ -30,9 +38,22 @@ class LLMCallLogger:
         *,
         request: dict[str, Any],
         response: dict[str, Any] | None,
+        role: ProviderRole,
+        provider_id: str,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
         sanitizer_pass2_applied: bool = False,
     ) -> None:
-        entry = self._base_entry(request=request, sanitizer_pass2_applied=sanitizer_pass2_applied)
+        entry = self._base_entry(
+            request=request,
+            role=role,
+            provider_id=provider_id,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            sanitizer_pass2_applied=sanitizer_pass2_applied,
+        )
         entry["response"] = response
         self._append(entry)
 
@@ -41,9 +62,22 @@ class LLMCallLogger:
         *,
         request: dict[str, Any],
         exception: BaseException,
+        role: ProviderRole,
+        provider_id: str,
+        model: str,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
         sanitizer_pass2_applied: bool = False,
     ) -> None:
-        entry = self._base_entry(request=request, sanitizer_pass2_applied=sanitizer_pass2_applied)
+        entry = self._base_entry(
+            request=request,
+            role=role,
+            provider_id=provider_id,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            sanitizer_pass2_applied=sanitizer_pass2_applied,
+        )
         entry["response"] = None
         entry["error"] = {
             "class": type(exception).__name__,
@@ -52,12 +86,25 @@ class LLMCallLogger:
         self._append(entry)
 
     def _base_entry(
-        self, *, request: dict[str, Any], sanitizer_pass2_applied: bool
+        self,
+        *,
+        request: dict[str, Any],
+        role: ProviderRole,
+        provider_id: str,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        sanitizer_pass2_applied: bool,
     ) -> dict[str, Any]:
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-            "request": request,
+            "role": role.value,
+            "provider_id": provider_id,
+            "model": model,
+            "prompt_tokens": int(prompt_tokens),
+            "completion_tokens": int(completion_tokens),
             "sanitizer_pass2_applied": bool(sanitizer_pass2_applied),
+            "request": request,
         }
 
     def _append(self, entry: dict[str, Any]) -> None:

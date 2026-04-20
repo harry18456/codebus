@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from codebus_agent.providers.llm_call_logger import LLMCallLogger
 from codebus_agent.providers.mock import MockProvider
-from codebus_agent.providers.protocol import Message
+from codebus_agent.providers.protocol import Message, ProviderRole
 from codebus_agent.providers.tracked import TrackedProvider
 from codebus_agent.providers.usage_tracker import UsageTracker
 
@@ -60,7 +60,12 @@ async def test_first_workspace_write_has_every_required_field(
 
     tracker = UsageTracker(workspace / "token_usage.jsonl")
     logger = LLMCallLogger(workspace / "llm_calls.jsonl")
-    wrapped = TrackedProvider(MockProvider(), tracker=tracker, logger=logger)
+    wrapped = TrackedProvider(
+        MockProvider(role=ProviderRole.CHAT),
+        tracker=tracker,
+        logger=logger,
+        role=ProviderRole.CHAT,
+    )
 
     await wrapped.chat(
         messages=[Message(role="user", content="hello")],

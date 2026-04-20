@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from codebus_agent.providers.llm_call_logger import LLMCallLogger
 from codebus_agent.providers.mock import MockProvider, MockScript
-from codebus_agent.providers.protocol import LLMProvider, Message
+from codebus_agent.providers.protocol import LLMProvider, Message, ProviderRole
 from codebus_agent.providers.tracked import TrackedProvider
 from codebus_agent.providers.usage_tracker import UsageTracker
 
@@ -32,11 +32,16 @@ def _read_lines(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def _build_tracked(tmp_path: Path, inner: object | None = None) -> TrackedProvider:
+def _build_tracked(
+    tmp_path: Path,
+    inner: object | None = None,
+    *,
+    role: ProviderRole = ProviderRole.CHAT,
+) -> TrackedProvider:
     tracker = UsageTracker(tmp_path / "token_usage.jsonl")
     logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
     return TrackedProvider(
-        inner or MockProvider(), tracker=tracker, logger=logger
+        inner or MockProvider(), tracker=tracker, logger=logger, role=role
     )
 
 
@@ -124,7 +129,9 @@ async def test_script_pinned_response_is_returned_through_wrapper(
     inner = MockProvider(script=script)
     tracker = UsageTracker(tmp_path / "token_usage.jsonl")
     logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
-    wrapped = TrackedProvider(inner, tracker=tracker, logger=logger)
+    wrapped = TrackedProvider(
+        inner, tracker=tracker, logger=logger, role=ProviderRole.CHAT
+    )
 
     result = await wrapped.chat(
         messages=[Message(role="user", content="x")],

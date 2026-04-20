@@ -7,11 +7,21 @@ openspec/changes/m1-power-on/specs/llm-provider/spec.md
     Scenario: Mock script controls output
     Scenario: Mock embed returns deterministic vector
 
+and openspec/changes/llm-role-routing/specs/llm-provider/spec.md
+  Requirement: MockProvider records role for audit reachability
+    Scenario: Mock provider exposes role
+    Scenario: Mock without role remains backward compatible
+
 Design D-local-4 requires that `chat` walks the same Pydantic
 parsing path real providers will use.  We generate a dict from each
 field's annotation, then call `response_model.model_validate(...)` so
 validators actually fire.  Callers that need exact outputs (fixtures,
 golden-sample tests) push entries onto a `MockScript` FIFO.
+
+Design llm-role-routing §5: a single MockProvider class carries an
+optional `role` attribute so `llm_calls.jsonl` records can attribute
+each mock invocation back to its call-site role without a per-role
+subclass explosion.
 """
 from __future__ import annotations
 
@@ -23,7 +33,7 @@ from typing import Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
-from .protocol import EmbedResponse, Message, Usage
+from .protocol import EmbedResponse, Message, ProviderRole, Usage
 
 _EMBED_MODEL_ID = "mock-embed-v1"
 _CHAT_MODEL_ID = "mock-chat-v1"
@@ -67,12 +77,22 @@ class MockProvider:
     name = "mock"
 
     def __init__(
-        self, script: MockScript | None = None, embedding_dim: int = 8
+        self,
+        script: MockScript | None = None,
+        embedding_dim: int = 8,
+        *,
+        role: ProviderRole | None = None,
     ) -> None:
         if embedding_dim <= 0:
             raise ValueError(f"embedding_dim must be > 0, got {embedding_dim}")
+        if role is not None and not isinstance(role, ProviderRole):
+            raise TypeError(
+                f"MockProvider role must be a ProviderRole or None; "
+                f"got {type(role).__name__}"
+            )
         self.script = script or MockScript()
         self.embedding_dim = embedding_dim
+        self.role = role
 
     async def chat(
         self,

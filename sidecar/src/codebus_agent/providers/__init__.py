@@ -12,7 +12,14 @@ from __future__ import annotations
 
 from .llm_call_logger import LLMCallLogger
 from .mock import MockProvider, MockScript
-from .protocol import EmbedResponse, LLMProvider, Message, Usage
+from .protocol import (
+    EmbedResponse,
+    LLMProvider,
+    Message,
+    ProviderRole,
+    RoleConfig,
+    Usage,
+)
 from .registry import ProviderRegistry, ProviderRegistryError
 from .tracked import TrackedProvider
 from .usage_tracker import UsageTracker
@@ -26,6 +33,8 @@ __all__ = [
     "MockScript",
     "ProviderRegistry",
     "ProviderRegistryError",
+    "ProviderRole",
+    "RoleConfig",
     "TrackedProvider",
     "Usage",
     "UsageTracker",

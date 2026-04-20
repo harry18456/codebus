@@ -1,25 +1,24 @@
 """Backs SHALL clauses in
-openspec/changes/m1-power-on/specs/llm-provider/spec.md
-  Requirement: No outbound LLM traffic during M1
-    Scenario: Only MockProvider registered
-    Scenario: Integration test asserts no outbound calls
-
-and openspec/changes/m1-power-on/specs/usage-tracking/spec.md
+openspec/changes/m1-power-on/specs/usage-tracking/spec.md
   Requirement: TrackedProvider wraps every provider
-    Scenario: Direct provider use forbidden
-    Scenario: Skipping wrapper emits test failure
+    Scenario: Wrapper preserves protocol shape (via TrackedProvider inner-type guard)
+
+The role-level registry-dispatch and wrapping invariants migrated to
+`test_registry_role_dispatch.py` and `test_registry_guard_roles.py`
+when the llm-role-routing change reshaped the construction API from
+`register(name, provider)` to `ProviderRegistry({role: provider})`.
+The surviving scenario here covers the `TrackedProvider` inner-type
+guard, which is orthogonal to the registry surface and unchanged by
+the role refactor.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
 
 from codebus_agent.providers.llm_call_logger import LLMCallLogger
-from codebus_agent.providers.mock import MockProvider
-from codebus_agent.providers.protocol import Message
-from codebus_agent.providers.registry import ProviderRegistry, ProviderRegistryError
+from codebus_agent.providers.protocol import ProviderRole
 from codebus_agent.providers.tracked import TrackedProvider
 from codebus_agent.providers.usage_tracker import UsageTracker
 
@@ -36,68 +35,20 @@ class _WouldBeOpenAI:
         raise AssertionError("should never be called in M1")
 
 
-class _Echo(BaseModel):
-    content: str = ""
-
-
-def _wrap(tmp_path: Path, inner: object | None = None) -> TrackedProvider:
-    tracker = UsageTracker(tmp_path / "token_usage.jsonl")
-    logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
-    return TrackedProvider(
-        inner or MockProvider(), tracker=tracker, logger=logger
-    )
-
-
-def test_registry_accepts_tracked_provider(tmp_path: Path) -> None:
-    """Scenario: Direct provider use forbidden — only TrackedProvider allowed."""
-    registry = ProviderRegistry()
-    registry.register(_wrap(tmp_path))
-    assert "mock" in registry.names
-
-
-def test_registry_rejects_raw_mock_provider() -> None:
-    """Scenario: Skipping wrapper emits test failure (raw MockProvider blocked)."""
-    registry = ProviderRegistry()
-    with pytest.raises(ProviderRegistryError):
-        registry.register(MockProvider())
-
-
 def test_tracked_rejects_non_mock_inner_provider(tmp_path: Path) -> None:
-    """Scenario: Only MockProvider registered — fake inner raises at wrap time.
+    """`TrackedProvider.ALLOWED_INNER_TYPES` blocks non-Mock inner providers.
 
-    TrackedProvider's `ALLOWED_INNER_TYPES` guard fires first, so the
-    unwrapped path is unreachable from production code even before the
-    registry gets a chance to look.
+    This M1 invariant is orthogonal to registry dispatch and must
+    survive the llm-role-routing refactor unchanged: any production
+    attempt to wrap a real vendor adapter dies at wrap time, not at
+    registration time.
     """
     tracker = UsageTracker(tmp_path / "token_usage.jsonl")
     logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
     with pytest.raises(TypeError, match="MockProvider"):
-        TrackedProvider(_WouldBeOpenAI(), tracker=tracker, logger=logger)
-
-
-def test_registry_get_returns_registered_provider(tmp_path: Path) -> None:
-    registry = ProviderRegistry()
-    wrapped = _wrap(tmp_path)
-    registry.register(wrapped)
-    assert registry.get("mock") is wrapped
-
-
-@pytest.mark.asyncio
-async def test_no_outbound_http_during_tracked_mock_provider_calls(
-    tmp_path: Path,
-    block_outbound_sockets: list,
-) -> None:
-    """Scenario: Integration test asserts no outbound calls."""
-    registry = ProviderRegistry()
-    registry.register(_wrap(tmp_path))
-    provider = registry.get("mock")
-
-    await provider.chat(
-        messages=[Message(role="user", content="hi")],
-        response_model=_Echo,
-    )
-    await provider.embed(texts=["a", "b", "c"])
-
-    assert block_outbound_sockets == [], (
-        f"unexpected outbound connections: {block_outbound_sockets!r}"
-    )
+        TrackedProvider(
+            _WouldBeOpenAI(),
+            tracker=tracker,
+            logger=logger,
+            role=ProviderRole.CHAT,
+        )
