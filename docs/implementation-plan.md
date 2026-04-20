@@ -99,6 +99,13 @@ Markdown 互動 + Agent console（Demo 神器）+ 介入點。
 
 反覆調 prompt、跨平台測試、打包、簡報腳本。詳見 README §九 第五階段。
 
+### 打磨期候選（非承諾、時間充裕才評估）
+
+- **App 內原生 graph view**（D-029 §連動更新）：
+  視覺化 stations 之間的關聯（`route.json.stations[*].related_stations` + KB chunk `related_stations` 反查），作為 MOC 以外的 map-style 第二視圖。
+  實作前須另開 decision 確認：(1) 是否搭 reasoning_log / Judge 分數顯示 station 深度 (2) 渲染引擎選型（vis-network / d3 / Cytoscape）(3) 互動範圍（hover 預覽 / 點擊跳 station 檔 / backlinks 面板）
+  目前為 **評估項**，不計入 P0 工期；走到此處再看時間預算與 demo 價值決定是否開 change。
+
 ---
 
 ## 三、關鍵依賴鏈圖
