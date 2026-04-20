@@ -51,4 +51,4 @@
 
 - [x] 8.1 執行 `uv run pytest` 全測回歸，確認 M1 既有 ~94 個 test 仍全綠（扣除 Qdrant / symlink auto-skip 者）
 - [x] 8.2 執行 `pre-commit run --all-files` 確認無 lint / format 違規
-- [ ] 8.3 commit 本次改動，訊息格式：`refactor(providers): add ProviderRole routing and role-aware registry`（另一 commit 文件：`docs(providers): update llm-provider and module-5 for role routing + D-028`）
+- [x] 8.3 commit 本次改動，訊息格式：`refactor(providers): add ProviderRole routing and role-aware registry`（另一 commit 文件：`docs(providers): update llm-provider and module-5 for role routing + D-028`）
