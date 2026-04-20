@@ -1034,7 +1034,7 @@ CodeBus 核心敘事是 **Agentic Exploration > Naive RAG**（見 `agent-explore
 
 ### 連動更新（近期）
 
-- [ ] `docs/module-5-generator.md` 輸出段改寫為多檔結構：`stations/s0X-slug.md` + `tutorial.md` (MOC) + frontmatter schema；degraded fallback 策略改為 per-station
+- [x] `docs/module-5-generator.md` 輸出段改寫為多檔結構：`stations/s0X-slug.md` + `tutorial.md` (MOC) + frontmatter schema；degraded fallback 策略改為 per-station（2026-04-20）
 - [ ] `docs/interactive-tutorial.md` 投影片模式改為「檔案 = 一頁」，URL 路由用 `s0X-slug` 穩定 id
 - [ ] `docs/qa-agent.md` `add_to_kb` 描述補 stable station id 引用能力（便於跨 session 連結）
 - [ ] `docs/implementation-plan.md` M3 polish 階段候選加「App 內原生 graph view」（評估、非承諾；實作前另開 decision）
