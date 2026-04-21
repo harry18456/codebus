@@ -1134,6 +1134,52 @@ CodeBus 核心敘事是 **Agentic Exploration > Naive RAG**（見 `agent-explore
 
 ---
 
+## D-031: App version 曝光與同步機制（佔位，延後決策）
+
+**狀態**：⏸ 延後（2026-04-21）— **現階段不定、不實作；延到 Module 7 前端 Trust Layer footer 實作期一起敲**。佔位此 ADR 的目的是不讓議題遺失，並讓後續 change 有可引用的 D 編號。
+
+### 脈絡
+
+目前 4 份 manifest 各自寫 `0.1.0`，沒有同步機制：
+
+- `sidecar/pyproject.toml`
+- `web/package.json`
+- `tauri/src-tauri/Cargo.toml`
+- `tauri/src-tauri/tauri.conf.json`
+
+未來會有兩個 consumer：
+
+1. **UI 曝光**（R-01 Workspace footer / 關於對話框）——使用者需要知道跑的是哪版，出問題才回報得了
+2. **稽核脈絡**（`llm_calls.jsonl` / `sanitize_audit.jsonl`）可選加 `app_version` 欄位，跨 release 回溯時比單看 sanitizer rules 版本更完整
+
+與 **Sanitizer rules version**（CLAUDE.md 不變式 #9 / `docs/sanitizer.md`）是**不同概念**：App version 覆蓋整包 release；Sanitizer rules version 覆蓋 redaction pattern 集合，bump 時機與消費端都不同（後者 bump 會強制使用者重授權，見 `docs/authorization.md §六`）。兩者不混用、獨立版號。
+
+### 決策（佔位）
+
+**延到 Module 7 前端 Trust Layer footer 實作期重評**，理由：
+
+1. 目前沒有 UI consumer（landing page 還沒 footer）——過早選 sync 機制，pattern 可能與後續 R-01 footer / 關於對話框對不上
+2. M1 稽核 JSONL 還沒跨 release 的場景需要 `app_version` 欄位（所有 audit log 都還在同一版內）
+3. 4 份 manifest 都還停在 `0.1.0`，尚未 bump 過；手動維持成本低
+
+### 過渡期規則
+
+- **發版（release）時 4 份 manifest 一起 bump**，commit message 明註 `chore: bump version to vX.Y.Z`
+- 不另加 CI 檢查——手動即可
+- **Sanitizer rules version bump ≠ App version bump**（見 CLAUDE.md 不變式 #9）
+
+### 連動更新
+
+- 本 decision **不改現行 spec / 實作**；是對「未來 UI 曝光 + 稽核版本化」的佔位
+- Module 7 Trust Layer footer 設計時引用 D-031，決策定下時同步更新此 ADR 為「已決」，並決定：sync 機制（單一 source + build script 同步／各自維護 + CI 檢查／Tauri `getVersion` + sidecar `/healthz` 加欄位）、`app_version` 是否進 audit JSONL schema
+
+### 預估工期
+
+- 近期：0d（此 decision 純記錄 + 過渡期規則）
+- Module 7 實作期：依最終選項另行估
+
+---
+
 ### 需要決策動作
 - [x] D-001：定技術棧（混合架構）（2026-04-17）
 - [x] D-003：決定 Ollama 路徑（Provider 抽象 + 只接指定 LLM 供應商 API）（2026-04-17）
@@ -1158,6 +1204,7 @@ CodeBus 核心敘事是 **Agentic Exploration > Naive RAG**（見 `agent-explore
 - [x] D-028：LLM Vision 能力延後至 Phase 2（MVP 不做、介面不預埋 Capability enum）（2026-04-20）
 - [x] D-029：Module 5 輸出多檔結構（拆檔 + frontmatter + stable station id，拒絕 Obsidian 整合）（2026-04-20）
 - [x] D-030：Repo-level entity wiki 層延至 Phase 2（MVP 不做、不取代 tutorial.md）（2026-04-21）
+- [x] D-031：App version 曝光與同步機制（佔位，延後到 Module 7 Trust Layer footer 重評）（2026-04-21）
 
 ### 需要 spec 動作（實作前再做）
 - [ ] D-008：三階段進度元件 Vue spec（Vue 實作）
