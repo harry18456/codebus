@@ -1056,6 +1056,84 @@ CodeBus 核心敘事是 **Agentic Exploration > Naive RAG**（見 `agent-explore
 
 ---
 
+## D-030: Repo-level entity wiki 層延至 Phase 2（MVP 不做、不取代 tutorial.md）
+
+**狀態**：✅ 已決（2026-04-21）— **MVP 不在 Qdrant 之上、tutorials/ 之外另加 repo-level entity wiki 層；Karpathy-style「LLM-maintained wiki」模式列為 Phase 2 Topic Explorer 啟動時重評的候選，而非取代 `tutorial.md`**。
+
+### 脈絡
+
+討論「Karpathy 的 LLM Wiki 模式（gist: 442a6bf555914893e9891c11519de94f）能否取代 Qdrant」，第一層答案是「不能」— Trust Layer 要求 Agent 看無損 raw code，LLM-mediated summary 破壞可追溯性（與 D-015 / D-022 不變式衝突）。
+
+第二層問題才真正有意思：**Karpathy 模式能不能取代 `tutorial.md`**？拆開兩者本質：
+
+| | Module 5 `tutorial.md` + stations（D-029） | Karpathy wiki |
+|---|---|---|
+| 組織單位 | **task**（`tutorials/{task_id}/`） | **entity / concept**（`auth.md`、`payment.md`） |
+| 結構 | **線性 station 1 → 2 → 3**（MOC + per-station） | **網狀**（cross-ref + `index.md`） |
+| 生命週期 | Module 5 產完**凍結** | **持續維護**（Q&A / log.md / lint） |
+| 讀者動作 | **walk through**（我在 station 3/7） | **jump around**（我想看 X） |
+| UX 隱喻 | **教案 / 導覽**（pedagogy） | **維基 / 百科**（reference） |
+
+核心觀察：兩者是**不同產品形態**，不是儲存格式之爭。CodeBus 的敘事核心（`design/r-01-workspace.html` main panel）是「站點導覽」——有序、有進度、有下一站；這是教學體驗，不是查閱體驗。換成 wiki = 把「導覽」產品變成「查閱」產品，是重定位，不是重構。
+
+**但使用者的直覺戳到一個真實的洞**：CodeBus 目前所有 LLM synthesis 都鎖在 per-task `tutorials/` 裡，跨 task 不共享。同一個 repo 做兩個 task，對同一個 `PaymentService` 會各寫一次 station，重複勞動、無複利效果。Karpathy 模式適合當 `Qdrant` 與 `tutorials/` **之間**的 repo-level entity 抽象層——不是取代 tutorial，是疊在下面。
+
+### 選項
+
+| 選項 | 優 | 缺 |
+|---|---|---|
+| A. 用 Karpathy wiki **取代** `tutorial.md` | 跨 task 複利、Q&A enrichment 更自然 | 掀桌站點導覽 UX、毀教學敘事；task-scoping 消失；**等同重定位產品**，不是重構 |
+| B. MVP **加疊** repo-level entity wiki 層（Qdrant → Entity Wiki → Tutorials） | 跨 task 複利、Q&A 有地方去、Module 4 cold start 變暖 | Module 5 / Module 8 都還沒實作就多一層 synthesis；Trust Layer 要延伸到 wiki page；Sanitizer rules bump 重跑成本大；過早優化 |
+| **C. MVP 不做、Phase 2 重評（tutorial.md 不動、不加 wiki 層）** | 保護 MVP 聚焦核心假設；實作 Module 5 / 8 後再看痛點；Phase 2 Topic mode 與 entity wiki 天然契合，屆時評估基準更充分 | 跨 task 重複 synthesis 成本暫時吃下；Q&A add_to_kb 只寫 Qdrant 不寫 wiki page |
+
+### 決策：C — MVP 不做，Phase 2 Topic Explorer 啟動時重評
+
+**✅ 做**
+
+1. **保留 `tutorial.md` + stations/ 結構**（D-029 不動）作為 Module 5 MVP 輸出
+2. **Q&A add_to_kb 仍只寫 Qdrant + `kb_growth.jsonl`**（`docs/qa-agent.md §三`），不額外寫 entity wiki page
+3. **D-029 既有的 stable station id + MOC 結構繼續保留**——那本來就是輕量 wiki flavor，足夠 MVP
+
+**❌ 不做**
+
+1. **不用 Karpathy wiki 取代 tutorial.md**——會毀站點導覽核心 UX，等同重定位產品
+2. **MVP 不加 repo-level entity wiki 中間層**——Module 5 / 8 未實作，加 synthesis 層是過早優化
+3. **不改 Qdrant 職責**——Qdrant 仍是底層無損記憶，不讓它承擔 entity 抽象
+
+### 主要理由
+
+1. **Trust Layer 保護**：LLM-mediated wiki 層引入 non-deterministic 中介，要求 Sanitizer / Audit 延伸到 wiki page 本身；MVP 階段 Trust Layer 核心（Sanitizer Pass 2 / LLM Call Inspector）還沒實作，先立骨幹再疊層
+2. **核心假設尚未驗證**：CodeBus 的產品假設「Agentic Exploration > Naive RAG」（見 `agent-explorer-spec.md:13-16` / D-029 脈絡）要在 Module 1-8 demo 跑通後才證得了；跨 task 複利是次級假設，不該排在核心前面
+3. **Phase 2 的 topic mode 才是 entity wiki 的主場**：`workspace_type: "topic"`（D-002 / D-023）本質就是跨來源（web / article / repo）的概念學習；topic mode 啟動時重新評估 entity wiki，評估基準比現在充分（有真實 topic 使用場景當輸入）
+4. **Module 5 / 8 實作後痛點才會明確**：現在討論「跨 task 複利值多少工期」是抽象辯論；等兩個 task 跑過同 repo、看 `tutorials/{task_id}_a/` 與 `_b/` 的實際重疊率，才有實測依據
+5. **D-029 已預備 stable station id**：未來 tutorials → entity wiki 的轉譯路徑已鋪好（per-station frontmatter + stable id 可被聚合成 entity page），非 breaking
+
+### 關鍵不變式
+
+1. **Qdrant 職責不膨脹**——仍是底層無損 chunk 記憶，不承擔 entity 抽象層責任
+2. **tutorial.md 站點導覽 UX 保留**——D-029 的線性 station 結構是核心 UX，不因未來加 wiki 層而廢
+3. **未來若加 wiki 層，必然疊在 Qdrant 之上、tutorials 之外**——三層並存（Qdrant → Entity Wiki → Tutorials），不是二擇一替換
+4. **Phase 2 重評前，Q&A add_to_kb 只寫 Qdrant**——不雙寫 wiki page，避免 Sanitizer Pass 3 表面積提早膨脹
+
+### 未來可能重開條件（Phase 2 Topic Explorer 啟動時評估，以下至少兩條成立再動）
+
+1. Module 3 Topic Explorer 啟動，topic mode 的「跨來源概念學習」需要 entity 抽象層
+2. MVP 實測：同 repo 多 task 的 station 重疊率 >30%，且使用者回饋「希望教材不要重複寫」
+3. Q&A Agent 實測：`add_to_kb` 累積的 chunk 造成 KB 搜尋精度下降（純 chunk 層級無法表達 entity 層關係）
+4. 有研究 / 社群在 GraphRAG / entity-aware RAG 領域出現開源 reference 實作，可降低自製 wiki 層的工期
+
+### 連動更新
+
+- 本 decision **不改現行 spec / 實作**——是對「未來可能架構演進」的前瞻記錄，避免未來有人重問「要不要用 Karpathy wiki 取代 tutorial.md」
+- `docs/implementation-plan.md` 打磨期候選無須新增條目（D-029 已記 App 內原生 graph view，兩者屬同類「未來抽象層」候選，實作前另開 decision 合併評估）
+
+### 預估工期
+
+- 近期：0d（此 decision 純記錄 MVP 不做的理由與 Phase 2 重評條件）
+- Phase 2 若重開：評估工期另行開 D-XXX，至少涵蓋 Module 5 / 8 改動 + Trust Layer 延伸到 wiki page + sanitizer rules version 對 wiki synthesis 的影響
+
+---
+
 ### 需要決策動作
 - [x] D-001：定技術棧（混合架構）（2026-04-17）
 - [x] D-003：決定 Ollama 路徑（Provider 抽象 + 只接指定 LLM 供應商 API）（2026-04-17）
@@ -1079,6 +1157,7 @@ CodeBus 核心敘事是 **Agentic Exploration > Naive RAG**（見 `agent-explore
 - [x] D-027：Qdrant standalone binary 取代 Docker Compose 為主路徑（2026-04-19）
 - [x] D-028：LLM Vision 能力延後至 Phase 2（MVP 不做、介面不預埋 Capability enum）（2026-04-20）
 - [x] D-029：Module 5 輸出多檔結構（拆檔 + frontmatter + stable station id，拒絕 Obsidian 整合）（2026-04-20）
+- [x] D-030：Repo-level entity wiki 層延至 Phase 2（MVP 不做、不取代 tutorial.md）（2026-04-21）
 
 ### 需要 spec 動作（實作前再做）
 - [ ] D-008：三階段進度元件 Vue spec（Vue 實作）
