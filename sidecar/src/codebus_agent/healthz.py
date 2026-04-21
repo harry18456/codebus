@@ -6,6 +6,10 @@ openspec/changes/m1-power-on/specs/app-packaging/spec.md
     Scenario: Healthz flag succeeds after build
     Scenario: Healthz reports degraded if optional dependency missing
 
+and openspec/changes/qdrant-lifecycle-bootstrap/specs/qdrant-client/spec.md
+  Requirement: CODEBUS_QDRANT_URL resolution has a single source of truth
+    Scenario: healthz CLI uses the shared resolver
+
 The self-check never starts an HTTP server — it probes each
 dependency once and returns a `HealthReport`.  Exit code is always 0
 (even when degraded) so CI can separate "binary crashed" from
@@ -15,32 +19,14 @@ field of the JSON line.
 from __future__ import annotations
 
 import asyncio
-import os
-from urllib.error import URLError
-from urllib.request import urlopen
 
 from codebus_agent.health import DependencyStatus, HealthReport, collect
-
-DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
-
-
-def _qdrant_url() -> str:
-    return os.environ.get("CODEBUS_QDRANT_URL", DEFAULT_QDRANT_URL)
+from codebus_agent.kb import qdrant_client as _kb_qdrant
 
 
 async def _check_qdrant() -> DependencyStatus:
-    url = _qdrant_url().rstrip("/")
-
-    def _probe() -> DependencyStatus:
-        try:
-            with urlopen(f"{url}/readyz", timeout=1.0) as resp:
-                return DependencyStatus(ok=resp.status == 200, detail=url)
-        except (URLError, TimeoutError, ConnectionError, OSError) as exc:
-            return DependencyStatus(
-                ok=False, detail=f"{url} ({type(exc).__name__})"
-            )
-
-    return await asyncio.to_thread(_probe)
+    url = _kb_qdrant.resolve_url()
+    return await asyncio.to_thread(_kb_qdrant.probe, url)
 
 
 async def run_self_check() -> HealthReport:

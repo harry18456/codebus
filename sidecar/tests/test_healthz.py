@@ -1,6 +1,8 @@
 """Health endpoint tests — backs SHALL clauses in
 openspec/changes/m1-power-on/specs/sidecar-runtime/spec.md
   Requirement: Health endpoint
+and openspec/changes/qdrant-lifecycle-bootstrap/specs/qdrant-client/spec.md
+  Requirement: Runtime health endpoint reflects Qdrant connectivity
 """
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from codebus_agent.api import create_app
 from codebus_agent.health import DependencyStatus
+from codebus_agent.kb import qdrant_client as _kb_qdrant
 
 
 @pytest.fixture
@@ -74,3 +77,56 @@ def test_healthz_with_no_registered_checks_is_ok(bearer: str) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Runtime /healthz reflects live Qdrant connectivity
+# (qdrant-lifecycle-bootstrap spec, Requirement: Runtime health endpoint ...)
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_healthz_ok_when_qdrant_reachable(
+    bearer: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scenario: Qdrant reachable, healthz reports ok.
+
+    We monkeypatch the shared probe so CI does not need a real Qdrant
+    process — the scenario is about wire-up, not Qdrant itself.
+    """
+    monkeypatch.setattr(
+        _kb_qdrant,
+        "probe",
+        lambda url, timeout_seconds=1.0: DependencyStatus(ok=True, detail=url),
+    )
+    app = create_app(bearer_token=bearer, qdrant_url="http://127.0.0.1:6333")
+    with TestClient(app) as client:
+        response = client.get("/healthz", headers=_auth(bearer))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["dependencies"]["qdrant"]["ok"] is True
+
+
+def test_runtime_healthz_degraded_when_qdrant_unreachable(bearer: str) -> None:
+    """Scenario: Qdrant unreachable, healthz reports degraded.
+
+    Port 1 on loopback is an unprivileged-reserved port; the TCP
+    connect fails fast and the real probe surfaces ``ok=false``.
+    """
+    app = create_app(bearer_token=bearer, qdrant_url="http://127.0.0.1:1")
+    with TestClient(app) as client:
+        response = client.get("/healthz", headers=_auth(bearer))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["dependencies"]["qdrant"]["ok"] is False
+
+
+def test_runtime_healthz_omits_qdrant_when_url_not_configured(bearer: str) -> None:
+    """Scenario: No Qdrant URL configured, healthz omits dependency."""
+    app = create_app(bearer_token=bearer)
+    with TestClient(app) as client:
+        response = client.get("/healthz", headers=_auth(bearer))
+    assert response.status_code == 200
+    body = response.json()
+    assert "qdrant" not in body.get("dependencies", {})

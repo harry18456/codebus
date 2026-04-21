@@ -914,7 +914,7 @@ npm test                        # vitest
 - [x] `openspec/changes/m1-power-on/specs/qdrant-client/spec.md` SHALL 條款改「啟動腳本 + binary 路徑」為主、compose 為備
 - [x] `openspec/changes/m1-power-on/tasks.md` Phase 5 task 改走 binary
 - [ ] `docs/dev-setup.md` 新增 Qdrant binary 下載 / 解壓 / 啟動段落，Docker compose 降為「備援」章節
-- [ ] `docs/module-2-kb-builder.md §三` 提到 Qdrant 的句子改中性（HTTP endpoint），不綁 Docker
+- [ ] `docs/module-2-kb-builder.md §三` 提到 Qdrant 的句子改中性（HTTP endpoint），不綁 Docker<br>※ runtime lifecycle 已在 change `qdrant-lifecycle-bootstrap` 實作
 - [ ] `.gitignore` 補 `*.qdrant-bin/` / `bin/qdrant*` 模板
 - [ ] README workspace 結構圖補 `~/.codebus/bin/` 目錄
 

@@ -42,8 +42,8 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# Qdrant local storage
-kb/
+# Qdrant local storage — only match repo-root, not the sidecar Python `kb/` package
+/kb/
 *.qdrant/
 .qdrant-initialized
 

@@ -20,6 +20,7 @@ import uvicorn
 
 from codebus_agent import auth, handshake, healthz, net
 from codebus_agent.api import create_app
+from codebus_agent.kb import qdrant_client as _kb_qdrant
 from codebus_agent.watchdog import watch_parent
 
 
@@ -86,7 +87,10 @@ def run(argv: list[str] | None = None) -> None:
         sys.exit(run_healthz())
     bearer = auth.generate_token()
     sock, port = net.bind_ephemeral_loopback()
-    app = create_app(bearer_token=bearer)
+    # D-027 + design「Startup policy：degraded-but-alive」— thread the
+    # resolved Qdrant URL through to the app factory so /healthz reflects
+    # live connectivity, but never block startup on Qdrant being reachable.
+    app = create_app(bearer_token=bearer, qdrant_url=_kb_qdrant.resolve_url())
     try:
         asyncio.run(_serve(app, sock, port, bearer, args.parent_pid))
     finally:

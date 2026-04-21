@@ -66,3 +66,4 @@ M1「power-on」只交付了 Qdrant 的 **外圍設施**：`sidecar/scripts/star
   - `qdrant-client` Python package 已在 `sidecar/pyproject.toml`（M1 引入）；本 change **不升版、不新增**。
 - **Downstream unlock**:
   - `docs/implementation-plan.md` Step 14 Module 2 P0 可開工。
+- **Archive follow-up**（`spectra archive` 流程 `MODIFIED Requirements` 不吃 Purpose prose）：archive 後手動把 `openspec/specs/qdrant-client/spec.md` 的 Purpose 從 `TBD - created by archiving change 'm1-power-on'` 改為「定義 Qdrant 的 launch recipe、smoke test 與 sidecar runtime lifecycle（client wrapper、health probe、`ensure_collection`、degraded-mode startup）」。

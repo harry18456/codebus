@@ -134,6 +134,24 @@ def test_source_healthz_returns_zero_on_either_status() -> None:
     assert report["status"] in {"ok", "degraded"}
 
 
+def test_source_healthz_detail_surfaces_resolved_url() -> None:
+    """Scenario: healthz CLI uses the shared resolver.
+
+    Backs openspec/changes/qdrant-lifecycle-bootstrap/specs/qdrant-client/spec.md
+      Requirement: CODEBUS_QDRANT_URL resolution has a single source of truth
+
+    A distinctive hostname is injected via ``CODEBUS_QDRANT_URL``; it
+    MUST reach the probe's ``DependencyStatus.detail`` so the CLI's URL
+    resolution is demonstrably shared with the wrapper's ``resolve_url``.
+    """
+    sentinel = "http://healthz-cli-sentinel.invalid:65533"
+    result = _run_source_healthz(env_extra={"CODEBUS_QDRANT_URL": sentinel})
+    assert result.returncode == 0, f"stderr: {result.stderr!r}"
+    report = _parse_single_json_line(result.stdout)
+    qdrant = report["dependencies"]["qdrant"]  # type: ignore[index]
+    assert sentinel in str(qdrant["detail"])
+
+
 @pytest.mark.skipif(_find_binary() is None, reason="packaged binary not built yet")
 def test_binary_healthz_ok_when_qdrant_reachable() -> None:
     """Scenario: Healthz flag succeeds after build (packaged artifact)."""

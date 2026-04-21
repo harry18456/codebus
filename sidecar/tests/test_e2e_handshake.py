@@ -70,7 +70,12 @@ def test_parent_reads_handshake_and_succeeds_ping() -> None:
             pytest.fail(f"could not reach sidecar /healthz: {last_err!r}")
 
         assert response.status_code == 200
-        assert response.json()["status"] == "ok"
+        # qdrant-lifecycle-bootstrap: /healthz now reflects live Qdrant
+        # connectivity. CI may or may not have a Qdrant running, so the
+        # e2e contract is "sidecar is reachable and answers", not "all
+        # deps are ok". ``status`` will be ``degraded`` when Qdrant is
+        # down — that is the design「degraded-but-alive」path, not a bug.
+        assert response.json()["status"] in {"ok", "degraded"}
     finally:
         proc.terminate()
         try:

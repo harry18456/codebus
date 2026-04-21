@@ -332,7 +332,7 @@ KBGrowthLogger.write()  → kb_growth.jsonl
 
 | 優先 | 項目 | 工期 |
 |---|---|---|
-| P0 | Qdrant client wrapper（connect / ensure_collection / upsert / query） | 0.5d |
+| P0 | Qdrant client wrapper（connect / ensure_collection / upsert / query）<br>※ connect / ensure_collection 由 change `qdrant-lifecycle-bootstrap` 交付；upsert / query 屬 Module 2 range | 0.5d |
 | P0 | KBPayload schema + payload index | 0.25d |
 | P0 | Chunk 函式（token window + 行邊界 respect） | 0.5d |
 | P0 | Build pipeline（ScanResult → chunk → embed → upsert） | 0.5d |
