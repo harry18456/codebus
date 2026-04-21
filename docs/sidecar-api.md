@@ -58,7 +58,7 @@
 > - `workspace_type: "topic"` → `HTTPException 501 Not Implemented`（非 `400`）with `detail="workspace_type='topic' not implemented in MVP"`（對齊 D-002「discriminator day 1」：schema 吃得到但功能未實作）。
 > - 未知 `workspace_type`（不是 `"folder"` / `"topic"`）→ `422 Unprocessable Entity`，由 Pydantic discriminated union 驗證擋下。
 > - `workspace_root` 不存在或非目錄 → `400` with `detail={ "code": "SCANNER_WORKSPACE_INVALID", "message": "..." }`（對齊 `module-1-scanner.md §十二`）。
-> - Response 中 `git` 永遠 `null`、`is_monorepo=false` / `monorepo_type=null` / `sub_packages=[]`、每個 `FileEntry.sanitize_stats={}`、`stats.quarantined_count=0`（詳 `module-1-scanner.md §十一` Skeleton 註記）。
+> - Response 中 `git` 永遠 `null`、`is_monorepo=false` / `monorepo_type=null` / `sub_packages=[]`（詳 `module-1-scanner.md §十一` Skeleton 註記）；`FileEntry.sanitize_stats` 為 Pass 1 sanitize 後真實 kind→count（無命中時 `{}`）、`stats.quarantined_count` 為 Pass 1 失敗檔數（正常情況為 `0`）。
 
 **Request**（Skeleton · `workspace_type: "folder"`）
 ```json
@@ -140,7 +140,7 @@
 }
 ```
 
-> **Skeleton 行為差異**：上方 Response example 展示**完整 spec 目標**（含 `git` metadata、`is_monorepo=true` 的 monorepo 結果、非零 `sanitize_stats`）。目前 `scanner-skeleton` 階段實際回的是同一 schema 但 stub 版——`git` 為 `null`、`is_monorepo=false` / `monorepo_type=null` / `sub_packages=[]`、所有 `FileEntry.sanitize_stats={}`、`FileEntry.oversized_preview=null`、`stats.quarantined_count=0`、`task_id` 未採用（同步 response 不需）。
+> **Skeleton 行為差異**：上方 Response example 展示**完整 spec 目標**（含 `git` metadata、`is_monorepo=true` 的 monorepo 結果）。目前 `scanner-skeleton` + `scanner-sanitizer-orchestration` 階段實際回的是同一 schema 但部分子系統仍為 stub——`git` 為 `null`、`is_monorepo=false` / `monorepo_type=null` / `sub_packages=[]`、`FileEntry.oversized_preview=null`、`task_id` 未採用（同步 response 不需）。`FileEntry.sanitize_stats` 與 `stats.quarantined_count` 已由 Pass 1 Sanitizer 驅動，回實際值（無命中時 `{}` / `0`）。
 
 大 repo 走 async（先回 `{ "task_id": "..." }` + SSE 進度 + `GET /tasks/{id}/result` 取結果）為後續 change 目標，`scanner-skeleton` 未實作——所有 repo 都走同步 body。
 

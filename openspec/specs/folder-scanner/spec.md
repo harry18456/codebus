@@ -103,7 +103,9 @@ The scanner SHALL classify each non-symlink entry into exactly one of `{text, bi
 5. `oversized` if the file size exceeds `max_file_size_kb` (default 512 KB) and the file was not classified as binary by rules 1-4.
 6. `text` otherwise.
 
-For `binary`, `lockfile`, and `generated` entries, `FileEntry.content` MUST be `null` and `FileEntry.encoding` MUST be `null`. For `oversized` entries, `FileEntry.content` MUST be `null` and `FileEntry.oversized_preview` MAY contain up to the first 200 lines of the decoded head.
+For `binary`, `lockfile`, and `generated` entries, `FileEntry.content` MUST be `null` and `FileEntry.encoding` MUST be `null`. For `oversized` entries, `FileEntry.content` MUST be `null`; `FileEntry.oversized_preview` MAY contain up to the first 200 lines of the decoded head, and if populated in a future change that preview MUST itself be routed through the Pass 1 sanitizer before being stored.
+
+For `text` entries, `FileEntry.content` MUST hold the **Pass 1 sanitized** string (see the "Pass 1 sanitizer orchestration for text FileEntries" requirement), not the raw decoded body. `FileEntry.encoding` MUST identify the encoding under which the raw bytes were successfully decoded.
 
 #### Scenario: PNG classified as binary without reading full content
 
@@ -120,10 +122,31 @@ For `binary`, `lockfile`, and `generated` entries, `FileEntry.content` MUST be `
 - **WHEN** the workspace contains `app.min.js`
 - **THEN** the corresponding `FileEntry` has `kind="generated"` and `content=null`.
 
-#### Scenario: Small plain text file classified as text with content
+#### Scenario: Small plain text file classified as text with sanitized content
 
-- **WHEN** the workspace contains `README.md` of size 2 KB containing UTF-8 text
-- **THEN** the corresponding `FileEntry` has `kind="text"`, `content` equals the decoded file body, and `encoding="utf-8"`.
+- **WHEN** the workspace contains `README.md` of size 2 KB containing UTF-8 text with no sanitizer matches
+- **THEN** the corresponding `FileEntry` has `kind="text"`, `FileEntry.content` equals the decoded file body (sanitizer returned it unchanged), `FileEntry.encoding="utf-8"`, and `FileEntry.sanitize_stats` equals `{}`.
+
+
+<!-- @trace
+source: scanner-sanitizer-orchestration
+updated: 2026-04-21
+code:
+  - sidecar/src/codebus_agent/scanner/service.py
+  - docs/module-1-scanner.md
+  - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/sanitizer/engine.py
+  - sidecar/src/codebus_agent/sandbox.py
+  - docs/implementation-plan.md
+  - sidecar/src/codebus_agent/api/scan.py
+tests:
+  - sidecar/tests/scanner/test_scan_api.py
+  - sidecar/tests/scanner/test_service.py
+  - sidecar/tests/scanner/fixtures/with-secrets/config.py
+  - sidecar/tests/scanner/fixtures/with-secrets/contacts.txt
+  - sidecar/tests/scanner/fixtures/with-secrets/README.md
+  - sidecar/tests/scanner/test_fixtures_integration.py
+-->
 
 ---
 ### Requirement: Encoding detection fallback chain
@@ -204,28 +227,49 @@ The scanner SHALL invoke `ensure_in_workspace(path, ctx)` from the `tool-sandbox
 ---
 ### Requirement: Deferred subsystem schema preservation
 
-Skeleton scans MUST emit the complete `ScanResult` schema with stable default values for subsystems not yet implemented, so that downstream consumers can be written against the final contract:
+Skeleton scans that have not yet implemented the remaining deferred subsystems MUST emit the complete `ScanResult` schema with stable default values for those subsystems, so that downstream consumers can be written against the final contract:
 
-- `FileEntry.sanitize_stats` MUST be an empty dict `{}`.
-- `ScanResult.git` MUST be `null`.
-- `ScanResult.is_monorepo` MUST be `false`, `ScanResult.monorepo_type` MUST be `null`, and `ScanResult.sub_packages` MUST be an empty list `[]`.
+- `ScanResult.git` MUST be `null` until git metadata collection lands.
+- `ScanResult.is_monorepo` MUST be `false`, `ScanResult.monorepo_type` MUST be `null`, and `ScanResult.sub_packages` MUST be an empty list `[]` until monorepo detection lands.
+- `FileEntry.oversized_preview` MUST be `null` until the oversized preview enhancement lands.
 
-The skeleton `/scan` output MUST NOT be consumed by any code path that forwards data into the LLM call chain until the sanitizer orchestration change lands; this constraint applies at the capability boundary, not via runtime enforcement.
-
-#### Scenario: Sanitize stats default empty
-
-- **WHEN** a scan completes on any folder workspace during the skeleton change
-- **THEN** every `FileEntry.sanitize_stats` equals `{}`.
+The `FileEntry.sanitize_stats` field is no longer a deferred stub; its semantics are governed by the "Pass 1 sanitizer orchestration for text FileEntries" requirement. The previous constraint that `/scan` output MUST NOT be consumed by the LLM call chain no longer applies, because Pass 1 sanitization is now enforced at the scanner boundary.
 
 #### Scenario: Git metadata default null
 
-- **WHEN** a scan completes on a workspace that contains a `.git/` directory during the skeleton change
+- **WHEN** a scan completes on a workspace that contains a `.git/` directory while git metadata collection is still deferred
 - **THEN** `ScanResult.git` equals `null` and no `pygit2` call is made.
 
 #### Scenario: Monorepo fields default inactive
 
-- **WHEN** a scan completes on a workspace that declares a `pnpm-workspace.yaml` during the skeleton change
+- **WHEN** a scan completes on a workspace that declares a `pnpm-workspace.yaml` while monorepo detection is still deferred
 - **THEN** `ScanResult.is_monorepo=false`, `ScanResult.monorepo_type=null`, and `ScanResult.sub_packages=[]`.
+
+#### Scenario: Oversized preview default null
+
+- **WHEN** a scan encounters a file whose size exceeds `max_file_size_kb` while the oversized preview enhancement is still deferred
+- **THEN** the corresponding `FileEntry.kind="oversized"`, `FileEntry.content=null`, and `FileEntry.oversized_preview=null`.
+
+
+<!-- @trace
+source: scanner-sanitizer-orchestration
+updated: 2026-04-21
+code:
+  - sidecar/src/codebus_agent/scanner/service.py
+  - docs/module-1-scanner.md
+  - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/sanitizer/engine.py
+  - sidecar/src/codebus_agent/sandbox.py
+  - docs/implementation-plan.md
+  - sidecar/src/codebus_agent/api/scan.py
+tests:
+  - sidecar/tests/scanner/test_scan_api.py
+  - sidecar/tests/scanner/test_service.py
+  - sidecar/tests/scanner/fixtures/with-secrets/config.py
+  - sidecar/tests/scanner/fixtures/with-secrets/contacts.txt
+  - sidecar/tests/scanner/fixtures/with-secrets/README.md
+  - sidecar/tests/scanner/test_fixtures_integration.py
+-->
 
 ---
 ### Requirement: Synchronous response without SSE progress events
@@ -236,3 +280,86 @@ The skeleton `POST /scan` endpoint SHALL return the full `ScanResult` in a singl
 
 - **WHEN** a client sends `POST /scan` and the scan succeeds
 - **THEN** the response has `Content-Type: application/json`, a single JSON body, and no `Content-Type: text/event-stream` alternate.
+
+---
+### Requirement: Pass 1 sanitizer orchestration for text FileEntries
+
+The scanner SHALL invoke `SanitizerEngine.sanitize(content, FileSource(path=<relative_path>))` for every candidate `FileEntry` whose `kind` resolves to `text` after successful decoding and before the entry is appended to `ScanResult.files`. `FileEntry.content` MUST store the Pass 1 sanitized string returned by the engine, not the raw decoded body. `FileEntry.sanitize_stats` MUST be a mapping from `AuditEntry.kind` (e.g. `"email"`, `"secret"`, `"domain"`) to the integer number of placeholders applied to that file, and MUST be `{}` when the engine reports zero hits.
+
+The scanner MUST construct `FileSource` with `pass_="scanner"` and `path` equal to the file path relative to `workspace_root` (forward slashes, regardless of host OS). The scanner MUST pass the shared `SanitizerEngine` instance provided by `ToolContext.sanitizer`; it MUST NOT construct an ad-hoc engine per call.
+
+#### Scenario: Plain text file with no sanitizer matches
+
+- **WHEN** a workspace contains `notes.md` whose decoded body has no email, secret, or other sanitizer-rule matches
+- **THEN** the resulting `FileEntry.content` equals the decoded body byte-for-byte, `FileEntry.sanitize_stats` equals `{}`, and no line is appended to `sanitize_audit.jsonl` for that file.
+
+#### Scenario: Text file containing an email is scrubbed in content and counted in stats
+
+- **WHEN** a workspace contains `contact.txt` whose decoded body contains one email address and the sanitizer email rule is active
+- **THEN** `FileEntry.content` contains a `<REDACTED:email#N>` placeholder in place of the email, `FileEntry.sanitize_stats` equals `{"email": 1}`, and the raw email string does not appear anywhere in `ScanResult`.
+
+#### Scenario: Non-text kinds bypass sanitizer
+
+- **WHEN** a workspace contains `logo.png` (binary), `uv.lock` (lockfile), and `app.min.js` (generated)
+- **THEN** no sanitize call is issued for these files, `FileEntry.content` stays `null`, and `FileEntry.sanitize_stats` equals `{}` for each.
+
+
+<!-- @trace
+source: scanner-sanitizer-orchestration
+updated: 2026-04-21
+code:
+  - sidecar/src/codebus_agent/scanner/service.py
+  - docs/module-1-scanner.md
+  - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/sanitizer/engine.py
+  - sidecar/src/codebus_agent/sandbox.py
+  - docs/implementation-plan.md
+  - sidecar/src/codebus_agent/api/scan.py
+tests:
+  - sidecar/tests/scanner/test_scan_api.py
+  - sidecar/tests/scanner/test_service.py
+  - sidecar/tests/scanner/fixtures/with-secrets/config.py
+  - sidecar/tests/scanner/fixtures/with-secrets/contacts.txt
+  - sidecar/tests/scanner/fixtures/with-secrets/README.md
+  - sidecar/tests/scanner/test_fixtures_integration.py
+-->
+
+---
+### Requirement: Sanitize audit logging during scan
+
+For every Pass 1 hit (every `AuditEntry` returned by `SanitizerEngine.sanitize`) produced during a single scan, the scanner SHALL persist one line to `sanitize_audit.jsonl` via the existing `SanitizeAuditLogger`. The persisted entry MUST carry `source.pass = "scanner"` and `source.path` equal to the file path relative to `workspace_root`. The scanner MUST NOT batch audit writes in a way that loses entries when a later file fails; each successful sanitize call's entries SHALL be flushed before the next file is processed.
+
+If `SanitizerEngine.sanitize` raises any exception for a given file, that file is treated as quarantined: it MUST NOT appear in `ScanResult.files` under any form, a human-readable warning identifying the offending relative path MUST be appended to `ScanResult.warnings`, and `ScanResult.stats.quarantined_count` MUST be incremented by one. The engine-raised exception MUST NOT propagate out of `POST /scan`; the endpoint SHALL still return HTTP 200 with the remaining files.
+
+#### Scenario: Sanitize audit line written for each hit
+
+- **WHEN** a scan encounters two text files that together produce three sanitizer hits (e.g. two emails and one secret)
+- **THEN** `sanitize_audit.jsonl` receives three new lines, each with `source.pass="scanner"` and `source.path` set to the relevant file's workspace-relative path.
+
+#### Scenario: Sanitizer engine failure quarantines the file without failing the scan
+
+- **WHEN** `SanitizerEngine.sanitize` raises an unexpected exception while processing `broken.txt`
+- **THEN** `ScanResult.files` contains no entry for `broken.txt`, `ScanResult.warnings` includes a message identifying `broken.txt`, `ScanResult.stats.quarantined_count` is at least `1`, and the overall response is HTTP 200.
+
+
+<!-- @trace
+source: scanner-sanitizer-orchestration
+updated: 2026-04-21
+code:
+  - sidecar/src/codebus_agent/scanner/service.py
+  - docs/module-1-scanner.md
+  - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/sanitizer/engine.py
+  - sidecar/src/codebus_agent/sandbox.py
+  - docs/implementation-plan.md
+  - sidecar/src/codebus_agent/api/scan.py
+tests:
+  - sidecar/tests/scanner/test_scan_api.py
+  - sidecar/tests/scanner/test_service.py
+  - sidecar/tests/scanner/fixtures/with-secrets/config.py
+  - sidecar/tests/scanner/fixtures/with-secrets/contacts.txt
+  - sidecar/tests/scanner/fixtures/with-secrets/README.md
+  - sidecar/tests/scanner/test_fixtures_integration.py
+-->
+
+---
