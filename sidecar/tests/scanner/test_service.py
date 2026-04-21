@@ -1,4 +1,5 @@
-"""TDD red tests for `scanner/service.py::scan` — Task 6.1.
+"""TDD red tests for `scanner/service.py::scan` — Task 6.1 (skeleton)
+and Task 2.x (scanner-sanitizer-orchestration).
 
 Backs openspec/changes/scanner-skeleton/specs/folder-scanner/spec.md
   Requirement: Workspace scan endpoint
@@ -10,13 +11,22 @@ Backs openspec/changes/scanner-skeleton/specs/folder-scanner/spec.md
   Requirement: Symlink handling without following
   Requirement: Sandbox boundary enforcement
 
-service.scan() 是 walk → classify → encode → language → summary 的 orchestrator。
-它吃 `(workspace_root: str, ctx: ToolContext)`，吐出完整 `ScanResult`，包括
-skeleton 階段 MUST 保留的 stub defaults（`git=None`、`is_monorepo=False`、
-`monorepo_type=None`、`sub_packages=[]`、每個 `FileEntry.sanitize_stats={}`）。
+and openspec/changes/scanner-sanitizer-orchestration/specs/folder-scanner/spec.md
+  Requirement: Pass 1 sanitizer orchestration for text FileEntries
+  Requirement: Sanitize audit logging during scan
+  Requirement: File classification by extension and content sniffing
+    (sanitize_stats semantics after Pass 1 wiring)
+
+service.scan() 是 walk → classify → encode → language → sanitize Pass 1 →
+summary 的 orchestrator。它吃 `(workspace_root: str, ctx: ToolContext,
+sanitize_audit=..., rules_version=..., session_id=...)`，吐出完整
+`ScanResult`，包括 skeleton 階段 MUST 保留的 stub defaults（`git=None`、
+`is_monorepo=False`、`monorepo_type=None`、`sub_packages=[]`）；
+`FileEntry.sanitize_stats` 則在 Pass 1 串通後改為「真實 kind→count」。
 """
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +34,12 @@ from pathlib import Path
 import pytest
 
 from codebus_agent.sandbox import ToolContext
+from codebus_agent.sanitizer import (
+    FileSource,
+    SanitizedResult,
+    SanitizerAuditLogger,
+    SanitizerEngine,
+)
 from codebus_agent.scanner.models import FileEntry, ScanResult, Symlink
 from codebus_agent.scanner.service import scan
 
@@ -33,8 +49,31 @@ from codebus_agent.scanner.service import scan
 # ---------------------------------------------------------------------------
 
 
-def _ctx(root: Path) -> ToolContext:
-    return ToolContext(workspace_root=root, workspace_type="folder")
+def _ctx(root: Path, sanitizer: SanitizerEngine | None = None) -> ToolContext:
+    # scanner-sanitizer-orchestration requires ctx.sanitizer to be wired;
+    # most skeleton tests don't care about Pass 1 output so we default to
+    # a fresh built-in engine. Tests that need to inject a mock engine
+    # pass `sanitizer=` explicitly.
+    return ToolContext(
+        workspace_root=root,
+        workspace_type="folder",
+        sanitizer=sanitizer if sanitizer is not None else SanitizerEngine(),
+    )
+
+
+def _make_audit_logger(tmp_path: Path) -> tuple[SanitizerAuditLogger, Path]:
+    audit_path = tmp_path / "sanitize_audit.jsonl"
+    return SanitizerAuditLogger(audit_path), audit_path
+
+
+def _read_audit_lines(audit_path: Path) -> list[dict]:
+    if not audit_path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in audit_path.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
 
 
 def _file_by_path(result: ScanResult, path: str) -> FileEntry:
@@ -400,3 +439,170 @@ def test_scan_stats_skipped_count_reflects_warnings(
     # 至少一條 warning 且 stats.skipped_count 應 >=1
     assert len(result.warnings) >= 1
     assert result.stats.skipped_count >= 1
+
+
+# ---------------------------------------------------------------------------
+# 7. Pass 1 Sanitizer orchestration
+#    （scanner-sanitizer-orchestration Task 2.1 ~ 2.4）
+# ---------------------------------------------------------------------------
+
+
+def test_scan_text_file_without_sanitizer_hits_keeps_content_and_empty_stats(
+    tmp_path: Path,
+) -> None:
+    """Task 2.1：text 檔無 sanitizer 命中 → content 等於原 decode 字串、
+    sanitize_stats == {}、sanitize_audit.jsonl 無新行。
+
+    對應 spec Requirement: Pass 1 sanitizer orchestration for text FileEntries
+    Scenario: Plain text file with no sanitizer matches
+    """
+    payload = "hello world\nno secrets here\n"
+    (tmp_path / "notes.md").write_bytes(payload.encode("utf-8"))
+
+    logger, audit_path = _make_audit_logger(tmp_path)
+
+    result = scan(
+        str(tmp_path),
+        _ctx(tmp_path),
+        sanitize_audit=logger,
+        rules_version="2026-04-20-1",
+        session_id="test-session-1",
+    )
+
+    entry = _file_by_path(result, "notes.md")
+    assert entry.kind == "text"
+    assert entry.content == payload
+    assert entry.sanitize_stats == {}
+    # audit log 不得多行
+    assert _read_audit_lines(audit_path) == []
+
+
+def test_scan_text_file_with_email_gets_sanitized_and_audited(tmp_path: Path) -> None:
+    """Task 2.2：text 檔含 email → content 改用 `<REDACTED:email#N>` placeholder、
+    sanitize_stats == {"email": 1}、sanitize_audit.jsonl 多 1 行，
+    source.pass == "scanner"、source.path 為相對路徑（posix slash）。
+
+    對應 spec Requirement: Pass 1 sanitizer orchestration for text FileEntries
+    Scenario: Text file containing an email is scrubbed in content and counted in stats
+    + Requirement: Sanitize audit logging during scan
+    Scenario: Sanitize audit line written for each hit
+    """
+    payload = "contact: alice@example.com\n"
+    (tmp_path / "contact.txt").write_bytes(payload.encode("utf-8"))
+
+    logger, audit_path = _make_audit_logger(tmp_path)
+
+    result = scan(
+        str(tmp_path),
+        _ctx(tmp_path),
+        sanitize_audit=logger,
+        rules_version="2026-04-20-1",
+        session_id="test-session-2",
+    )
+
+    entry = _file_by_path(result, "contact.txt")
+    assert entry.kind == "text"
+    assert "<REDACTED:email#1>" in entry.content
+    assert "alice@example.com" not in entry.content
+    assert entry.sanitize_stats == {"email": 1}
+
+    # audit log: 1 行 + source 為結構化 dict
+    lines = _read_audit_lines(audit_path)
+    assert len(lines) == 1
+    line = lines[0]
+    assert isinstance(line["source"], dict), (
+        f"expected source to be a structured dict, got {type(line['source']).__name__}: "
+        f"{line['source']!r}"
+    )
+    assert line["source"]["pass"] == "scanner"
+    assert line["source"]["path"] == "contact.txt"
+    assert line["kind"] == "email"
+    assert line["placeholder_index"] == 1
+
+
+def test_scan_non_text_kinds_bypass_sanitizer(tmp_path: Path) -> None:
+    """Task 2.3：binary / lockfile / generated → 不觸發 sanitize。
+
+    用 mock engine 紀錄呼叫；fixture 放 4 個 non-text 類型（binary、lockfile、
+    generated）+ 1 個 text，預期 mock 只對 text 被呼叫 1 次。
+
+    對應 spec Requirement: File classification by extension and content sniffing
+    Scenario: Non-text kinds bypass sanitizer
+    """
+    # binary
+    (tmp_path / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    # lockfile
+    (tmp_path / "uv.lock").write_bytes(b"# lock file\nname = 'x'\n")
+    # generated
+    (tmp_path / "app.min.js").write_bytes(b"var a=1;var b=2;")
+    # text — 應觸發 1 次 sanitize
+    (tmp_path / "main.py").write_bytes(b"x = 1\n")
+
+    calls: list[tuple[str, str]] = []
+
+    class RecordingEngine(SanitizerEngine):
+        def sanitize(self, text: str, source):  # type: ignore[override]
+            if isinstance(source, FileSource):
+                calls.append((source.pass_, source.path))
+            return super().sanitize(text, source)
+
+    logger, audit_path = _make_audit_logger(tmp_path)
+
+    result = scan(
+        str(tmp_path),
+        _ctx(tmp_path, sanitizer=RecordingEngine()),
+        sanitize_audit=logger,
+        rules_version="2026-04-20-1",
+        session_id="test-session-3",
+    )
+
+    # mock 只對 text 被呼叫 1 次
+    assert len(calls) == 1, (
+        f"expected exactly one sanitize() call (for main.py), got {calls!r}"
+    )
+    assert calls[0] == ("scanner", "main.py")
+
+    # 其他 kind 的 sanitize_stats 仍是 {}
+    for path in ("logo.png", "uv.lock", "app.min.js"):
+        entry = _file_by_path(result, path)
+        assert entry.sanitize_stats == {}
+
+    # sanitize_audit.jsonl 應該零新行（main.py 本身內容也不命中）
+    assert _read_audit_lines(audit_path) == []
+
+
+def test_scan_sanitize_raises_quarantines_file(tmp_path: Path) -> None:
+    """Task 2.4：某檔 sanitize 拋例外 → 該檔不進 ScanResult.files、
+    warnings 含相對路徑、stats.quarantined_count ≥ 1。
+
+    對應 spec Requirement: Sanitize audit logging during scan
+    Scenario: Sanitizer engine failure quarantines the file without failing the scan
+    """
+    (tmp_path / "ok.py").write_bytes(b"x = 1\n")
+    (tmp_path / "broken.txt").write_bytes(b"this file will explode\n")
+
+    class ExplodingEngine(SanitizerEngine):
+        def sanitize(self, text: str, source):  # type: ignore[override]
+            if isinstance(source, FileSource) and source.path.endswith("broken.txt"):
+                raise RuntimeError("synthetic engine crash")
+            return super().sanitize(text, source)
+
+    logger, _ = _make_audit_logger(tmp_path)
+
+    result = scan(
+        str(tmp_path),
+        _ctx(tmp_path, sanitizer=ExplodingEngine()),
+        sanitize_audit=logger,
+        rules_version="2026-04-20-1",
+        session_id="test-session-4",
+    )
+
+    paths = {e.path for e in result.files}
+    assert "ok.py" in paths
+    assert "broken.txt" not in paths, (
+        f"broken.txt must be quarantined from files, got {paths!r}"
+    )
+    assert any("broken.txt" in w for w in result.warnings), (
+        f"expected a warning mentioning broken.txt, got {result.warnings!r}"
+    )
+    assert result.stats.quarantined_count >= 1

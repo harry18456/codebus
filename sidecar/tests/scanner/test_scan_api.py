@@ -1,10 +1,14 @@
-"""TDD red tests for `POST /scan` — Task 7.1.
+"""TDD red tests for `POST /scan` — Task 7.1 + scanner-sanitizer-orchestration Task 4.2.
 
 Backs openspec/changes/scanner-skeleton/specs/folder-scanner/spec.md
   Requirement: Workspace scan endpoint
   Requirement: Workspace type discriminator routing
   Requirement: Synchronous response without SSE progress events
 and the `sidecar-runtime` delta Requirement: Workspace scan endpoint registration.
+
+Also backs openspec/changes/scanner-sanitizer-orchestration/specs/folder-scanner/spec.md
+  Requirement: Pass 1 sanitizer orchestration for text FileEntries
+  Requirement: Sanitize audit logging during scan
 
 測試負責鎖住以下契約：
   * 200 folder：正常工作區同步回 JSON ScanResult
@@ -13,16 +17,23 @@ and the `sidecar-runtime` delta Requirement: Workspace scan endpoint registratio
   * 401 missing bearer：無 Authorization 標頭直接 401，不執行 traversal
   * 400 SCANNER_WORKSPACE_INVALID：workspace_root 路徑不存在
   * Content-Type: application/json 單 body（不得 text/event-stream）
+  * Pass 1 sanitizer 整合：with-secrets fixture 會讓 FileEntry.content 帶
+    `<REDACTED:...>` placeholder、sanitize_stats 非空、sanitize_audit.jsonl
+    實際落盤且 source.pass == "scanner"。
 """
 from __future__ import annotations
 
+import json
 import secrets
+import shutil
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from codebus_agent.api import create_app
+
+_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "with-secrets"
 
 
 # ---------------------------------------------------------------------------
@@ -257,3 +268,87 @@ def test_scan_workspace_root_that_is_a_file_returns_400(
         or (not isinstance(detail, dict) and "SCANNER_WORKSPACE_INVALID" in str(detail))
     )
     assert code_found
+
+
+# ---------------------------------------------------------------------------
+# 6. Pass 1 sanitizer integration（scanner-sanitizer-orchestration Task 4.2）
+# ---------------------------------------------------------------------------
+
+
+def test_scan_with_secrets_fixture_sanitizes_content_and_writes_audit(
+    client: TestClient, bearer: str, tmp_path: Path
+) -> None:
+    """with-secrets fixture → FileEntry.content 含 `<REDACTED:...>` placeholder,
+    sanitize_stats 至少一個非零 kind, sanitize_audit.jsonl 實際落盤且含
+    source.pass == "scanner"。
+
+    對應 spec Scenario: Text file containing an email is scrubbed in content
+    and counted in stats + Scenario: Sanitize audit line written for each hit.
+    """
+    # Copy fixture into a tmp workspace so the endpoint's audit writes land in
+    # an isolated location (not under the repo source tree).
+    ws = tmp_path / "with-secrets"
+    shutil.copytree(_FIXTURE_ROOT, ws)
+
+    resp = client.post(
+        "/scan",
+        headers=_auth(bearer),
+        json={"workspace_type": "folder", "workspace_root": str(ws)},
+    )
+    assert resp.status_code == 200
+
+    body = resp.json()
+    files_by_path = {e["path"]: e for e in body["files"]}
+
+    # contacts.txt → two emails redacted; raw emails gone from content.
+    contacts = files_by_path.get("contacts.txt")
+    assert contacts is not None, f"contacts.txt missing from scan result: {list(files_by_path)!r}"
+    assert contacts["kind"] == "text"
+    assert "<REDACTED:email#1>" in contacts["content"]
+    assert "alice@example.com" not in contacts["content"]
+    assert "bob@example.com" not in contacts["content"]
+    assert contacts["sanitize_stats"].get("email", 0) >= 1
+
+    # config.py → detect-secrets rule path (AWS dummy creds).
+    config_py = files_by_path.get("config.py")
+    assert config_py is not None
+    assert config_py["kind"] == "text"
+    assert "AKIAIOSFODNN7EXAMPLE" not in config_py["content"]
+    assert "<REDACTED:" in config_py["content"]
+    assert config_py["sanitize_stats"].get("secret", 0) >= 1
+
+    # README.md → clean; sanitize_stats stays {}.
+    readme = files_by_path.get("README.md")
+    assert readme is not None
+    assert readme["sanitize_stats"] == {}
+
+    # quarantined_count is 0 (no engine crash expected on this fixture).
+    assert body["stats"]["quarantined_count"] == 0
+
+    # sanitize_audit.jsonl landed under <ws>/.codebus/ and includes scanner-
+    # scoped lines whose source is the structured {"pass": ..., "path": ...}.
+    audit_path = ws / ".codebus" / "sanitize_audit.jsonl"
+    assert audit_path.exists(), f"expected {audit_path} to be written by /scan"
+
+    lines = [
+        json.loads(line)
+        for line in audit_path.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    assert len(lines) >= 3, (
+        f"expected at least 3 audit lines (2 emails + >=1 secret), got {len(lines)}: {lines!r}"
+    )
+    scanner_lines = [
+        ln for ln in lines
+        if isinstance(ln.get("source"), dict) and ln["source"].get("pass") == "scanner"
+    ]
+    assert len(scanner_lines) == len(lines), (
+        "all Pass 1 audit lines MUST carry source.pass == 'scanner'; "
+        f"got {lines!r}"
+    )
+    # Every scanner line's source.path MUST be one of the fixture's relative
+    # paths (posix slash form regardless of host OS).
+    audited_paths = {ln["source"]["path"] for ln in scanner_lines}
+    assert audited_paths <= {"contacts.txt", "config.py"}, (
+        f"unexpected paths in audit log: {audited_paths!r}"
+    )

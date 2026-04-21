@@ -1,0 +1,3 @@
+Internal on-call rota — please do NOT commit real addresses.
+Primary: alice@example.com
+Backup: bob@example.com

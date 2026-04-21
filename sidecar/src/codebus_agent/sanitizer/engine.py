@@ -36,7 +36,19 @@ class SanitizerError(RuntimeError):
 
 @dataclass(frozen=True)
 class FileSource:
+    """Pass 1 (scanner) / Pass 3 (Q&A add_to_kb) source tag.
+
+    ``pass_`` is an optional lifecycle label.  When empty (the sanitizer-
+    safety-chain default) the audit log emits ``source`` as the legacy
+    ``"file:<path>"`` string, preserving the archived schema.  When set
+    (scanner passes ``"scanner"`` per
+    ``openspec/changes/scanner-sanitizer-orchestration``) the audit log
+    emits ``source`` as a structured ``{"pass": ..., "path": ...}``
+    object so downstream tooling can key on the pass label directly.
+    """
+
     path: str
+    pass_: str = ""
 
 
 @dataclass(frozen=True)
@@ -49,10 +61,18 @@ SanitizeSource = FileSource | MessageSource
 
 @dataclass(frozen=True)
 class AuditEntry:
+    """Single Pass-N hit record.
+
+    ``source`` carries either the legacy string form (``"file:<path>"``
+    / ``"message:<id>"``) or the structured dict form introduced by
+    scanner-sanitizer-orchestration (``{"pass": "scanner", "path": ...}``).
+    JSON serialization handles both transparently.
+    """
+
     rule_id: str
     kind: str
     placeholder_index: int
-    source: str
+    source: "str | dict[str, Any]"
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -82,13 +102,14 @@ class SanitizerEngine:
         self._config = config
 
     def sanitize(self, text: str, source: SanitizeSource) -> SanitizedResult:
-        source_str = _format_source(source)
+        formatted_source = _format_source(source)
+        source_label = _format_source_label(source)
 
         try:
             matches = self._gather_matches(text)
         except BaseException as exc:
             raise SanitizerError(
-                f"sanitize failed on {source_str}"
+                f"sanitize failed on {source_label}"
             ) from exc
 
         matches = _resolve_overlaps(matches)
@@ -134,7 +155,7 @@ class SanitizerEngine:
                         rule_id=m.rule_id,
                         kind=m.kind,
                         placeholder_index=index,
-                        source=source_str,
+                        source=formatted_source,
                         extra=extra,
                     )
                 )
@@ -183,7 +204,33 @@ class SanitizerEngine:
         return compiled
 
 
-def _format_source(source: SanitizeSource) -> str:
+def _format_source(source: SanitizeSource) -> str | dict[str, Any]:
+    """Serialize ``source`` for the audit entry payload.
+
+    FileSource with a non-empty ``pass_`` yields a structured
+    ``{"pass": ..., "path": ...}`` dict — this is the format scanner
+    Pass 1 writes so the Trust-Layer inspector can filter on
+    ``source.pass``.  All other callers fall back to the legacy
+    ``"file:<path>"`` / ``"message:<id>"`` string so the archived
+    sanitizer-safety-chain audit schema stays intact.
+    """
+    if isinstance(source, FileSource):
+        if source.pass_:
+            return {"pass": source.pass_, "path": source.path}
+        return f"file:{source.path}"
+    if isinstance(source, MessageSource):
+        return f"message:{source.message_id}"
+    raise TypeError(f"unknown SanitizeSource type: {type(source).__name__}")
+
+
+def _format_source_label(source: SanitizeSource) -> str:
+    """Human-readable source label for ``SanitizerError`` messages.
+
+    The SanitizerEngine promises fail-closed errors identify the source
+    — scanner-safety-chain's red tests assert ``"file:src/app.py"``
+    appears in the error text regardless of whether the audit payload
+    is a string or a dict.
+    """
     if isinstance(source, FileSource):
         return f"file:{source.path}"
     if isinstance(source, MessageSource):

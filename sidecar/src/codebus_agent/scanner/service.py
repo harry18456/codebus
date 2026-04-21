@@ -1,4 +1,4 @@
-"""Scanner orchestrator：walk → classify → encode → language → summary。
+"""Scanner orchestrator：walk → classify → encode → language → sanitize Pass 1 → summary。
 
 Backs openspec/changes/scanner-skeleton/specs/folder-scanner/spec.md
   Requirement: Workspace scan endpoint
@@ -7,14 +7,18 @@ Backs openspec/changes/scanner-skeleton/specs/folder-scanner/spec.md
   Requirement: File classification by extension and content sniffing
   Requirement: Encoding detection fallback chain
   Requirement: Language identification
-Implements tasks.md Task 6.2 (TDD green for `tests/scanner/test_service.py`).
+and openspec/changes/scanner-sanitizer-orchestration/specs/folder-scanner/spec.md
+  Requirement: Pass 1 sanitizer orchestration for text FileEntries
+  Requirement: Sanitize audit logging during scan
+  Requirement: File classification by extension and content sniffing
+    (sanitize_stats semantics after Pass 1 wiring)
 
 設計守則：
 
-1. **stub defaults 一次到位**（D-002 / spec "Deferred subsystem schema preservation"）。
-   skeleton 階段 `git=None`、`is_monorepo=False`、`monorepo_type=None`、
-   `sub_packages=[]`、每個 `FileEntry.sanitize_stats={}` —— 不提供 override
-   路徑，避免將來 sanitizer / git / monorepo 延後 change 落地前被誤觸發。
+1. **stub defaults 仍一次到位**（D-002 / spec "Deferred subsystem schema preservation"）。
+   `git=None`、`is_monorepo=False`、`monorepo_type=None`、`sub_packages=[]` 的
+   stub 契約不動；`FileEntry.sanitize_stats` 在 Pass 1 串通後改為「真實 kind→count，
+   無命中時 `{}`」——schema 欄位未動，只是從恆 `{}` 升級成實際聚合結果。
 2. **walk 已決定 kind**：walk.py 在 yield FileEntry 時已 call classify；service
    僅負責對 kind=="text"/"oversized" 的條目跑 encoding + language，並在 encoding
    fallback 全失敗時把 kind 重新歸為 binary（spec 第 92 行規則 4）。
@@ -23,10 +27,13 @@ Implements tasks.md Task 6.2 (TDD green for `tests/scanner/test_service.py`).
 4. **oversized 不讀全檔**：僅讀前 8 KB head 供 encoding 判定；`oversized_preview`
    在 skeleton 先留 None，後續 change 可補「前 200 行」實作而不破 schema。
 5. **summary & stats** 都走 pure function（`build_summary`），service 只負責把
-   walk 出的 list 丟進去 + 累計 bytes / duration。
+   walk 出的 list 丟進去 + 累計 bytes / duration / quarantined。
 6. **SSE 絕不開啟**：service 以同步方式回傳單一 ScanResult；API 層要給的是
    `Content-Type: application/json`，見 spec "Synchronous response without SSE
    progress events"。
+7. **Pass 1 sanitizer fail-closed**：若 `ctx.sanitizer.sanitize(...)` 拋例外，
+   該檔 **不** 進 `ScanResult.files`、`warnings` 追加相對路徑、
+   `stats.quarantined_count += 1`；HTTP 層仍 200（D-015 fail-closed 條款）。
 """
 from __future__ import annotations
 
@@ -34,6 +41,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from codebus_agent.sandbox import ToolContext
+from codebus_agent.sanitizer import FileSource, SanitizerAuditLogger
 from codebus_agent.scanner.encoding import detect_encoding
 from codebus_agent.scanner.language import identify
 from codebus_agent.scanner.models import (
@@ -53,7 +61,14 @@ _HEAD_BYTES_SIZE = 8 * 1024
 _NO_CONTENT_KINDS: frozenset[str] = frozenset({"binary", "lockfile", "generated"})
 
 
-def scan(workspace_root: str, ctx: ToolContext) -> ScanResult:
+def scan(
+    workspace_root: str,
+    ctx: ToolContext,
+    *,
+    sanitize_audit: SanitizerAuditLogger | None = None,
+    rules_version: str = "2026-04-20-1",
+    session_id: str = "",
+) -> ScanResult:
     """同步掃描 ``ctx.workspace_root``，回傳完整 ``ScanResult``。
 
     Args
@@ -64,13 +79,24 @@ def scan(workspace_root: str, ctx: ToolContext) -> ScanResult:
         寫進 ``ScanResult.workspace_root`` 時對齊（會改寫為 resolved 形式）。
     ctx:
         ``ToolContext``（frozen）；``workspace_type`` 在此 skeleton 一律為 ``folder``，
-        ``topic`` 由 API 層回 501，不會走到這裡。
+        ``topic`` 由 API 層回 501，不會走到這裡。``ctx.sanitizer`` 會被用在 Pass 1；
+        scanner 對 ``kind == "text"`` 的 FileEntry 呼叫一次 ``sanitize(...)``。
+    sanitize_audit:
+        可選。若提供，scanner 對每個 Pass 1 sanitize 命中追加一行 JSONL
+        （由 ``SanitizerAuditLogger`` 序列化寫入）。``None`` 時不寫 audit，但
+        ``FileEntry.content`` / ``sanitize_stats`` 仍會被 Pass 1 更新。
+    rules_version:
+        寫進 sanitize_audit line 的 rules version 標記。
+    session_id:
+        寫進 sanitize_audit line 的 session id。
 
     Returns
     -------
     ScanResult
         完整填好的結果；含 ``content_summary`` / ``stats`` / ``warnings``，
-        以及 deferred subsystem 的 stub defaults。
+        以及 deferred subsystem 的 stub defaults。``files[*].content`` 為 Pass 1
+        sanitized 版本（placeholder 形式 ``<REDACTED:kind#index>``）；
+        ``files[*].sanitize_stats`` 為聚合後 kind→count dict，無命中時 ``{}``。
     """
     # 兩個時間戳都用 UTC；ISO-8601 由 Pydantic serializer 負責。
     scan_started_at = datetime.now(timezone.utc)
@@ -82,6 +108,7 @@ def scan(workspace_root: str, ctx: ToolContext) -> ScanResult:
     warnings: list[str] = []
     total_files_walked = 0
     total_bytes_read = 0
+    quarantined_count = 0
 
     for entry in walk(resolved_root, ctx, warnings=warnings):
         if isinstance(entry, Symlink):
@@ -96,14 +123,38 @@ def scan(workspace_root: str, ctx: ToolContext) -> ScanResult:
         if enriched is None:
             # 讀檔失敗 → walk 階段已 warn；這裡視為 skipped，不進 files。
             continue
-        files.append(enriched.entry)
+
+        # Pass 1 sanitizer orchestration —— 只對 kind=="text" 且已有 decoded
+        # content 的檔跑；其餘 kind（binary / lockfile / generated / oversized）
+        # 繞過並保持 sanitize_stats == {}（spec "File classification"）。
+        # Fail-closed：engine 拋例外 → 該檔不進 files + warning + quarantine++
+        # （D-015 / spec "Sanitize audit logging during scan"）。
+        file_entry = enriched.entry
+        if file_entry.kind == "text" and file_entry.content is not None:
+            try:
+                file_entry = _apply_pass1_sanitize(
+                    file_entry,
+                    ctx=ctx,
+                    sanitize_audit=sanitize_audit,
+                    rules_version=rules_version,
+                    session_id=session_id,
+                )
+            except Exception as exc:
+                warnings.append(
+                    f"sanitize failed for {file_entry.path}: {exc}"
+                )
+                quarantined_count += 1
+                continue
+
+        files.append(file_entry)
         total_bytes_read += enriched.bytes_read
 
     content_summary = build_summary(files)
     scan_completed_at = datetime.now(timezone.utc)
     duration_seconds = (scan_completed_at - scan_started_at).total_seconds()
 
-    # skipped_count = walk 丟出的 warning 總數（sandbox 違規 / stat fail / read fail）
+    # skipped_count = walk 丟出的 warning 總數（sandbox 違規 / stat fail / read fail
+    # + Pass 1 sanitize 失敗的 quarantine warning）。
     skipped_count = len(warnings)
 
     stats = ScanStats(
@@ -111,8 +162,7 @@ def scan(workspace_root: str, ctx: ToolContext) -> ScanResult:
         total_files_included=len(files),
         total_bytes_read=total_bytes_read,
         duration_seconds=duration_seconds,
-        # quarantined_count 是 sanitizer Pass 1 的欄位，skeleton 未接，恆 0
-        quarantined_count=0,
+        quarantined_count=quarantined_count,
         skipped_count=skipped_count,
     )
 
@@ -251,6 +301,56 @@ def _enrich_file_entry(
             }
         ),
         bytes_read=total_bytes,
+    )
+
+
+def _apply_pass1_sanitize(
+    file_entry: FileEntry,
+    *,
+    ctx: ToolContext,
+    sanitize_audit: SanitizerAuditLogger | None,
+    rules_version: str,
+    session_id: str,
+) -> FileEntry:
+    """對單一 text FileEntry 跑 Pass 1 sanitize，回傳 content / sanitize_stats
+    更新後的新實例。
+
+    Pass 1 責任（D-015 / spec "Pass 1 sanitizer orchestration for text FileEntries"）：
+      * ``content`` 改存 ``SanitizedResult.text`` —— placeholder 形式，原值不保留
+      * ``sanitize_stats`` 依 kind 聚合 ``SanitizedResult.entries``；無命中時 ``{}``
+      * ``FileSource(pass_="scanner", path=...)`` 讓 audit line 的 ``source`` 以
+        ``{"pass": "scanner", "path": ...}`` 結構化形式落盤（下游 Trust-Layer
+        inspector 靠 ``source.pass`` filter）
+      * audit line 逐檔 flush（``SanitizerAuditLogger.append`` 內部以 lock 包住
+        ``open(...).write(...).close()``，不跨檔 batch）
+
+    Engine 拋例外不在此處理 —— 直接讓 caller 的 ``except Exception`` 接到，
+    由 scan() 統一落 warning + quarantined_count +=1。
+    """
+    assert ctx.sanitizer is not None, (
+        "ctx.sanitizer must be injected for Pass 1 orchestration; "
+        "see scanner-sanitizer-orchestration change"
+    )
+    sanitized = ctx.sanitizer.sanitize(
+        file_entry.content or "",
+        FileSource(pass_="scanner", path=file_entry.path),
+    )
+
+    stats_map: dict[str, int] = {}
+    for audit_entry in sanitized.entries:
+        stats_map[audit_entry.kind] = stats_map.get(audit_entry.kind, 0) + 1
+
+    if sanitize_audit is not None:
+        for audit_entry in sanitized.entries:
+            sanitize_audit.append(
+                entry=audit_entry,
+                pass_num=1,
+                rules_version=rules_version,
+                session_id=session_id,
+            )
+
+    return file_entry.model_copy(
+        update={"content": sanitized.text, "sanitize_stats": stats_map}
     )
 
 

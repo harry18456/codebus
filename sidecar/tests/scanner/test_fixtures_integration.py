@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from codebus_agent.sandbox import ToolContext
+from codebus_agent.sanitizer import SanitizerEngine
 from codebus_agent.scanner.models import ScanResult
 from codebus_agent.scanner.service import scan
 
@@ -34,7 +35,14 @@ def _copy_fixture(src: Path, dst: Path) -> Path:
 
 
 def _ctx(root: Path) -> ToolContext:
-    return ToolContext(workspace_root=root, workspace_type="folder")
+    # scanner-sanitizer-orchestration: ctx.sanitizer is required for text
+    # FileEntries (Pass 1 orchestration); inject a fresh built-in engine so
+    # these integration fixtures exercise the full pipeline.
+    return ToolContext(
+        workspace_root=root,
+        workspace_type="folder",
+        sanitizer=SanitizerEngine(),
+    )
 
 
 def _run_scan(root: Path) -> ScanResult:

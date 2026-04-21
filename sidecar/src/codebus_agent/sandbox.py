@@ -7,12 +7,17 @@ and openspec/changes/sanitizer-safety-chain/specs/tool-sandbox/spec.md
   Requirement: ToolSandbox appends every invocation to tool_audit.jsonl
   Requirement: Tools declare their auditable field whitelist
   Requirement: Schema version on every tool audit line
+and openspec/changes/scanner-sanitizer-orchestration/specs/folder-scanner/spec.md
+  Requirement: Pass 1 sanitizer orchestration for text FileEntries
+    (ToolContext.sanitizer carries the shared SanitizerEngine)
 
 The M1 ToolContext is the stripped-down skeleton — just the fields we
 actually use here plus the discriminator (D-002 day-1 invariant).
-Future fields (kb, sanitizer, audit_log, usage_tracker, ...) will be
-added in subsequent milestones; adding them later is schema-compatible
-because every future field is either required-with-default or optional.
+``sanitizer`` landed with scanner-sanitizer-orchestration so scanner
+Pass 1 can reuse a single engine instance across a scan.  Future fields
+(kb, audit_log, usage_tracker, ...) will be added in subsequent
+milestones; adding them later is schema-compatible because every future
+field is either required-with-default or optional.
 """
 from __future__ import annotations
 
@@ -28,6 +33,8 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from codebus_agent.sanitizer import SanitizerEngine
+
 
 class PathEscapeError(ValueError):
     """Raised when a requested path resolves outside the workspace root."""
@@ -39,6 +46,11 @@ class ToolContext(BaseModel):
     ``frozen=True`` guarantees tools cannot silently relocate the
     workspace mid-run by mutating the context.  Per D-002 the
     ``workspace_type`` discriminator MUST be present day 1.
+
+    ``sanitizer`` is optional at the schema level so existing sandbox /
+    red-team fixtures keep constructing ``ToolContext`` without it; any
+    real code path that touches file content (scanner Pass 1, future
+    KB / Q&A Pass 3 wiring) MUST inject an engine explicitly.
     """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
@@ -47,6 +59,7 @@ class ToolContext(BaseModel):
     workspace_type: Literal["folder", "topic"]
     workspace_id: str = ""
     session_id: str = ""
+    sanitizer: SanitizerEngine | None = None
 
     @field_validator("workspace_root", mode="after")
     @classmethod

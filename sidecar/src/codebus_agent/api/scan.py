@@ -16,6 +16,7 @@ Backs openspec/changes/scanner-skeleton/specs/folder-scanner/spec.md
 """
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Literal
 
@@ -23,8 +24,23 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from codebus_agent.sandbox import ToolContext
+from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
 from codebus_agent.scanner.models import ScanResult
 from codebus_agent.scanner.service import scan
+
+# Workspace-level sanitize_audit.jsonl — lives alongside other workspace audit
+# artefacts under `<workspace_root>/.codebus/`.  Per D-025 this is a provisional
+# location for M1; a future change will relocate workspace audit to
+# `~/.codebus/workspaces/{id}/` once workspace_id plumbing lands.  Schema and
+# JSONL contents do not depend on the enclosing directory.
+_WORKSPACE_AUDIT_SUBDIR = ".codebus"
+_SANITIZE_AUDIT_FILENAME = "sanitize_audit.jsonl"
+
+# Rules version recorded on every sanitize_audit line; kept in sync with the
+# built-in rule table bundled in `codebus_agent.sanitizer.rules`.  Bumping this
+# string is mandatory whenever that rule table changes (see `docs/sanitizer.md
+# §六` / `docs/authorization.md §六`).
+_RULES_VERSION = "2026-04-20-1"
 
 
 router = APIRouter()
@@ -75,12 +91,31 @@ def scan_endpoint(request: ScanRequest) -> ScanResult:
             },
         )
 
+    # scanner-sanitizer-orchestration: a fresh engine per request is safe —
+    # SanitizerEngine keeps no cross-call state (placeholder indices reset
+    # per `sanitize` call, per `docs/decisions.md` D-015).  Future M2+
+    # wiring may relocate construction to app.state if rule config turns
+    # out to be expensive to load; schema doesn't change either way.
     ctx = ToolContext(
         workspace_root=workspace_root,
         workspace_type="folder",
+        sanitizer=SanitizerEngine(),
     )
 
-    return scan(request.workspace_root, ctx)
+    # SanitizerAuditLogger creates the `.codebus/` subdir on first write;
+    # a fresh uuid4 tags this scan's audit lines so forensic readers can
+    # trace a full /scan invocation across the seven-layer audit tree.
+    audit_path = workspace_root / _WORKSPACE_AUDIT_SUBDIR / _SANITIZE_AUDIT_FILENAME
+    audit_logger = SanitizerAuditLogger(audit_path)
+    session_id = str(uuid.uuid4())
+
+    return scan(
+        request.workspace_root,
+        ctx,
+        sanitize_audit=audit_logger,
+        rules_version=_RULES_VERSION,
+        session_id=session_id,
+    )
 
 
 __all__ = ["router", "ScanRequest", "scan_endpoint"]
