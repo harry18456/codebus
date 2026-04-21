@@ -26,6 +26,7 @@ from codebus_agent.providers.mock import MockProvider
 from codebus_agent.providers.protocol import Message, ProviderRole
 from codebus_agent.providers.tracked import TrackedProvider
 from codebus_agent.providers.usage_tracker import UsageTracker
+from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
 
 
 class _Plan(BaseModel):
@@ -65,6 +66,9 @@ async def test_first_workspace_write_has_every_required_field(
         tracker=tracker,
         logger=logger,
         role=ProviderRole.CHAT,
+        sanitizer=SanitizerEngine(),
+        sanitizer_audit=SanitizerAuditLogger(workspace / "sanitize_audit.jsonl"),
+        rules_version="test-v1",
     )
 
     await wrapped.chat(
@@ -117,10 +121,11 @@ async def test_first_workspace_write_has_every_required_field(
     # Request/response captured scenario.
     assert success_chat["request"] is not None
     assert success_chat["response"] is not None
-    # Sanitizer-ready field scenario — M1 invariant is false.
+    # Sanitizer-ready field scenario — post sanitizer-safety-chain, every
+    # TrackedProvider call applies Pass 2 and flips the flag to true.
     for row in call_lines:
-        assert row.get("sanitizer_pass2_applied") is False, (
-            f"sanitizer_pass2_applied MUST be false during M1, got {row!r}"
+        assert row.get("sanitizer_pass2_applied") is True, (
+            f"sanitizer_pass2_applied MUST be true after Pass 2 wiring, got {row!r}"
         )
 
     # Failure-logged scenario.

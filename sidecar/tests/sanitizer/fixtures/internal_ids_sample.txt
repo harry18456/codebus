@@ -1,0 +1,9 @@
+db_host: db01.corp
+app_host: app01.local
+cache_host: redis.internal
+nas_host: filer.lan
+rfc1918_10: 10.0.3.42
+rfc1918_172: 172.16.3.42
+rfc1918_192: 192.168.1.1
+rfc4193: fd00:dead:beef::1
+link_local: 169.254.1.1

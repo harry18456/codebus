@@ -21,6 +21,7 @@ from codebus_agent.providers.llm_call_logger import LLMCallLogger
 from codebus_agent.providers.protocol import ProviderRole
 from codebus_agent.providers.tracked import TrackedProvider
 from codebus_agent.providers.usage_tracker import UsageTracker
+from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
 
 
 class _WouldBeOpenAI:
@@ -51,4 +52,7 @@ def test_tracked_rejects_non_mock_inner_provider(tmp_path: Path) -> None:
             tracker=tracker,
             logger=logger,
             role=ProviderRole.CHAT,
+            sanitizer=SanitizerEngine(),
+            sanitizer_audit=SanitizerAuditLogger(tmp_path / "sanitize_audit.jsonl"),
+            rules_version="test-v1",
         )

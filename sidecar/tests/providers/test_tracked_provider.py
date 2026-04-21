@@ -21,6 +21,7 @@ from codebus_agent.providers.mock import MockProvider, MockScript
 from codebus_agent.providers.protocol import LLMProvider, Message, ProviderRole
 from codebus_agent.providers.tracked import TrackedProvider
 from codebus_agent.providers.usage_tracker import UsageTracker
+from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
 
 
 class _Plan(BaseModel):
@@ -41,7 +42,13 @@ def _build_tracked(
     tracker = UsageTracker(tmp_path / "token_usage.jsonl")
     logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
     return TrackedProvider(
-        inner or MockProvider(), tracker=tracker, logger=logger, role=role
+        inner or MockProvider(),
+        tracker=tracker,
+        logger=logger,
+        role=role,
+        sanitizer=SanitizerEngine(),
+        sanitizer_audit=SanitizerAuditLogger(tmp_path / "sanitize_audit.jsonl"),
+        rules_version="test-v1",
     )
 
 
@@ -69,7 +76,7 @@ async def test_chat_through_wrapper_writes_usage_and_call_logs(
     assert len(call_lines) == 1
     assert usage_lines[0]["operation"] == "chat"
     assert usage_lines[0]["cost_usd"] is not None
-    assert call_lines[0]["sanitizer_pass2_applied"] is False
+    assert call_lines[0]["sanitizer_pass2_applied"] is True
     assert call_lines[0]["response"] is not None
 
 
@@ -130,7 +137,13 @@ async def test_script_pinned_response_is_returned_through_wrapper(
     tracker = UsageTracker(tmp_path / "token_usage.jsonl")
     logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
     wrapped = TrackedProvider(
-        inner, tracker=tracker, logger=logger, role=ProviderRole.CHAT
+        inner,
+        tracker=tracker,
+        logger=logger,
+        role=ProviderRole.CHAT,
+        sanitizer=SanitizerEngine(),
+        sanitizer_audit=SanitizerAuditLogger(tmp_path / "sanitize_audit.jsonl"),
+        rules_version="test-v1",
     )
 
     result = await wrapped.chat(

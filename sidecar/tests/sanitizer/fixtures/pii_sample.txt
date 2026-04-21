@@ -1,0 +1,5 @@
+contact: alice@example.com
+phone: 0912-345-678
+phone_compact: 0912345678
+phone_intl: +886-912-345-678
+national_id: A123456789

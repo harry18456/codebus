@@ -25,6 +25,7 @@ from codebus_agent.providers import (
     UsageTracker,
 )
 from codebus_agent.providers.protocol import Message
+from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
 
 
 class _Plan(BaseModel):
@@ -36,7 +37,15 @@ def _wrap(tmp_path: Path, *, role: ProviderRole) -> TrackedProvider:
     tracker = UsageTracker(tmp_path / f"{role.value}_token_usage.jsonl")
     logger = LLMCallLogger(tmp_path / f"{role.value}_llm_calls.jsonl")
     return TrackedProvider(
-        MockProvider(role=role), tracker=tracker, logger=logger, role=role
+        MockProvider(role=role),
+        tracker=tracker,
+        logger=logger,
+        role=role,
+        sanitizer=SanitizerEngine(),
+        sanitizer_audit=SanitizerAuditLogger(
+            tmp_path / f"{role.value}_sanitize_audit.jsonl"
+        ),
+        rules_version="test-v1",
     )
 
 

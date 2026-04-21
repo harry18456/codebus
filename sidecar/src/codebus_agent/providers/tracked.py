@@ -7,33 +7,40 @@ openspec/changes/m1-power-on/specs/usage-tracking/spec.md
     Scenario: Direct provider use forbidden (enforced in registry)
     Scenario: Skipping wrapper emits test failure (enforced in registry)
 
-and openspec/changes/llm-role-routing/specs/llm-provider/spec.md
+openspec/changes/llm-role-routing/specs/llm-provider/spec.md
   Requirement: TrackedProvider records role in audit log
-    Scenario: Audit record contains role field
-    Scenario: Role field is additive to existing audit schema
+
+and openspec/changes/sanitizer-safety-chain/specs/llm-provider/spec.md
+  Requirement: TrackedProvider applies Sanitizer Pass 2 before dispatch
+  Requirement: TrackedProvider writes audit entries to sanitize_audit.jsonl
 
 Every call fans out to both `UsageTracker` (token / cost ledger —
-D-021) and `LLMCallLogger` (full wire payload — D-022).  Exceptions
-from the inner provider are captured as failure lines and re-raised
-so callers see the original error.
+D-021) and `LLMCallLogger` (full wire payload — D-022).  Pre-dispatch,
+`SanitizerEngine.sanitize` rewrites every message / text so the
+wrapped provider and `llm_calls.jsonl` only ever see redacted
+payloads (D-015 Pass 2).  Each replacement also appends to
+`sanitize_audit.jsonl` via the injected `SanitizerAuditLogger`.
 
-Design llm-role-routing §6: `role` is bound at construction so
-callers (`.chat()` / `.embed()`) keep their M1 signatures; the audit
-trail auto-attributes every call to its role without the call site
-needing to remember.
-
-M1 constrains the inner type to `MockProvider`; real provider
-adapters arrive in a later change, together with the Sanitizer
-Pass 2 flag flip referenced in `llm_call_logger.py`.
+Design sanitizer-safety-chain §"Pass 2 hook point":
+the sanitizer is **required** at construction — a missing engine
+raises `ValueError`.  That collapses the registry guard and the
+wrapper into a single choke point: nothing can reach the inner
+provider without Pass 2 applied.
 """
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import asdict, is_dataclass
 from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
+from ..sanitizer import (
+    MessageSource,
+    SanitizerAuditLogger,
+    SanitizerEngine,
+)
 from .llm_call_logger import LLMCallLogger
 from .mock import MockProvider
 from .protocol import EmbedResponse, Message, ProviderRole
@@ -52,6 +59,9 @@ class TrackedProvider:
         tracker: UsageTracker,
         logger: LLMCallLogger,
         role: ProviderRole,
+        sanitizer: SanitizerEngine,
+        sanitizer_audit: SanitizerAuditLogger,
+        rules_version: str,
     ) -> None:
         if type(inner) not in self.ALLOWED_INNER_TYPES:
             raise TypeError(
@@ -64,10 +74,31 @@ class TrackedProvider:
                 f"TrackedProvider role must be a ProviderRole; "
                 f"got {type(role).__name__}"
             )
+        if sanitizer is None or not isinstance(sanitizer, SanitizerEngine):
+            raise ValueError(
+                "TrackedProvider requires a SanitizerEngine injection "
+                "(sanitizer=...). Pass 2 is non-bypassable — see "
+                "openspec/changes/sanitizer-safety-chain/specs/llm-provider/spec.md."
+            )
+        if sanitizer_audit is None or not isinstance(
+            sanitizer_audit, SanitizerAuditLogger
+        ):
+            raise ValueError(
+                "TrackedProvider requires a SanitizerAuditLogger injection "
+                "(sanitizer_audit=...). Audit trail must receive every Pass 2 hit."
+            )
+        if not isinstance(rules_version, str) or not rules_version:
+            raise ValueError(
+                "TrackedProvider requires a non-empty rules_version string "
+                "so every sanitize_audit.jsonl line can reference the rule set in effect."
+            )
         self._inner = inner
         self._tracker = tracker
         self._logger = logger
         self._role = role
+        self._sanitizer = sanitizer
+        self._sanitizer_audit = sanitizer_audit
+        self._rules_version = rules_version
         self.name: str = getattr(inner, "name", "tracked")
 
     @property
@@ -80,12 +111,17 @@ class TrackedProvider:
         *,
         response_model: type[BaseModel],
     ) -> BaseModel:
-        request = _serialize_chat_request(messages, response_model)
+        call_id = f"chat_req_{uuid.uuid4()}"
+        sanitized_messages = self._sanitize_messages(messages, call_id)
+
+        request = _serialize_chat_request(sanitized_messages, response_model)
         model_id = _chat_model_id(self._inner)
-        prompt_tokens = _estimate_tokens(_join_message_text(messages))
+        prompt_tokens = _estimate_tokens(_join_message_text(sanitized_messages))
 
         try:
-            result = await self._inner.chat(messages, response_model=response_model)
+            result = await self._inner.chat(
+                sanitized_messages, response_model=response_model
+            )
         except BaseException as exc:
             self._logger.log_failure(
                 request=request,
@@ -95,6 +131,7 @@ class TrackedProvider:
                 model=model_id,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=0,
+                sanitizer_pass2_applied=True,
             )
             raise
 
@@ -110,6 +147,7 @@ class TrackedProvider:
             model=model_id,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            sanitizer_pass2_applied=True,
         )
         self._tracker.record(
             provider=self.name,
@@ -122,11 +160,14 @@ class TrackedProvider:
         return result
 
     async def embed(self, texts: list[str]) -> EmbedResponse:
-        request = {"texts": list(texts)}
-        prompt_tokens = sum(len(t) for t in texts)
+        call_id = f"embed_req_{uuid.uuid4()}"
+        sanitized_texts = self._sanitize_texts(texts, call_id)
+
+        request = {"texts": list(sanitized_texts)}
+        prompt_tokens = sum(len(t) for t in sanitized_texts)
 
         try:
-            result = await self._inner.embed(texts)
+            result = await self._inner.embed(sanitized_texts)
         except BaseException as exc:
             self._logger.log_failure(
                 request=request,
@@ -136,6 +177,7 @@ class TrackedProvider:
                 model=_EMBED_UNKNOWN_MODEL,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=0,
+                sanitizer_pass2_applied=True,
             )
             raise
 
@@ -151,6 +193,7 @@ class TrackedProvider:
             model=result.usage.model,
             prompt_tokens=int(result.usage.embed_tokens),
             completion_tokens=0,
+            sanitizer_pass2_applied=True,
         )
         cost = result.usage.cost_usd if result.usage.cost_usd is not None else 0.0
         self._tracker.record(
@@ -162,6 +205,48 @@ class TrackedProvider:
             cost_usd=cost,
         )
         return result
+
+    def _sanitize_messages(
+        self, messages: list[Message], call_id: str
+    ) -> list[Message]:
+        session_id = str(uuid.uuid4())
+        source = MessageSource(message_id=call_id)
+
+        sanitized: list[Message] = []
+        for m in messages:
+            result = self._sanitizer.sanitize(m.content, source=source)
+            for entry in result.entries:
+                self._sanitizer_audit.append(
+                    entry=entry,
+                    pass_num=2,
+                    rules_version=self._rules_version,
+                    session_id=session_id,
+                )
+            sanitized.append(
+                Message(
+                    role=m.role,
+                    content=result.text,
+                    tool_call_id=m.tool_call_id,
+                )
+            )
+        return sanitized
+
+    def _sanitize_texts(self, texts: list[str], call_id: str) -> list[str]:
+        session_id = str(uuid.uuid4())
+        source = MessageSource(message_id=call_id)
+
+        sanitized: list[str] = []
+        for text in texts:
+            result = self._sanitizer.sanitize(text, source=source)
+            for entry in result.entries:
+                self._sanitizer_audit.append(
+                    entry=entry,
+                    pass_num=2,
+                    rules_version=self._rules_version,
+                    session_id=session_id,
+                )
+            sanitized.append(result.text)
+        return sanitized
 
 
 _EMBED_UNKNOWN_MODEL = "unknown-embed"

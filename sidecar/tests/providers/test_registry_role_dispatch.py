@@ -18,6 +18,7 @@ from codebus_agent.providers import (
     TrackedProvider,
     UsageTracker,
 )
+from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
 
 
 def _wrap(
@@ -26,7 +27,15 @@ def _wrap(
     tracker = UsageTracker(tmp_path / f"{name}_token_usage.jsonl")
     logger = LLMCallLogger(tmp_path / f"{name}_llm_calls.jsonl")
     return TrackedProvider(
-        MockProvider(), tracker=tracker, logger=logger, role=role
+        MockProvider(),
+        tracker=tracker,
+        logger=logger,
+        role=role,
+        sanitizer=SanitizerEngine(),
+        sanitizer_audit=SanitizerAuditLogger(
+            tmp_path / f"{name}_sanitize_audit.jsonl"
+        ),
+        rules_version="test-v1",
     )
 
 

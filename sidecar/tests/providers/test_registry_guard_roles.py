@@ -21,6 +21,7 @@ from codebus_agent.providers import (
     TrackedProvider,
     UsageTracker,
 )
+from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
 
 
 def _wrap(
@@ -29,7 +30,15 @@ def _wrap(
     tracker = UsageTracker(tmp_path / f"{tag}_token_usage.jsonl")
     logger = LLMCallLogger(tmp_path / f"{tag}_llm_calls.jsonl")
     return TrackedProvider(
-        MockProvider(), tracker=tracker, logger=logger, role=role
+        MockProvider(),
+        tracker=tracker,
+        logger=logger,
+        role=role,
+        sanitizer=SanitizerEngine(),
+        sanitizer_audit=SanitizerAuditLogger(
+            tmp_path / f"{tag}_sanitize_audit.jsonl"
+        ),
+        rules_version="test-v1",
     )
 
 
@@ -84,6 +93,30 @@ def test_registry_accepts_all_roles_wrapped(tmp_path: Path) -> None:
         ProviderRole.CHAT,
         ProviderRole.EMBED,
     }
+
+
+def test_registry_path_requires_sanitizer_injection(tmp_path: Path) -> None:
+    """Task 7.7 — registry construction path MUST NOT allow building
+    TrackedProvider without a SanitizerEngine. The ValueError fires at
+    TrackedProvider.__init__, which is the choke point the registry
+    relies on (see openspec/changes/sanitizer-safety-chain/specs/llm-provider/spec.md
+    Requirement "TrackedProvider applies Sanitizer Pass 2 before dispatch").
+    """
+    from codebus_agent.sanitizer import SanitizerAuditLogger
+
+    tracker = UsageTracker(tmp_path / "token_usage.jsonl")
+    logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
+
+    with pytest.raises(ValueError, match="sanitizer"):
+        TrackedProvider(
+            MockProvider(),
+            tracker=tracker,
+            logger=logger,
+            role=ProviderRole.CHAT,
+            sanitizer=None,  # type: ignore[arg-type]
+            sanitizer_audit=SanitizerAuditLogger(tmp_path / "sanitize_audit.jsonl"),
+            rules_version="test-v1",
+        )
 
 
 def test_registry_get_does_not_revalidate_at_runtime(tmp_path: Path) -> None:

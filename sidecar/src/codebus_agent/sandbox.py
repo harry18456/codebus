@@ -1,8 +1,12 @@
-"""Tool sandbox — ToolContext schema + path-escape guard.
+"""Tool sandbox — ToolContext schema + path-escape guard + audit log.
 
 Backs openspec/changes/m1-power-on/specs/tool-sandbox/spec.md
   Requirement: ToolContext carries workspace type discriminator
   Requirement: ensure_in_workspace blocks path escape
+and openspec/changes/sanitizer-safety-chain/specs/tool-sandbox/spec.md
+  Requirement: ToolSandbox appends every invocation to tool_audit.jsonl
+  Requirement: Tools declare their auditable field whitelist
+  Requirement: Schema version on every tool audit line
 
 The M1 ToolContext is the stripped-down skeleton — just the fields we
 actually use here plus the discriminator (D-002 day-1 invariant).
@@ -12,11 +16,15 @@ because every future field is either required-with-default or optional.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
+import threading
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -156,3 +164,159 @@ def ensure_in_workspace(requested: str | os.PathLike[str], ctx: ToolContext) -> 
     # caller spelled the input.
     stripped = _strip_long_path_prefix(str(resolved))
     return Path(stripped) if stripped != str(resolved) else resolved
+
+
+_TOOL_AUDIT_SCHEMA_VERSION: Literal[1] = 1
+
+_DENIAL_REASON_LITERALS = (
+    "path_escape",
+    "symlink_outside",
+    "unc_path",
+    "long_path_prefix_invalid",
+    "case_variant",
+    "trailing_whitespace",
+)
+
+
+@runtime_checkable
+class SandboxTool(Protocol):
+    """Structural contract every registrable tool satisfies.
+
+    Tools MUST declare ``audit_fields`` so `ToolSandbox` can filter the
+    args dict down to a safe-to-persist summary before writing the
+    audit line (see Requirement "Tools declare their auditable field
+    whitelist"). The optional ``path_args`` names arguments that must
+    pass `ensure_in_workspace` before the body runs.
+    """
+
+    name: str
+    audit_fields: list[str]
+
+    def run(self, args: dict[str, Any], ctx: ToolContext) -> Any: ...
+
+
+def _classify_denial(requested: str) -> str:
+    """Map a raw user-supplied path string to one of the closed-set
+    denial reasons required by the tool-sandbox spec.
+
+    We bias toward the most specific reason we can prove from the
+    input alone — symlink detection would require a filesystem probe
+    the caller never granted, so "path_escape" is the conservative
+    default for any generic escape.
+    """
+    if requested.endswith((" ", ".")):
+        return "trailing_whitespace"
+    if requested.startswith("\\\\?\\"):
+        return "long_path_prefix_invalid"
+    if requested.startswith("\\\\"):
+        return "unc_path"
+    return "path_escape"
+
+
+class ToolSandbox:
+    """Registrar + dispatcher that writes one audit line per invocation.
+
+    The sandbox is the single choke point for tool execution: it
+    validates path-like arguments via `ensure_in_workspace` before the
+    tool body runs, serializes audit writes via a process-local lock,
+    and records both allowed and denied invocations. Inner tools are
+    plain classes satisfying the `SandboxTool` Protocol.
+    """
+
+    def __init__(self, *, audit_log_path: Path | str) -> None:
+        self._audit_path = Path(audit_log_path)
+        self._audit_path.parent.mkdir(parents=True, exist_ok=True)
+        self._tools: dict[str, SandboxTool] = {}
+        self._lock = threading.Lock()
+
+    def register(self, tool: SandboxTool) -> None:
+        audit_fields = getattr(tool, "audit_fields", None)
+        if audit_fields is None:
+            raise ValueError(
+                f"tool {type(tool).__name__!r} is missing `audit_fields`; "
+                f"every registered tool MUST declare its audit whitelist "
+                f"(see sanitizer-safety-chain tool-sandbox spec)."
+            )
+        if not isinstance(audit_fields, list) or not all(
+            isinstance(f, str) for f in audit_fields
+        ):
+            raise ValueError(
+                f"tool {type(tool).__name__!r}.audit_fields must be a list[str]; "
+                f"got {audit_fields!r}."
+            )
+        name = getattr(tool, "name", None)
+        if not isinstance(name, str) or not name:
+            raise ValueError(
+                f"tool {type(tool).__name__!r} must expose a non-empty "
+                f"`name: str` attribute."
+            )
+        self._tools[name] = tool
+
+    def invoke(
+        self, tool_name: str, args: dict[str, Any], ctx: ToolContext
+    ) -> Any:
+        try:
+            tool = self._tools[tool_name]
+        except KeyError as exc:
+            raise KeyError(
+                f"no tool registered under {tool_name!r}; "
+                f"known tools: {sorted(self._tools)}"
+            ) from exc
+
+        args_summary = {k: args[k] for k in tool.audit_fields if k in args}
+        path_args: list[str] = list(getattr(tool, "path_args", []))
+        resolved_path: Path | None = None
+
+        for arg_name in path_args:
+            if arg_name not in args:
+                continue
+            raw = str(args[arg_name])
+            try:
+                resolved_path = ensure_in_workspace(raw, ctx)
+            except PathEscapeError:
+                self._append_audit(
+                    tool_name=tool_name,
+                    args_summary=args_summary,
+                    resolved_path=None,
+                    allowed=False,
+                    denial_reason=_classify_denial(raw),
+                    ctx=ctx,
+                )
+                raise
+
+        result = tool.run(args, ctx)
+        self._append_audit(
+            tool_name=tool_name,
+            args_summary=args_summary,
+            resolved_path=str(resolved_path) if resolved_path is not None else None,
+            allowed=True,
+            denial_reason=None,
+            ctx=ctx,
+        )
+        return result
+
+    def _append_audit(
+        self,
+        *,
+        tool_name: str,
+        args_summary: dict[str, Any],
+        resolved_path: str | None,
+        allowed: bool,
+        denial_reason: str | None,
+        ctx: ToolContext,
+    ) -> None:
+        line = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "schema_version": _TOOL_AUDIT_SCHEMA_VERSION,
+            "workspace_type": ctx.workspace_type,
+            "tool_name": tool_name,
+            "args_summary": args_summary,
+            "resolved_path": resolved_path,
+            "allowed": allowed,
+            "denial_reason": denial_reason,
+            "session_id": ctx.session_id or str(uuid.uuid4()),
+        }
+        payload = json.dumps(line, ensure_ascii=False, default=str) + "\n"
+        with self._lock:
+            with self._audit_path.open("a", encoding="utf-8") as fp:
+                fp.write(payload)

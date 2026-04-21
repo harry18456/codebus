@@ -23,6 +23,7 @@ from codebus_agent.providers import (
     UsageTracker,
 )
 from codebus_agent.providers.protocol import Message
+from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
 
 
 class _Echo(BaseModel):
@@ -40,7 +41,13 @@ def _build_tracked(
     log_path = tmp_path / "llm_calls.jsonl"
     logger = LLMCallLogger(log_path)
     wrapped = TrackedProvider(
-        MockProvider(), tracker=tracker, logger=logger, role=role
+        MockProvider(),
+        tracker=tracker,
+        logger=logger,
+        role=role,
+        sanitizer=SanitizerEngine(),
+        sanitizer_audit=SanitizerAuditLogger(tmp_path / "sanitize_audit.jsonl"),
+        rules_version="test-v1",
     )
     return wrapped, log_path
 
@@ -89,7 +96,7 @@ async def test_audit_record_preserves_m1_schema_fields(tmp_path: Path) -> None:
     assert isinstance(entry["timestamp"], str) and entry["timestamp"]
     assert isinstance(entry["provider_id"], str) and entry["provider_id"]
     assert isinstance(entry["model"], str) and entry["model"]
-    assert entry["sanitizer_pass2_applied"] is False
+    assert entry["sanitizer_pass2_applied"] is True
     assert isinstance(entry["prompt_tokens"], int) and entry["prompt_tokens"] >= 0
     assert isinstance(entry["completion_tokens"], int)
     assert entry["completion_tokens"] >= 0
