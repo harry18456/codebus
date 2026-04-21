@@ -1,0 +1,1 @@
+繁體中文 fallback chain 測試資料。Big5 bytes follow.

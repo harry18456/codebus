@@ -7,9 +7,11 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "charset-normalizer>=3.4.7",
     "detect-secrets>=1.5.0",
     "fastapi>=0.136.0",
     "instructor>=1.15.1",
+    "pathspec>=1.0.4",
     "psutil>=7.2.2",
     "pydantic>=2.13.2",
     "pyyaml>=6.0.2",
@@ -34,6 +36,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# fixtures/ 目錄內的檔案只是 scanner 測試素材（例如 sample_test.py 模擬 has_tests 偵測），
+# 不是真的 test module，必須排除，否則 pytest 會 ImportError。
+norecursedirs = ["tests/scanner/fixtures"]
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers"
 markers = [

@@ -1,0 +1,2 @@
+secret payload — scanner must mark the escape symlink as resolved_in_workspace=false
+and MUST NOT open this file.

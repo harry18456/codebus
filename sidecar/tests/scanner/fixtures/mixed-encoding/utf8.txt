@@ -1,0 +1,3 @@
+UTF-8 文字檔（scanner fallback chain 首站即命中）。
+Plain ASCII content follows:
+Hello, world!

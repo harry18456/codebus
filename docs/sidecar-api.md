@@ -50,24 +50,30 @@
 ### `POST /scan`
 掃描 workspace 內容（Module 1）。同步呼叫，小資料夾秒回；大資料夾走 async 版（見下）。
 
-**Request**（MVP · `workspace_type: "folder"`）
+> **Skeleton 範圍註記（`scanner-skeleton`）**：
+>
+> - `/scan` 目前為**同步單 body JSON response**，尚無 async + SSE 路徑；response 一次回完整 `ScanResult`（Response example 如下所列）。
+> - Request 使用**骨架簡化 schema**：`{ workspace_type, workspace_root }`，扁平化於頂層；原 spec 設計的 `workspace_source: { path }` wrapper 與 `options` 物件（`respect_gitignore` / `max_file_size_kb`）**未實作**，留待後續 change 疊加（屆時以新增欄位為主，不破壞現有 caller）。
+> - 必經 bearer 中介層：無 `Authorization: Bearer <token>` → `401`，不露 sidecar 內部（對齊 §五）。
+> - `workspace_type: "topic"` → `HTTPException 501 Not Implemented`（非 `400`）with `detail="workspace_type='topic' not implemented in MVP"`（對齊 D-002「discriminator day 1」：schema 吃得到但功能未實作）。
+> - 未知 `workspace_type`（不是 `"folder"` / `"topic"`）→ `422 Unprocessable Entity`，由 Pydantic discriminated union 驗證擋下。
+> - `workspace_root` 不存在或非目錄 → `400` with `detail={ "code": "SCANNER_WORKSPACE_INVALID", "message": "..." }`（對齊 `module-1-scanner.md §十二`）。
+> - Response 中 `git` 永遠 `null`、`is_monorepo=false` / `monorepo_type=null` / `sub_packages=[]`、每個 `FileEntry.sanitize_stats={}`、`stats.quarantined_count=0`（詳 `module-1-scanner.md §十一` Skeleton 註記）。
+
+**Request**（Skeleton · `workspace_type: "folder"`）
 ```json
 {
   "workspace_type": "folder",
-  "workspace_source": { "path": "/abs/path/to/repo" },
-  "options": {
-    "respect_gitignore": true,
-    "max_file_size_kb": 512
-  }
+  "workspace_root": "/abs/path/to/repo"
 }
 ```
 
 **雙模 schema**（對齊 `authorization.md §一` · D-002）
 
-| `workspace_type` | `workspace_source` 形態 | 何時支援 |
+| `workspace_type` | Skeleton 行為 | 何時完整支援 |
 |---|---|---|
-| `"folder"` | `{ "path": "<abs_path>" }` | **MVP** |
-| `"topic"` | `{ "query": "...", "seed_urls": [...], "domain_allowlist": [...] }` | Phase 2 |
+| `"folder"` | 走 `scan()` pipeline，回完整 `ScanResult` | **Skeleton（本 change）** |
+| `"topic"` | 回 `501 Not Implemented`（schema 已吃，功能未實作）| Phase 2 |
 
 `workspace_type` discriminator 從 day 1 寫入，Phase 2 加 topic 不需 schema breaking change。
 
@@ -134,7 +140,9 @@
 }
 ```
 
-大 repo 走 async：先回 `{ "task_id": "scan_abc123" }`，進度走 SSE（見四），最終結果經 `GET /tasks/{id}/result` 取上述完整 `ScanResult`。
+> **Skeleton 行為差異**：上方 Response example 展示**完整 spec 目標**（含 `git` metadata、`is_monorepo=true` 的 monorepo 結果、非零 `sanitize_stats`）。目前 `scanner-skeleton` 階段實際回的是同一 schema 但 stub 版——`git` 為 `null`、`is_monorepo=false` / `monorepo_type=null` / `sub_packages=[]`、所有 `FileEntry.sanitize_stats={}`、`FileEntry.oversized_preview=null`、`stats.quarantined_count=0`、`task_id` 未採用（同步 response 不需）。
+
+大 repo 走 async（先回 `{ "task_id": "..." }` + SSE 進度 + `GET /tasks/{id}/result` 取結果）為後續 change 目標，`scanner-skeleton` 未實作——所有 repo 都走同步 body。
 
 ---
 

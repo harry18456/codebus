@@ -22,6 +22,7 @@ import asyncio
 from fastapi import FastAPI
 
 from codebus_agent import auth
+from codebus_agent.api.scan import router as scan_router
 from codebus_agent.health import DependencyCheck, DependencyStatus, collect
 from codebus_agent.kb import qdrant_client as _kb_qdrant
 
@@ -70,5 +71,9 @@ def create_app(
     async def healthz() -> dict[str, object]:
         report = await collect(app.state.dependency_checks)
         return report.to_dict()
+
+    # Scanner router — 註冊於 bearer middleware 下（install 先於 include_router）
+    # 對齊 spec「Workspace scan endpoint」：endpoint MUST NOT bypass bearer middleware。
+    app.include_router(scan_router)
 
     return app
