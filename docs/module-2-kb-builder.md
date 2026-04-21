@@ -332,13 +332,13 @@ KBGrowthLogger.write()  → kb_growth.jsonl
 
 | 優先 | 項目 | 工期 |
 |---|---|---|
-| P0 | Qdrant client wrapper（connect / ensure_collection / upsert / query）<br>※ connect / ensure_collection 由 change `qdrant-lifecycle-bootstrap` 交付；upsert / query 屬 Module 2 range | 0.5d |
-| P0 | KBPayload schema + payload index | 0.25d |
-| P0 | Chunk 函式（token window + 行邊界 respect） | 0.5d |
-| P0 | Build pipeline（ScanResult → chunk → embed → upsert） | 0.5d |
-| P0 | content-hash 去重 | 0.25d |
-| P0 | `query` / `find_similar` API | 0.25d |
-| P0 | SSE progress emit | 0.25d |
+| P0 | Qdrant client wrapper（connect / ensure_collection / upsert / query）<br>※ connect / ensure_collection 由 change `qdrant-lifecycle-bootstrap` 交付；upsert / query 屬 Module 2 range — 2026-04-21 落地（change `module-2-kb-builder-p0`） | 0.5d |
+| P0 | KBPayload schema + payload index — 2026-04-21 落地（change `module-2-kb-builder-p0`） | 0.25d |
+| P0 | Chunk 函式（token window + 行邊界 respect） — 2026-04-21 落地（change `module-2-kb-builder-p0`） | 0.5d |
+| P0 | Build pipeline（ScanResult → chunk → embed → upsert） — 2026-04-21 落地（change `module-2-kb-builder-p0`） | 0.5d |
+| P0 | content-hash 去重 — 2026-04-21 落地（change `module-2-kb-builder-p0`） | 0.25d |
+| P0 | `query` / `find_similar` API — 2026-04-21 落地（change `module-2-kb-builder-p0`） | 0.25d |
+| P0 | SSE progress emit — 2026-04-21 落地（change `module-2-kb-builder-p0`，progress callback；SSE wire 由 Module 1/2 step 15 接續） | 0.25d |
 | P1 | Git metadata chunk（commits / activity / blame） | 0.5d |
 | P1 | `upsert_chunk` / `delete_chunk`（D-016 後端） | 0.5d |
 | P1 | rebuild 保留 qa_agent chunks 選項 | 0.25d |

@@ -38,7 +38,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19-m1-power-on/`）。最小通電骨架就位，但尚未做 Module 1 ~ 8 的功能：
 
-- `sidecar/` — uv-managed Python 3.12 sidecar（FastAPI app factory、ephemeral port bind、bearer auth、`/healthz`、stdout handshake、`--parent-pid` watchdog、ToolSandbox、LLMProvider Protocol + MockProvider + TrackedProvider、UsageTracker、LLMCallLogger、PyInstaller onefile spec）
+- `sidecar/` — uv-managed Python 3.12 sidecar（FastAPI app factory、ephemeral port bind、bearer auth、`/healthz`、stdout handshake、`--parent-pid` watchdog、ToolSandbox、LLMProvider Protocol + MockProvider + TrackedProvider、UsageTracker、LLMCallLogger、PyInstaller onefile spec；2026-04-21 加入 Module 2 KB Builder P0：`KnowledgeBase` / `KBPayload` / token-window chunker + 策略分派 / `KBQdrantBackend` Protocol + `QdrantHttpBackend` adapter，change `module-2-kb-builder-p0`）
 - `tauri/src-tauri/` — Rust host + `sidecar_ping` command（spawn 已打包 sidecar → 讀 stdout handshake → `GET /healthz`）。`src/sidecar.rs` 負責 spawn 協定、`src/lib.rs` 的 `resolve_sidecar_path()` 讓 packaged / dev 模式都找得到 sibling binary
 - `web/` — Nuxt 3 + Tailwind + TypeScript 骨架（npm，見 D-026），目前只有 landing page 與 Sidecar Ping 按鈕（`app/app.vue` / `app/components/`）
 - `openspec/specs/` — 8 capability spec（`app-packaging` / `llm-provider` / `qdrant-client` / `repo-layout` / `sidecar-runtime` / `tauri-shell` / `tool-sandbox` / `usage-tracking`），都是 M1 archive 時灌入的
@@ -50,6 +50,8 @@ M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19
 接下來里程碑在 `docs/implementation-plan.md`；下一條通常先從 Module 1 Scanner 或 Qdrant lifecycle bootstrap 起（下個未指派 D 編號）。
 
 最近一筆 archive：`2026-04-20-llm-role-routing`（provider role-based dispatch；見架構快照「LLM 呼叫鏈」段 + `openspec/specs/llm-provider/spec.md`）。
+
+最近一筆 in-progress：`module-2-kb-builder-p0`（Module 2 KB Builder P0 落地，見 `docs/module-2-kb-builder.md §十三` / `docs/implementation-plan.md` 步驟 14）。
 
 ## 架構快照
 
