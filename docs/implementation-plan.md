@@ -56,7 +56,7 @@ Module 1 → Module 2，讓 Explorer 有東西吃。
 |---|---|---|---|---|
 | 13 | **Module 1 P0**：遍歷 + gitignore + binary/encoding + ScanResult + **scanner Pass 1 Sanitizer 串通**（openspec `scanner-sanitizer-orchestration` 已落地 2026-04-21） | 2d | 5, 9 | module-1-scanner.md §十六 P0 |
 | 14 | **Module 2 P0**（Scanner Pass 1 已解鎖）：Qdrant wrapper + KBPayload + chunk + embed pipeline + content-hash 去重 — 2026-04-21 落地（change `module-2-kb-builder-p0`） | 2.5d | 7, 8, 13 | module-2-kb-builder.md §十三 P0 |
-| 15 | Module 1/2 SSE progress emit 串通 | 0.5d | 13, 14 | sidecar-api.md §四 |
+| 15 | Module 1/2 SSE progress emit 串通 — 2026-04-22 落地（change `sse-progress-skeleton`） | 0.5d | 13, 14 | sidecar-api.md §四 |
 
 ### 第四階段：Agent 核心（~10d，Demo 靈魂）
 

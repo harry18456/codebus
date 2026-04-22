@@ -427,9 +427,12 @@ class ScanResult(BaseModel):
 
 ## 十三、效能與進度回報
 
-> **Skeleton 範圍註記**：`/scan` 目前為**同步單 body JSON response**（`POST /scan` →
-> 一次回完整 `ScanResult`）。SSE Progress Event（下方 §十三 example）**尚未實作**，
-> 僅保留於 spec 作為後續 change 的目標。效能 target 亦未在骨架做 benchmark 驗證。
+> **Skeleton 範圍更新（2026-04-22，change `sse-progress-skeleton`）**：
+> `POST /scan` 仍**預設同步**單 body JSON response，但新增 `?stream=true`
+> opt-in async streaming 路徑——建立 task → spawn background coroutine 跑
+> `scan(..., on_progress=…)` → 立即回 `{"task_id": "scan_<hex8>"}`；訂閱者
+> 透過 `GET /tasks/{id}/events` 收 progress / done / error。效能 target
+> 仍未在骨架做 benchmark 驗證。
 
 ### Target
 | Repo 規模 | 目標時間 |
@@ -439,12 +442,42 @@ class ScanResult(BaseModel):
 | 2000-5000 檔 | < 30s |
 | > 5000 檔 | 無硬保證，每 500 檔 emit progress |
 
-### SSE Progress Event（`sidecar-api.md` §四）
+### 進度回報介面（landed）
+
+對應 `openspec/changes/sse-progress-skeleton/specs/folder-scanner/spec.md`
+Requirements `Scanner progress callback hook` 與 `POST /scan opt-in async
+streaming mode`。
+
+**`ScannerProgressCallback` Protocol**（`scanner/models.py`）：
+
+```python
+ScannerProgressCallback = Callable[[ScannerProgressEvent], Awaitable[None]]
+
+class ScannerProgressEvent(BaseModel):
+    phase: Literal["walking", "sanitizing"]
+    current: int            # 已處理檔案數
+    total: int | None       # walking 階段未知；sanitizing 階段為 walking 結果
+    current_file: str | None
+```
+
+`scanner.service.scan(...)` 是 async function，接受 `on_progress:
+ScannerProgressCallback | None = None`。`_PROGRESS_EMIT_EVERY = 50`
+控制兩階段的 emit 節奏（每 50 檔一次，加上每階段尾端的 guarantee event，
+確保小 workspace 也至少各 emit 一次 `walking` / `sanitizing`）。
+
+### Wire 翻譯與 SSE 事件
+
+`api/scan.py::_scanner_event_to_wire(event)` 把兩個 source phase 折疊成
+單一 wire phase `"scanning"`（消費端不需感知 scanner 內部 pipeline 切分）：
+
 ```json
 { "type": "progress", "phase": "scanning", "current": 420, "total": 940, "current_file": "src/foo.py" }
 ```
-- 每 50 檔 emit 一次（避免 SSE 洪水）
-- `total` 在第一次遍歷後才知道 → 首次 emit 時 `total` 為估計值（基於前幾層速度）
+
+- 對外只看到 `phase: "scanning"`，內部 `walking` / `sanitizing` 兩階段透明
+- `total` 在 walking 階段為 `null`，sanitizing 階段則為 walking 完成後的總數
+- 每 50 檔 emit 一次（避免 SSE 洪水）；終端的 SSE `done` 事件由 task wrapper
+  發出，`scan()` 自身不感知 transport 層（詳見 `sidecar-api.md §三-bis`）
 
 ---
 

@@ -1,10 +1,13 @@
-"""`POST /scan` endpoint — synchronous workspace scan.
+"""`POST /scan` endpoint — synchronous (default) or async streaming
+(`?stream=true`) workspace scan.
 
 Backs openspec/changes/scanner-skeleton/specs/folder-scanner/spec.md
   Requirement: Workspace scan endpoint
   Requirement: Workspace type discriminator routing
   Requirement: Synchronous response without SSE progress events
 和 `sidecar-runtime` delta Requirement: Workspace scan endpoint registration。
+也對應 openspec/changes/sse-progress-skeleton/specs/folder-scanner/spec.md
+  Requirement: POST /scan opt-in async streaming mode
 
 關鍵約束（務必不鬆綁）：
   * Bearer + loopback 不鬆綁：router 只掛在 bearer middleware 之下，
@@ -12,20 +15,29 @@ Backs openspec/changes/scanner-skeleton/specs/folder-scanner/spec.md
   * Discriminator day-1（D-002）：``workspace_type: "folder" | "topic"``
     是 Pydantic Literal；``topic`` 由 handler 回 501，``folder`` 走 pipeline。
   * SCANNER_WORKSPACE_INVALID：``workspace_root`` 不存在 / 非目錄 → 400。
-  * SSE 禁用：這個 endpoint 只吐單一 JSON body，不 stream 任何 progress 事件。
+  * 同步模式（無 query）只吐單一 JSON body，不 stream 任何 progress 事件。
+  * ``?stream=true`` opt-in：建 task → 啟 background coroutine → 立即回
+    ``{task_id}``；既有同步路徑程式碼路徑完全不動。
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
+from codebus_agent.api.tasks import (
+    ERROR_CODES,
+    TaskHandle,
+    TaskRegistry,
+    _run_background_task,
+)
 from codebus_agent.sandbox import ToolContext
 from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
-from codebus_agent.scanner.models import ScanResult
+from codebus_agent.scanner.models import ScannerProgressEvent, ScanResult
 from codebus_agent.scanner.service import scan
 
 # Workspace-level sanitize_audit.jsonl — lives alongside other workspace audit
@@ -58,30 +70,42 @@ class ScanRequest(BaseModel):
     workspace_root: str
 
 
-@router.post("/scan", response_model=ScanResult)
-def scan_endpoint(request: ScanRequest) -> ScanResult:
-    """同步執行 workspace scan，回傳 ``ScanResult``。
+def _scanner_event_to_wire(event: ScannerProgressEvent) -> dict[str, Any]:
+    """Translate a ``ScannerProgressEvent`` into a wire ``progress`` event.
 
-    流程：
-      1. ``workspace_type == "topic"`` → 501 Not Implemented（MVP 未支援）
-      2. ``workspace_root`` 不存在或非目錄 → 400 ``SCANNER_WORKSPACE_INVALID``
-      3. 其他 → 建 ``ToolContext`` 並呼叫 ``service.scan`` 回傳結果
+    Per `sse-progress-skeleton` spec "POST /scan opt-in async streaming mode":
+    both internal phases (``walking`` / ``sanitizing``) collapse to the
+    single wire phase ``"scanning"`` (Module 1 phase-name mapping —
+    consumers don't need to know the scanner's internal pipeline split).
+    """
+    return {
+        "type": "progress",
+        "phase": "scanning",
+        "current": event.current,
+        "total": event.total,
+        "current_file": event.current_file,
+    }
 
-    備註：bearer 驗證由 ``BearerAuthMiddleware`` 在 ASGI 層級處理；到達 handler
-    的請求都已過 auth，無需在此重複檢查。
+
+def _build_scan_inputs(
+    request: ScanRequest,
+) -> tuple[Path, ToolContext, SanitizerAuditLogger, str]:
+    """Validate the request and return the inputs required to call ``scan``.
+
+    Pulled out of the endpoint body so the sync and ``?stream=true`` paths
+    share the exact same setup — keeps the spec's "既有同步契約保留"
+    invariant honest (no divergence between the two branches).
     """
     if request.workspace_type == "topic":
-        # spec Scenario「Topic workspace returns 501」—— detail 需明確指出未實作
+        # spec Scenario「Topic workspace returns 501」
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="workspace_type='topic' not implemented in MVP",
         )
 
-    # folder branch — 驗 workspace_root 存在且是目錄
     workspace_root = Path(request.workspace_root)
     if not workspace_root.exists() or not workspace_root.is_dir():
-        # spec Scenario「Nonexistent workspace root rejected」——
-        # detail 以 dict 傳 code + message，方便前端機器判讀
+        # spec Scenario「Nonexistent workspace root rejected」
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -93,29 +117,85 @@ def scan_endpoint(request: ScanRequest) -> ScanResult:
 
     # scanner-sanitizer-orchestration: a fresh engine per request is safe —
     # SanitizerEngine keeps no cross-call state (placeholder indices reset
-    # per `sanitize` call, per `docs/decisions.md` D-015).  Future M2+
-    # wiring may relocate construction to app.state if rule config turns
-    # out to be expensive to load; schema doesn't change either way.
+    # per `sanitize` call, per `docs/decisions.md` D-015).
     ctx = ToolContext(
         workspace_root=workspace_root,
         workspace_type="folder",
         sanitizer=SanitizerEngine(),
     )
-
-    # SanitizerAuditLogger creates the `.codebus/` subdir on first write;
-    # a fresh uuid4 tags this scan's audit lines so forensic readers can
-    # trace a full /scan invocation across the seven-layer audit tree.
     audit_path = workspace_root / _WORKSPACE_AUDIT_SUBDIR / _SANITIZE_AUDIT_FILENAME
     audit_logger = SanitizerAuditLogger(audit_path)
     session_id = str(uuid.uuid4())
-
-    return scan(
-        request.workspace_root,
-        ctx,
-        sanitize_audit=audit_logger,
-        rules_version=_RULES_VERSION,
-        session_id=session_id,
-    )
+    return workspace_root, ctx, audit_logger, session_id
 
 
-__all__ = ["router", "ScanRequest", "scan_endpoint"]
+@router.post("/scan")
+async def scan_endpoint(
+    request: ScanRequest,
+    http_request: Request,
+    stream: bool = False,
+) -> Any:
+    """執行 workspace scan。
+
+    Modes:
+      * 預設（無 ``?stream=true``）：同步執行，回完整 ``ScanResult`` JSON，
+        對應 `Synchronous response without SSE progress events`。
+      * ``?stream=true``：建 task handle、spawn background coroutine 跑
+        ``scan(..., on_progress=…)``，立即回 ``{"task_id": "scan_<hex8>"}``；
+        訂閱者透過 ``GET /tasks/{id}/events`` 收 progress / done / error
+        （`POST /scan opt-in async streaming mode`）。
+
+    備註：bearer 驗證由 ``BearerAuthMiddleware`` 在 ASGI 層級處理；到達 handler
+    的請求都已過 auth，無需在此重複檢查。
+    """
+    workspace_root, ctx, audit_logger, session_id = _build_scan_inputs(request)
+
+    if not stream:
+        # Sync path — unchanged behaviour. Return the full ScanResult.
+        return await scan(
+            request.workspace_root,
+            ctx,
+            sanitize_audit=audit_logger,
+            rules_version=_RULES_VERSION,
+            session_id=session_id,
+        )
+
+    # Stream path — opt-in async mode.
+    registry: TaskRegistry = http_request.app.state.tasks
+    handle = registry.create("scan")
+    if handle is None:
+        running = registry.current_running()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "TASK_IN_FLIGHT",
+                "running_task_id": running.id if running else None,
+            },
+        )
+
+    async def _on_progress(event: ScannerProgressEvent) -> None:
+        handle.emit(_scanner_event_to_wire(event))
+
+    async def _coro_factory() -> dict[str, Any]:
+        result = await scan(
+            request.workspace_root,
+            ctx,
+            sanitize_audit=audit_logger,
+            rules_version=_RULES_VERSION,
+            session_id=session_id,
+            on_progress=_on_progress,
+        )
+        # Hand the full ScanResult JSON to the task wrapper as the
+        # terminal payload returned by `/tasks/{id}/result`.
+        return result.model_dump(mode="json")
+
+    asyncio.create_task(_run_background_task(handle, _coro_factory))
+    return {"task_id": handle.id}
+
+
+__all__ = [
+    "router",
+    "ScanRequest",
+    "scan_endpoint",
+    "_scanner_event_to_wire",
+]

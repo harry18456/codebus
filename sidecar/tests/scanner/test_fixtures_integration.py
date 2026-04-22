@@ -17,7 +17,15 @@ import pytest
 from codebus_agent.sandbox import ToolContext
 from codebus_agent.sanitizer import SanitizerEngine
 from codebus_agent.scanner.models import ScanResult
-from codebus_agent.scanner.service import scan
+from codebus_agent.scanner.service import scan as _async_scan
+
+
+# `scan` was made async in change `sse-progress-skeleton` (Section 11). These
+# integration tests pre-date that and exercise sync invariants — wrap with
+# `asyncio.run` so the bodies stay unchanged.
+def scan(*args, **kwargs):
+    import asyncio
+    return asyncio.run(_async_scan(*args, **kwargs))
 
 
 # ---------------------------------------------------------------------------

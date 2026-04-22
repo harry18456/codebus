@@ -46,6 +46,8 @@ from codebus_agent.scanner.encoding import detect_encoding
 from codebus_agent.scanner.language import identify
 from codebus_agent.scanner.models import (
     FileEntry,
+    ScannerProgressCallback,
+    ScannerProgressEvent,
     ScanResult,
     ScanStats,
     Symlink,
@@ -60,14 +62,19 @@ _HEAD_BYTES_SIZE = 8 * 1024
 # 不跑 encoding / language 的 kind —— 永遠保持 content=None / encoding=None。
 _NO_CONTENT_KINDS: frozenset[str] = frozenset({"binary", "lockfile", "generated"})
 
+# `Scanner progress callback hook` 觸發頻率：兩段（walking / sanitizing）都每
+# 50 檔 await 一次 callback。50 是 spec §四「emit cadence」的明定數字。
+_PROGRESS_EMIT_EVERY = 50
 
-def scan(
+
+async def scan(
     workspace_root: str,
     ctx: ToolContext,
     *,
     sanitize_audit: SanitizerAuditLogger | None = None,
     rules_version: str = "2026-04-20-1",
     session_id: str = "",
+    on_progress: ScannerProgressCallback | None = None,
 ) -> ScanResult:
     """同步掃描 ``ctx.workspace_root``，回傳完整 ``ScanResult``。
 
@@ -109,6 +116,7 @@ def scan(
     total_files_walked = 0
     total_bytes_read = 0
     quarantined_count = 0
+    sanitized_count = 0
 
     for entry in walk(resolved_root, ctx, warnings=warnings):
         if isinstance(entry, Symlink):
@@ -119,6 +127,19 @@ def scan(
 
         # entry is FileEntry —— 對它跑 encoding + language + content 填充。
         total_files_walked += 1
+        # `Scanner progress callback hook` walking phase emit：每 50 檔 await 一次。
+        # 第一檔即觸發（current==1 % 50 == 1，但 1 != 0），所以下方用 (n % N == 0)
+        # 模式：每 50 檔末尾 emit；外加保證至少一筆（最後 finally 補 emit）。
+        if on_progress is not None and total_files_walked % _PROGRESS_EMIT_EVERY == 0:
+            await on_progress(
+                ScannerProgressEvent(
+                    phase="walking",
+                    current=total_files_walked,
+                    total=None,
+                    current_file=entry.path,
+                )
+            )
+
         enriched = _enrich_file_entry(entry, resolved_root)
         if enriched is None:
             # 讀檔失敗 → walk 階段已 warn；這裡視為 skipped，不進 files。
@@ -146,8 +167,44 @@ def scan(
                 quarantined_count += 1
                 continue
 
+            sanitized_count += 1
+            # `Scanner progress callback hook` sanitizing phase emit：同樣每 50 檔。
+            if (
+                on_progress is not None
+                and sanitized_count % _PROGRESS_EMIT_EVERY == 0
+            ):
+                await on_progress(
+                    ScannerProgressEvent(
+                        phase="sanitizing",
+                        current=sanitized_count,
+                        total=None,
+                        current_file=file_entry.path,
+                    )
+                )
+
         files.append(file_entry)
         total_bytes_read += enriched.bytes_read
+
+    # `Scanner progress callback hook` 至少一筆保證：spec 規定「Callback receives
+    # at least one event per phase」，所以即使檔數不足 50 也補打一發。total 此時
+    # 已知（迴圈跑完），可填入。
+    if on_progress is not None:
+        await on_progress(
+            ScannerProgressEvent(
+                phase="walking",
+                current=total_files_walked,
+                total=total_files_walked,
+                current_file=None,
+            )
+        )
+        await on_progress(
+            ScannerProgressEvent(
+                phase="sanitizing",
+                current=sanitized_count,
+                total=sanitized_count,
+                current_file=None,
+            )
+        )
 
     content_summary = build_summary(files)
     scan_completed_at = datetime.now(timezone.utc)

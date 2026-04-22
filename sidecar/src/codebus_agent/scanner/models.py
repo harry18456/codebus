@@ -11,6 +11,7 @@ MUST default to `False` / `None` / `[]`.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Literal
 
@@ -19,6 +20,7 @@ from pydantic import BaseModel, Field
 FileKind = Literal["text", "binary", "oversized", "lockfile", "generated"]
 LanguageConfidence = Literal["extension", "shebang", "unknown"]
 DominantCategory = Literal["code", "docs", "config", "mixed"]
+ScannerPhase = Literal["walking", "sanitizing"]
 
 
 class FileEntry(BaseModel):
@@ -117,6 +119,26 @@ class ScanResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ScannerProgressEvent(BaseModel):
+    """One progress event emitted by ``scanner.service.scan(on_progress=...)``.
+
+    Backs openspec/changes/sse-progress-skeleton/specs/folder-scanner/spec.md
+      Requirement: Scanner progress callback hook
+
+    The wire-level translation (collapsing both phases to spec §四 ``scanning``)
+    happens in ``api/scan.py``; this model is the *internal* contract between
+    the scanner service and any in-process subscriber.
+    """
+
+    phase: ScannerPhase
+    current: int = Field(ge=0)
+    total: int | None = Field(default=None, ge=0)
+    current_file: str | None = None
+
+
+ScannerProgressCallback = Callable[[ScannerProgressEvent], Awaitable[None]]
+
+
 __all__ = [
     "ContentTypeSummary",
     "DominantCategory",
@@ -124,6 +146,9 @@ __all__ = [
     "FileKind",
     "GitMeta",
     "LanguageConfidence",
+    "ScannerPhase",
+    "ScannerProgressCallback",
+    "ScannerProgressEvent",
     "ScanResult",
     "ScanStats",
     "Symlink",

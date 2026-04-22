@@ -41,7 +41,17 @@ from codebus_agent.sanitizer import (
     SanitizerEngine,
 )
 from codebus_agent.scanner.models import FileEntry, ScanResult, Symlink
-from codebus_agent.scanner.service import scan
+from codebus_agent.scanner.service import scan as _async_scan
+
+
+# `scan` was made async in change `sse-progress-skeleton` (Section 11) so the
+# new SSE `POST /scan?stream=true` mode can `await` it. Existing tests here
+# pre-date that change and exercise sync invariants (walk/classify/encoding
+# /language/sanitize Pass 1 contract). Wrap with `asyncio.run` so the test
+# bodies stay unchanged — task 11.4 requires these to remain green.
+def scan(*args, **kwargs):
+    import asyncio
+    return asyncio.run(_async_scan(*args, **kwargs))
 
 
 # ---------------------------------------------------------------------------

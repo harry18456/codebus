@@ -181,11 +181,32 @@ if hits and hits[0].score >= SIMILARITY_DEDUP_THRESHOLD:  # 0.95
 - `asyncio.gather` 分批，單次 in-flight 最多 3 個 batch（`asyncio.Semaphore(3)`）
 - 超過 rate limit → Provider 層 backoff → 上層 log progress stall
 
-### Progress 回報（SSE，連動 `sidecar-api.md` §四）
+### Progress 回報（SSE，連動 `sidecar-api.md` §四 / §三-bis）
+
+KB 建置的進度路徑分兩層：
+
+1. **Source 層**（`KnowledgeBase.build(..., on_progress=…)`）：
+   `KBProgressEvent(phase: Literal["chunking", "embedding", "upserting", "done"], current, total, workspace_id)`
+   ——`chunking` 完成計數、`embedding` 每完成一個 batch、`upserting` 每完成一個 Qdrant
+   batch、`done` 終止——共四個 source phase。
+2. **Wire 層**（`api/kb.py::_KBProgressAdapter`）：把上面三個非 done phase 全部
+   折疊成單一 wire phase `"embedding"`，`done` source 不對應 wire progress event
+   （SSE 的終端 `done` 由 task wrapper 發出）：
+
 ```json
 { "type": "progress", "phase": "embedding", "current": 480, "total": 1200 }
 ```
-每完成一個 batch 回報一次。
+
+`_KBProgressAdapter` 在第一個 non-done event 鎖定 anchor total（KB 自然從
+`chunking` 開始，total 即 `chunks_emitted`），後續 wire stream 保證：
+
+- 至少一筆 `current == 0`（`chunking` 進場時 override 成 0）
+- 至少一筆 `current == anchor_total`（`upserting` 進場時 snap 到 anchor_total）
+- `current` 單調非降；`embedding` 階段以 `chunks_emitted` 為分母按比例縮放，
+  即使中間因 dedup 改變內在 total 也不會出現倒退。
+
+對應 `openspec/changes/sse-progress-skeleton/specs/knowledge-base/spec.md`
+Requirement `KB progress phase translation to wire schema`。
 
 ### Token 用量追蹤（D-021）
 每批 `embed()` 回 `EmbedResponse(vectors, usage)`；build pipeline 呼叫 `ctx.usage_tracker.record(usage=response.usage, module="kb_build")` 寫進 `token_usage.jsonl`。Provider 沒回 token 數時以 tiktoken 估算 + `estimated=True`。詳見 `agent-core.md §十三`。
@@ -235,6 +256,31 @@ class KBHit(BaseModel):
     score: float
     payload: KBPayload
 ```
+
+### HTTP 端點對接 — `POST /kb/build`（async, change `sse-progress-skeleton`）
+
+對應 `openspec/changes/sse-progress-skeleton/specs/knowledge-base/spec.md`
+Requirement `POST /kb/build async endpoint`。
+
+```
+POST /kb/build           # 預設 async，無同步變體
+Body: { "workspace_root": "<abs>", "scan_result": <ScanResult JSON> }
+→ 200 { "task_id": "kb_<hex8>" }   立即回，不阻塞 build
+→ 409 { "code": "TASK_IN_FLIGHT", "running_task_id": "..." }
+→ 503 { "code": "KB_NOT_CONFIGURED" }   sidecar 未注入 KB 依賴時
+```
+
+設計要點：
+
+- 端點解析 `(backend, provider, usage_tracker, embedding_dim)` 自 `app.state`
+  （正式 wiring 由 sidecar bootstrap 注入；測試以 in-memory double 注入相同
+  `app.state` slot），缺任一即回 503。
+- 進度走 `_make_kb_progress_adapter(handle)` → `KnowledgeBase.build(...,
+  on_progress=…)`；wire 翻譯規則見上方 §六「Progress 回報」。
+- 終端 `KBStats` 透過 `_run_background_task` wrapper 寫入 `handle.result`，
+  消費端用 `GET /tasks/{id}/result` 取（詳見 `sidecar-api.md §三-bis`）。
+- 任何 build 例外被 wrapper 收斂成 sanitized SSE `error` event（`KB_EMBED_FAILED`
+  / `INTERNAL_ERROR`），不洩漏 traceback；完整 traceback 只進 logger。
 
 ---
 

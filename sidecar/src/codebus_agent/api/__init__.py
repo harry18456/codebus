@@ -22,7 +22,9 @@ import asyncio
 from fastapi import FastAPI
 
 from codebus_agent import auth
+from codebus_agent.api.kb import router as kb_router
 from codebus_agent.api.scan import router as scan_router
+from codebus_agent.api.tasks import TaskRegistry, router as tasks_router
 from codebus_agent.health import DependencyCheck, DependencyStatus, collect
 from codebus_agent.kb import qdrant_client as _kb_qdrant
 
@@ -46,6 +48,11 @@ def create_app(
     app = FastAPI(title="codebus-sidecar", version="0.1.0")
     app.state.bearer_token = bearer_token
     app.state.qdrant_client = None
+    # Single-slot task registry — survives the lifetime of the app, holds at
+    # most one in-flight background task per spec
+    # `sse-progress-skeleton/sidecar-runtime` Requirement
+    # `Single-slot in-memory task registry`.
+    app.state.tasks = TaskRegistry()
 
     checks: dict[str, DependencyCheck] = dict(dependency_checks or {})
 
@@ -75,5 +82,11 @@ def create_app(
     # Scanner router — 註冊於 bearer middleware 下（install 先於 include_router）
     # 對齊 spec「Workspace scan endpoint」：endpoint MUST NOT bypass bearer middleware。
     app.include_router(scan_router)
+    # Task lifecycle (`GET /tasks/{id}/events|result`) + KB build (`POST /kb/build`)
+    # 都掛在同一層 bearer middleware 下；spec
+    # `sse-progress-skeleton/sidecar-runtime` 規定 SSE 與 result endpoint MUST
+    # NOT bypass bearer。
+    app.include_router(tasks_router)
+    app.include_router(kb_router)
 
     return app
