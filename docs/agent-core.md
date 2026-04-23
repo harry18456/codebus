@@ -102,69 +102,86 @@ class ExplorerState(BaseModel):
 ## 四、主 ReAct 迴圈
 
 ```python
-# agent/explorer.py
+# agent/explorer.py — 本節 code 為 post-P0 目標形狀；目前 explorer-react-loop-p0 已落地
+# Think→Act→Observe→Judge→Log→Update 六步骨架 + cancel_event + dormant coverage hook。
 async def run_explorer(
+    *,
     state: ExplorerState,
-    provider: LLMProvider,
-    tools: ToolRegistry,
+    provider: TrackedProvider,       # TrackedProvider-only（registry guard 擋原生 provider）
+    tools: ExplorerTools,            # agent/protocols.py @runtime_checkable Protocol
     judge: Judge,
     coverage: CoverageChecker,
     logger: ReasoningLogger,
+    cancel_event: asyncio.Event | None = None,
+    tool_specs: list[dict] | None = None,
 ) -> ExplorerResult:
-    while not _should_stop(state):
-        # 1. Think — LLM 決定下一步
-        thought, tool_calls = await _think(state, provider, tools)
+    while True:
+        stop, reason = _should_stop(state, cancel_event)
+        if stop:
+            break
 
-        # 2. Act — 執行工具（可並行）
-        results = await _execute_tools(tool_calls, tools, state)
+        # 1. Think — LLM 決定下一步
+        thought, tool_calls = await _think(state, provider, tool_specs or [])
+
+        # 2. Act — 執行工具（可並行；tool 錯誤包進 ToolResult.error 不往外拋）
+        results = await _execute_tools(tool_calls, tools)
 
         # 3. Observe — 結果寫回 messages，讓下輪 LLM 看到
         _append_observations(state, tool_calls, results)
 
         # 4. Judge — 針對這輪看到的新內容評估
-        verdict = await judge.evaluate(state, results, provider)
+        verdict = await judge.evaluate(state, results)
 
-        # 5. Update state — 更新 queue / visited / stations
-        _update_state(state, results, verdict)
-
-        # 6. Log — 寫 reasoning_log + emit SSE
-        step = Step(
+        # 5. Log — 寫 reasoning_log（P0 sync；SSE emit 由 agent-sse-wiring change 注入）
+        logger.write(Step(
             step=state.step_count,
-            ts=datetime.utcnow(),
+            ts=datetime.now(timezone.utc),
             thought=thought,
             tool_calls=tool_calls,
             tool_results=results,
             judge_verdict=verdict,
-            tokens_used=...,
-        )
-        await logger.write(step)
+            tokens_used=0,
+        ))
 
+        # 6. Update state — 更新 queue / visited / stations
+        _update_state(state, tool_calls, results, verdict)
         state.step_count += 1
         state.budget_steps_left -= 1
 
-    # 7. Coverage check — 收斂時跑
-    gaps = await coverage.check(state, provider)
-    if gaps and state.budget_steps_left > 0:
-        _enqueue_gap_investigation(state, gaps)
-        return await run_explorer(state, provider, tools, judge, coverage, logger)
+    # 7. Coverage check + 遞迴補查 — P0 以 _COVERAGE_RECURSION_ENABLED=False 夾住,
+    # 由 coverage-gap-recurse change 打開並補上遞迴深度上限。
+    if _COVERAGE_RECURSION_ENABLED:
+        gaps = await coverage.check(state)
+        if gaps and state.budget_steps_left > 0:
+            _enqueue_gap_investigation(state, gaps)
+            return await run_explorer(...)  # 遞迴
 
-    return ExplorerResult(stations=state.stations, log_path=logger.path)
-
-
-def _should_stop(state: ExplorerState) -> bool:
-    return (
-        state.budget_steps_left <= 0
-        or state.budget_tokens_left <= 0
-        or state.pending_queue == [] and _has_enough_stations(state)
-        or _cancel_token.is_set()
+    return ExplorerResult(
+        stations=list(state.stations),
+        log_path=str(logger.path),
+        stopped_reason=reason or "budget_exhausted",
     )
+
+
+def _should_stop(
+    state: ExplorerState, cancel_event: asyncio.Event | None
+) -> tuple[bool, str | None]:
+    # 三分支 convergence：cancel → budget → queue_empty(with enough stations)
+    if cancel_event is not None and cancel_event.is_set():
+        return True, "cancelled"
+    if state.budget_steps_left <= 0:
+        return True, "budget_exhausted"
+    if not state.pending_queue and len(state.stations) >= _MIN_STATIONS_FOR_CONVERGENCE:
+        return True, "queue_empty"
+    return False, None
 ```
 
 **關鍵特性**
 - 一個 while 迴圈，所有決策透明，debug 時 stack trace 乾淨
-- Think / Act / Observe / Judge / Update 分函式，每段獨立可測
-- Cancel 走 `asyncio.Event`，每輪迴圈檢查一次
-- Recursive call 用在 Coverage gap 補查，容易讀但要設遞迴深度上限（預設 3）
+- Think / Act / Observe / Judge / Log / Update 分函式，每段獨立可測
+- Cancel 走 `asyncio.Event`，每輪迴圈開頭檢查一次
+- Recursive call 用在 Coverage gap 補查，容易讀但要設遞迴深度上限（預設 3）；P0 以 flag 夾住不跑
+- `_MIN_STATIONS_FOR_CONVERGENCE = 3` 是 P0 收斂下限常數（spec `Explorer loop stops...` 的 sensible P0 default）
 
 ---
 
@@ -285,6 +302,8 @@ async def _execute_one(call, tools, ctx) -> ToolResult:
 ## 七、Judge 與 Coverage Checker
 
 **都是 one-shot LLM call，不進 ReAct 迴圈，各自獨立函式。**
+
+**P0 落地形狀（`explorer-react-loop-p0`）**：`LLMJudge(provider_factory, workspace_root)` 在建構期呼一次 factory（shape 與 `app.state.llm_judge_provider(ws)` 一致）拿到 **workspace-scoped TrackedProvider**，之後 evaluate 只重用該 provider；這和 chat-provider-wiring 定的 per-workspace 稽核落地點對齊（`token_usage.jsonl` / `llm_calls.jsonl` 依 workspace 自動分流）。registry-based 寫法（下方 code block）是往後若要合併多 provider 的參考形狀，P0 未實作。`CoverageChecker` 在 P0 只有 Protocol 抽象，LLM impl 延到 `coverage-gap-recurse` change。
 
 ```python
 class Judge:
@@ -414,6 +433,8 @@ class Budget:
 
 ### 寫檔
 每步 append JSONL 到 `{workspace}/reasoning_log.jsonl`：
+
+**P0 落地形狀（`explorer-react-loop-p0`）**：`ReasoningLogger(path)` 純 sync 寫檔，**不含** SSEEmitter；`write(step)` 呼 `step.model_copy(update={"explorer_prompt_version": EXPLORER_PROMPT_VERSION, "judge_prompt_version": JUDGE_PROMPT_VERSION})` 後 append `model_dump_json() + "\n"`，寫失敗直接 raise（不靜默丟失）。SSE emit 留到 `agent-sse-wiring` change（步驟 22）注入 emitter，shape 見下方 code block。
 
 ```python
 class ReasoningLogger:

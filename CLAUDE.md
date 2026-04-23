@@ -65,8 +65,9 @@ M1「power-on」通電（2026-04-19 archive）後，資料層 + provider wiring 
 | 2026-04-23 | `kb-query-endpoint` | `POST /kb/query` 同步查詢 + `kb_query_provider` factory 帶 `default_module="kb_query"` 拆帳 |
 | 2026-04-23 | `usage-tracker-dedup` | TrackedProvider 加 `default_module`，變成 `module` 欄唯一寫入路徑；KB 不再手動 `tracker.record(...)` |
 | 2026-04-23 | `chat-provider-wiring` | `OpenAIChatProvider`（instructor-wrapped `gpt-4o-mini`）+ `OpenAIContextLengthError`/`OPENAI_CONTEXT_EXCEEDED` + 三個 chat-ish role factory（`llm_reasoning_provider` 0.1 / `llm_judge_provider` 0.0 / `llm_chat_provider` 0.2）+ `/healthz` `openai_chat` 三態；M1 `No outbound LLM traffic during M1` 不變式退役，由 `Outbound LLM traffic gated by TrackedProvider whitelist` 取代 |
+| 2026-04-24 | `explorer-react-loop-p0` | Module 4 Explorer ReAct skeleton：`codebus_agent.agent` 子套件（`types` / `protocols` / `explorer` / `judge` / `reasoning_logger` / `prompts`）；`run_explorer` 六步主迴圈（Think→Act→Observe→Judge→Log→Update）+ `_should_stop` 三分支收斂（budget / queue / cancel）+ `_MIN_STATIONS_FOR_CONVERGENCE=3`；`LLMJudge` one-shot + `ReasoningLogger` append-only JSONL（`explorer_prompt_version` / `judge_prompt_version` 寫每行）；`ExplorerTools` / `Judge` / `CoverageChecker` 三個 `@runtime_checkable` Protocol（day-1 抽象 for Q&A 共用）；Coverage 遞迴 hook 以 `_COVERAGE_RECURSION_ENABLED=False` 夾住，由 `coverage-gap-recurse` 後續打開 |
 
-**目前沒有 in-progress change**。下一步依 `docs/implementation-plan.md`：Module 4 Explorer P0（自寫 ReAct loop + `reasoning_log.jsonl` 寫檔 + `search` / `list_dir` / `read_file` / `mark_station` 四個真工具）。
+**目前沒有 in-progress change**。下一步依 `docs/implementation-plan.md`：**步驟 17 `explorer-tools-p0`**（`search` / `list_dir` / `read_file` / `mark_station` 四個真工具 + ToolContext + `ensure_in_workspace` 紅線），解鎖 Explorer 跑真 codebase。
 
 ## 架構快照
 

@@ -1,0 +1,339 @@
+# agent-core Specification
+
+## Purpose
+
+TBD - created by archiving change 'explorer-react-loop-p0'. Update Purpose after archive.
+
+## Requirements
+
+### Requirement: ReAct loop executes think-act-observe-judge-log-update each iteration
+
+The sidecar SHALL implement an async `run_explorer(state, provider, tools, judge, coverage, logger)` function in `codebus_agent.agent.explorer` that drives Explorer Agent execution through a ReAct control flow. Each iteration MUST perform the six sub-steps in order: (1) **Think** — invoke `provider.chat(messages, response_model=ExplorerAction)` to produce an `ExplorerAction`; (2) **Act** — dispatch each `tool_calls[*]` through the `ExplorerTools` Protocol implementation and collect `ToolResult`s (empty list when the action contains no tool calls); (3) **Observe** — append Tool results as `Message(role="tool", ...)` onto `state.messages` so the next iteration sees them; (4) **Judge** — call `judge.evaluate(state, results)` to produce a `JudgeVerdict`; (5) **Log** — build a `Step` aggregating thought + tool_calls + tool_results + verdict and pass it to `logger.write(step)`; (6) **Update state** — advance `state.step_count`, decrement `state.budget_steps_left`, and fold the verdict into `state.stations` / `state.visited_files` / `state.pending_queue` per the orchestrator's update rules.
+
+The loop terminates via the `_should_stop(state)` predicate (see separate Requirement). On termination, `run_explorer` returns an `ExplorerResult` containing the accumulated `state.stations`, the reasoning-log path, and a `stopped_reason` string classifying which convergence branch fired. Coverage-gap recursion is intentionally out of scope for this Requirement — the code site reserves a hook for the follow-up change but the recursive call MUST NOT execute in the P0 implementation.
+
+#### Scenario: Each iteration writes exactly one Step line
+
+- **WHEN** `run_explorer` runs with a budget that permits N iterations
+- **THEN** `logger.write(step)` MUST be invoked exactly N times, each with a `Step.step` value equal to the iteration index (0-based)
+- **AND** every `Step` written MUST contain a non-None `judge_verdict` (Judge ran in the same iteration)
+
+#### Scenario: Observations feed forward into next Think call
+
+- **WHEN** iteration K emits tool calls that return results `R1, R2`
+- **THEN** iteration K+1's `_think` invocation MUST include messages with `role="tool"` whose `content` reflects `R1.output` / `R2.output` so the LLM can react to observations
+
+#### Scenario: Tool errors do not crash the loop
+
+- **WHEN** a tool invocation inside `_execute_tools` raises any exception
+- **THEN** the exception MUST be captured into the corresponding `ToolResult.error` field (and `ToolResult.output` MUST hold a sanitized error string), the loop MUST continue to the Judge / Log / Update sub-steps, and the `Step` line written for that iteration MUST record the failed `ToolResult` verbatim
+
+#### Scenario: Coverage recursion hook remains dormant in P0
+
+- **WHEN** `_should_stop` returns true and `run_explorer` is about to return
+- **THEN** any code path that would call `coverage.check(state)` + recurse MUST be gated off (e.g., guarded by a feature flag defaulting to False or commented out with a link to the follow-up change) so P0 executions always return without a recursive call
+
+
+<!-- @trace
+source: explorer-react-loop-p0
+updated: 2026-04-24
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/prompts/__init__.py
+  - sidecar/src/codebus_agent/agent/prompts/judge.py
+  - sidecar/src/codebus_agent/agent/__init__.py
+  - sidecar/src/codebus_agent/agent/reasoning_logger.py
+  - docs/agent-core.md
+  - sidecar/src/codebus_agent/agent/protocols.py
+  - sidecar/src/codebus_agent/agent/prompts/explorer.py
+  - sidecar/src/codebus_agent/agent/types.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/judge.py
+tests:
+  - sidecar/tests/agent/test_types.py
+  - sidecar/tests/agent/conftest.py
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/agent/test_reasoning_logger.py
+  - sidecar/tests/agent/test_protocols.py
+  - sidecar/tests/agent/test_judge.py
+  - sidecar/tests/agent/__init__.py
+-->
+
+---
+### Requirement: Explorer Think step validates ExplorerAction via Instructor
+
+The `_think(state, provider, tool_specs)` internal function SHALL invoke `await provider.chat(messages, response_model=ExplorerAction)` exactly once per iteration and rely on the provider's Instructor integration to parse + validate the response into an `ExplorerAction` Pydantic instance. The provider passed in MUST be a `TrackedProvider` — the function MUST NOT construct a raw provider or bypass the tracking wrapper. The returned `ExplorerAction` MUST include `thought: str`, `tool_calls: list[ToolCall]`, and `stop: bool` fields.
+
+The `messages` argument to `provider.chat` SHALL consist of the current `state.messages` plus a freshly-rendered user message produced by `render_explorer_prompt(state, tool_specs)`; no messages from prior iterations SHALL be dropped by `_think` itself (any pruning is the responsibility of a future Context-compression change).
+
+#### Scenario: Think returns validated ExplorerAction instance
+
+- **WHEN** `_think` runs against a provider whose `chat()` returns an `ExplorerAction(thought="hi", tool_calls=[], stop=False)`
+- **THEN** the returned value MUST be an instance of `ExplorerAction` with the same fields; no raw JSON string MUST leak to the caller
+
+#### Scenario: Think rejects raw (untracked) providers at call-site
+
+- **WHEN** a caller wires `run_explorer` with a provider whose `type(provider)` is not `TrackedProvider`
+- **THEN** either the caller's integration test MUST fail at construction time (registry guard), OR `run_explorer` MUST NOT import/use raw provider classes directly — the agent layer's only reachable path to a live LLM goes through a `TrackedProvider` instance supplied by `app.state.llm_reasoning_provider(ws)`
+
+#### Scenario: Prompt version constant is stable across one session
+
+- **WHEN** `_think` runs N times in a single `run_explorer` invocation
+- **THEN** every call MUST use the same `EXPLORER_PROMPT_VERSION` constant value as recorded in the reasoning log
+
+
+<!-- @trace
+source: explorer-react-loop-p0
+updated: 2026-04-24
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/prompts/__init__.py
+  - sidecar/src/codebus_agent/agent/prompts/judge.py
+  - sidecar/src/codebus_agent/agent/__init__.py
+  - sidecar/src/codebus_agent/agent/reasoning_logger.py
+  - docs/agent-core.md
+  - sidecar/src/codebus_agent/agent/protocols.py
+  - sidecar/src/codebus_agent/agent/prompts/explorer.py
+  - sidecar/src/codebus_agent/agent/types.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/judge.py
+tests:
+  - sidecar/tests/agent/test_types.py
+  - sidecar/tests/agent/conftest.py
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/agent/test_reasoning_logger.py
+  - sidecar/tests/agent/test_protocols.py
+  - sidecar/tests/agent/test_judge.py
+  - sidecar/tests/agent/__init__.py
+-->
+
+---
+### Requirement: Judge evaluation runs as one-shot call per iteration
+
+The sidecar SHALL implement a `codebus_agent.agent.judge.LLMJudge` class that satisfies the `Judge` Protocol and produces a `JudgeVerdict` by invoking `provider.chat(messages, response_model=JudgeVerdict)` on a `TrackedProvider` obtained via the `llm_judge_provider(workspace_root)` factory (role `ProviderRole.JUDGE`, `default_module="judge"`). Each call to `LLMJudge.evaluate(state, results)` MUST be a one-shot LLM call — it MUST NOT enter a ReAct sub-loop and MUST NOT invoke `ExplorerTools`.
+
+The Judge's returned `JudgeVerdict` SHALL carry `relevance: float` (0.0 ≤ x ≤ 1.0), `should_follow_imports: bool`, `should_add_station: bool`, and `reason: str` fields. The Explorer loop's Update step reads these fields to mutate `state.stations` / `state.pending_queue` but Judge itself MUST NOT mutate `state`.
+
+#### Scenario: Judge produces validated verdict per iteration
+
+- **WHEN** `LLMJudge.evaluate(state, results)` is called where `results` is a list of `ToolResult` objects
+- **THEN** the result MUST be an instance of `JudgeVerdict` with `0.0 <= relevance <= 1.0` after Pydantic validation
+
+#### Scenario: Judge provider is distinct from reasoning provider
+
+- **WHEN** `run_explorer` is invoked with its `provider` (reasoning) and its `judge` (backed by `llm_judge_provider`)
+- **THEN** the `TrackedProvider` used by `_think` MUST have `role == ProviderRole.REASONING` and the one used by `LLMJudge.evaluate` MUST have `role == ProviderRole.JUDGE`; both MUST resolve to distinct `TrackedProvider` instances (audit records split by role)
+
+#### Scenario: Judge is stateless with respect to ExplorerState
+
+- **WHEN** `LLMJudge.evaluate(state, results)` returns
+- **THEN** `state.stations`, `state.visited_files`, `state.pending_queue`, and `state.step_count` MUST be unchanged relative to their values at call entry — only the Explorer loop's Update step is allowed to mutate them
+
+
+<!-- @trace
+source: explorer-react-loop-p0
+updated: 2026-04-24
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/prompts/__init__.py
+  - sidecar/src/codebus_agent/agent/prompts/judge.py
+  - sidecar/src/codebus_agent/agent/__init__.py
+  - sidecar/src/codebus_agent/agent/reasoning_logger.py
+  - docs/agent-core.md
+  - sidecar/src/codebus_agent/agent/protocols.py
+  - sidecar/src/codebus_agent/agent/prompts/explorer.py
+  - sidecar/src/codebus_agent/agent/types.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/judge.py
+tests:
+  - sidecar/tests/agent/test_types.py
+  - sidecar/tests/agent/conftest.py
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/agent/test_reasoning_logger.py
+  - sidecar/tests/agent/test_protocols.py
+  - sidecar/tests/agent/test_judge.py
+  - sidecar/tests/agent/__init__.py
+-->
+
+---
+### Requirement: ReasoningLogger appends one JSONL line per Step to workspace path
+
+The sidecar SHALL implement a `codebus_agent.agent.reasoning_logger.ReasoningLogger` class whose `write(step: Step)` method appends exactly one UTF-8 encoded JSON line per call to `{workspace_root}/reasoning_log.jsonl`. The JSON payload MUST be `step.model_dump_json()` output (Pydantic v2 canonical form) so every field of `Step` (including `thought`, `tool_calls`, `tool_results`, `judge_verdict`, `tokens_used`, `ts`) round-trips via `Step.model_validate_json`.
+
+Every written line SHALL additionally include the `explorer_prompt_version` and `judge_prompt_version` constant strings so golden-sample replays can pin prompt revisions. The logger MUST NOT emit any SSE events in P0 (wiring deferred to the follow-up SSE change) and MUST NOT write to any path outside `workspace_root`.
+
+Write failures (disk full, permission denied) MUST propagate as exceptions so the Explorer loop's error-handling path can log and terminate gracefully — silent drops are forbidden.
+
+#### Scenario: Each write appends exactly one JSONL line
+
+- **WHEN** `ReasoningLogger(path).write(step)` is called K times in sequence
+- **THEN** the file at `path` MUST contain exactly K lines, each terminated by `\n`, and each line MUST parse as a `Step` via `Step.model_validate_json`
+
+#### Scenario: Prompt version columns are present on every line
+
+- **WHEN** any line is parsed out of `reasoning_log.jsonl`
+- **THEN** the JSON object MUST contain string fields `explorer_prompt_version` and `judge_prompt_version` matching the module-level constants at write time
+
+#### Scenario: Path stays under workspace
+
+- **WHEN** `ReasoningLogger(path)` is constructed where `path` resolves above `workspace_root`
+- **THEN** the caller's integration site (e.g., `run_explorer`'s setup) MUST have rejected the path via `ensure_in_workspace` before construction; `ReasoningLogger` itself MAY rely on that precondition and perform no additional path check, but it MUST NOT silently create parent directories outside the workspace
+
+
+<!-- @trace
+source: explorer-react-loop-p0
+updated: 2026-04-24
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/prompts/__init__.py
+  - sidecar/src/codebus_agent/agent/prompts/judge.py
+  - sidecar/src/codebus_agent/agent/__init__.py
+  - sidecar/src/codebus_agent/agent/reasoning_logger.py
+  - docs/agent-core.md
+  - sidecar/src/codebus_agent/agent/protocols.py
+  - sidecar/src/codebus_agent/agent/prompts/explorer.py
+  - sidecar/src/codebus_agent/agent/types.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/judge.py
+tests:
+  - sidecar/tests/agent/test_types.py
+  - sidecar/tests/agent/conftest.py
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/agent/test_reasoning_logger.py
+  - sidecar/tests/agent/test_protocols.py
+  - sidecar/tests/agent/test_judge.py
+  - sidecar/tests/agent/__init__.py
+-->
+
+---
+### Requirement: Explorer loop stops on budget exhaustion, empty queue, or cancel signal
+
+The sidecar SHALL implement a `_should_stop(state, cancel_event)` predicate (internal to `codebus_agent.agent.explorer`) that returns `True` when any of three convergence conditions fires: (a) `state.budget_steps_left <= 0`, (b) `state.pending_queue == []` **and** `len(state.stations) >= _MIN_STATIONS_FOR_CONVERGENCE` (a module-level constant with a sensible P0 default, e.g. 3), or (c) `cancel_event.is_set()` is True.
+
+The predicate MUST be evaluated at the top of each loop iteration (before `_think`) so cancel signals abort cleanly without issuing an LLM call. When the predicate returns True, `run_explorer` MUST populate `ExplorerResult.stopped_reason` with one of the documented string values: `"budget_exhausted"`, `"queue_empty"`, `"cancelled"`.
+
+#### Scenario: Budget exhaustion terminates loop
+
+- **WHEN** `run_explorer` is called with `state.budget_steps_left == 0`
+- **THEN** the loop body MUST NOT execute even once — no `_think` call MUST fire — and the returned `ExplorerResult.stopped_reason` MUST equal `"budget_exhausted"`
+
+#### Scenario: Cancel event short-circuits mid-run
+
+- **WHEN** a caller sets the `asyncio.Event` passed as `cancel_event` between iterations K and K+1
+- **THEN** iteration K+1 MUST NOT invoke `_think`, `_execute_tools`, or `judge.evaluate`; `run_explorer` MUST return `ExplorerResult` with `stopped_reason == "cancelled"` and the stations accumulated through iteration K intact
+
+#### Scenario: Queue empty + enough stations terminates cleanly
+
+- **WHEN** an iteration completes such that `state.pending_queue == []` and `len(state.stations) >= _MIN_STATIONS_FOR_CONVERGENCE`
+- **THEN** the next iteration's `_should_stop` check MUST return True with `stopped_reason == "queue_empty"`
+
+
+<!-- @trace
+source: explorer-react-loop-p0
+updated: 2026-04-24
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/prompts/__init__.py
+  - sidecar/src/codebus_agent/agent/prompts/judge.py
+  - sidecar/src/codebus_agent/agent/__init__.py
+  - sidecar/src/codebus_agent/agent/reasoning_logger.py
+  - docs/agent-core.md
+  - sidecar/src/codebus_agent/agent/protocols.py
+  - sidecar/src/codebus_agent/agent/prompts/explorer.py
+  - sidecar/src/codebus_agent/agent/types.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/judge.py
+tests:
+  - sidecar/tests/agent/test_types.py
+  - sidecar/tests/agent/conftest.py
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/agent/test_reasoning_logger.py
+  - sidecar/tests/agent/test_protocols.py
+  - sidecar/tests/agent/test_judge.py
+  - sidecar/tests/agent/__init__.py
+-->
+
+---
+### Requirement: ExplorerTools, Judge, and CoverageChecker are structural Protocols
+
+The sidecar SHALL expose three `typing.Protocol` types in `codebus_agent.agent.protocols` that define the boundary between Explorer core and pluggable implementations: `ExplorerTools` (with `primary_search`, `fetch`, `follow_reference` coroutines), `Judge` (with `evaluate`), and `CoverageChecker` (with `check`). These Protocols MUST be `runtime_checkable` so tests can assert duck-typing conformance, but `run_explorer` MUST NOT perform `isinstance` checks in its hot path — type checking is enforced statically and at test boundaries.
+
+The Protocol surface is the day-1 abstraction that unlocks future reuse: Q&A Agent (Module 8) and Topic-mode Explorer (Phase 2) supply their own implementations without touching the core loop. Therefore the P0 shape MUST NOT leak Folder-mode-specific assumptions (e.g. file paths) into the Protocol signatures — use abstract types like `SearchHit`, `Content`, `Target` defined alongside the Protocols.
+
+#### Scenario: MockTools satisfies ExplorerTools structurally
+
+- **WHEN** a test class implements `primary_search` / `fetch` / `follow_reference` with correct coroutine signatures (no `ExplorerTools` inheritance)
+- **THEN** `isinstance(mock_tools, ExplorerTools)` MUST return True via `runtime_checkable`, and `run_explorer` MUST accept it as the `tools` argument without type error
+
+#### Scenario: Protocols do not bind Folder-mode types
+
+- **WHEN** `ExplorerTools.primary_search`'s signature is inspected
+- **THEN** its parameters and return type MUST be abstract (`query: str` → `list[SearchHit]`) rather than Folder-specific types, so a `TopicTools` implementation (Phase 2) can satisfy the same Protocol without core-loop changes
+
+
+<!-- @trace
+source: explorer-react-loop-p0
+updated: 2026-04-24
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/prompts/__init__.py
+  - sidecar/src/codebus_agent/agent/prompts/judge.py
+  - sidecar/src/codebus_agent/agent/__init__.py
+  - sidecar/src/codebus_agent/agent/reasoning_logger.py
+  - docs/agent-core.md
+  - sidecar/src/codebus_agent/agent/protocols.py
+  - sidecar/src/codebus_agent/agent/prompts/explorer.py
+  - sidecar/src/codebus_agent/agent/types.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/judge.py
+tests:
+  - sidecar/tests/agent/test_types.py
+  - sidecar/tests/agent/conftest.py
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/agent/test_reasoning_logger.py
+  - sidecar/tests/agent/test_protocols.py
+  - sidecar/tests/agent/test_judge.py
+  - sidecar/tests/agent/__init__.py
+-->
+
+---
+### Requirement: Agent-core types are Pydantic BaseModels with stable JSON serialization
+
+All ReAct data structures exposed in `codebus_agent.agent.types` (`Message`, `ToolCall`, `ToolResult`, `Step`, `JudgeVerdict`, `CoverageResult`, `Station`, `ExplorerState`, `ExplorerAction`, `ExplorerResult`) SHALL be Pydantic `BaseModel` subclasses. Each type MUST round-trip via `model_dump_json` / `model_validate_json` without data loss so that `reasoning_log.jsonl` replay, golden-sample fixtures, and future Generator-side consumers (Module 5) can rely on the on-disk schema.
+
+Numeric fields with natural bounds (e.g., `JudgeVerdict.relevance`) MUST carry Pydantic validators (e.g., `Field(ge=0, le=1)`) so out-of-range LLM outputs are rejected at parse time rather than polluting state.
+
+#### Scenario: ExplorerAction round-trips through Instructor parse path
+
+- **WHEN** a raw JSON payload `{"thought": "...", "tool_calls": [], "stop": false}` is validated via `ExplorerAction.model_validate_json`
+- **THEN** the resulting instance's `model_dump_json()` MUST yield a string that `json.loads` equal to the original object (key order may differ)
+
+#### Scenario: JudgeVerdict rejects out-of-range relevance
+
+- **WHEN** a JSON payload with `relevance=1.5` is validated via `JudgeVerdict.model_validate_json`
+- **THEN** Pydantic MUST raise a `ValidationError`; Instructor's retry machinery will either re-prompt the LLM or surface the error — the agent layer MUST NOT silently accept out-of-range values
+
+<!-- @trace
+source: explorer-react-loop-p0
+updated: 2026-04-24
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/prompts/__init__.py
+  - sidecar/src/codebus_agent/agent/prompts/judge.py
+  - sidecar/src/codebus_agent/agent/__init__.py
+  - sidecar/src/codebus_agent/agent/reasoning_logger.py
+  - docs/agent-core.md
+  - sidecar/src/codebus_agent/agent/protocols.py
+  - sidecar/src/codebus_agent/agent/prompts/explorer.py
+  - sidecar/src/codebus_agent/agent/types.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/judge.py
+tests:
+  - sidecar/tests/agent/test_types.py
+  - sidecar/tests/agent/conftest.py
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/agent/test_reasoning_logger.py
+  - sidecar/tests/agent/test_protocols.py
+  - sidecar/tests/agent/test_judge.py
+  - sidecar/tests/agent/__init__.py
+-->
