@@ -8,7 +8,7 @@ TBD - created by archiving change 'm1-power-on'. Update Purpose after archive.
 
 ### Requirement: UsageTracker writes token_usage.jsonl
 
-The sidecar SHALL implement a `UsageTracker` that appends one JSON line per LLM call to `<workspace>/token_usage.jsonl`, per `docs/decisions.md` D-021 and `docs/agent-core.md §十三`.
+The sidecar SHALL implement a `UsageTracker` that appends one JSON line per LLM call to `<workspace>/token_usage.jsonl`, per `docs/decisions.md` D-021 and `docs/agent-core.md §十三`. The `module` field on each line SHALL reflect the calling subsystem (e.g., `"kb_build"`, `"qa_agent"`); when `TrackedProvider` is constructed with `default_module`, that value SHALL be carried automatically into every record it writes, so callers do not duplicate the `record(...)` call themselves.
 
 #### Scenario: One line per chat call
 
@@ -25,12 +25,31 @@ The sidecar SHALL implement a `UsageTracker` that appends one JSON line per LLM 
 - **WHEN** an `LLMProvider.embed` call completes through the tracked wrapper
 - **THEN** a line with `operation="embed"` and `output_tokens=0` MUST be appended to `token_usage.jsonl`
 
+#### Scenario: Module field reflects TrackedProvider's default_module
+
+- **WHEN** a `TrackedProvider` is constructed with `default_module="kb_build"` and an `embed` call completes through it
+- **THEN** the appended `token_usage.jsonl` line MUST contain `"module": "kb_build"`, and no second line with the same `(timestamp, model, input_tokens)` tuple MUST be appended by any other layer (e.g., `KnowledgeBase` MUST NOT call `tracker.record()` itself)
+
+#### Scenario: Default module absent yields empty string
+
+- **WHEN** a `TrackedProvider` is constructed without `default_module` (or `default_module=None`) and a call completes through it
+- **THEN** the appended line's `module` field MUST be the empty string `""`, preserving backward compatibility with M1 records that did not carry a module label
+
 
 <!-- @trace
-source: m1-power-on
-updated: 2026-04-19
+source: usage-tracker-dedup
+updated: 2026-04-23
 code:
-  - web/dist
+  - sidecar/src/codebus_agent/api/__init__.py
+  - docs/llm-provider.md
+  - CLAUDE.md
+  - docs/module-2-kb-builder.md
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/providers/tracked.py
+tests:
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/kb/test_knowledge_base.py
+  - sidecar/tests/providers/test_default_module.py
 -->
 
 ---

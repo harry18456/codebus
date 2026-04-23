@@ -194,8 +194,15 @@ tracked = TrackedProvider(
     sanitizer=SanitizerEngine(),
     sanitizer_audit=SanitizerAuditLogger(ws / ".codebus" / "sanitize_audit.jsonl"),
     rules_version="2026-04-20-1",
+    default_module="kb_build",   # change `usage-tracker-dedup`
 )
 ```
+
+### `default_module` — single-source-of-truth for `module` label (change `usage-tracker-dedup`)
+
+`TrackedProvider` 是 `token_usage.jsonl` 的唯一寫入路徑。其他 subsystem（KB build / qa_agent / generator）**不得**自己呼 `tracker.record(...)`——而是在建 `TrackedProvider` 時帶 `default_module="kb_build"` / `"qa_agent"` / `"generator"`，TrackedProvider 在 `chat` / `embed` 的 record call 會把它塞進 `module` 欄。
+
+這條設計（對齊 D-021「強制所有 Provider 呼叫都走 tracker」與 M1「all calls through TrackedProvider」不變式）修掉了 `kb-build-production-wiring` 煙霧測發現的重複記帳 bug：同一 embed call 被 TrackedProvider 自動記一次、又被 KnowledgeBase 手動記一次，cost 加總會 2x。`usage-tracker-dedup` 把 KB 手動 record 拿掉,由 `default_module` 取代。
 
 **契約摘要**
 

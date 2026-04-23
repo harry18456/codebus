@@ -115,6 +115,11 @@ class KnowledgeBase:
         workspace_root: str,
         embedding_dim: int,
     ) -> None:
+        # NOTE (`usage-tracker-dedup`): `usage_tracker` is retained for
+        # backward compat — KnowledgeBase no longer writes to it (the
+        # wrapping `TrackedProvider` does, with `default_module="kb_build"`).
+        # Removing the parameter would break existing callers; full removal
+        # is queued for the next change once Module 4 / 5 align.
         self._backend = backend
         self._provider = provider
         self._tracker = usage_tracker
@@ -265,9 +270,14 @@ class KnowledgeBase:
                     # raw form keeps query and indexed vectors aligned.
                     texts = [item[1].text for item in batch]
                     response = await self._provider.embed(texts)
-                    self._tracker.record(
-                        usage=response.usage, module="kb_build"
-                    )
+                    # `usage-tracker-dedup`: KnowledgeBase no longer calls
+                    # `tracker.record(...)` here. The wrapping `TrackedProvider`
+                    # (constructed by `wire_kb_dependencies` with
+                    # `default_module="kb_build"`) is the sole record path,
+                    # which keeps the `UsageTracker writes token_usage.jsonl`
+                    # "exactly one new line per call" contract honest in
+                    # production. `self._tracker` is retained on the instance
+                    # for backward compat — see `KnowledgeBase.__init__`.
                     batches_embedded += 1
                     prompt_tokens_total += int(response.usage.embed_tokens)
                     points = []

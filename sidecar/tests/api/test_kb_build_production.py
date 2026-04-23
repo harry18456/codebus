@@ -142,14 +142,30 @@ def test_happy_path_kbstats_nonzero_counters(bearer: str, tmp_path: Path) -> Non
 
 
 def test_usage_tracker_writes_to_workspace_scoped_path(
-    bearer: str, tmp_path: Path
+    bearer: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Spec scenario "UsageTracker records embedding call for the requesting workspace".
 
-    The factory wiring in production guarantees `token_usage.jsonl`
-    lands at `{workspace_root}/token_usage.jsonl`.
+    Post `usage-tracker-dedup`: provider factory wraps SpyProvider in
+    TrackedProvider with `default_module="kb_build"` to mirror the
+    production wiring path. KnowledgeBase no longer writes to the
+    tracker itself, so the wrapping is now load-bearing.
     """
+    from codebus_agent.providers import (
+        LLMCallLogger,
+        ProviderRole,
+        TrackedProvider,
+    )
+    from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
     from tests.kb.conftest import InMemoryQdrantBackend, SpyProvider
+
+    # Test-only relaxation of TrackedProvider's allowed inner types so we
+    # can wrap SpyProvider without spinning up real OpenAI traffic.
+    monkeypatch.setattr(
+        TrackedProvider,
+        "ALLOWED_INNER_TYPES",
+        TrackedProvider.ALLOWED_INNER_TYPES | {SpyProvider},
+    )
 
     app = create_app(bearer_token=bearer)
     spy = SpyProvider()
@@ -159,9 +175,21 @@ def test_usage_tracker_writes_to_workspace_scoped_path(
     ws_str = str(ws_path)
     usage_path = ws_path / "token_usage.jsonl"
 
-    def _provider_factory(ws: Path):
-        # Deliberately ignore the arg — SpyProvider shared across all calls.
-        return spy
+    def _provider_factory(ws: Path) -> TrackedProvider:
+        # Mirror production: wrap raw provider in TrackedProvider with
+        # workspace-scoped audit logs + default_module="kb_build".
+        return TrackedProvider(
+            spy,
+            tracker=UsageTracker(Path(ws) / "token_usage.jsonl"),
+            logger=LLMCallLogger(Path(ws) / "llm_calls.jsonl"),
+            role=ProviderRole.EMBED,
+            sanitizer=SanitizerEngine(),
+            sanitizer_audit=SanitizerAuditLogger(
+                Path(ws) / ".codebus" / "sanitize_audit.jsonl"
+            ),
+            rules_version="2026-04-20-1",
+            default_module="kb_build",
+        )
 
     def _tracker_factory(ws: Path) -> UsageTracker:
         # Path MUST derive from caller's workspace_root.
@@ -196,7 +224,26 @@ def test_usage_tracker_writes_to_workspace_scoped_path(
         json.loads(line) for line in lines if json.loads(line).get("operation") == "embed"
     ]
     assert embed_lines, "no 'operation: embed' line found in token_usage.jsonl"
-    assert any(e.get("module") == "kb_build" for e in embed_lines)
+    # `usage-tracker-dedup` Requirement contract:
+    # `UsageTracker writes token_usage.jsonl` Scenario "Module field
+    # reflects TrackedProvider's default_module" — every embed line MUST
+    # carry the module label, AND no duplicate must be written by any
+    # other layer (pre-fix bug: KnowledgeBase.build also called
+    # tracker.record() so each batch produced 2 lines).
+    assert all(e.get("module") == "kb_build" for e in embed_lines), (
+        f"every embed line MUST carry module='kb_build'; got modules "
+        f"{[e.get('module') for e in embed_lines]}"
+    )
+    # Number of embed lines MUST equal `batches_embedded` from KBStats —
+    # exactly one record per batch, never two.
+    result = client.get(
+        f"/tasks/{task_id}/result", headers=_auth(bearer)
+    ).json()
+    assert len(embed_lines) == result["batches_embedded"], (
+        f"token_usage.jsonl has {len(embed_lines)} embed lines but "
+        f"KBStats reports {result['batches_embedded']} batches embedded — "
+        f"this is the dedup invariant from `usage-tracker-dedup`."
+    )
 
 
 def test_openai_rate_limited_surfaces_as_sse_error_event(

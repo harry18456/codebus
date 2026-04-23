@@ -307,8 +307,8 @@ env CODEBUS_QDRANT_URL       ──┼─► wire_kb_dependencies(app, openai_ap
 **依賴注入語意**:
 
 - **`kb_backend`（app-level 實例）**：`QdrantHttpBackend` 包 `AsyncQdrantClient`,一個 sidecar 共享一個連線
-- **`kb_provider`（workspace-level factory）**：呼叫時 build `TrackedProvider(inner=OpenAIEmbeddingProvider(), tracker=UsageTracker(<ws>/token_usage.jsonl), logger=LLMCallLogger(<ws>/llm_calls.jsonl), sanitizer=SanitizerEngine(), sanitizer_audit=SanitizerAuditLogger(<ws>/.codebus/sanitize_audit.jsonl), role=EMBED, rules_version=…)`
-- **`kb_usage_tracker`（workspace-level factory）**：回 `UsageTracker(<ws>/token_usage.jsonl)`,與 provider 內綁的 tracker 指同一 path,確保 `KnowledgeBase.build` 手動 `record(...)` 的 usage 與 provider 自動記錄的 usage 合流
+- **`kb_provider`（workspace-level factory）**：呼叫時 build `TrackedProvider(inner=OpenAIEmbeddingProvider(), tracker=UsageTracker(<ws>/token_usage.jsonl), logger=LLMCallLogger(<ws>/llm_calls.jsonl), sanitizer=SanitizerEngine(), sanitizer_audit=SanitizerAuditLogger(<ws>/.codebus/sanitize_audit.jsonl), role=EMBED, rules_version=…, default_module="kb_build")` ——`default_module` 由 `usage-tracker-dedup` 引入,讓 TrackedProvider 自動把 `module="kb_build"` 寫進 `token_usage.jsonl`,KB pipeline 不再手動 `tracker.record(...)`(避免每個 batch 被記兩次)
+- **`kb_usage_tracker`（workspace-level factory）**：回 `UsageTracker(<ws>/token_usage.jsonl)`,**目前** KB pipeline 不直接寫此 tracker（記帳路徑全走 TrackedProvider 內綁的同 path tracker）。slot 保留給未來 KB 層級的非 LLM-call 統計用途（例如 chunk 計數),Phase 2+ 與 Module 4/5 對齊時再決定是否拆掉
 - **`kb_embedding_dim`（app-level 常數）**：`OpenAIEmbeddingProvider` 宣告的 `OPENAI_EMBEDDING_DIM = 1536`
 
 **Graceful degrade 政策**（D-032 決策 2）：

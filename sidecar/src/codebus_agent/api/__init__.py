@@ -148,6 +148,11 @@ def _make_provider_factory() -> Callable[[Path], TrackedProvider]:
             sanitizer=SanitizerEngine(),
             sanitizer_audit=sanitizer_audit,
             rules_version=_RULES_VERSION,
+            # `usage-tracker-dedup`: TrackedProvider tags every record
+            # with this module label so `token_usage.jsonl` lines from
+            # KB build are aggregable / billable to the right subsystem
+            # without KnowledgeBase calling `tracker.record(...)` itself.
+            default_module="kb_build",
         )
 
     return _factory

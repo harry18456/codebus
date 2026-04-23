@@ -69,6 +69,7 @@ class TrackedProvider:
         sanitizer: SanitizerEngine,
         sanitizer_audit: SanitizerAuditLogger,
         rules_version: str,
+        default_module: str | None = None,
     ) -> None:
         if type(inner) not in self.ALLOWED_INNER_TYPES:
             raise TypeError(
@@ -106,6 +107,12 @@ class TrackedProvider:
         self._sanitizer = sanitizer
         self._sanitizer_audit = sanitizer_audit
         self._rules_version = rules_version
+        # `usage-tracker-dedup` (Option A): default_module is the SOLE label
+        # path into `token_usage.jsonl`. Empty string preserves M1 records'
+        # behavior (no module field meant blank). Callers like KB build pass
+        # "kb_build" via the wire_kb_dependencies factory so KB no longer
+        # needs to call `tracker.record(...)` itself.
+        self._default_module: str = default_module or ""
         self.name: str = getattr(inner, "name", "tracked")
 
     @property
@@ -163,6 +170,7 @@ class TrackedProvider:
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
             cost_usd=0.0,
+            module=self._default_module,
         )
         return result
 
@@ -210,6 +218,7 @@ class TrackedProvider:
             input_tokens=int(result.usage.embed_tokens),
             output_tokens=0,
             cost_usd=cost,
+            module=self._default_module,
         )
         return result
 

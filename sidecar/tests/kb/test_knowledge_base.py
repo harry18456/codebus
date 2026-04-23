@@ -391,12 +391,20 @@ async def test_embedding_concurrency_capped_at_3_inflight(
     )
 
 
-async def test_usage_tracker_records_one_entry_per_batch(
+async def test_kb_build_does_not_call_tracker_directly(
     in_memory_backend, spy_provider, tmp_path
 ) -> None:
-    """Scenario: UsageTracker records one entry per batch.
+    """`usage-tracker-dedup` invariant: KnowledgeBase MUST NOT call
+    `tracker.record(...)` itself — `TrackedProvider.embed` is the sole
+    record path so each batch produces exactly one `token_usage.jsonl`
+    line (the pre-fix bug had KB also recording, doubling each entry).
 
-    64 chunks → 2 batches → 2 jsonl entries with `module="kb_build"`.
+    This test passes a RAW `SpyProvider` (no TrackedProvider wrapping)
+    and asserts the tracker file ends up empty after a 64-chunk build.
+    Production wiring's TrackedProvider with `default_module="kb_build"`
+    is what writes the lines now — see
+    `tests/api/test_kb_build_production.py::test_usage_tracker_writes_to_workspace_scoped_path`
+    for the full-stack version of the contract.
     """
     log_path = tmp_path / "usage.jsonl"
     files = _unique_files(64)
@@ -404,21 +412,13 @@ async def test_usage_tracker_records_one_entry_per_batch(
 
     await kb.build(_make_scan(files))
 
-    entries = [
-        line for line in log_path.read_text(encoding="utf-8").splitlines() if line
-    ]
-    import json
-
-    parsed = [json.loads(e) for e in entries]
-    kb_entries = [e for e in parsed if e.get("module") == "kb_build"]
-    assert len(kb_entries) == 2, (
-        f"expected exactly 2 kb_build entries (one per batch); got {len(kb_entries)}"
-    )
-    total_input_tokens = sum(e["input_tokens"] for e in kb_entries)
-    expected = spy_provider.embed_token_per_text * 64
-    assert total_input_tokens == expected, (
-        f"recorded input_tokens {total_input_tokens} != provider total {expected}"
-    )
+    if log_path.exists():
+        contents = log_path.read_text(encoding="utf-8").strip()
+        assert contents == "", (
+            f"KnowledgeBase MUST NOT write usage records when provider is "
+            f"unwrapped (TrackedProvider is the sole record path); got "
+            f"contents:\n{contents}"
+        )
 
 
 async def test_oversized_chunk_split_then_skipped_with_warning(
