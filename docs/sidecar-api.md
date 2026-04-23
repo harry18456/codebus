@@ -172,6 +172,55 @@
 
 ---
 
+### `POST /kb/query`（change `kb-query-endpoint`）
+查 KB(Module 2)。**同步** JSON,非 SSE(query 通常 < 1s)。
+
+**Request**
+```json
+{
+  "workspace_root": "/abs/path/to/workspace",
+  "text": "storage adapter",
+  "top_k": 8,
+  "filter_path": "src/storage/types.ts",
+  "filter_source_kind": ["code"]
+}
+```
+
+| 欄位 | 規範 |
+|---|---|
+| `workspace_root` | abs path,sidecar 用此導出 collection name 與 audit log 路徑 |
+| `text` | 必填、非空字串;sidecar 會 embed 後做 cosine search |
+| `top_k` | 預設 8,範圍 `1..50`,超出回 422 |
+| `filter_path` | 選填;只回此 file_path 的 hits |
+| `filter_source_kind` | 選填;list of `"code"` / `"doc"` / `"skeleton"` 等 SourceKind |
+
+**Response**(200 OK)
+```json
+{
+  "hits": [
+    {
+      "point_id": "...",
+      "score": 0.87,
+      "payload": { "file_path": "src/foo.py", "source_kind": "code", "...": "..." }
+    }
+  ]
+}
+```
+
+`hits` 依 score 遞減排序。Empty workspace / 未 build 的 collection → 200 `{"hits": []}`(非 404,讓 caller 邏輯單一)。
+
+**錯誤回應**
+
+| Status | Body | 觸發條件 |
+|---|---|---|
+| 401 | bearer 拒絕 | 無 / bad `Authorization` header |
+| 422 | Pydantic validation | 缺欄位、`top_k <= 0` 或 `> 50`、`text` 空字串 |
+| 503 | `{"detail": {"code": "KB_NOT_CONFIGURED", "missing": [...]}}` | sidecar 啟動時無 `CODEBUS_OPENAI_API_KEY`(query 也需要 embed text 成向量) |
+
+**Cost 帳分離**:query 路徑的 embed call 在 `<workspace>/token_usage.jsonl` 標 `module="kb_query"`(非 `"kb_build"`),由 `app.state.kb_query_provider` factory 內的 TrackedProvider `default_module="kb_query"` 自動套用——詳見 `module-2-kb-builder.md §七` Production wiring 段。
+
+---
+
 ### `POST /explore`
 Explorer Agent 探索（Module 4）。async。
 

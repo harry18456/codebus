@@ -26,7 +26,7 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from codebus_agent.api.tasks import TaskRegistry, _run_background_task
 from codebus_agent.kb.knowledge_base import KnowledgeBase
@@ -232,10 +232,115 @@ async def kb_build_endpoint(
     return {"task_id": handle.id}
 
 
+# ---------------------------------------------------------------------------
+# POST /kb/query — synchronous JSON endpoint (change `kb-query-endpoint`)
+# ---------------------------------------------------------------------------
+
+
+class KBQueryRequest(BaseModel):
+    """Request body for ``POST /kb/query``.
+
+    Backs openspec/changes/kb-query-endpoint/specs/knowledge-base/spec.md
+      Requirement: POST /kb/query endpoint
+
+    `top_k` capped at 50 per the proposal Non-Goal: avoid accidental
+    large queries; typical RAG use is 8-16. `extra="forbid"` so callers
+    don't accidentally smuggle unsupported filter knobs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_root: str
+    text: str = Field(min_length=1)
+    top_k: int = Field(default=8, ge=1, le=50)
+    filter_path: str | None = None
+    filter_source_kind: list[str] | None = None
+
+
+def _require_query_deps(request: Request):
+    """Resolve the query path's dependencies; 503 KB_NOT_CONFIGURED on miss.
+
+    Reads ``app.state.kb_query_provider`` (the ``default_module="kb_query"``
+    factory wired by ``wire_kb_dependencies``) — distinct from
+    ``kb_provider`` so cost accounting can split build vs query in
+    ``token_usage.jsonl`` without per-call ``module=`` plumbing.
+    """
+    state = request.app.state
+    backend = getattr(state, "kb_backend", None)
+    query_provider_factory = getattr(state, "kb_query_provider", None)
+    tracker_factory = getattr(state, "kb_usage_tracker", None)
+    embedding_dim = getattr(state, "kb_embedding_dim", None)
+    if (
+        backend is None
+        or query_provider_factory is None
+        or tracker_factory is None
+        or embedding_dim is None
+    ):
+        missing = [
+            name
+            for name, val in (
+                ("kb_backend", backend),
+                ("kb_query_provider", query_provider_factory),
+                ("kb_usage_tracker", tracker_factory),
+                ("kb_embedding_dim", embedding_dim),
+            )
+            if val is None
+        ]
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "KB_NOT_CONFIGURED",
+                "message": "knowledge-base query dependencies not initialized",
+                "missing": missing,
+            },
+        )
+    return backend, query_provider_factory, tracker_factory, embedding_dim
+
+
+@router.post("/kb/query")
+async def kb_query_endpoint(
+    request: KBQueryRequest, http_request: Request
+) -> dict[str, Any]:
+    """Synchronously embed ``text`` and return top-k matching ``KBHit``s.
+
+    Backs openspec/changes/kb-query-endpoint/specs/knowledge-base/spec.md
+      Requirement: POST /kb/query endpoint
+
+    Empty / unbuilt collection → ``200 {"hits": []}`` (Non-Goal documented:
+    no 404 for unbuilt workspace; callers see a single "no results" mode).
+    """
+    from pathlib import Path as _Path
+
+    backend, provider_factory, tracker_factory, embedding_dim = _require_query_deps(
+        http_request
+    )
+
+    workspace_path = _Path(request.workspace_root)
+    provider = provider_factory(workspace_path)
+    tracker = tracker_factory(workspace_path)
+
+    kb = KnowledgeBase(
+        backend=backend,
+        provider=provider,
+        usage_tracker=tracker,
+        workspace_root=request.workspace_root,
+        embedding_dim=embedding_dim,
+    )
+    hits = await kb.query(
+        request.text,
+        top_k=request.top_k,
+        filter_path=request.filter_path,
+        filter_source_kind=request.filter_source_kind,
+    )
+    return {"hits": [hit.model_dump(mode="json") for hit in hits]}
+
+
 __all__ = [
     "router",
     "KBBuildRequest",
+    "KBQueryRequest",
     "kb_build_endpoint",
+    "kb_query_endpoint",
     "_KBProgressAdapter",
     "_make_kb_progress_adapter",
 ]

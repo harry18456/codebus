@@ -151,6 +151,63 @@ def test_kb_provider_slot_is_factory_returning_tracked_provider(
     assert isinstance(provider._inner, OpenAIEmbeddingProvider)
 
 
+def test_query_provider_factory_uses_kb_query_module(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec `KB query endpoint registration` Scenario "Both KB build and KB
+    query slots present after wiring":
+
+    `app.state.kb_query_provider` is a separate factory from
+    `app.state.kb_provider`. Both invoked with the same workspace return
+    distinct TrackedProviders with `_default_module` "kb_build" vs "kb_query"
+    respectively, so cost accounting can split build/query embedding spend.
+    """
+    monkeypatch.setenv("CODEBUS_OPENAI_API_KEY", "sk-test")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(_OPENAI_EMBED_URL).mock(
+            return_value=httpx.Response(200, json=_fake_embed_response(["ping"]))
+        )
+        app = create_app(
+            bearer_token=_bearer(),
+            qdrant_url="http://127.0.0.1:6333",
+            openai_api_key="sk-test",
+        )
+
+    build_factory = app.state.kb_provider
+    query_factory = app.state.kb_query_provider
+    assert callable(build_factory), "kb_provider must be a factory"
+    assert callable(query_factory), "kb_query_provider must be a factory"
+
+    ws = tmp_path / "ws-q"
+    ws.mkdir()
+    build_provider = build_factory(ws)
+    query_provider = query_factory(ws)
+    assert isinstance(build_provider, TrackedProvider)
+    assert isinstance(query_provider, TrackedProvider)
+    assert build_provider is not query_provider, (
+        "build / query providers MUST be distinct instances so audit logs do not "
+        "share state"
+    )
+    assert build_provider._default_module == "kb_build"
+    assert query_provider._default_module == "kb_query"
+
+
+def test_missing_openai_key_leaves_query_provider_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec `KB query endpoint registration` Scenario "Missing OpenAI API key
+    leaves both provider slots None"."""
+    # env fixture already unset CODEBUS_OPENAI_API_KEY.
+    app = create_app(
+        bearer_token=_bearer(),
+        qdrant_url="http://127.0.0.1:6333",
+        openai_api_key=None,
+    )
+    assert app.state.kb_provider is None
+    assert app.state.kb_query_provider is None
+
+
 def test_healthz_reports_openai_embedding_dependency_states(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

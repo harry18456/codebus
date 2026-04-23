@@ -102,11 +102,20 @@ def wire_kb_dependencies(
         app.state.kb_backend = None
 
     if openai_api_key:
-        app.state.kb_provider = _make_provider_factory()
+        app.state.kb_provider = _make_provider_factory(default_module="kb_build")
+        # `kb-query-endpoint`: distinct factory for the query path so
+        # `token_usage.jsonl` lines from `/kb/query` are tagged
+        # `module="kb_query"` (vs `"kb_build"` from `/kb/build`),
+        # letting cost accounting split build vs query without per-call
+        # `module=` plumbing in the endpoint handlers.
+        app.state.kb_query_provider = _make_provider_factory(
+            default_module="kb_query"
+        )
         app.state.kb_usage_tracker = _make_tracker_factory()
         app.state.kb_embedding_dim = OPENAI_EMBEDDING_DIM
     else:
         app.state.kb_provider = None
+        app.state.kb_query_provider = None
         app.state.kb_usage_tracker = None
         app.state.kb_embedding_dim = None
 
@@ -120,7 +129,9 @@ def _make_tracker_factory() -> Callable[[Path], UsageTracker]:
     return _factory
 
 
-def _make_provider_factory() -> Callable[[Path], TrackedProvider]:
+def _make_provider_factory(
+    *, default_module: str
+) -> Callable[[Path], TrackedProvider]:
     """Factory for workspace-scoped TrackedProvider wrapping OpenAIEmbeddingProvider.
 
     TrackedProvider binds three audit loggers at construction time, all
@@ -132,6 +143,11 @@ def _make_provider_factory() -> Callable[[Path], TrackedProvider]:
     Constructing the raw ``OpenAIEmbeddingProvider`` inside the factory
     (vs. once at startup) is acceptable: the openai SDK is inexpensive
     to instantiate relative to a multi-minute KB build.
+
+    ``default_module`` is parameterized (``kb-query-endpoint``) so the
+    same factory shape can produce ``kb_build``-tagged providers for the
+    build path and ``kb_query``-tagged providers for the query path,
+    splitting cost in ``token_usage.jsonl`` without per-call plumbing.
     """
 
     def _factory(workspace_root: Path) -> TrackedProvider:
@@ -149,10 +165,10 @@ def _make_provider_factory() -> Callable[[Path], TrackedProvider]:
             sanitizer_audit=sanitizer_audit,
             rules_version=_RULES_VERSION,
             # `usage-tracker-dedup`: TrackedProvider tags every record
-            # with this module label so `token_usage.jsonl` lines from
-            # KB build are aggregable / billable to the right subsystem
-            # without KnowledgeBase calling `tracker.record(...)` itself.
-            default_module="kb_build",
+            # with this module label so `token_usage.jsonl` lines are
+            # aggregable / billable to the right subsystem without the
+            # caller needing to plumb `module=` through every call.
+            default_module=default_module,
         )
 
     return _factory

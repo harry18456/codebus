@@ -49,9 +49,9 @@ M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19
 
 接下來里程碑在 `docs/implementation-plan.md`；下一條通常先從 Module 1 Scanner 或 Qdrant lifecycle bootstrap 起（下個未指派 D 編號）。
 
-最近一筆 archive：`2026-04-23-kb-build-production-wiring`（D-032；KB build production DI：`OpenAIEmbeddingProvider` + `wire_kb_dependencies` factory-based DI + KB dim-mismatch guard + `/healthz` `openai_embedding` 三態探測；見 `docs/module-2-kb-builder.md §七` Production wiring 段 + `docs/llm-provider.md §三-bis`）。
+最近一筆 archive：`2026-04-23-usage-tracker-dedup`（修 `kb-build-production-wiring` 煙霧測發現的 `token_usage.jsonl` 重複記帳 bug：TrackedProvider 加 `default_module` 為 `module` 欄唯一寫入路徑、KnowledgeBase 移除手動 `tracker.record(...)`；見 `docs/llm-provider.md §三-bis` 末尾「default_module」段）。
 
-最近一筆 in-progress：`usage-tracker-dedup`（修 `kb-build-production-wiring` 煙霧測發現的 `token_usage.jsonl` 重複記帳 bug：TrackedProvider 加 `default_module` 為 `module` 欄唯一寫入路徑、KnowledgeBase 移除手動 `tracker.record(...)`；見 `docs/llm-provider.md §三-bis` 末尾「default_module」段）。
+最近一筆 in-progress：`kb-query-endpoint`（`POST /kb/query` 同步 KB 查詢端點 + `kb_query_provider` factory 帶 `default_module="kb_query"` 將 build vs query cost 在 `token_usage.jsonl` 拆開記帳;見 `docs/sidecar-api.md §三 POST /kb/query` + `docs/module-2-kb-builder.md §七` Production wiring 段)。
 
 ## 架構快照
 
