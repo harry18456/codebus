@@ -1180,6 +1180,60 @@ CodeBus 核心敘事是 **Agentic Exploration > Naive RAG**（見 `agent-explore
 
 ---
 
+## D-032: Embedding provider 選 OpenAI `text-embedding-3-small`（推翻 sentence-transformers 本地備案）
+
+**狀態**：✅ 已決（2026-04-22）— **M2 production 預設 embedding provider 為 OpenAI `text-embedding-3-small`（dim 1536），本地 provider 延至 offline-mode change**
+
+### 脈絡
+
+`sse-progress-skeleton` 已落地 `POST /kb/build` 的 SSE 骨架，但端點在 production 會回 `503 KB_NOT_CONFIGURED` —— `app.state.kb_provider` 還沒任何 embedding provider 註冊。此 ADR 固定 M2 的選擇,讓 `kb-build-production-wiring` change 有明確實作目標。
+
+D-003 已敲定 LLM Provider 抽象允許「只接指定 LLM 供應商 API」,但當時沒具體選 embedding model。此 ADR 補這塊。
+
+### 考慮過的選項
+
+| 選項 | 優點 | 缺點 |
+|---|---|---|
+| **OpenAI `text-embedding-3-small`（dim 1536）** | cost 低（$0.02 / 1M tokens）、latency 穩、dim 常見、demo 友善、SDK 成熟 | 需 API key、非本地、有 rate limit |
+| OpenAI `text-embedding-3-large`（dim 3072） | 少數 benchmark 勝 small 版 | cost 6.5 倍、demo 體感無差、dim 肥 |
+| sentence-transformers 本地（例 `all-MiniLM-L6-v2` dim 384） | 完全本地、零 API cost、對齊「本地優先」claim | onefile binary 肥 ~500MB、首次 model 下載 UX 差、RAG 準確度較低 |
+| Voyage AI / Cohere | 某些評測勝 OpenAI | 第三方 lock-in、demo 認知成本高、對齊 D-003 精神較弱 |
+
+### 決策
+
+1. **MVP 選 OpenAI `text-embedding-3-small`**：`OpenAIEmbeddingProvider.embed()` 以此 model 為實作目標,dim 固定 1536
+2. **本地 provider 延至另一條 change**（`offline-mode-provider` 或類似）——不在 `kb-build-production-wiring` scope
+3. **API key 只讀 env var**（`CODEBUS_OPENAI_API_KEY`）,對齊 D-local-2「bearer 只在記憶體」精神,不做任何持久化儲存
+4. **Missing API key → graceful degrade**：sidecar 仍正常啟動,`POST /kb/build` 回 503 `KB_NOT_CONFIGURED`,`/healthz` `openai_embedding.status == "not-configured"`
+5. **Dim-mismatch guard 放在 KB 層**：既有 Qdrant collection dim 不符 → `POST /kb/build` 回 409 `KB_DIM_MISMATCH`,帶 `expected_dim` / `actual_dim` / `suggestion`
+6. **Retry / backoff 委派給 Provider 層**（不在 KB pipeline 做雙層 retry,避免 rate limit debug 爆炸）
+
+### 理由
+
+- **demo 優先「跑得順 + 看得懂」**：MVP 每 workspace 一次 build 通常 < $0.10,cost 不是 blocker
+- **沒有本地 provider 會拖住通電**：sentence-transformers 首次下載 model 要幾百 MB,對 first-run UX（D-008）三個等待點是負面影響
+- **獨立 offline-mode change**：離線需求可以另外做,不用綁在 M2 主路徑
+
+### 後續變動政策
+
+- 換 model（例：以後要切 `text-embedding-3-large`）→ 新 change,必帶 migration 計畫（dim 變 → collection 要 re-embed）。目前 `KB_DIM_MISMATCH` 只擋寫,不做自動遷移。
+- `CODEBUS_OPENAI_MODEL` env var 切換？**不支援**。避免 dim-mismatch 成為常態,model 固定於 provider code。
+
+### 連動更新
+
+- [ ] `openspec/specs/llm-provider/spec.md`：ADDED `OpenAI embedding provider` Requirement（`kb-build-production-wiring` delta）
+- [ ] `openspec/specs/knowledge-base/spec.md`：ADDED `KB build production dependency wiring` Requirement
+- [ ] `openspec/specs/sidecar-runtime/spec.md`：ADDED `KB dependency injection hook` Requirement
+- [ ] `docs/module-2-kb-builder.md §七`：補 production wiring 段
+- [ ] `docs/llm-provider.md`：補 OpenAI embedding 段
+- [ ] `docs/sidecar-api.md §一`：`/healthz` dependency map 加 `openai_embedding` key
+
+### 預估工期
+
+- ADR + spec deltas + 實作 + 測試 + 文件：2.5d（見 `openspec/changes/kb-build-production-wiring/tasks.md` 50 tasks）
+
+---
+
 ### 需要決策動作
 - [x] D-001：定技術棧（混合架構）（2026-04-17）
 - [x] D-003：決定 Ollama 路徑（Provider 抽象 + 只接指定 LLM 供應商 API）（2026-04-17）

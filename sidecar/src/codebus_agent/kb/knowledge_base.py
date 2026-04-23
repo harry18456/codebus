@@ -157,6 +157,17 @@ class KnowledgeBase:
             ),
         )
 
+        # ---- Dim-mismatch guard (D-032 decision 4) ---------------------
+        # Check BEFORE embedding so a collection/model mismatch fails
+        # loudly without burning any OpenAI API calls. Happens after
+        # chunking (which is local / free) so the caller sees how big the
+        # build would have been. Skip when no chunks were produced —
+        # empty workspace has nothing to collide with.
+        if chunks_emitted > 0:
+            await self._backend.ensure_collection(
+                self.collection_name, expected_dim=self._embedding_dim
+            )
+
         # ---- Hash + dedup ----------------------------------------------
         embeddable: list[tuple[FileEntry, ChunkDraft, str]] = []
         warnings: list[str] = []

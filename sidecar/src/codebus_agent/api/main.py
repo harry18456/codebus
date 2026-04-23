@@ -90,7 +90,15 @@ def run(argv: list[str] | None = None) -> None:
     # D-027 + design「Startup policy：degraded-but-alive」— thread the
     # resolved Qdrant URL through to the app factory so /healthz reflects
     # live connectivity, but never block startup on Qdrant being reachable.
-    app = create_app(bearer_token=bearer, qdrant_url=_kb_qdrant.resolve_url())
+    # D-032 (kb-build-production-wiring): CODEBUS_OPENAI_API_KEY env var
+    # feeds the KB embedding provider. Missing → sidecar still starts;
+    # POST /kb/build returns 503 KB_NOT_CONFIGURED until the env is set
+    # and the sidecar restarts.
+    app = create_app(
+        bearer_token=bearer,
+        qdrant_url=_kb_qdrant.resolve_url(),
+        openai_api_key=os.environ.get("CODEBUS_OPENAI_API_KEY"),
+    )
     try:
         asyncio.run(_serve(app, sock, port, bearer, args.parent_pid))
     finally:

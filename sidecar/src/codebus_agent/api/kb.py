@@ -137,25 +137,46 @@ def _make_kb_progress_adapter(handle) -> ProgressCallback:
 def _require_kb_deps(request: Request):
     """Resolve KB dependencies from ``app.state``; 503 if not wired.
 
-    Production wiring populates ``app.state.kb_backend`` /
-    ``app.state.kb_provider`` / ``app.state.kb_usage_tracker`` /
-    ``app.state.kb_embedding_dim``. Tests inject in-memory doubles via
-    the same ``app.state`` slots.
+    Production wiring (``kb-build-production-wiring`` change, D-032
+    decision 3 / A-plan) populates:
+      * ``app.state.kb_backend``        — ``QdrantHttpBackend`` instance
+      * ``app.state.kb_provider``       — ``Callable[[Path], TrackedProvider]`` factory
+      * ``app.state.kb_usage_tracker``  — ``Callable[[Path], UsageTracker]`` factory
+      * ``app.state.kb_embedding_dim``  — ``int``
+
+    Tests inject ``lambda _ws: instance`` for the factory slots to reuse
+    singleton doubles across builds.
     """
     state = request.app.state
     backend = getattr(state, "kb_backend", None)
-    provider = getattr(state, "kb_provider", None)
-    tracker = getattr(state, "kb_usage_tracker", None)
+    provider_factory = getattr(state, "kb_provider", None)
+    tracker_factory = getattr(state, "kb_usage_tracker", None)
     embedding_dim = getattr(state, "kb_embedding_dim", None)
-    if backend is None or provider is None or tracker is None or embedding_dim is None:
+    if (
+        backend is None
+        or provider_factory is None
+        or tracker_factory is None
+        or embedding_dim is None
+    ):
+        missing = [
+            name
+            for name, val in (
+                ("kb_backend", backend),
+                ("kb_provider", provider_factory),
+                ("kb_usage_tracker", tracker_factory),
+                ("kb_embedding_dim", embedding_dim),
+            )
+            if val is None
+        ]
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "code": "KB_NOT_CONFIGURED",
                 "message": "knowledge-base dependencies not initialized on this sidecar",
+                "missing": missing,
             },
         )
-    return backend, provider, tracker, embedding_dim
+    return backend, provider_factory, tracker_factory, embedding_dim
 
 
 @router.post("/kb/build")
@@ -168,8 +189,15 @@ async def kb_build_endpoint(
     already holds a running task. Errors raised by ``KnowledgeBase.build``
     surface via the ``_run_background_task`` wrapper as a sanitized SSE
     ``error`` event (see ``api/tasks.py`` `Background task error containment`).
+
+    Factory dispatch: ``kb_provider`` and ``kb_usage_tracker`` are
+    ``Callable[[Path], ...]`` per D-032 A-plan, so audit logs land under
+    the caller's ``workspace_root``. Both factories are invoked here with
+    the request's ``workspace_root`` before the background task spawns.
     """
-    backend, provider, tracker, embedding_dim = _require_kb_deps(http_request)
+    backend, provider_factory, tracker_factory, embedding_dim = _require_kb_deps(
+        http_request
+    )
 
     registry: TaskRegistry = http_request.app.state.tasks
     handle = registry.create("kb")
@@ -184,6 +212,10 @@ async def kb_build_endpoint(
         )
 
     on_progress = _make_kb_progress_adapter(handle)
+    from pathlib import Path as _Path
+    workspace_path = _Path(request.workspace_root)
+    provider = provider_factory(workspace_path)
+    tracker = tracker_factory(workspace_path)
 
     async def _coro_factory() -> dict[str, Any]:
         kb = KnowledgeBase(

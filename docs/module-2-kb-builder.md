@@ -272,15 +272,55 @@ Body: { "workspace_root": "<abs>", "scan_result": <ScanResult JSON> }
 
 設計要點：
 
-- 端點解析 `(backend, provider, usage_tracker, embedding_dim)` 自 `app.state`
-  （正式 wiring 由 sidecar bootstrap 注入；測試以 in-memory double 注入相同
-  `app.state` slot），缺任一即回 503。
+- 端點解析 `(backend, provider_factory, tracker_factory, embedding_dim)` 自 `app.state`
+  （正式 wiring 由 `api/__init__.py::wire_kb_dependencies` 注入——見下方
+  「Production wiring」段；測試以 `lambda _ws: instance` 包裝 in-memory double
+  注入相同 `app.state` slot），缺任一即回 503。
+- `kb_provider` 與 `kb_usage_tracker` 為 `Callable[[Path], ...]` factory
+  （D-032 決策 3 A 方案）——每次 `POST /kb/build` 依 `request.workspace_root`
+  分別呼叫兩個 factory，確保 `TrackedProvider` 內的 audit logger（`token_usage.jsonl`
+  / `llm_calls.jsonl` / `sanitize_audit.jsonl`）全部落在正確的 workspace path。
 - 進度走 `_make_kb_progress_adapter(handle)` → `KnowledgeBase.build(...,
   on_progress=…)`；wire 翻譯規則見上方 §六「Progress 回報」。
 - 終端 `KBStats` 透過 `_run_background_task` wrapper 寫入 `handle.result`，
   消費端用 `GET /tasks/{id}/result` 取（詳見 `sidecar-api.md §三-bis`）。
 - 任何 build 例外被 wrapper 收斂成 sanitized SSE `error` event（`KB_EMBED_FAILED`
-  / `INTERNAL_ERROR`），不洩漏 traceback；完整 traceback 只進 logger。
+  / `OPENAI_AUTH_FAILED` / `OPENAI_RATE_LIMITED` / `KB_DIM_MISMATCH` / `INTERNAL_ERROR`），
+  不洩漏 traceback；完整 traceback 只進 logger。
+
+### Production wiring（change `kb-build-production-wiring`, D-032）
+
+對應 `openspec/changes/kb-build-production-wiring/specs/{knowledge-base,sidecar-runtime,llm-provider}/spec.md`。
+
+**啟動路徑**（`api/main.py` → `create_app` → `wire_kb_dependencies`）：
+
+```
+env CODEBUS_OPENAI_API_KEY  ──┐
+env CODEBUS_QDRANT_URL       ──┼─► wire_kb_dependencies(app, openai_api_key, qdrant_url)
+                                │
+                                ├─► app.state.kb_backend         = QdrantHttpBackend(client)
+                                ├─► app.state.kb_provider        = factory(ws) -> TrackedProvider
+                                ├─► app.state.kb_usage_tracker   = factory(ws) -> UsageTracker
+                                └─► app.state.kb_embedding_dim   = 1536
+```
+
+**依賴注入語意**:
+
+- **`kb_backend`（app-level 實例）**：`QdrantHttpBackend` 包 `AsyncQdrantClient`,一個 sidecar 共享一個連線
+- **`kb_provider`（workspace-level factory）**：呼叫時 build `TrackedProvider(inner=OpenAIEmbeddingProvider(), tracker=UsageTracker(<ws>/token_usage.jsonl), logger=LLMCallLogger(<ws>/llm_calls.jsonl), sanitizer=SanitizerEngine(), sanitizer_audit=SanitizerAuditLogger(<ws>/.codebus/sanitize_audit.jsonl), role=EMBED, rules_version=…)`
+- **`kb_usage_tracker`（workspace-level factory）**：回 `UsageTracker(<ws>/token_usage.jsonl)`,與 provider 內綁的 tracker 指同一 path,確保 `KnowledgeBase.build` 手動 `record(...)` 的 usage 與 provider 自動記錄的 usage 合流
+- **`kb_embedding_dim`（app-level 常數）**：`OpenAIEmbeddingProvider` 宣告的 `OPENAI_EMBEDDING_DIM = 1536`
+
+**Graceful degrade 政策**（D-032 決策 2）：
+
+| 狀況 | 行為 |
+|---|---|
+| `CODEBUS_OPENAI_API_KEY` 未設 | sidecar 正常啟動；`kb_provider` / `kb_embedding_dim` 留 `None`；`POST /kb/build` 回 503 `KB_NOT_CONFIGURED`；`/healthz` `openai_embedding.status = "not-configured"` |
+| env 有設但 OpenAI auth 失敗 | smoke probe 在啟動時發現;`/healthz` `openai_embedding.status = "degraded"`;`POST /kb/build` 仍允許送出但會在 build 中 raise 並被包成 `OPENAI_AUTH_FAILED` SSE error |
+| env 有設且 OpenAI 通 | `/healthz` `openai_embedding.status = "ok"`,happy path 跑完回 KBStats |
+| Qdrant 既有 collection dim 不符 | `KnowledgeBase.build()` 在 chunking 完 / embed 前呼 `backend.ensure_collection(expected_dim)` 擋下 → `KBDimMismatchError` → SSE error event 帶 `expected_dim` / `actual_dim` / `suggestion` |
+
+**Healthz smoke probe 例外**（D-032 決策 3）：`/healthz` 的 `openai_embedding` 狀態由啟動時的 raw `OpenAIEmbeddingProvider.embed(["ping"])` 決定——**不經 TrackedProvider**,因為 workspace path 此時還不知道,且健康檢查不是 production traffic。結果 cache 於 `app.state.openai_embedding_probe`,`/healthz` 不每次都打 OpenAI。
 
 ---
 

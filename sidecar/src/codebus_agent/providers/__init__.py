@@ -12,6 +12,13 @@ from __future__ import annotations
 
 from .llm_call_logger import LLMCallLogger
 from .mock import MockProvider, MockScript
+from .openai_embedding import (
+    OPENAI_EMBEDDING_DIM,
+    OPENAI_EMBEDDING_MODEL,
+    OpenAIAuthError,
+    OpenAIEmbeddingProvider,
+    OpenAIRateLimitError,
+)
 from .protocol import (
     EmbedResponse,
     LLMProvider,
@@ -31,6 +38,11 @@ __all__ = [
     "Message",
     "MockProvider",
     "MockScript",
+    "OPENAI_EMBEDDING_DIM",
+    "OPENAI_EMBEDDING_MODEL",
+    "OpenAIAuthError",
+    "OpenAIEmbeddingProvider",
+    "OpenAIRateLimitError",
     "ProviderRegistry",
     "ProviderRegistryError",
     "ProviderRole",

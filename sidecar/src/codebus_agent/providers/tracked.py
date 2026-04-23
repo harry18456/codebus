@@ -43,6 +43,7 @@ from ..sanitizer import (
 )
 from .llm_call_logger import LLMCallLogger
 from .mock import MockProvider
+from .openai_embedding import OpenAIEmbeddingProvider
 from .protocol import EmbedResponse, Message, ProviderRole
 from .usage_tracker import UsageTracker
 
@@ -50,7 +51,13 @@ from .usage_tracker import UsageTracker
 class TrackedProvider:
     """Decorator-style wrapper enforcing audit on every LLM call."""
 
-    ALLOWED_INNER_TYPES: ClassVar[frozenset[type]] = frozenset({MockProvider})
+    # `kb-build-production-wiring` adds `OpenAIEmbeddingProvider` per D-032:
+    # M2 permits outbound traffic specifically for embeddings. Other live
+    # providers (chat / reasoning) remain gated behind future changes that
+    # must extend this tuple explicitly.
+    ALLOWED_INNER_TYPES: ClassVar[frozenset[type]] = frozenset(
+        {MockProvider, OpenAIEmbeddingProvider}
+    )
 
     def __init__(
         self,

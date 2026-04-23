@@ -575,3 +575,64 @@ tests:
   - sidecar/tests/api/test_tasks_sse.py
   - sidecar/tests/scanner/test_progress_callback.py
 -->
+
+---
+### Requirement: KB build production dependency wiring
+
+The sidecar SHALL expose a `POST /kb/build` endpoint that, when all four KB dependencies (`kb_backend`, `kb_provider`, `kb_usage_tracker` factory, `kb_embedding_dim`) are populated on `app.state`, executes a full chunk → embed → upsert pipeline and makes the resulting `KBStats` retrievable via `GET /tasks/{id}/result`. When any dependency is absent or misconfigured, the endpoint SHALL respond with a specific, documented error code so the caller can recover without restarting the sidecar.
+
+#### Scenario: Happy path returns KBStats via result endpoint
+
+- **WHEN** `CODEBUS_OPENAI_API_KEY` is set, Qdrant is reachable, and the caller posts a valid `{workspace_root, scan_result}` body to `POST /kb/build`
+- **THEN** the endpoint MUST return `200 {"task_id": "kb_<hex8>"}` within 2 seconds, emit `progress` and `done` events over the SSE stream, and make a `KBStats` object with non-zero `chunks_emitted` and `points_upserted` reachable through `GET /tasks/{task_id}/result`
+
+#### Scenario: Missing OpenAI API key returns 503 KB_NOT_CONFIGURED
+
+- **WHEN** the sidecar starts without `CODEBUS_OPENAI_API_KEY` and the caller posts to `POST /kb/build`
+- **THEN** the endpoint MUST return `503` with body `{"code": "KB_NOT_CONFIGURED", "missing": ["embedding_provider"]}` and MUST NOT create a task handle, MUST NOT emit any SSE events, and MUST NOT call the Qdrant backend
+
+#### Scenario: Existing collection with wrong vector dimension returns 409 KB_DIM_MISMATCH
+
+- **WHEN** the Qdrant collection named by the workspace already exists with a vector dimension different from the dimension declared by the configured embedding provider, and the caller posts to `POST /kb/build`
+- **THEN** the background task MUST emit an SSE `error` event with `{"code": "KB_DIM_MISMATCH", "expected_dim": <provider-dim>, "actual_dim": <collection-dim>, "suggestion": "delete collection and rebuild"}` before any embedding calls are made, and MUST NOT upsert any points
+
+#### Scenario: OpenAI rate limit surfaces as sanitized error event
+
+- **WHEN** the OpenAI embedding provider exhausts its internal retry budget during a `POST /kb/build` task
+- **THEN** the background task MUST emit an SSE `error` event with `code: "OPENAI_RATE_LIMITED"` (or `OPENAI_AUTH_FAILED` for 401 responses), MUST NOT leak the provider's stack trace in the wire event, and the full traceback MUST be written only to the sidecar logger
+
+#### Scenario: UsageTracker records embedding call for the requesting workspace
+
+- **WHEN** a `POST /kb/build` task completes successfully against `workspace_root=/abs/example`
+- **THEN** at least one line with `operation="embed"` and `module="kb_build"` MUST be appended to `/abs/example/token_usage.jsonl` (or the workspace-scoped path defined by the existing `UsageTracker writes token_usage.jsonl` Requirement), with `input_tokens > 0` and a non-null `cost_usd`
+
+<!-- @trace
+source: kb-build-production-wiring
+updated: 2026-04-23
+code:
+  - sidecar/src/codebus_agent/providers/openai_embedding.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/kb/backend.py
+  - sidecar/src/codebus_agent/api/tasks.py
+  - docs/module-2-kb-builder.md
+  - sidecar/src/codebus_agent/providers/tracked.py
+  - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/api/main.py
+  - docs/llm-provider.md
+  - sidecar/src/codebus_agent/api/__init__.py
+  - sidecar/src/codebus_agent/health.py
+  - sidecar/uv.lock
+  - docs/decisions.md
+  - sidecar/pyproject.toml
+  - sidecar/src/codebus_agent/providers/__init__.py
+  - docs/implementation-plan.md
+  - CLAUDE.md
+tests:
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/test_wire_kb_dependencies.py
+  - sidecar/tests/kb/conftest.py
+  - sidecar/tests/kb/test_dim_mismatch.py
+  - sidecar/tests/providers/test_openai_embedding.py
+-->

@@ -174,6 +174,51 @@ class ContestProvider(LLMProvider):
 
 ---
 
+## 三-bis、Production embedding：`OpenAIEmbeddingProvider`（change `kb-build-production-wiring`, D-032）
+
+對應 `openspec/changes/kb-build-production-wiring/specs/llm-provider/spec.md`
+Requirement `OpenAI embedding provider`。
+
+M2 production 預設 embedding provider 固定為 OpenAI `text-embedding-3-small`（dim 1536）。
+
+```python
+from codebus_agent.providers.openai_embedding import OpenAIEmbeddingProvider
+
+# 啟動時(wire_kb_dependencies 內)
+raw = OpenAIEmbeddingProvider()              # 讀 CODEBUS_OPENAI_API_KEY
+tracked = TrackedProvider(
+    raw,
+    role=ProviderRole.EMBED,
+    tracker=UsageTracker(ws / "token_usage.jsonl"),
+    logger=LLMCallLogger(ws / "llm_calls.jsonl"),
+    sanitizer=SanitizerEngine(),
+    sanitizer_audit=SanitizerAuditLogger(ws / ".codebus" / "sanitize_audit.jsonl"),
+    rules_version="2026-04-20-1",
+)
+```
+
+**契約摘要**
+
+| 項目 | 規範 |
+|---|---|
+| Model | `text-embedding-3-small`（hard-coded，dim 1536） |
+| API key 來源 | **只讀** `CODEBUS_OPENAI_API_KEY` env var；**不** fallback `OPENAI_API_KEY`（避免繞過 sidecar 的 graceful degrade 契約） |
+| `embed()` 回傳 | `EmbedResponse(vectors, usage)`；`usage.embed_tokens` 是真實值（從 OpenAI response 拿），`usage.cost_usd = tokens * 0.02 / 1M` |
+| Retry / backoff | 委派給 `openai` SDK 預設 retry budget（D-032 決策 6），不在 KB pipeline 再疊 |
+| Registry guard | 必經 `TrackedProvider` 包裝；`ALLOWED_INNER_TYPES = {MockProvider, OpenAIEmbeddingProvider}` |
+
+**錯誤碼對照**
+
+| Provider 例外 | `_classify_exception` → 映射的 wire code | 觸發條件 |
+|---|---|---|
+| `OpenAIAuthError` | `OPENAI_AUTH_FAILED` | OpenAI 回 401（bad / missing key） |
+| `OpenAIRateLimitError` | `OPENAI_RATE_LIMITED` | SDK retry budget 用完仍收到 429 |
+| `KBDimMismatchError`（KB 層） | `KB_DIM_MISMATCH` | 既有 Qdrant collection dim 與 provider 宣告 dim 不符 |
+
+錯誤訊息不含 API key、不含 request headers repr；完整 traceback 只進 sidecar logger,SSE error event 只帶 sanitized `message`（見 `sidecar-api.md §三-bis`）。
+
+---
+
 ## 四、Phase 2 預留：`OllamaProvider`
 
 不在 MVP，但介面已定，未來可做：

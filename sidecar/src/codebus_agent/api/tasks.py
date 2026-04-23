@@ -39,8 +39,17 @@ TaskStatus = Literal["running", "done", "error"]
 
 # Closed values per design `error event 安全性`. The endpoint MUST pick from
 # this table — never echo `repr(exc)` into the wire.
+# `kb-build-production-wiring` adds OPENAI_AUTH_FAILED / OPENAI_RATE_LIMITED /
+# KB_DIM_MISMATCH for production KB build paths (D-032 decisions 4 & 5).
 ERROR_CODES: frozenset[str] = frozenset(
-    {"SCAN_FAILED", "KB_EMBED_FAILED", "INTERNAL_ERROR"}
+    {
+        "SCAN_FAILED",
+        "KB_EMBED_FAILED",
+        "INTERNAL_ERROR",
+        "OPENAI_AUTH_FAILED",
+        "OPENAI_RATE_LIMITED",
+        "KB_DIM_MISMATCH",
+    }
 )
 
 _VALID_KINDS: frozenset[str] = frozenset({"scan", "kb"})
@@ -190,8 +199,20 @@ def _classify_exception(exc: BaseException) -> str:
     leak shape information about internal failures into the wire. The full
     exception is logged separately so operators still have full diagnostic
     context.
+
+    `kb-build-production-wiring` adds branches for OpenAI auth / rate-limit
+    failures (typed exceptions from ``providers.openai_embedding``) and for
+    KB dim-mismatch (D-032 decision 4 — catch before embed fires).
     """
     name = type(exc).__name__
+    # Explicit typed checks first — order matters: OpenAIAuthError subclasses
+    # Exception, so name-based branches below would otherwise swallow it.
+    if name == "OpenAIAuthError":
+        return "OPENAI_AUTH_FAILED"
+    if name == "OpenAIRateLimitError":
+        return "OPENAI_RATE_LIMITED"
+    if name == "KBDimMismatchError":
+        return "KB_DIM_MISMATCH"
     # Heuristic dispatch — kept narrow on purpose. Each branch's message is
     # already safe (constants, no `repr(exc)`).
     if name == "ScanError" or "scan" in name.lower():
@@ -207,7 +228,34 @@ def _safe_error_message(code: str) -> str:
         return "scan task failed"
     if code == "KB_EMBED_FAILED":
         return "knowledge-base build failed"
+    if code == "OPENAI_AUTH_FAILED":
+        return "OpenAI authentication failed; verify CODEBUS_OPENAI_API_KEY"
+    if code == "OPENAI_RATE_LIMITED":
+        return "OpenAI rate limit exceeded; try again later"
+    if code == "KB_DIM_MISMATCH":
+        return "knowledge-base collection vector dimension mismatch"
     return "internal sidecar error"
+
+
+def _enrich_error_event(code: str, exc: BaseException) -> dict[str, Any]:
+    """Add code-specific context fields to the wire error event.
+
+    Kept narrow on purpose: only fields that the spec requires or that are
+    safe derivatives of the exception's typed attributes. Never echoes
+    ``repr(exc)`` or ``str(exc)`` — extraction goes through the exception's
+    documented instance attributes instead.
+    """
+    if code == "KB_DIM_MISMATCH":
+        expected = getattr(exc, "expected_dim", None)
+        actual = getattr(exc, "actual_dim", None)
+        extra: dict[str, Any] = {}
+        if isinstance(expected, int):
+            extra["expected_dim"] = expected
+        if isinstance(actual, int):
+            extra["actual_dim"] = actual
+        extra["suggestion"] = "delete collection and rebuild"
+        return extra
+    return {}
 
 
 async def _run_background_task(
@@ -221,9 +269,10 @@ async def _run_background_task(
     Invariants per spec `Background task error containment`:
       * Subscribers always observe either a ``done`` or an ``error`` event
         before the stream closes.
-      * The wire ``error`` event carries only ``code`` + safe ``message``;
-        ``repr(exc)`` / tracebacks NEVER hit the wire — they go to the
-        sidecar logger instead.
+      * The wire ``error`` event carries only ``code`` + safe ``message``
+        (plus a narrow, code-specific set of typed extras — see
+        ``_enrich_error_event``); ``repr(exc)`` / tracebacks NEVER hit the
+        wire, they go to the sidecar logger instead.
       * ``done`` and ``error`` are mutually exclusive: ``done`` only fires
         on a clean return path, ``error`` only on the except path.
     """
@@ -234,7 +283,12 @@ async def _run_background_task(
         if code not in ERROR_CODES:
             code = "INTERNAL_ERROR"
         message = _safe_error_message(code)
-        error_event = {"type": "error", "code": code, "message": message}
+        error_event: dict[str, Any] = {
+            "type": "error",
+            "code": code,
+            "message": message,
+        }
+        error_event.update(_enrich_error_event(code, exc))
         handle.status = "error"
         handle.error_event = error_event
         handle.emit(error_event)

@@ -19,13 +19,23 @@ class DependencyStatus:
     ``detail`` is a short human-readable hint (connection refused,
     timeout, bad response, etc.) — surfaced to the parent process so
     the UI can say something more actionable than "degraded".
+
+    ``status`` is an explicit string label that backs the
+    ``kb-build-production-wiring`` spec ``KB dependency injection hook``
+    scenarios (which require three states: ``ok`` / ``degraded`` /
+    ``not-configured``). When ``status`` is unset it is derived from
+    ``ok`` so existing call sites keep working unchanged.
     """
 
     ok: bool
     detail: str = ""
+    status: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        out: dict[str, object] = {"ok": self.ok}
+        out: dict[str, object] = {
+            "ok": self.ok,
+            "status": self.status or ("ok" if self.ok else "degraded"),
+        }
         if self.detail:
             out["detail"] = self.detail
         return out

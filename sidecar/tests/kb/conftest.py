@@ -50,10 +50,33 @@ class InMemoryQdrantBackend:
     Cosine similarity is computed in pure Python; the backend is small
     enough that we don't need numpy. Filter handling mirrors the live
     wrapper: equality scalars and list-membership for `related_stations`.
+
+    ``kb-build-production-wiring`` adds ``ensure_collection(expected_dim)``:
+    tracks the dim first recorded per collection and raises
+    ``KBDimMismatchError`` when a later caller requests a different dim
+    (mirrors the live ``QdrantHttpBackend`` contract).
     """
 
     def __init__(self) -> None:
         self._collections: dict[str, list[_StoredPoint]] = {}
+        self._dims: dict[str, int] = {}
+
+    async def ensure_collection(
+        self, collection: str, *, expected_dim: int
+    ) -> None:
+        from codebus_agent.kb.backend import KBDimMismatchError
+
+        known = self._dims.get(collection)
+        if known is None:
+            self._dims[collection] = expected_dim
+            self._collections.setdefault(collection, [])
+            return
+        if known != expected_dim:
+            raise KBDimMismatchError(
+                collection=collection,
+                expected_dim=expected_dim,
+                actual_dim=known,
+            )
 
     async def ensure_indices(self, collection: str) -> None:
         self._collections.setdefault(collection, [])

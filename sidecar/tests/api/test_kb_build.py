@@ -91,8 +91,11 @@ def _make_scan(workspace_root: str = "/abs/workspace/demo") -> dict:
 def app_with_kb_deps(bearer: str):
     """Build an app and inject in-memory KB dependencies via app.state.
 
-    The endpoint resolves `(backend, provider)` from `app.state` so tests
-    can wire offline doubles without spinning up Qdrant.
+    The endpoint resolves `(backend, provider_factory, tracker_factory)` from
+    `app.state` per `kb-build-production-wiring` A-plan (decision 3):
+    provider + tracker are workspace-scoped factories. Tests wrap the
+    existing singleton doubles in ``lambda _ws: instance`` so the same
+    spy / in-memory backend backs every build.
     """
     from codebus_agent.providers.usage_tracker import UsageTracker
 
@@ -101,11 +104,11 @@ def app_with_kb_deps(bearer: str):
     from tests.kb.conftest import InMemoryQdrantBackend, SpyProvider
 
     app = create_app(bearer_token=bearer)
+    spy_provider = SpyProvider()
+    shared_tracker = UsageTracker(Path("/tmp/codebus_kb_api_test_usage.jsonl"))
     app.state.kb_backend = InMemoryQdrantBackend()
-    app.state.kb_provider = SpyProvider()
-    app.state.kb_usage_tracker = UsageTracker(
-        Path("/tmp/codebus_kb_api_test_usage.jsonl")
-    )
+    app.state.kb_provider = lambda _ws: spy_provider
+    app.state.kb_usage_tracker = lambda _ws: shared_tracker
     app.state.kb_embedding_dim = 8
     return app
 
