@@ -34,24 +34,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 使用者偏好 **繁體中文（zh-TW）** 回覆。Spec 內文、commit message、code comment 的 prose 也是 zh-TW；schema / 識別字 / filename / test name 維持英文。
 
-## Repo 現況（M1「power-on」封存後）
+## Repo 現況
 
-M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19-m1-power-on/`）。最小通電骨架就位，但尚未做 Module 1 ~ 8 的功能：
+M1「power-on」通電（2026-04-19 archive）後，資料層 + provider wiring 已補齊；下一個里程碑是 **Module 4 Explorer Agent P0**（`docs/implementation-plan.md` 步驟 16-23）。
 
-- `sidecar/` — uv-managed Python 3.12 sidecar（FastAPI app factory、ephemeral port bind、bearer auth、`/healthz`、stdout handshake、`--parent-pid` watchdog、ToolSandbox、LLMProvider Protocol + MockProvider + TrackedProvider、UsageTracker、LLMCallLogger、PyInstaller onefile spec；2026-04-21 加入 Module 2 KB Builder P0：`KnowledgeBase` / `KBPayload` / token-window chunker + 策略分派 / `KBQdrantBackend` Protocol + `QdrantHttpBackend` adapter，change `module-2-kb-builder-p0`；2026-04-22 加入 sidecar SSE skeleton：`POST /kb/build` async + `POST /scan?stream=true` opt-in + `GET /tasks/{id}/events|result` 單槽 in-memory registry + `_run_background_task` 錯誤收斂 wrapper，change `sse-progress-skeleton`；2026-04-22 加入 KB build production wiring：`CODEBUS_OPENAI_API_KEY` env 啟用真實 KB build、`OpenAIEmbeddingProvider`（`text-embedding-3-small` dim 1536）、`wire_kb_dependencies` factory-based DI、KB dim-mismatch guard、`/healthz` `openai_embedding` 三態探測，change `kb-build-production-wiring` D-032）
-- `tauri/src-tauri/` — Rust host + `sidecar_ping` command（spawn 已打包 sidecar → 讀 stdout handshake → `GET /healthz`）。`src/sidecar.rs` 負責 spawn 協定、`src/lib.rs` 的 `resolve_sidecar_path()` 讓 packaged / dev 模式都找得到 sibling binary
-- `web/` — Nuxt 3 + Tailwind + TypeScript 骨架（npm，見 D-026），目前只有 landing page 與 Sidecar Ping 按鈕（`app/app.vue` / `app/components/`）
-- `openspec/specs/` — 8 capability spec（`app-packaging` / `llm-provider` / `qdrant-client` / `repo-layout` / `sidecar-runtime` / `tauri-shell` / `tool-sandbox` / `usage-tracking`），都是 M1 archive 時灌入的
-- `docs/` — 14 份 Module / Agent / 橫切層 spec + `decisions.md` ADR + `README.md` / `dev-setup.md` / `implementation-plan.md` / `prompts.md`
-- `design/` — Phase A Trust Layer 的 3 份 HTML mockup（`r-01` / `o-01` / `o-05`）+ 14 張截圖
-- `tests/golden/` — `demo-synthetic/`（比賽 demo / regression fixture）+ `timeline-gdrive-adapter/`（參考實作）
-- `tests/fixtures/` — `precommit-violations/`（commit-gate 負測 fixture）
+**子系統**
 
-接下來里程碑在 `docs/implementation-plan.md`；下一條通常先從 Module 1 Scanner 或 Qdrant lifecycle bootstrap 起（下個未指派 D 編號）。
+- `sidecar/` — uv-managed Python 3.12 FastAPI sidecar。核心：app factory、ephemeral port + bearer、stdout handshake、`--parent-pid` watchdog、ToolSandbox（`ensure_in_workspace` + red team fixture）、LLMProvider Protocol + `ProviderRole` dispatch + `MockProvider` / `OpenAIEmbeddingProvider` / `OpenAIChatProvider`、`TrackedProvider`（唯一 `token_usage.jsonl` / `llm_calls.jsonl` 寫入路徑）、三段 Sanitizer 前兩段、Qdrant lifecycle、Module 1 Scanner、Module 2 KB Builder + KB query + dim-mismatch guard、SSE task skeleton、PyInstaller onefile spec。
+- `tauri/src-tauri/` — Rust host + `sidecar_ping` command。`src/sidecar.rs` spawn 協定、`src/lib.rs::resolve_sidecar_path()` 在 packaged / dev 模式都找得到 sibling binary。
+- `web/` — Nuxt 3 + Tailwind + TypeScript 骨架（npm，D-026）。目前只有 landing page 與 Sidecar Ping 按鈕；Trust Layer 四站（R-01 / O-01 / O-04 / O-05）mockup 已畫好但尚未實作。
+- `openspec/specs/` — 11 個 capability spec：`app-packaging` / `folder-scanner` / `knowledge-base` / `llm-provider` / `qdrant-client` / `repo-layout` / `sanitizer` / `sidecar-runtime` / `tauri-shell` / `tool-sandbox` / `usage-tracking`。
+- `docs/` — 14 份 Module / Agent / 橫切層 spec + `decisions.md` ADR + `README.md` / `dev-setup.md` / `implementation-plan.md` / `prompts.md`。
+- `design/` — Phase A Trust Layer 的 3 份 HTML mockup（`r-01` / `o-01` / `o-05`）+ 14 張截圖。
+- `tests/golden/` — `demo-synthetic/`（比賽 demo / regression fixture）+ `timeline-gdrive-adapter/`（參考實作）。
+- `tests/fixtures/` — `precommit-violations/`（commit-gate 負測 fixture）。
 
-最近一筆 archive：`2026-04-23-usage-tracker-dedup`（修 `kb-build-production-wiring` 煙霧測發現的 `token_usage.jsonl` 重複記帳 bug：TrackedProvider 加 `default_module` 為 `module` 欄唯一寫入路徑、KnowledgeBase 移除手動 `tracker.record(...)`；見 `docs/llm-provider.md §三-bis` 末尾「default_module」段）。
+**archive 時間軸**（由舊至新，每條 archive 對應 `openspec/changes/archive/YYYY-MM-DD-<name>/`）
 
-最近一筆 in-progress：`kb-query-endpoint`（`POST /kb/query` 同步 KB 查詢端點 + `kb_query_provider` factory 帶 `default_module="kb_query"` 將 build vs query cost 在 `token_usage.jsonl` 拆開記帳;見 `docs/sidecar-api.md §三 POST /kb/query` + `docs/module-2-kb-builder.md §七` Production wiring 段)。
+| 日期 | Change | 重點 |
+|---|---|---|
+| 2026-04-19 | `m1-power-on` | Tauri ↔ Sidecar 通電骨架、bearer、handshake、watchdog、Provider Protocol、UsageTracker、LLMCallLogger |
+| 2026-04-20 | `llm-role-routing` | `ProviderRole`（reasoning / judge / chat / embed）+ `registry.get(role)` 分派；TrackedProvider 必帶 `role` |
+| 2026-04-21 | `qdrant-lifecycle-bootstrap` | `AsyncQdrantClient` 綁 app state + probe-backed healthz |
+| 2026-04-21 | `scanner-skeleton` | Module 1 遍歷 + gitignore + encoding + `ScanResult` |
+| 2026-04-21 | `sanitizer-safety-chain` | Pass 1 detect-secrets + PII regex + placeholder；Pass 2 provider pre-flight hook（`sanitizer_pass2_applied` 會翻 true）；`sanitize_audit.jsonl` |
+| 2026-04-21 | `scanner-sanitizer-orchestration` | Scanner 入 KB 前過 Pass 1 |
+| 2026-04-21 | `module-2-kb-builder-p0` | `KnowledgeBase` / `KBPayload` / token-window chunker + 策略分派 / `KBQdrantBackend` Protocol + `QdrantHttpBackend` |
+| 2026-04-22 | `sse-progress-skeleton` | `POST /kb/build` async + `POST /scan?stream=true` + `GET /tasks/{id}/events\|result` + `_run_background_task` 錯誤收斂 |
+| 2026-04-23 | `kb-build-production-wiring`（D-032） | `OpenAIEmbeddingProvider`（`text-embedding-3-small` dim 1536）+ `wire_kb_dependencies` factory DI + dim-mismatch guard + `/healthz` `openai_embedding` 三態 |
+| 2026-04-23 | `kb-query-endpoint` | `POST /kb/query` 同步查詢 + `kb_query_provider` factory 帶 `default_module="kb_query"` 拆帳 |
+| 2026-04-23 | `usage-tracker-dedup` | TrackedProvider 加 `default_module`，變成 `module` 欄唯一寫入路徑；KB 不再手動 `tracker.record(...)` |
+| 2026-04-23 | `chat-provider-wiring` | `OpenAIChatProvider`（instructor-wrapped `gpt-4o-mini`）+ `OpenAIContextLengthError`/`OPENAI_CONTEXT_EXCEEDED` + 三個 chat-ish role factory（`llm_reasoning_provider` 0.1 / `llm_judge_provider` 0.0 / `llm_chat_provider` 0.2）+ `/healthz` `openai_chat` 三態；M1 `No outbound LLM traffic during M1` 不變式退役，由 `Outbound LLM traffic gated by TrackedProvider whitelist` 取代 |
+
+**目前沒有 in-progress change**。下一步依 `docs/implementation-plan.md`：Module 4 Explorer P0（自寫 ReAct loop + `reasoning_log.jsonl` 寫檔 + `search` / `list_dir` / `read_file` / `mark_station` 四個真工具）。
 
 ## 架構快照
 
@@ -66,7 +81,7 @@ M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19
 
 **Agent 核心**（D-012）：自寫 ReAct loop + Instructor/Pydantic structured output。Explorer 與 Q&A Agent **共用** ReAct core，靠 `ExplorerTools` / `Judge` / `CoverageChecker` Protocol 抽象（`docs/agent-explorer-spec.md §十二`）。
 
-**LLM 呼叫鏈**（M1 已實作 + llm-role-routing archive）：registry 只能註冊 `MockProvider`（zero outbound 不變式，M1 測試 suite 靠 `respx`/socket patch 守門），且所有 provider 必須包 `TrackedProvider` 裝飾器——registry 在實例化階段 raise 拒絕 unwrapped provider。分派機制走 `ProviderRole`（`chat` / `reasoning` / `judge` / `embedding`）：呼叫端用 `registry.get(role)` 取對應 provider；`TrackedProvider` 建構必帶 `role` kwarg，`token_usage.jsonl` / `llm_calls.jsonl` 每筆都帶 `role` 欄位。`TrackedProvider` 同步寫 `UsageTracker`（`token_usage.jsonl`）與 `LLMCallLogger`（`llm_calls.jsonl`，含 `sanitizer_pass2_applied` 欄位，M1 一律 false）。
+**LLM 呼叫鏈**（M1 + llm-role-routing + kb-build-production-wiring + chat-provider-wiring 合成）：所有 provider 必須包 `TrackedProvider` 裝飾器——registry 在實例化階段 raise 拒絕 unwrapped provider。允許的 inner class 是一個顯式 allowlist：`TrackedProvider.ALLOWED_INNER_TYPES = {MockProvider, OpenAIEmbeddingProvider, OpenAIChatProvider}`；要擴增 provider（Ollama / Anthropic）必須在新 change 裡同步改 spec `Outbound LLM traffic gated by TrackedProvider whitelist` 與 code allowlist。測試 suite 用 `respx` mock OpenAI wire。分派機制走 `ProviderRole`（`reasoning` / `judge` / `chat` / `embed`）：呼叫端用 `registry.get(role)` 或 app state 的 `llm_<role>_provider(workspace)` factory 取對應 TrackedProvider。`TrackedProvider` 建構必帶 `role`、`default_module` kwarg，每筆 `token_usage.jsonl` / `llm_calls.jsonl` 記錄都帶 `role` + `module`（後者由 `usage-tracker-dedup` 引入，是 module 欄的唯一寫入路徑）。`llm_calls.jsonl` 含 `sanitizer_pass2_applied` 欄位：sanitizer-safety-chain 後真的 Pass 2 hit 即 true。
 
 **Trust Layer 四站**（Phase A，敘事核心 — 評審會停在這邊）：
 - **R-01** Workspace（主畫面 + 六層 audit 面板）
@@ -74,23 +89,23 @@ M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19
 - **O-05** Sanitizer Diff（LOCKED/UNLOCKED 稽核畫面）
 - **O-01** Grant Modal（workspace 授權）
 
-**三段 Sanitizer**（D-015，M2 才實作）：Pass 1 Scanner 入 KB 前 → Pass 2 Provider pre-flight 每次 LLM call 前 → Pass 3 Q&A `add_to_kb` 寫入前。詳見 `docs/sanitizer.md §三`。
+**三段 Sanitizer**（D-015）：Pass 1 Scanner 入 KB 前（`scanner-sanitizer-orchestration` 落地）→ Pass 2 Provider pre-flight 每次 LLM call 前（`sanitizer-safety-chain` 落地，由 `TrackedProvider` 注入 `SanitizerEngine` + `SanitizerAuditLogger`）→ Pass 3 Q&A `add_to_kb` 寫入前（待 Module 8 Q&A P0）。詳見 `docs/sanitizer.md §三`。
 
 **七層 Audit JSONL**（workspace-level 六層 + App-level 一層）：
-- `sanitize_audit.jsonl`（Sanitizer 命中）
-- `tool_audit.jsonl`（Sandbox 工具呼叫）
-- `kb_growth.jsonl`（Q&A add_to_kb）
-- `reasoning_log.jsonl`（ReAct 每 step）
-- `token_usage.jsonl`（D-021，M1 已實作）
-- `llm_calls.jsonl`（D-022 完整 wire payload，M1 已實作）
+- `sanitize_audit.jsonl`（Sanitizer 命中；Pass 1 Scanner + Pass 2 Provider 都會寫，帶 `pass_num` 欄）
+- `tool_audit.jsonl`（Sandbox 工具呼叫；Module 4 Explorer 實作時開始填）
+- `kb_growth.jsonl`（Q&A `add_to_kb`；Module 8 實作時開始填）
+- `reasoning_log.jsonl`（ReAct 每 step；Module 4 實作時開始填）
+- `token_usage.jsonl`（D-021 + `usage-tracker-dedup`）：唯一寫入路徑是 `TrackedProvider`，`module` 欄由構造時的 `default_module` 寫入（目前值：`kb_build` / `kb_query` / `reasoning` / `judge` / `chat`）
+- `llm_calls.jsonl`（D-022）：完整 wire payload，`sanitizer_pass2_applied` M2 後真會翻 true
 - `~/.codebus/authorization_audit.jsonl`（跨 workspace，App-level，見 `docs/authorization.md §五`）
 
 ## 關鍵不變式（寫 spec / code 時必守）
 
 1. **雙模 discriminator day 1**（D-002）：`workspace_type: "folder" | "topic"` 欄位從一開始就寫進 schema；MVP 只實作 `folder`，但 `topic` 加進來不能造成 breaking change。`ToolContext`（`sidecar/src/codebus_agent/sandbox.py` + `docs/tool-sandbox.md §三`）、`POST /scan`（`docs/sidecar-api.md §三`）、`authorization_audit`（`docs/authorization.md §五`）都遵守此約。
 2. **Sanitizer 單向**：placeholder `<REDACTED:kind#N>` 無 reverse mapping，一旦替換即不可逆；原值「不額外儲存」，原檔在本機原處，不 copy 到 KB/log/網路。
-3. **LLM 看到的一定是 Sanitize 過的**：`llm_calls.jsonl` 記的是 post-Sanitizer Pass 2 版本，不還原 pre-sanitize 原文（D-022）。M1 `sanitizer_pass2_applied` 永遠 false；M2 實作 Pass 2 時翻 true，舊欄位不刪、不改型別。
-4. **Provider 必包 TrackedProvider**：registry guard 已在實例化階段攔截 unwrapped provider（`sidecar/src/codebus_agent/providers/`）。新增 provider 時必須經 registry；不可直接 import 繞過。
+3. **LLM 看到的一定是 Sanitize 過的**：`llm_calls.jsonl` 記的是 post-Sanitizer Pass 2 版本，不還原 pre-sanitize 原文（D-022）。`sanitizer_pass2_applied` 欄位在 sanitizer-safety-chain 後才真會翻 true（M1 舊行為 false）；不變的是此欄位永遠存在、型別不變。
+4. **Provider 必包 TrackedProvider + allowlist 同步**：registry guard 在實例化階段攔截 unwrapped provider（`sidecar/src/codebus_agent/providers/`）；而且只有 `TrackedProvider.ALLOWED_INNER_TYPES` 裡列的 inner class 才能包入。目前 allowlist 是 `{MockProvider, OpenAIEmbeddingProvider, OpenAIChatProvider}`——要加新 live provider 必須同步修 `openspec/specs/llm-provider/spec.md` 的 `Outbound LLM traffic gated by TrackedProvider whitelist` Requirement，spec 列的 allowlist 與 code 列的 ALLOWED_INNER_TYPES 不可分歧。
 5. **Bearer + loopback 不可鬆綁**：sidecar 只 bind `127.0.0.1:0`（ephemeral）、bearer token 記憶體常駐不落盤（D-local-2）；任何 endpoint 不得跳過 bearer middleware。
 6. **ensure_in_workspace 紅線**：所有檔案操作必須先過 `ensure_in_workspace(path, ctx)`（`Path.resolve(strict=False)` + `is_relative_to`）——覆蓋 `..` 逃逸、symlink、Windows UNC、`\\?\` long-path 全譜系。紅隊 fixture 在 `sidecar/tests/sandbox/`。
 7. **檔名 kebab-case**：`docs/*.md`、`design/*.html`、`design/screenshots/*.png` 一律 `{代號}-{語意}`。舊版直接刪，不留 `-v1` 後綴（歷史去 git log 找）。
@@ -100,14 +115,15 @@ M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19
 ## 決策記憶 — `docs/decisions.md`
 
 所有非 trivial 的技術取捨都寫成 **D-XXX ADR**（脈絡 / 選項 / 理由 / 後續）。Spec 首行必引相關 D-XXX。改決策時**先改 `decisions.md`，再改引用它的 spec**。常查：
-- D-001 混合架構 / D-002 Topic mode 不進 MVP / D-003 LLM Provider 抽象（2026-04-20 role routing 落地）
+- D-001 混合架構 / D-002 Topic mode 不進 MVP / D-003 LLM Provider 抽象（2026-04-20 role routing 落地 → 2026-04-23 `chat-provider-wiring` 接上 chat-ish live provider，M1 「No outbound」不變式退役）
 - D-011 資安 / D-012 自寫 ReAct / D-014 uv toolchain
 - D-015 Sanitizer / D-016 Q&A add_to_kb / D-017 ToolSandbox
-- D-021 token_usage / D-022 llm_calls
+- D-021 token_usage / D-022 llm_calls（`module` 欄由 `usage-tracker-dedup` 收束成單一寫入路徑）
 - D-026 前端 toolchain 改 npm（原本 bun）
 - D-027 Qdrant 走 local binary 主路徑（docker compose 降為 fallback）
 - D-028 LLM Vision 延後至 Phase 2（介面不預埋 Capability enum）
 - D-029 Module 5 多檔輸出（MOC + `stations/s0X-slug.md` + frontmatter + stable station id）+ 拒絕 Obsidian 整合
+- D-032 KB build production wiring（`text-embedding-3-small` dim 1536 hard-coded、`CODEBUS_OPENAI_API_KEY` 唯一 env 來源、不 fallback `OPENAI_API_KEY`、SDK retry 不再疊）
 
 ## 常用指令
 
@@ -115,13 +131,16 @@ M1「power-on」已於 2026-04-19 archive（`openspec/changes/archive/2026-04-19
 ```bash
 cd sidecar
 uv sync                            # 裝依賴 + 建 venv
-uv run pytest                      # 全測（約 94 個 test；Qdrant / symlink 相關會自動 skip）
+uv run pytest                      # 全測（~524 passed + ~17 skipped；Qdrant / symlink 相關環境相依會自動 skip）
 uv run pytest tests/sandbox/       # 紅隊 path-escape 專測
-uv run pytest tests/providers/     # Mock / Tracked / UsageTracker / LLMCallLogger
+uv run pytest tests/providers/     # Mock / Tracked / OpenAIEmbedding / OpenAIChat / UsageTracker / LLMCallLogger
 uv run pytest tests/qdrant/ -v     # smoke test（需 Qdrant 起來才會跑）
+uv run pytest tests/test_wire_kb_dependencies.py  # DI hook 八 slot + 兩 healthz probe
 uv run pytest -k healthz           # 按關鍵字挑單測
 uv run python -m codebus_agent.api.main           # 獨立起 sidecar（讀 port/bearer 看 stdout）
 uv run python -m codebus_agent.api.main --healthz # 自檢模式，印 JSON 不起 HTTP
+# Real-endpoint smoke test — loads CODEBUS_OPENAI_API_KEY from repo-root .env 但不 echo 到 stdout
+uv run python scripts/smoke_chat_provider.py      # 驗 /healthz openai_chat + 一次真實 chat call + token_usage 拆帳
 ```
 
 **Qdrant 本地 binary**（D-027）
