@@ -54,6 +54,8 @@ tool_audit.jsonl
 sanitize_audit.jsonl
 kb_growth.jsonl
 generator_log.jsonl
+# Ad-hoc smoke-test workspace produced by sidecar/scripts/smoke_chat_provider.py
+.codebus-smoke-ws/
 
 # PyInstaller
 build/

@@ -49,12 +49,15 @@ from codebus_agent.kb.backend import QdrantHttpBackend
 from codebus_agent.providers import (
     OPENAI_EMBEDDING_DIM,
     LLMCallLogger,
+    OpenAIChatProvider,
     OpenAIEmbeddingProvider,
     ProviderRole,
     TrackedProvider,
     UsageTracker,
 )
+from codebus_agent.providers.protocol import Message
 from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +116,39 @@ def wire_kb_dependencies(
         )
         app.state.kb_usage_tracker = _make_tracker_factory()
         app.state.kb_embedding_dim = OPENAI_EMBEDDING_DIM
+        # `chat-provider-wiring`: three chat-ish role factories share the
+        # same OpenAI key + `gpt-4o-mini` default model, differing only in
+        # temperature (reasoning: 0.1 deterministic, judge: 0.0 strictly
+        # deterministic, chat: 0.2 slightly creative) and `default_module`
+        # tag so `token_usage.jsonl` can split cost by role without any
+        # per-call plumbing. All three MUST be wrapped in `TrackedProvider`
+        # (registry guard + ALLOWED_INNER_TYPES allowlist enforce this).
+        app.state.llm_reasoning_provider = _make_chat_provider_factory(
+            model="gpt-4o-mini",
+            temperature=0.1,
+            default_module="reasoning",
+            role=ProviderRole.REASONING,
+        )
+        app.state.llm_judge_provider = _make_chat_provider_factory(
+            model="gpt-4o-mini",
+            temperature=0.0,
+            default_module="judge",
+            role=ProviderRole.JUDGE,
+        )
+        app.state.llm_chat_provider = _make_chat_provider_factory(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            default_module="chat",
+            role=ProviderRole.CHAT,
+        )
     else:
         app.state.kb_provider = None
         app.state.kb_query_provider = None
         app.state.kb_usage_tracker = None
         app.state.kb_embedding_dim = None
+        app.state.llm_reasoning_provider = None
+        app.state.llm_judge_provider = None
+        app.state.llm_chat_provider = None
 
 
 def _make_tracker_factory() -> Callable[[Path], UsageTracker]:
@@ -172,6 +203,96 @@ def _make_provider_factory(
         )
 
     return _factory
+
+
+def _make_chat_provider_factory(
+    *,
+    model: str,
+    temperature: float,
+    default_module: str,
+    role: ProviderRole,
+) -> Callable[[Path], TrackedProvider]:
+    """Factory for workspace-scoped TrackedProvider wrapping OpenAIChatProvider.
+
+    Mirrors `_make_provider_factory` but for chat-ish roles: the inner
+    provider is `OpenAIChatProvider` (not `OpenAIEmbeddingProvider`), the
+    TrackedProvider role is caller-supplied (`REASONING` / `JUDGE` /
+    `CHAT`) rather than hard-wired to `EMBED`, and temperature is
+    parameterized so callers can tune per role without spinning up a new
+    factory type per variant.
+
+    `default_module` still flows straight into `TrackedProvider` so every
+    `token_usage.jsonl` line written via this factory's returned wrapper
+    gets tagged `module=<reasoning|judge|chat>`.
+    """
+
+    def _factory(workspace_root: Path) -> TrackedProvider:
+        ws = Path(workspace_root)
+        tracker = UsageTracker(ws / "token_usage.jsonl")
+        call_logger = LLMCallLogger(ws / "llm_calls.jsonl")
+        sanitizer_audit_path = ws / _WORKSPACE_AUDIT_SUBDIR / _SANITIZE_AUDIT_FILENAME
+        sanitizer_audit = SanitizerAuditLogger(sanitizer_audit_path)
+        return TrackedProvider(
+            OpenAIChatProvider(model, temperature=temperature),
+            tracker=tracker,
+            logger=call_logger,
+            role=role,
+            sanitizer=SanitizerEngine(),
+            sanitizer_audit=sanitizer_audit,
+            rules_version=_RULES_VERSION,
+            default_module=default_module,
+        )
+
+    return _factory
+
+
+class _ChatProbeModel(BaseModel):
+    """Minimal Pydantic shape for the chat smoke probe.
+
+    Kept tiny on purpose: the probe only proves the OpenAI chat endpoint
+    is reachable + Instructor TOOLS-mode round-trip works; we don't need
+    a real payload.
+    """
+
+    ok: bool = True
+
+
+async def _probe_openai_chat_raw() -> DependencyStatus:
+    """Smoke-check OpenAI chat completions with a raw (non-tracked) provider.
+
+    Spec scenario `Healthz reflects OpenAI chat configuration state`:
+    one probe covers all three chat-ish roles since they share the same
+    OpenAI API + key. Like the embedding probe, this bypass is permitted
+    because an operational health check is not production traffic and
+    MUST NOT write to any workspace audit trail (`token_usage.jsonl` /
+    `llm_calls.jsonl` / `sanitize_audit.jsonl`).
+    """
+    try:
+        provider = OpenAIChatProvider("gpt-4o-mini")
+        await provider.chat(
+            [Message(role="user", content="ping")],
+            response_model=_ChatProbeModel,
+        )
+    except Exception as exc:  # noqa: BLE001 — classify broadly, details in detail
+        return DependencyStatus(
+            ok=False,
+            status="degraded",
+            detail=f"{type(exc).__name__}",
+        )
+    return DependencyStatus(ok=True, status="ok")
+
+
+async def _probe_openai_chat_not_configured() -> DependencyStatus:
+    """Probe returned when `CODEBUS_OPENAI_API_KEY` is absent.
+
+    Mirrors `_probe_openai_embedding_not_configured`: `ok=True` because
+    this is an *expected* degraded state, not a failure.
+    """
+    return DependencyStatus(
+        ok=True,
+        status="not-configured",
+        detail="CODEBUS_OPENAI_API_KEY not set",
+    )
 
 
 async def _probe_openai_embedding_raw() -> DependencyStatus:
@@ -259,20 +380,20 @@ def create_app(
     # against freshly-populated slots without re-reading env vars.
     wire_kb_dependencies(app, openai_api_key=openai_api_key, qdrant_url=qdrant_url)
 
-    # Run the startup smoke probe exactly once; cache its result so
-    # /healthz doesn't hit OpenAI on every request. The cached status
-    # lives on app.state so tests can introspect it if needed.
+    # Run the startup smoke probes exactly once; cache their results so
+    # /healthz doesn't hit OpenAI on every request. The cached statuses
+    # live on app.state so tests can introspect them if needed.
     if openai_api_key:
         try:
-            _startup_probe = asyncio.run(_probe_openai_embedding_raw())
+            _embed_probe = asyncio.run(_probe_openai_embedding_raw())
         except RuntimeError:
             # asyncio.run fails if there's a running loop (TestClient can
             # trigger this on some paths). Fall back to the probe being
             # evaluated lazily.
-            _startup_probe = None
-        app.state.openai_embedding_probe = _startup_probe
+            _embed_probe = None
+        app.state.openai_embedding_probe = _embed_probe
 
-        async def _cached_openai_probe() -> DependencyStatus:
+        async def _cached_openai_embedding_probe() -> DependencyStatus:
             cached = getattr(app.state, "openai_embedding_probe", None)
             if cached is not None:
                 return cached
@@ -280,9 +401,29 @@ def create_app(
             app.state.openai_embedding_probe = fresh
             return fresh
 
-        checks["openai_embedding"] = _cached_openai_probe
+        checks["openai_embedding"] = _cached_openai_embedding_probe
+
+        # `chat-provider-wiring`: parallel smoke probe for the chat path.
+        # One probe covers all three chat-ish roles (REASONING / JUDGE /
+        # CHAT) since they share the same OpenAI API + key.
+        try:
+            _chat_probe = asyncio.run(_probe_openai_chat_raw())
+        except RuntimeError:
+            _chat_probe = None
+        app.state.openai_chat_probe = _chat_probe
+
+        async def _cached_openai_chat_probe() -> DependencyStatus:
+            cached = getattr(app.state, "openai_chat_probe", None)
+            if cached is not None:
+                return cached
+            fresh = await _probe_openai_chat_raw()
+            app.state.openai_chat_probe = fresh
+            return fresh
+
+        checks["openai_chat"] = _cached_openai_chat_probe
     else:
         checks["openai_embedding"] = _probe_openai_embedding_not_configured
+        checks["openai_chat"] = _probe_openai_chat_not_configured
 
     app.state.dependency_checks = checks
     auth.install(app, bearer_token)

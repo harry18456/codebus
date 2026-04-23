@@ -24,13 +24,17 @@
 ### Health check
 - `GET /healthz` → `200 {"status": "ok|degraded", "dependencies": {...}}`
 - Tauri 啟動後輪詢（最多 10s）確認 sidecar ready
-- `dependencies` map（change `kb-build-production-wiring`, D-032 後）：
+- `dependencies` map（change `kb-build-production-wiring`, D-032 後；`chat-provider-wiring` 再補 `openai_chat`）：
   - `qdrant`：Qdrant 連線探測（不可達 → `ok=false`）
   - `openai_embedding`：KB embedding provider 狀態,`status` 有三值
     - `"ok"`：`CODEBUS_OPENAI_API_KEY` 設 + 啟動時 smoke embed 通
     - `"degraded"`：env 設但 smoke embed 失敗(auth / rate limit / network)
     - `"not-configured"`：env 未設（`ok=true` 因為是**預期的**降級,非故障）
-- Smoke probe 在 sidecar 啟動時跑一次,結果 cache 於 `app.state.openai_embedding_probe`；`/healthz` 不每次都打 OpenAI。Probe 走 **raw** `OpenAIEmbeddingProvider`(不經 TrackedProvider)——健康檢查不是 production traffic,不污染任何 workspace audit trail
+  - `openai_chat`：chat / reasoning / judge 三個 role 共用的 provider 狀態,`status` 一樣三態
+    - `"ok"`：env 設 + 啟動時 smoke chat（打 `gpt-4o-mini` with `response_model=_ChatProbeModel`）通
+    - `"degraded"`：env 設但 smoke chat 失敗
+    - `"not-configured"`：env 未設
+- Smoke probe 在 sidecar 啟動時各跑一次,結果分別 cache 於 `app.state.openai_embedding_probe` / `app.state.openai_chat_probe`；`/healthz` 不每次都打 OpenAI。兩個 probe 都走 **raw** provider(不經 TrackedProvider)——健康檢查不是 production traffic,不污染任何 workspace audit trail。一個 `openai_chat` probe 覆蓋三個 chat-ish role 因為它們共用同一把 API key 與同一個 OpenAI chat endpoint
 
 ---
 

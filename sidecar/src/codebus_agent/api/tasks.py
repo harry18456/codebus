@@ -41,6 +41,8 @@ TaskStatus = Literal["running", "done", "error"]
 # this table — never echo `repr(exc)` into the wire.
 # `kb-build-production-wiring` adds OPENAI_AUTH_FAILED / OPENAI_RATE_LIMITED /
 # KB_DIM_MISMATCH for production KB build paths (D-032 decisions 4 & 5).
+# `chat-provider-wiring` adds OPENAI_CONTEXT_EXCEEDED for oversized prompts
+# on the chat-ish roles (reasoning / judge / chat).
 ERROR_CODES: frozenset[str] = frozenset(
     {
         "SCAN_FAILED",
@@ -48,6 +50,7 @@ ERROR_CODES: frozenset[str] = frozenset(
         "INTERNAL_ERROR",
         "OPENAI_AUTH_FAILED",
         "OPENAI_RATE_LIMITED",
+        "OPENAI_CONTEXT_EXCEEDED",
         "KB_DIM_MISMATCH",
     }
 )
@@ -211,6 +214,8 @@ def _classify_exception(exc: BaseException) -> str:
         return "OPENAI_AUTH_FAILED"
     if name == "OpenAIRateLimitError":
         return "OPENAI_RATE_LIMITED"
+    if name == "OpenAIContextLengthError":
+        return "OPENAI_CONTEXT_EXCEEDED"
     if name == "KBDimMismatchError":
         return "KB_DIM_MISMATCH"
     # Heuristic dispatch — kept narrow on purpose. Each branch's message is
@@ -232,6 +237,10 @@ def _safe_error_message(code: str) -> str:
         return "OpenAI authentication failed; verify CODEBUS_OPENAI_API_KEY"
     if code == "OPENAI_RATE_LIMITED":
         return "OpenAI rate limit exceeded; try again later"
+    if code == "OPENAI_CONTEXT_EXCEEDED":
+        # Fixed, content-free message — the prompt body is potentially
+        # sensitive and MUST NOT appear in any wire event.
+        return "LLM context window exceeded for the chosen model"
     if code == "KB_DIM_MISMATCH":
         return "knowledge-base collection vector dimension mismatch"
     return "internal sidecar error"

@@ -43,6 +43,7 @@ from ..sanitizer import (
 )
 from .llm_call_logger import LLMCallLogger
 from .mock import MockProvider
+from .openai_chat import OpenAIChatProvider
 from .openai_embedding import OpenAIEmbeddingProvider
 from .protocol import EmbedResponse, Message, ProviderRole
 from .usage_tracker import UsageTracker
@@ -51,12 +52,17 @@ from .usage_tracker import UsageTracker
 class TrackedProvider:
     """Decorator-style wrapper enforcing audit on every LLM call."""
 
-    # `kb-build-production-wiring` adds `OpenAIEmbeddingProvider` per D-032:
-    # M2 permits outbound traffic specifically for embeddings. Other live
-    # providers (chat / reasoning) remain gated behind future changes that
-    # must extend this tuple explicitly.
+    # `kb-build-production-wiring` added `OpenAIEmbeddingProvider` per D-032:
+    # M2 permits outbound traffic specifically for embeddings.
+    # `chat-provider-wiring` extends the allowlist to `OpenAIChatProvider`
+    # so chat-ish roles (REASONING / JUDGE / CHAT) can reach OpenAI for
+    # Module 4 Explorer (D-012). Future live providers (Ollama, Anthropic)
+    # remain gated behind changes that must extend this set explicitly —
+    # the `Outbound LLM traffic gated by TrackedProvider whitelist`
+    # Requirement in `openspec/specs/llm-provider/spec.md` enumerates the
+    # allowlist so spec + code stay in lockstep.
     ALLOWED_INNER_TYPES: ClassVar[frozenset[type]] = frozenset(
-        {MockProvider, OpenAIEmbeddingProvider}
+        {MockProvider, OpenAIEmbeddingProvider, OpenAIChatProvider}
     )
 
     def __init__(
@@ -75,7 +81,10 @@ class TrackedProvider:
             raise TypeError(
                 f"TrackedProvider inner must be one of "
                 f"{{{', '.join(t.__name__ for t in self.ALLOWED_INNER_TYPES)}}}; "
-                f"got {type(inner).__name__}. No outbound LLM traffic during M1."
+                f"got {type(inner).__name__}. Outbound LLM traffic is gated "
+                f"by this allowlist — extend ALLOWED_INNER_TYPES (and the "
+                f"spec Requirement `Outbound LLM traffic gated by "
+                f"TrackedProvider whitelist`) in a new change to add providers."
             )
         if not isinstance(role, ProviderRole):
             raise TypeError(

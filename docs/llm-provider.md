@@ -212,7 +212,7 @@ tracked = TrackedProvider(
 | API key 來源 | **只讀** `CODEBUS_OPENAI_API_KEY` env var；**不** fallback `OPENAI_API_KEY`（避免繞過 sidecar 的 graceful degrade 契約） |
 | `embed()` 回傳 | `EmbedResponse(vectors, usage)`；`usage.embed_tokens` 是真實值（從 OpenAI response 拿），`usage.cost_usd = tokens * 0.02 / 1M` |
 | Retry / backoff | 委派給 `openai` SDK 預設 retry budget（D-032 決策 6），不在 KB pipeline 再疊 |
-| Registry guard | 必經 `TrackedProvider` 包裝；`ALLOWED_INNER_TYPES = {MockProvider, OpenAIEmbeddingProvider}` |
+| Registry guard | 必經 `TrackedProvider` 包裝；`ALLOWED_INNER_TYPES = {MockProvider, OpenAIEmbeddingProvider, OpenAIChatProvider}`（後者於 `chat-provider-wiring` 加入） |
 
 **錯誤碼對照**
 
@@ -223,6 +223,78 @@ tracked = TrackedProvider(
 | `KBDimMismatchError`（KB 層） | `KB_DIM_MISMATCH` | 既有 Qdrant collection dim 與 provider 宣告 dim 不符 |
 
 錯誤訊息不含 API key、不含 request headers repr；完整 traceback 只進 sidecar logger,SSE error event 只帶 sanitized `message`（見 `sidecar-api.md §三-bis`）。
+
+---
+
+## 三-ter、Production chat：`OpenAIChatProvider`（change `chat-provider-wiring`, D-012）
+
+對應 `openspec/changes/chat-provider-wiring/specs/llm-provider/spec.md`
+Requirement `OpenAI chat provider`。
+
+M2 production chat / reasoning / judge 三個 role 統一走 OpenAI `gpt-4o-mini`（per-role 只在 temperature 上分化）。解鎖 Module 4 Explorer Agent（D-012 自寫 ReAct + Instructor 結構化輸出）。
+
+```python
+from codebus_agent.providers.openai_chat import OpenAIChatProvider
+
+# 啟動時(wire_kb_dependencies 內)
+raw = OpenAIChatProvider("gpt-4o-mini", temperature=0.1)   # 讀 CODEBUS_OPENAI_API_KEY
+tracked = TrackedProvider(
+    raw,
+    role=ProviderRole.REASONING,       # 也可以是 JUDGE / CHAT
+    tracker=UsageTracker(ws / "token_usage.jsonl"),
+    logger=LLMCallLogger(ws / "llm_calls.jsonl"),
+    sanitizer=SanitizerEngine(),
+    sanitizer_audit=SanitizerAuditLogger(ws / ".codebus" / "sanitize_audit.jsonl"),
+    rules_version="2026-04-20-1",
+    default_module="reasoning",        # "judge" / "chat" 依 role 而定
+)
+
+# chat() 回傳 validated Pydantic 實例
+from pydantic import BaseModel
+class Action(BaseModel):
+    tool: str
+    args: dict
+
+result = await tracked.chat(
+    [Message(role="user", content="...")],
+    response_model=Action,
+)   # result: Action, 不是 dict / raw JSON
+```
+
+**契約摘要**
+
+| 項目 | 規範 |
+|---|---|
+| 預設 model | `gpt-4o-mini`（三個 role 皆同） |
+| 建構參數 | `model: str`、`temperature: float = 0.2`、`max_tokens: int \| None = None` |
+| API key 來源 | **只讀** `CODEBUS_OPENAI_API_KEY`（與 embedding 共用 env var）；**不** fallback `OPENAI_API_KEY` |
+| Structured output | 走 `instructor.from_openai(openai.AsyncOpenAI(...))` 的 TOOLS mode；`chat(messages, response_model)` 回 `response_model` 的實例，不露 raw JSON |
+| Retry / backoff | 委派 `openai` SDK；`InstructorRetryException` wrap 的 API 錯誤在 provider 內會 unwrap 並重分類為 typed error |
+| Registry guard | 必經 `TrackedProvider` 包裝；inner type 必在 `ALLOWED_INNER_TYPES` 內 |
+
+**錯誤碼對照**
+
+| Provider 例外 | `_classify_exception` → 映射的 wire code | 觸發條件 |
+|---|---|---|
+| `OpenAIAuthError` | `OPENAI_AUTH_FAILED` | 401 |
+| `OpenAIRateLimitError` | `OPENAI_RATE_LIMITED` | 429 SDK retry 用盡 |
+| `OpenAIContextLengthError` | `OPENAI_CONTEXT_EXCEEDED` | 400 + `error.code == "context_length_exceeded"`（prompt 太長） |
+
+`OpenAIContextLengthError` 的訊息是固定字串 `"LLM context window exceeded for the chosen model"`——**絕不** echo prompt 內容（prompt 可能是使用者敏感 code），也不 chain 原始 `InstructorRetryException`（其 repr 可能含 prompt 的 `create_kwargs`）。
+
+**與 embedding 的對照**
+
+| 面向 | `OpenAIEmbeddingProvider` | `OpenAIChatProvider` |
+|---|---|---|
+| 入口 method | `embed(texts)` | `chat(messages, response_model)` |
+| 回傳 | `EmbedResponse(vectors, usage)` | validated `response_model` 實例 |
+| 預設 model | `text-embedding-3-small`（dim 1536 hard-coded） | `gpt-4o-mini`（可在 wire 時覆蓋） |
+| per-role 調參 | 無（單一 EMBED role） | `temperature` 三態：REASONING=0.1、JUDGE=0.0、CHAT=0.2 |
+| Instructor 層 | 不用 | 必經 — 負責 tool_call round-trip + Pydantic validation |
+| 錯誤碼新增 | `OPENAI_AUTH_FAILED` / `OPENAI_RATE_LIMITED` | 上述兩者 + `OPENAI_CONTEXT_EXCEEDED` |
+| healthz 鍵 | `openai_embedding` | `openai_chat`（獨立探測；一次覆蓋三個 chat-ish role） |
+
+Wire pattern 細節（三個 `llm_*_provider` slot 如何由 `_make_chat_provider_factory` 建）見 `module-2-kb-builder.md §七`；healthz probe 三態 ok / degraded / not-configured 的拆解見 `sidecar-api.md §一`。
 
 ---
 

@@ -126,6 +126,55 @@ async def test_chat_exception_still_logged_and_reraised(
     assert "boom" in call_lines[0]["error"]["message"]
 
 
+def test_tracked_provider_rejects_unknown_inner_types(tmp_path: Path) -> None:
+    """Backs `Outbound LLM traffic gated by TrackedProvider whitelist`
+    Scenarios "ALLOWED_INNER_TYPES enforces explicit allowlist" and
+    "Allowed inner types are explicitly enumerated" from
+    `openspec/changes/chat-provider-wiring/specs/llm-provider/spec.md`.
+
+    Two guarantees are pinned here:
+      1. Wrapping an inner class NOT in the allowlist raises `TypeError`
+         whose message enumerates the allowed inner class names so the
+         operator can tell what went wrong.
+      2. The allowlist is EXACTLY `{MockProvider, OpenAIEmbeddingProvider,
+         OpenAIChatProvider}` — future live providers (Ollama, Anthropic)
+         MUST be added by a new change that updates the Requirement AND
+         this set in lockstep.
+    """
+    from codebus_agent.providers.openai_chat import OpenAIChatProvider
+    from codebus_agent.providers.openai_embedding import OpenAIEmbeddingProvider
+
+    class _UnknownProvider:
+        name = "unknown"
+
+        async def chat(self, messages, *, response_model):
+            raise AssertionError("never called")
+
+        async def embed(self, texts):
+            raise AssertionError("never called")
+
+    tracker = UsageTracker(tmp_path / "token_usage.jsonl")
+    logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
+    with pytest.raises(TypeError, match="_UnknownProvider"):
+        TrackedProvider(
+            _UnknownProvider(),
+            tracker=tracker,
+            logger=logger,
+            role=ProviderRole.CHAT,
+            sanitizer=SanitizerEngine(),
+            sanitizer_audit=SanitizerAuditLogger(tmp_path / "sanitize_audit.jsonl"),
+            rules_version="test-v1",
+        )
+
+    assert TrackedProvider.ALLOWED_INNER_TYPES == frozenset(
+        {MockProvider, OpenAIEmbeddingProvider, OpenAIChatProvider}
+    ), (
+        "allowlist MUST be exactly {MockProvider, OpenAIEmbeddingProvider, "
+        "OpenAIChatProvider} after chat-provider-wiring lands; any drift means "
+        "spec and code disagree on outbound traffic surface"
+    )
+
+
 @pytest.mark.asyncio
 async def test_script_pinned_response_is_returned_through_wrapper(
     tmp_path: Path,

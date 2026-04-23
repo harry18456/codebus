@@ -57,20 +57,133 @@ code:
 -->
 
 ---
-### Requirement: No outbound LLM traffic during M1
+### Requirement: Outbound LLM traffic gated by TrackedProvider whitelist
 
-While this change is active, the sidecar SHALL NOT send any network request to an external LLM provider. This invariant extends to every `ProviderRole`: any role's provider MUST be `MockProvider` (optionally wrapped by `TrackedProvider`) during M1 and this llm-role-routing change.
+The sidecar SHALL allow outbound network requests to external LLM providers ONLY through providers that are explicitly listed in `TrackedProvider.ALLOWED_INNER_TYPES` and registered through a `TrackedProvider` wrapper. Any direct construction or use of a non-whitelisted live provider class MUST be rejected at construction time. This Requirement REPLACES the M1-era `No outbound LLM traffic during M1` Requirement (now removed), reflecting M2 reality where specific roles have lawful outbound paths.
 
-#### Scenario: Only MockProvider registered for every role
+#### Scenario: ALLOWED_INNER_TYPES enforces explicit allowlist
 
-- **WHEN** the sidecar process starts with any registry constructed
-- **THEN** for every `ProviderRole` registered, the underlying provider class MUST be `MockProvider`
-- **AND** no registered provider SHALL perform outbound HTTP to OpenAI, Anthropic, Gemini, or Ollama
+- **WHEN** code attempts `TrackedProvider(SomeUnknownProvider(), ...)` where `SomeUnknownProvider` is not in `TrackedProvider.ALLOWED_INNER_TYPES`
+- **THEN** construction MUST raise `TypeError` naming the disallowed inner class
 
-#### Scenario: Integration test asserts no outbound calls across roles
+#### Scenario: Allowed inner types are explicitly enumerated
 
-- **WHEN** the integration test suite runs against the role-aware registry
-- **THEN** it MUST assert that no outbound HTTP request leaves the sidecar process during any test, for any role, using a network-interception fixture
+- **WHEN** `TrackedProvider.ALLOWED_INNER_TYPES` is inspected
+- **THEN** it MUST be exactly `{MockProvider, OpenAIEmbeddingProvider, OpenAIChatProvider}` after this change lands; future live providers (e.g., Ollama, Anthropic) MUST be added by an explicit change that updates this spec
+
+#### Scenario: Non-whitelisted outbound paths rejected by registry
+
+- **WHEN** code attempts `ProviderRegistry({role: raw_openai_chat_instance})` without TrackedProvider wrapping
+- **THEN** the registry MUST raise `ProviderRegistryError` requiring TrackedProvider wrapping (existing `Registry enforces TrackedProvider wrapping per role` Requirement)
+
+<!-- @trace
+source: chat-provider-wiring
+updated: 2026-04-23
+code:
+  - sidecar/src/codebus_agent/providers/tracked.py
+  - sidecar/src/codebus_agent/providers/openai_chat.py
+  - sidecar/src/codebus_agent/providers/__init__.py
+tests:
+  - sidecar/tests/providers/test_tracked_provider.py
+  - sidecar/tests/providers/test_openai_chat.py
+-->
+
+
+<!-- @trace
+source: chat-provider-wiring
+updated: 2026-04-23
+code:
+  - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/api/__init__.py
+  - sidecar/src/codebus_agent/providers/tracked.py
+  - sidecar/src/codebus_agent/api/tasks.py
+  - docs/llm-provider.md
+  - sidecar/scripts/smoke_chat_provider.py
+  - sidecar/src/codebus_agent/providers/__init__.py
+  - docs/module-2-kb-builder.md
+  - sidecar/src/codebus_agent/providers/openai_chat.py
+  - CLAUDE.md
+tests:
+  - sidecar/tests/providers/test_tracked_provider.py
+  - sidecar/tests/test_wire_kb_dependencies.py
+  - sidecar/tests/providers/test_openai_chat.py
+-->
+
+---
+### Requirement: OpenAI chat provider
+
+The sidecar SHALL implement an `OpenAIChatProvider` class that satisfies the `LLMProvider` Protocol's `chat(messages: list[Message], *, response_model: type[BaseModel]) -> BaseModel` method, using `instructor` to parse OpenAI chat completions into validated Pydantic instances. The provider SHALL accept `model: str`, `temperature: float = 0.2`, and `max_tokens: int | None = None` at construction, read its API key only from the `CODEBUS_OPENAI_API_KEY` environment variable (sharing the same env var as `OpenAIEmbeddingProvider`), and SHALL be wrappable in `TrackedProvider`. Authentication, rate-limit, and context-length failures SHALL translate into documented typed exceptions.
+
+#### Scenario: Chat call returns validated Pydantic instance
+
+- **WHEN** `OpenAIChatProvider("gpt-4o-mini").chat([Message(role="user", content="reply with {\"answer\": \"hi\"}")], response_model=AnswerModel)` succeeds against a mocked OpenAI endpoint
+- **THEN** the returned object MUST be an instance of `AnswerModel` with the parsed fields populated; no raw JSON string MUST leak to the caller
+
+#### Scenario: Provider must be registered through TrackedProvider
+
+- **WHEN** `ProviderRegistry.__init__({ProviderRole.CHAT: OpenAIChatProvider("gpt-4o-mini")})` is attempted without a `TrackedProvider` wrapper
+- **THEN** the registry MUST raise `ProviderRegistryError` identifying the unwrapped provider, consistent with the existing `Registry enforces TrackedProvider wrapping per role` Requirement
+
+#### Scenario: Authentication failure maps to OPENAI_AUTH_FAILED
+
+- **WHEN** the OpenAI API responds `401 Unauthorized` to a chat completion request
+- **THEN** `OpenAIChatProvider.chat` MUST raise `OpenAIAuthError` (the same typed exception used by the embedding provider), and `_classify_exception` in `api/tasks.py` MUST map it to wire code `"OPENAI_AUTH_FAILED"`; the API key MUST NOT appear in the exception message, logs, or any wire payload
+
+#### Scenario: Rate limit after retries maps to OPENAI_RATE_LIMITED
+
+- **WHEN** the OpenAI API returns `429` responses beyond the SDK's retry budget for a chat completion
+- **THEN** the provider MUST raise `OpenAIRateLimitError` and `_classify_exception` MUST map it to wire code `"OPENAI_RATE_LIMITED"`
+
+#### Scenario: Context-length error maps to OPENAI_CONTEXT_EXCEEDED
+
+- **WHEN** the OpenAI API responds `400 Bad Request` with `error.code == "context_length_exceeded"` (oversized prompt for the chosen model)
+- **THEN** the provider MUST raise a new `OpenAIContextLengthError` exception class, and `_classify_exception` MUST map it to a new wire code `"OPENAI_CONTEXT_EXCEEDED"` added to `ERROR_CODES`. The error event MUST NOT echo the prompt content (which is potentially sensitive)
+
+#### Scenario: Missing CODEBUS_OPENAI_API_KEY env var blocks construction
+
+- **WHEN** `OpenAIChatProvider("gpt-4o-mini")` is constructed without `CODEBUS_OPENAI_API_KEY` set in the environment
+- **THEN** construction MUST raise a clear error identifying the missing env var name, and MUST NOT fall back to reading `OPENAI_API_KEY` (so the sidecar's degraded-mode contract in `sidecar-runtime` is not accidentally bypassed)
+
+#### Scenario: Temperature and max_tokens passed to OpenAI
+
+- **WHEN** `OpenAIChatProvider("gpt-4o-mini", temperature=0.0, max_tokens=512).chat(...)` is called
+- **THEN** the underlying `openai` SDK request MUST include `temperature=0.0` and `max_tokens=512` so per-role tuning takes effect
+
+<!-- @trace
+source: chat-provider-wiring
+updated: 2026-04-23
+code:
+  - sidecar/src/codebus_agent/providers/openai_chat.py
+  - sidecar/src/codebus_agent/providers/__init__.py
+  - sidecar/src/codebus_agent/providers/tracked.py
+  - sidecar/src/codebus_agent/api/tasks.py
+  - sidecar/src/codebus_agent/api/__init__.py
+  - docs/llm-provider.md
+tests:
+  - sidecar/tests/providers/test_openai_chat.py
+  - sidecar/tests/providers/test_tracked_provider.py
+-->
+
+
+<!-- @trace
+source: chat-provider-wiring
+updated: 2026-04-23
+code:
+  - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/api/__init__.py
+  - sidecar/src/codebus_agent/providers/tracked.py
+  - sidecar/src/codebus_agent/api/tasks.py
+  - docs/llm-provider.md
+  - sidecar/scripts/smoke_chat_provider.py
+  - sidecar/src/codebus_agent/providers/__init__.py
+  - docs/module-2-kb-builder.md
+  - sidecar/src/codebus_agent/providers/openai_chat.py
+  - CLAUDE.md
+tests:
+  - sidecar/tests/providers/test_tracked_provider.py
+  - sidecar/tests/test_wire_kb_dependencies.py
+  - sidecar/tests/providers/test_openai_chat.py
+-->
 
 ---
 ### Requirement: ProviderRole enumerates call-site categories

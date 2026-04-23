@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from .llm_call_logger import LLMCallLogger
 from .mock import MockProvider, MockScript
+from .openai_chat import OpenAIChatProvider, OpenAIContextLengthError
 from .openai_embedding import (
     OPENAI_EMBEDDING_DIM,
     OPENAI_EMBEDDING_MODEL,
@@ -41,6 +42,8 @@ __all__ = [
     "OPENAI_EMBEDDING_DIM",
     "OPENAI_EMBEDDING_MODEL",
     "OpenAIAuthError",
+    "OpenAIChatProvider",
+    "OpenAIContextLengthError",
     "OpenAIEmbeddingProvider",
     "OpenAIRateLimitError",
     "ProviderRegistry",

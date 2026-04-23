@@ -298,10 +298,14 @@ Body: { "workspace_root": "<abs>", "scan_result": <ScanResult JSON> }
 env CODEBUS_OPENAI_API_KEY  ──┐
 env CODEBUS_QDRANT_URL       ──┼─► wire_kb_dependencies(app, openai_api_key, qdrant_url)
                                 │
-                                ├─► app.state.kb_backend         = QdrantHttpBackend(client)
-                                ├─► app.state.kb_provider        = factory(ws) -> TrackedProvider
-                                ├─► app.state.kb_usage_tracker   = factory(ws) -> UsageTracker
-                                └─► app.state.kb_embedding_dim   = 1536
+                                ├─► app.state.kb_backend             = QdrantHttpBackend(client)
+                                ├─► app.state.kb_provider            = factory(ws) -> TrackedProvider   (EMBED)
+                                ├─► app.state.kb_query_provider      = factory(ws) -> TrackedProvider   (EMBED, module="kb_query")
+                                ├─► app.state.kb_usage_tracker       = factory(ws) -> UsageTracker
+                                ├─► app.state.kb_embedding_dim       = 1536
+                                ├─► app.state.llm_reasoning_provider = factory(ws) -> TrackedProvider   (REASONING, chat-provider-wiring)
+                                ├─► app.state.llm_judge_provider     = factory(ws) -> TrackedProvider   (JUDGE,     chat-provider-wiring)
+                                └─► app.state.llm_chat_provider      = factory(ws) -> TrackedProvider   (CHAT,      chat-provider-wiring)
 ```
 
 **依賴注入語意**:
@@ -309,6 +313,7 @@ env CODEBUS_QDRANT_URL       ──┼─► wire_kb_dependencies(app, openai_ap
 - **`kb_backend`（app-level 實例）**：`QdrantHttpBackend` 包 `AsyncQdrantClient`,一個 sidecar 共享一個連線
 - **`kb_provider`（workspace-level factory）**：呼叫時 build `TrackedProvider(inner=OpenAIEmbeddingProvider(), tracker=UsageTracker(<ws>/token_usage.jsonl), logger=LLMCallLogger(<ws>/llm_calls.jsonl), sanitizer=SanitizerEngine(), sanitizer_audit=SanitizerAuditLogger(<ws>/.codebus/sanitize_audit.jsonl), role=EMBED, rules_version=…, default_module="kb_build")` ——`default_module` 由 `usage-tracker-dedup` 引入,讓 TrackedProvider 自動把 `module="kb_build"` 寫進 `token_usage.jsonl`,KB pipeline 不再手動 `tracker.record(...)`(避免每個 batch 被記兩次)
 - **`kb_query_provider`（workspace-level factory；change `kb-query-endpoint`）**：與 `kb_provider` 結構一樣,但 `default_module="kb_query"`。`POST /kb/query` 用此 factory 取 TrackedProvider,讓查詢路徑的 embed cost 在 `token_usage.jsonl` 標 `module="kb_query"` 而非 `"kb_build"`,可由 group-by-module 把 build vs query 的成本拆開算
+- **`llm_reasoning_provider` / `llm_judge_provider` / `llm_chat_provider`（workspace-level factory；change `chat-provider-wiring`）**：三個 chat-ish role 的 factory。每個 factory build `TrackedProvider(inner=OpenAIChatProvider("gpt-4o-mini", temperature=<per-role>), role=<REASONING|JUDGE|CHAT>, default_module=<"reasoning"|"judge"|"chat">, ...)`。`gpt-4o-mini` 為三者共同預設 model；`temperature` 三態：REASONING=0.1、JUDGE=0.0、CHAT=0.2。雖然 chat-ish slot 不是 KB 本身會用的 provider（KB 只需 EMBED role），但 wiring 集中在同一個 hook 內方便統一管理 + 方便交叉查 wire 路徑；Module 4 Explorer / Module 8 Q&A Agent 讀這三個 slot
 - **`kb_usage_tracker`（workspace-level factory）**：回 `UsageTracker(<ws>/token_usage.jsonl)`,**目前** KB pipeline 不直接寫此 tracker（記帳路徑全走 TrackedProvider 內綁的同 path tracker）。slot 保留給未來 KB 層級的非 LLM-call 統計用途（例如 chunk 計數),Phase 2+ 與 Module 4/5 對齊時再決定是否拆掉
 - **`kb_embedding_dim`（app-level 常數）**：`OpenAIEmbeddingProvider` 宣告的 `OPENAI_EMBEDDING_DIM = 1536`
 
@@ -316,7 +321,7 @@ env CODEBUS_QDRANT_URL       ──┼─► wire_kb_dependencies(app, openai_ap
 
 | 狀況 | 行為 |
 |---|---|
-| `CODEBUS_OPENAI_API_KEY` 未設 | sidecar 正常啟動；`kb_provider` / `kb_embedding_dim` 留 `None`；`POST /kb/build` 回 503 `KB_NOT_CONFIGURED`；`/healthz` `openai_embedding.status = "not-configured"` |
+| `CODEBUS_OPENAI_API_KEY` 未設 | sidecar 正常啟動；`kb_provider` / `kb_query_provider` / `kb_embedding_dim` / `llm_reasoning_provider` / `llm_judge_provider` / `llm_chat_provider` 全留 `None`；`POST /kb/build` 回 503 `KB_NOT_CONFIGURED`；Module 4 Explorer 等 chat-ish caller 無 provider 可用；`/healthz` 兩個鍵 `openai_embedding.status` / `openai_chat.status` 皆 `"not-configured"` |
 | env 有設但 OpenAI auth 失敗 | smoke probe 在啟動時發現;`/healthz` `openai_embedding.status = "degraded"`;`POST /kb/build` 仍允許送出但會在 build 中 raise 並被包成 `OPENAI_AUTH_FAILED` SSE error |
 | env 有設且 OpenAI 通 | `/healthz` `openai_embedding.status = "ok"`,happy path 跑完回 KBStats |
 | Qdrant 既有 collection dim 不符 | `KnowledgeBase.build()` 在 chunking 完 / embed 前呼 `backend.ensure_collection(expected_dim)` 擋下 → `KBDimMismatchError` → SSE error event 帶 `expected_dim` / `actual_dim` / `suggestion` |
