@@ -470,3 +470,44 @@ async def test_queue_empty_with_enough_stations_terminates_cleanly(
     )
     assert logger.writes == []
     assert result.stopped_reason == "queue_empty"
+
+
+async def test_run_explorer_falls_back_to_empty_tool_specs_when_absent(
+    mock_script_reasoning: MockScript,
+    mock_reasoning_provider: TrackedProvider,
+    workspace_dir: Path,
+) -> None:
+    """`_DummyTools` lacks `tool_specs()` — run_explorer MUST fall back to [].
+
+    Backs explorer-tools-p0 spec scenario
+    `tool_specs method is optional on ExplorerTools`.
+    """
+    from codebus_agent.agent.explorer import run_explorer
+    from codebus_agent.agent.types import ExplorerAction, ExplorerState
+
+    captured = _wrap_inner_chat_spy(mock_reasoning_provider)
+    _push_actions(
+        mock_script_reasoning,
+        [ExplorerAction(thought="t0", tool_calls=[], stop=False)],
+    )
+
+    dummy_tools = _DummyTools()
+    assert not hasattr(dummy_tools, "tool_specs"), (
+        "Precondition: _DummyTools MUST NOT carry tool_specs"
+    )
+
+    logger = _RecordingLogger(workspace_dir / "reasoning_log.jsonl")
+    state = ExplorerState(task="t", budget_steps_left=1, budget_tokens_left=10_000)
+
+    # No AttributeError — run_explorer handles missing tool_specs gracefully.
+    await run_explorer(
+        state=state,
+        provider=mock_reasoning_provider,
+        tools=dummy_tools,
+        judge=_CountingJudge(lambda _s: _make_judge_verdict()),
+        coverage=_CountingCoverage(),
+        logger=logger,
+    )
+
+    assert len(captured) == 1  # _think fired exactly once
+    assert len(logger.writes) == 1

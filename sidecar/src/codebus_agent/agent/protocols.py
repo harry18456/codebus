@@ -66,7 +66,17 @@ class Target(BaseModel):
 
 @runtime_checkable
 class ExplorerTools(Protocol):
-    """Three-method tool surface; Folder / Topic / Q&A each provide their own impl."""
+    """Three-method tool surface; Folder / Topic / Q&A each provide their own impl.
+
+    Implementations additionally SHOULD expose an OPTIONAL ``tool_specs()``
+    method returning a ``list[dict]`` with ``name`` / ``description`` /
+    ``parameters`` keys so the Explorer prompt-render step can advertise
+    the concrete tool surface to the LLM. The method is intentionally
+    NOT declared here so minimal structural impls (e.g. tests' `_MockTools`)
+    can omit it without breaking ``isinstance(..., ExplorerTools)``; the
+    loop (``run_explorer``) falls back to an empty list when the method
+    is absent.
+    """
 
     async def primary_search(self, query: str) -> list[SearchHit]:
         ...

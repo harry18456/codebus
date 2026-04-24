@@ -160,16 +160,22 @@ class ToolContext(BaseModel):
     workspace_root: Path              # 已 resolve，唯一真相
     workspace_id: str
     session_id: str                   # workspace open → close 完整生命週期（非 per-agent-run；scan/kb_build/explore/generate/qa 全共用，D-021）
-    kb: KnowledgeBase                 # Qdrant client wrapper
-    kb_growth_log: KBGrowthLogger     # D-016
-    sanitizer: Sanitizer              # D-015
-    audit_log: AuditLogger            # 本 spec §七
-    usage_tracker: UsageTracker       # D-021（agent-core.md §十三）
+    workspace_type: Literal["folder", "topic"]  # D-002 day-1 discriminator
+    sanitizer: SanitizerEngine | None # D-015 Pass 1；explorer-tools-p0 的 read_file 必須非 None
+    kb: KnowledgeBase | None = None   # explorer-tools-p0 加（optional）；search 走 KB path 時用
+    usage_tracker: UsageTracker | None = None  # explorer-tools-p0 加（optional）；未來 tool 自呼 LLM 用
+    kb_growth_log: KBGrowthLogger     # D-016（待 Module 8 P0 落地）
+    audit_log: AuditLogger            # 本 spec §七（P0 以 `sandbox.append_tool_audit_line` 共用 writer 代勞；未注入 ToolContext）
     allow_git_metadata: bool = True   # 是否允許讀 .git/
 
     class Config:
         frozen = True  # 建立後不可變
 ```
+
+**落地進度**（P0 實際 schema，`sidecar/src/codebus_agent/sandbox.py::ToolContext`）：
+- ✅ M1：`workspace_root` / `workspace_id` / `session_id` / `workspace_type` / `sanitizer`
+- ✅ `explorer-tools-p0`（2026-04-24）：`kb: Any = None` / `usage_tracker: Any = None`（type hint 走 `TYPE_CHECKING`，Pydantic 側 `Any` + `arbitrary_types_allowed=True` 規避 forward-ref rebuild）
+- ⏳ 後續：`kb_growth_log` / `audit_log` / `allow_git_metadata`（`audit_log` 目前由 FolderTools 直接呼 `sandbox.append_tool_audit_line` 共用 writer 代勞，跟 ToolSandbox 寫同格式同 `tool_audit.jsonl`）
 
 ### 每個工具的責任
 

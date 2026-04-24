@@ -10,6 +10,10 @@ TBD - created by archiving change 'm1-power-on'. Update Purpose after archive.
 
 The sidecar SHALL define a `ToolContext` Pydantic model that includes a `workspace_type` field typed as `Literal["folder", "topic"]`, per `docs/decisions.md` D-002 and D-023.
 
+The model SHALL additionally expose two optional dependency slots — `kb: KnowledgeBase | None = None` and `usage_tracker: UsageTracker | None = None` — so Explorer-mode tools (`explorer-tools-p0`) can reach the KB client for `search` dispatch and wire `UsageTracker` into any future tool that itself consumes LLM budget. Both fields default to `None`, preserving backward compatibility with every prior construction site (M1 red-team fixtures, scanner Pass 1 orchestration, sanitizer safety-chain tests).
+
+`ToolContext` SHALL keep `frozen=True` so tools cannot silently relocate the workspace or swap dependencies mid-run by mutating the context.
+
 #### Scenario: Folder workspace accepted
 
 - **WHEN** a `ToolContext` is constructed with `workspace_type="folder"`
@@ -25,12 +29,48 @@ The sidecar SHALL define a `ToolContext` Pydantic model that includes a `workspa
 - **WHEN** a `ToolContext` is constructed with any string other than `"folder"` or `"topic"`
 - **THEN** Pydantic MUST raise a validation error
 
+#### Scenario: Optional kb and usage_tracker fields default to None
+
+- **WHEN** a `ToolContext` is constructed without supplying `kb` or `usage_tracker`
+- **THEN** `ctx.kb` MUST be `None` and `ctx.usage_tracker` MUST be `None`
+- **AND** the model MUST validate without raising
+- **AND** existing red-team fixtures and scanner constructors MUST continue to compile without modification
+
+#### Scenario: kb and usage_tracker fields accept their typed values
+
+- **WHEN** a `ToolContext` is constructed with `kb=<KnowledgeBase instance>` and `usage_tracker=<UsageTracker instance>`
+- **THEN** the model MUST validate without raising
+- **AND** `ctx.kb` and `ctx.usage_tracker` MUST expose the supplied instances
+
 
 <!-- @trace
-source: m1-power-on
-updated: 2026-04-19
+source: explorer-tools-p0
+updated: 2026-04-24
 code:
-  - web/dist
+  - docs/agent-explorer-spec.md
+  - sidecar/src/codebus_agent/agent/protocols.py
+  - sidecar/src/codebus_agent/agent/tools/__init__.py
+  - docs/tool-sandbox.md
+  - sidecar/src/codebus_agent/agent/tools/schemas.py
+  - sidecar/src/codebus_agent/sandbox.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+tests:
+  - sidecar/tests/agent/tools/test_read_file.py
+  - sidecar/tests/agent/tools/test_search.py
+  - sidecar/tests/agent/test_explorer_loop_with_real_tools.py
+  - sidecar/tests/agent/test_protocols.py
+  - sidecar/tests/agent/tools/test_folder_tools_structural.py
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/sandbox/test_tool_context_optional_deps.py
+  - sidecar/tests/agent/tools/test_mark_station.py
+  - sidecar/tests/agent/tools/__init__.py
+  - sidecar/tests/agent/tools/test_folder_tools_audit.py
+  - sidecar/tests/agent/tools/conftest.py
+  - sidecar/tests/agent/tools/test_tool_specs.py
+  - sidecar/tests/agent/tools/test_list_dir.py
+  - sidecar/tests/agent/tools/test_schemas.py
 -->
 
 ---

@@ -260,6 +260,8 @@ The sidecar SHALL expose three `typing.Protocol` types in `codebus_agent.agent.p
 
 The Protocol surface is the day-1 abstraction that unlocks future reuse: Q&A Agent (Module 8) and Topic-mode Explorer (Phase 2) supply their own implementations without touching the core loop. Therefore the P0 shape MUST NOT leak Folder-mode-specific assumptions (e.g. file paths) into the Protocol signatures — use abstract types like `SearchHit`, `Content`, `Target` defined alongside the Protocols.
 
+`ExplorerTools` SHALL additionally declare an OPTIONAL `tool_specs() -> list[dict]` method that returns the tool-spec list consumed by `render_explorer_prompt(state, tool_specs)`. The method is OPTIONAL at the Protocol level (implementors are permitted to omit it) and `run_explorer` MUST provide a fallback empty list when absent. Concrete Folder-mode `FolderTools` (landed by `explorer-tools-p0`) SHALL implement `tool_specs()` to return one dict per exposed tool with keys `name` / `description` / `parameters` so the Explorer Think-step prompt advertises its real tool surface instead of the empty `[]` default supplied in P0.
+
 #### Scenario: MockTools satisfies ExplorerTools structurally
 
 - **WHEN** a test class implements `primary_search` / `fetch` / `follow_reference` with correct coroutine signatures (no `ExplorerTools` inheritance)
@@ -270,30 +272,48 @@ The Protocol surface is the day-1 abstraction that unlocks future reuse: Q&A Age
 - **WHEN** `ExplorerTools.primary_search`'s signature is inspected
 - **THEN** its parameters and return type MUST be abstract (`query: str` → `list[SearchHit]`) rather than Folder-specific types, so a `TopicTools` implementation (Phase 2) can satisfy the same Protocol without core-loop changes
 
+#### Scenario: tool_specs method is optional on ExplorerTools
+
+- **WHEN** a minimal `_MockTools` class implements only `primary_search` / `fetch` / `follow_reference` and omits `tool_specs`
+- **THEN** `isinstance(mock_tools, ExplorerTools)` MUST still return True
+- **AND** `run_explorer` MUST fall back to an empty `tool_specs=[]` for prompt rendering without raising `AttributeError`
+
+#### Scenario: FolderTools advertises its tool surface via tool_specs
+
+- **WHEN** a `FolderTools` instance is passed to `run_explorer`
+- **AND** `tool_specs()` is invoked on that instance
+- **THEN** the return value MUST be a `list[dict]` containing at least one entry for each of `search` / `list_dir` / `read_file` / `mark_station`
+- **AND** each entry MUST carry `name` / `description` / `parameters` keys so the prompt render can advertise them to the LLM
+
 
 <!-- @trace
-source: explorer-react-loop-p0
+source: explorer-tools-p0
 updated: 2026-04-24
 code:
-  - sidecar/src/codebus_agent/agent/explorer.py
-  - sidecar/src/codebus_agent/agent/prompts/__init__.py
-  - sidecar/src/codebus_agent/agent/prompts/judge.py
-  - sidecar/src/codebus_agent/agent/__init__.py
-  - sidecar/src/codebus_agent/agent/reasoning_logger.py
-  - docs/agent-core.md
+  - docs/agent-explorer-spec.md
   - sidecar/src/codebus_agent/agent/protocols.py
-  - sidecar/src/codebus_agent/agent/prompts/explorer.py
-  - sidecar/src/codebus_agent/agent/types.py
+  - sidecar/src/codebus_agent/agent/tools/__init__.py
+  - docs/tool-sandbox.md
+  - sidecar/src/codebus_agent/agent/tools/schemas.py
+  - sidecar/src/codebus_agent/sandbox.py
+  - sidecar/src/codebus_agent/agent/explorer.py
   - CLAUDE.md
-  - sidecar/src/codebus_agent/agent/judge.py
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
 tests:
-  - sidecar/tests/agent/test_types.py
-  - sidecar/tests/agent/conftest.py
-  - sidecar/tests/agent/test_explorer_loop.py
-  - sidecar/tests/agent/test_reasoning_logger.py
+  - sidecar/tests/agent/tools/test_read_file.py
+  - sidecar/tests/agent/tools/test_search.py
+  - sidecar/tests/agent/test_explorer_loop_with_real_tools.py
   - sidecar/tests/agent/test_protocols.py
-  - sidecar/tests/agent/test_judge.py
-  - sidecar/tests/agent/__init__.py
+  - sidecar/tests/agent/tools/test_folder_tools_structural.py
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/sandbox/test_tool_context_optional_deps.py
+  - sidecar/tests/agent/tools/test_mark_station.py
+  - sidecar/tests/agent/tools/__init__.py
+  - sidecar/tests/agent/tools/test_folder_tools_audit.py
+  - sidecar/tests/agent/tools/conftest.py
+  - sidecar/tests/agent/tools/test_tool_specs.py
+  - sidecar/tests/agent/tools/test_list_dir.py
+  - sidecar/tests/agent/tools/test_schemas.py
 -->
 
 ---

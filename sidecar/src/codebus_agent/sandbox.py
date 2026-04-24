@@ -29,11 +29,15 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from codebus_agent.sanitizer import SanitizerEngine
+
+if TYPE_CHECKING:
+    from codebus_agent.kb.knowledge_base import KnowledgeBase
+    from codebus_agent.providers.usage_tracker import UsageTracker
 
 
 class PathEscapeError(ValueError):
@@ -47,10 +51,14 @@ class ToolContext(BaseModel):
     workspace mid-run by mutating the context.  Per D-002 the
     ``workspace_type`` discriminator MUST be present day 1.
 
-    ``sanitizer`` is optional at the schema level so existing sandbox /
-    red-team fixtures keep constructing ``ToolContext`` without it; any
-    real code path that touches file content (scanner Pass 1, future
-    KB / Q&A Pass 3 wiring) MUST inject an engine explicitly.
+    Optional dependency slots (``sanitizer`` / ``kb`` / ``usage_tracker``)
+    all default to ``None`` so existing sandbox / red-team fixtures keep
+    constructing ``ToolContext`` without them; each real code path that
+    needs a dep MUST inject explicitly:
+      - ``sanitizer``: scanner Pass 1 + explorer-tools-p0 read_file
+      - ``kb``: explorer-tools-p0 search (KB path; falls back to grep
+        when ``None``)
+      - ``usage_tracker``: future tools that themselves consume LLM budget
     """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
@@ -60,6 +68,14 @@ class ToolContext(BaseModel):
     workspace_id: str = ""
     session_id: str = ""
     sanitizer: SanitizerEngine | None = None
+    # Type-checker hint: ``KnowledgeBase | None``. Kept as ``Any`` at the
+    # Pydantic level to sidestep forward-ref rebuild gymnastics —
+    # ``arbitrary_types_allowed=True`` still lets callers pass a real
+    # ``KnowledgeBase`` instance, and the ``TYPE_CHECKING`` import above
+    # keeps IDE / mypy navigation honest.
+    kb: Any = None
+    # Type-checker hint: ``UsageTracker | None``.
+    usage_tracker: Any = None
 
     @field_validator("workspace_root", mode="after")
     @classmethod
@@ -318,18 +334,58 @@ class ToolSandbox:
         denial_reason: str | None,
         ctx: ToolContext,
     ) -> None:
-        line = {
-            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-            "schema_version": _TOOL_AUDIT_SCHEMA_VERSION,
-            "workspace_type": ctx.workspace_type,
-            "tool_name": tool_name,
-            "args_summary": args_summary,
-            "resolved_path": resolved_path,
-            "allowed": allowed,
-            "denial_reason": denial_reason,
-            "session_id": ctx.session_id or str(uuid.uuid4()),
-        }
-        payload = json.dumps(line, ensure_ascii=False, default=str) + "\n"
-        with self._lock:
-            with self._audit_path.open("a", encoding="utf-8") as fp:
-                fp.write(payload)
+        append_tool_audit_line(
+            audit_path=self._audit_path,
+            lock=self._lock,
+            tool_name=tool_name,
+            args_summary=args_summary,
+            resolved_path=resolved_path,
+            allowed=allowed,
+            denial_reason=denial_reason,
+            ctx=ctx,
+        )
+
+
+# Module-level process-wide lock so async tool dispatchers (FolderTools)
+# and the sync ToolSandbox both serialize writes through one critical
+# section. Spec `ToolSandbox appends every invocation to tool_audit.jsonl`
+# mandates one JSONL line per invocation with no partial writes.
+_MODULE_AUDIT_LOCK = threading.Lock()
+
+
+def append_tool_audit_line(
+    *,
+    audit_path: Path,
+    lock: threading.Lock | None,
+    tool_name: str,
+    args_summary: dict[str, Any],
+    resolved_path: str | None,
+    allowed: bool,
+    denial_reason: str | None,
+    ctx: ToolContext,
+) -> None:
+    """Append one `tool_audit.jsonl` line in the schema pinned by
+    openspec/specs/tool-sandbox/spec.md `ToolSandbox appends every
+    invocation to tool_audit.jsonl`.
+
+    Exposed at module scope so async FolderTools (`codebus-agent-p0`)
+    can share the same writer as the sync ToolSandbox — keeping the
+    schema, lock discipline, and classification code paths in one place.
+    """
+    line = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "schema_version": _TOOL_AUDIT_SCHEMA_VERSION,
+        "workspace_type": ctx.workspace_type,
+        "tool_name": tool_name,
+        "args_summary": args_summary,
+        "resolved_path": resolved_path,
+        "allowed": allowed,
+        "denial_reason": denial_reason,
+        "session_id": ctx.session_id or str(uuid.uuid4()),
+    }
+    payload = json.dumps(line, ensure_ascii=False, default=str) + "\n"
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    chosen_lock = lock if lock is not None else _MODULE_AUDIT_LOCK
+    with chosen_lock:
+        with audit_path.open("a", encoding="utf-8") as fp:
+            fp.write(payload)

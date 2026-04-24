@@ -114,3 +114,20 @@ def test_protocols_do_not_bind_folder_mode_types() -> None:
     assert SearchHit is not None
     assert Content is not None
     assert Target is not None
+
+
+def test_tool_specs_method_is_optional_on_explorer_tools() -> None:
+    """`_MockTools` omits `tool_specs` yet still satisfies ExplorerTools.
+
+    Backs spec scenario `tool_specs method is optional on ExplorerTools`
+    (explorer-tools-p0 — adds tool_specs as an OPTIONAL Protocol method).
+    """
+    from codebus_agent.agent.protocols import ExplorerTools
+
+    mock = _MockTools()
+    assert not hasattr(mock, "tool_specs"), (
+        "This test pins the 'optional' contract — _MockTools MUST lack tool_specs"
+    )
+    assert isinstance(mock, ExplorerTools), (
+        "Omitting the optional tool_specs method MUST NOT break Protocol conformance"
+    )

@@ -61,18 +61,20 @@ class Target(BaseModel):
 
 ## 三、Agent 可用工具（Tool Use）
 
-| 工具 | 簽名 | 用途 |
-|---|---|---|
-| `search` | `(keyword: str) -> list[FileMatch]` | grep 關鍵字找入口 |
-| `list_dir` | `(path: str) -> list[Entry]` | 看目錄結構 |
-| `read_file` | `(path: str, line_range: tuple[int,int] \| None = None) -> str` | 讀檔（可指定行數） |
-| `trace_import` | `(symbol: str) -> str \| None` | 追某個 import 的來源 |
-| `find_callers` | `(symbol: str) -> list[FileMatch]` | 找誰呼叫這個符號 |
-| `mark_station` | `(path: str, role: str, why: str)` | 把檔案標為學習站 |
-| `add_to_queue` | `(target: Target, priority: int, why: str)` | 把新目標加入探索清單 |
-| `stop` | `(reason: str)` | 決定探索夠了，收斂 |
+| 工具 | 簽名 | 用途 | 狀態 |
+|---|---|---|---|
+| `search` | `(keyword: str) -> list[SearchHit]` | KB query（優先）或 grep fallback | ✅ P0 landed（`explorer-tools-p0`） |
+| `list_dir` | `(path: str) -> list[DirEntry]` | 看目錄結構（一層；`.codebus` 排除） | ✅ P0 landed |
+| `read_file` | `(path: str, line_range: tuple[int,int] \| None = None) -> str` | 讀檔（Pass 1 sanitize + >12k truncate） | ✅ P0 landed |
+| `trace_import` | `(symbol: str) -> str \| None` | 追某個 import 的來源 | ⏳ P1（步驟 19） |
+| `find_callers` | `(symbol: str) -> list[FileMatch]` | 找誰呼叫這個符號 | ⏳ P1（步驟 19） |
+| `mark_station` | `(path: str, role: str, why: str)` | 把檔案標為學習站（`relevance=0.8` P0） | ✅ P0 landed |
+| `add_to_queue` | `(target: Target, priority: int, why: str)` | 把新目標加入探索清單 | ⏳ 後續（Explorer 迴圈 `_update_state` 代勞中） |
+| `stop` | `(reason: str)` | 決定探索夠了，收斂 | ⏳ 後續（`ExplorerAction.stop` 欄位代勞中） |
 
 **關鍵設計**：`mark_station` 和 `add_to_queue` 都要 Agent 給 `why`，才能在前端顯示決策理由。
+
+**P0 落地細節**（`explorer-tools-p0`，2026-04-24 archive）：四個 P0 tool 都透過 `codebus_agent.agent.tools.folder_tools.FolderTools` 實作；`search` 的 KB 走 `ctx.kb.query(keyword)`，回傳 `SearchHit(path, snippet, score)` 的 path 相對 workspace_root；grep fallback 走 text-file 副檔名 (`.py` / `.md` / `.ts` 等) + 512KB 上限，結果 cap 100。`read_file` 的輸出**一律**過 `ctx.sanitizer` Pass 1；`ctx.sanitizer=None` 時 fail-loud raise `ValueError`。每次 tool 呼叫都透過 `codebus_agent.sandbox.append_tool_audit_line` 共用 writer 寫一行 `tool_audit.jsonl`（含 allow/deny）。
 
 ---
 

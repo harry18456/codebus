@@ -228,8 +228,20 @@ async def run_explorer(
     cancel_event: asyncio.Event | None = None,
     tool_specs: list[dict] | None = None,
 ) -> ExplorerResult:
-    """Drive the Think → Act → Observe → Judge → Log → Update loop."""
-    tool_specs = tool_specs or []
+    """Drive the Think → Act → Observe → Judge → Log → Update loop.
+
+    ``tool_specs`` precedence (per spec `ExplorerTools, Judge, and
+    CoverageChecker are structural Protocols`): caller-supplied kwarg
+    wins, else call ``tools.tool_specs()`` if present, else fall back to
+    an empty list. The optional Protocol method lets ``FolderTools`` (and
+    future ``TopicTools``) advertise their surface without caller plumbing.
+    """
+    if tool_specs is None:
+        tool_specs_fn = getattr(tools, "tool_specs", None)
+        if callable(tool_specs_fn):
+            tool_specs = tool_specs_fn()
+        else:
+            tool_specs = []
 
     while True:
         should_stop, stopped_reason = _should_stop(state, cancel_event)
