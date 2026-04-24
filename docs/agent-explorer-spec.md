@@ -66,8 +66,8 @@ class Target(BaseModel):
 | `search` | `(keyword: str) -> list[SearchHit]` | KB query（優先）或 grep fallback | ✅ P0 landed（`explorer-tools-p0`） |
 | `list_dir` | `(path: str) -> list[DirEntry]` | 看目錄結構（一層；`.codebus` 排除） | ✅ P0 landed |
 | `read_file` | `(path: str, line_range: tuple[int,int] \| None = None) -> str` | 讀檔（Pass 1 sanitize + >12k truncate） | ✅ P0 landed |
-| `trace_import` | `(symbol: str) -> str \| None` | 追某個 import 的來源 | ⏳ P1（步驟 19） |
-| `find_callers` | `(symbol: str) -> list[FileMatch]` | 找誰呼叫這個符號 | ⏳ P1（步驟 19） |
+| `trace_import` | `(symbol: str) -> str \| None` | 追某個 import 的來源 | ✅ 步驟 19 landed（`explorer-tools-p1`） |
+| `find_callers` | `(symbol: str) -> list[FileMatch]` | 找誰呼叫這個符號 | ✅ 步驟 19 landed（`explorer-tools-p1`） |
 | `mark_station` | `(path: str, role: str, why: str)` | 把檔案標為學習站（`relevance=0.8` P0） | ✅ P0 landed |
 | `add_to_queue` | `(target: Target, priority: int, why: str)` | 把新目標加入探索清單 | ⏳ 後續（Explorer 迴圈 `_update_state` 代勞中） |
 | `stop` | `(reason: str)` | 決定探索夠了，收斂 | ⏳ 後續（`ExplorerAction.stop` 欄位代勞中） |
@@ -75,6 +75,8 @@ class Target(BaseModel):
 **關鍵設計**：`mark_station` 和 `add_to_queue` 都要 Agent 給 `why`，才能在前端顯示決策理由。
 
 **P0 落地細節**（`explorer-tools-p0`，2026-04-24 archive）：四個 P0 tool 都透過 `codebus_agent.agent.tools.folder_tools.FolderTools` 實作；`search` 的 KB 走 `ctx.kb.query(keyword)`，回傳 `SearchHit(path, snippet, score)` 的 path 相對 workspace_root；grep fallback 走 text-file 副檔名 (`.py` / `.md` / `.ts` 等) + 512KB 上限，結果 cap 100。`read_file` 的輸出**一律**過 `ctx.sanitizer` Pass 1；`ctx.sanitizer=None` 時 fail-loud raise `ValueError`。每次 tool 呼叫都透過 `codebus_agent.sandbox.append_tool_audit_line` 共用 writer 寫一行 `tool_audit.jsonl`（含 allow/deny）。
+
+**P1 落地細節**（`explorer-tools-p1`，步驟 19）：`trace_import` / `find_callers` 掛在同一 `FolderTools` 類別上；用 language-neutral 正則（Python / TS / JS / Go / Rust 的 def / class / function / struct / enum / trait），`re.escape(symbol)` 防注入。`trace_import` 依 `(path_depth, relative_path)` 排序候選，第一個命中即回 relative path，或 `None`；symlink 指向 workspace 外者被 `ensure_in_workspace` 拒絕並寫 `tool_audit.jsonl` `allowed=false` 行。`find_callers` 用 `\b<escaped_symbol>\b` whole-word 匹配，per-file ≤ 5、global ≤ 100、`(path_depth, path, line)` 排序；每行過 Pass 1 sanitize（截到 200 字），命中寫 `sanitize_audit.jsonl` `pass_num=1`；`ctx.sanitizer=None` 時 fail-loud；排除 `trace_import` 回的定義行以避免重覆。
 
 ---
 

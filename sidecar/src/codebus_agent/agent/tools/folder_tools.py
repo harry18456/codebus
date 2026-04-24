@@ -7,23 +7,28 @@ openspec/changes/explorer-tools-p0/specs/explorer-tools/spec.md
   Requirement: read_file sanitizes output via Pass 1 before returning to Agent
   Requirement: list_dir and read_file enforce ensure_in_workspace
   Requirement: mark_station mutates state without calling LLM
+openspec/changes/explorer-tools-p1/specs/explorer-tools/spec.md
+  Requirement: trace_import resolves symbols to definition paths via regex
+  Requirement: find_callers returns sanitized call-site FileMatches
 
 This class implements four concrete P0 tools (`search`, `list_dir`,
-`read_file`, `mark_station`) AND also satisfies the abstract
+`read_file`, `mark_station`) plus two P1 differentiated weapons
+(`trace_import`, `find_callers`), AND also satisfies the abstract
 ``ExplorerTools`` Protocol seams (`primary_search` / `fetch` /
 `follow_reference`) so Q&A Agent / Topic-mode impls can plug into the
 same loop without touching this file.
 
 The Explorer loop dispatches by concrete method name — ``getattr(tools,
-call.name)`` lands directly on one of the four P0 methods.
+call.name)`` lands directly on one of the six methods.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from codebus_agent.agent.protocols import Content, Target
-from codebus_agent.agent.tools.schemas import DirEntry, SearchHit
+from codebus_agent.agent.tools.schemas import DirEntry, FileMatch, SearchHit
 from codebus_agent.agent.types import ExplorerState, Station
 from codebus_agent.sandbox import (
     PathEscapeError,
@@ -50,17 +55,50 @@ _READ_FILE_TRUNCATE_LIMIT: int = 12000  # chars; heuristic proxy for ≈ 3000 to
 _TRUNCATE_MARKER: str = "\n[... truncated ...]\n"
 _SANITIZE_RULES_VERSION: str = "2026-04-20-1"  # kept in sync with sanitizer/config.py _BUILTIN_RULES_VERSION
 
-# Audit field whitelist per tool — keep keyword/why out of args_summary
-# since they carry Agent free-form text that can accidentally echo
-# sensitive snippets. Path-like args stay whitelisted so auditors can
-# reconstruct tool dispatch history without reading the raw log. Aligns
-# with openspec/specs/tool-sandbox/spec.md `Tools declare their auditable
-# field whitelist`.
+# Text-file extensions used by both P1 symbol-navigation tools. Mirrors
+# the P0 grep fallback allowlist so ``trace_import`` / ``find_callers``
+# see the same file set ``search`` does.
+_P1_ALLOWED_EXTS: frozenset[str] = frozenset(
+    {".py", ".md", ".ts", ".tsx", ".rs", ".go", ".js", ".jsx"}
+)
+_P1_MAX_BYTES: int = 512 * 1024  # align with search grep
+_FIND_CALLERS_GLOBAL_CAP: int = 100
+_FIND_CALLERS_PER_FILE_CAP: int = 5
+_FIND_CALLERS_SNIPPET_LIMIT: int = 200  # chars after sanitize
+
+# Language-neutral definition-site regex templates. ``{sym}`` is replaced
+# by ``re.escape(symbol)`` before compilation so user-supplied symbols
+# carrying regex metacharacters (``foo.bar``) cannot wildcard-match
+# unintended names (``foo_bar``). Each template is anchored at
+# ``^\s*`` and terminates with ``\b`` so ``Bar`` does not match
+# ``BarFoo``. Covers Python / TS / JS / Go / Rust families; markdown
+# files participate in iteration but yield no hits unless the symbol
+# happens to appear verbatim after a definition keyword.
+_DEFINITION_PATTERN_TEMPLATES: tuple[str, ...] = (
+    r"^\s*(?:async\s+)?def\s+{sym}\b",                       # Python def / async def
+    r"^\s*class\s+{sym}\b",                                  # Python / generic class
+    r"^\s*(?:export\s+)?class\s+{sym}\b",                    # TS / JS class (export)
+    r"^\s*(?:export\s+)?(?:async\s+)?function\s+{sym}\b",    # TS / JS function
+    r"^\s*(?:export\s+)?(?:const|let|var)\s+{sym}\b",        # TS / JS const / let / var
+    r"^\s*func\s+(?:\([^)]+\)\s+)?{sym}\b",                  # Go func (with optional receiver)
+    r"^\s*type\s+{sym}\b",                                   # Go type
+    r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+{sym}\b",             # Rust fn (pub / async)
+    r"^\s*(?:pub\s+)?(?:struct|enum|trait)\s+{sym}\b",       # Rust struct / enum / trait
+)
+
+# Audit field whitelist per tool — keep keyword/why/symbol out of
+# args_summary since they carry Agent free-form text that can
+# accidentally echo sensitive snippets. Path-like args stay whitelisted
+# so auditors can reconstruct tool dispatch history without reading
+# the raw log. Aligns with openspec/specs/tool-sandbox/spec.md
+# `Tools declare their auditable field whitelist`.
 _AUDIT_FIELDS: dict[str, list[str]] = {
     "search": [],
     "list_dir": ["path"],
     "read_file": ["path", "line_range"],
     "mark_station": ["path", "role"],
+    "trace_import": [],
+    "find_callers": [],
 }
 
 
@@ -130,9 +168,10 @@ class FolderTools:
 
         Descriptions align with `docs/agent-explorer-spec.md §三` so the
         prompt advertises the same signatures the LLM's tool_calls will
-        use. `parameters` follows a loose JSON-schema-like shape — full
-        JSON Schema emission lands with the P1 (`explorer-tools-p1`)
-        change when `trace_import` / `find_callers` arrive.
+        use. `parameters` follows a loose JSON-schema-like shape. The
+        P1 entries (``trace_import`` / ``find_callers``) landed with
+        `explorer-tools-p1`; they complete the symbol-navigation
+        surface alongside the P0 four.
         """
         return [
             {
@@ -185,6 +224,28 @@ class FolderTools:
                         "why": {"type": "string"},
                     },
                     "required": ["path", "role", "why"],
+                },
+            },
+            {
+                "name": "trace_import",
+                "description": "Resolve a symbol name to the workspace-relative path where it is defined. Scans Python / TS / JS / Go / Rust definition-site patterns and returns the first match, or null when the symbol is not defined anywhere.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string"},
+                    },
+                    "required": ["symbol"],
+                },
+            },
+            {
+                "name": "find_callers",
+                "description": "Find every call-site of a symbol across the workspace. Returns FileMatch(path, line, snippet) entries with sanitized snippets; capped at 100 total / 5 per file; definition-site line is excluded.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string"},
+                    },
+                    "required": ["symbol"],
                 },
             },
         ]
@@ -452,4 +513,217 @@ class FolderTools:
         self._audit_allow(
             "mark_station", {"path": path, "role": role}, resolved
         )
+        return None
+
+    # ------------------------------------------------------------------
+    # P1 differentiated weapons — symbol-level navigation
+    # (openspec/changes/explorer-tools-p1)
+    # ------------------------------------------------------------------
+
+    async def trace_import(self, symbol: str) -> str | None:
+        """Resolve ``symbol`` to its defining file (workspace-relative path).
+
+        Iterates allowed text-file extensions in deterministic order
+        (``(path_depth, relative_path)``) and returns the first match of
+        any language-neutral definition-site pattern. Symlinks escaping
+        the workspace are rejected by ``ensure_in_workspace`` and logged
+        to ``tool_audit.jsonl`` with ``allowed=false``. The final
+        outcome (match path or ``None``) is logged as one additional
+        ``tool_audit.jsonl`` line.
+        """
+        escaped = re.escape(symbol)
+        combined = re.compile(
+            "|".join(
+                f"(?:{template.format(sym=escaped)})"
+                for template in _DEFINITION_PATTERN_TEMPLATES
+            ),
+            re.MULTILINE,
+        )
+
+        ordered = self._iter_allowed_paths_sorted()
+        for _depth, rel_str, abs_path in ordered:
+            try:
+                resolved = ensure_in_workspace(rel_str, self._ctx)
+            except PathEscapeError:
+                self._audit_deny("trace_import", {"symbol": symbol}, rel_str)
+                continue
+            text = self._read_text_or_none(resolved)
+            if text is None:
+                continue
+            if combined.search(text):
+                self._audit_allow("trace_import", {"symbol": symbol}, resolved)
+                return rel_str
+
+        # Exhausted — log one overall-outcome line with no resolved path.
+        self._audit_allow("trace_import", {"symbol": symbol}, None)
+        return None
+
+    async def find_callers(self, symbol: str) -> list[FileMatch]:
+        """Return sanitized call-site FileMatches for ``symbol``.
+
+        Whole-word ``\\b<escaped_symbol>\\b`` match across the P1 allowed
+        extensions. Per-file cap of 5, global cap of 100; sort key
+        ``(path_depth, path, line)``. Snippets pass through Pass 1
+        sanitize and truncate at 200 chars; ``ctx.sanitizer=None`` fails
+        loud without touching the filesystem. Definition-site line
+        (resolved via ``trace_import``) is excluded from results.
+        """
+        if self._ctx.sanitizer is None:
+            # Fail-loud matches ``read_file`` invariant — raw source
+            # MUST NOT leak into the Agent without Pass 1 redaction.
+            raise ValueError(
+                f"find_callers requires ctx.sanitizer to be configured "
+                f"(symbol={symbol!r}); raw call-site snippets MUST NOT "
+                f"reach the Agent without Pass 1 redaction"
+            )
+
+        definition_path = await self.trace_import(symbol)
+        definition_line = (
+            self._find_definition_line(definition_path, symbol)
+            if definition_path is not None
+            else None
+        )
+
+        escaped = re.escape(symbol)
+        call_pattern = re.compile(rf"\b{escaped}\b")
+
+        # (path_depth, rel_str, line_no, raw_line)
+        raw_matches: list[tuple[int, str, int, str]] = []
+        for depth, rel_str, abs_path in self._iter_allowed_paths_sorted():
+            try:
+                resolved = ensure_in_workspace(rel_str, self._ctx)
+            except PathEscapeError:
+                self._audit_deny("find_callers", {"symbol": symbol}, rel_str)
+                continue
+            text = self._read_text_or_none(resolved)
+            if text is None:
+                continue
+            per_file_kept = 0
+            for line_no, line in enumerate(text.splitlines(), start=1):
+                if not call_pattern.search(line):
+                    continue
+                if (
+                    definition_path == rel_str
+                    and definition_line is not None
+                    and line_no == definition_line
+                ):
+                    # Skip the definition-site line; no per-file slot consumed.
+                    continue
+                raw_matches.append((depth, rel_str, line_no, line))
+                per_file_kept += 1
+                if per_file_kept >= _FIND_CALLERS_PER_FILE_CAP:
+                    break
+
+        raw_matches.sort(key=lambda m: (m[0], m[1], m[2]))
+        raw_matches = raw_matches[:_FIND_CALLERS_GLOBAL_CAP]
+
+        audit_logger = self._get_sanitize_audit_logger()
+        results: list[FileMatch] = []
+        for _depth, rel_str, line_no, raw_line in raw_matches:
+            sanitized = self._ctx.sanitizer.sanitize(
+                raw_line,
+                source=MessageSource(
+                    message_id=f"find_callers:{rel_str}:{line_no}"
+                ),
+            )
+            for entry in sanitized.entries:
+                audit_logger.append(
+                    entry=entry,
+                    pass_num=1,
+                    rules_version=_SANITIZE_RULES_VERSION,
+                    session_id=self._ctx.session_id or "sess-unknown",
+                )
+            snippet = sanitized.text
+            if len(snippet) > _FIND_CALLERS_SNIPPET_LIMIT:
+                snippet = snippet[:_FIND_CALLERS_SNIPPET_LIMIT]
+            results.append(
+                FileMatch(path=rel_str, line=line_no, snippet=snippet)
+            )
+
+        self._audit_allow("find_callers", {"symbol": symbol}, None)
+        return results
+
+    # ------------------------------------------------------------------
+    # Shared P1 helpers
+    # ------------------------------------------------------------------
+
+    def _iter_allowed_paths_sorted(
+        self,
+    ) -> list[tuple[int, str, Path]]:
+        """Return every workspace text-file candidate sorted deterministically.
+
+        Sort key: ``(path_depth, relative_path_str)``. Filter rules:
+
+        - Extension in ``_P1_ALLOWED_EXTS``.
+        - ``.codebus`` housekeeping directory excluded.
+        - Size ≤ ``_P1_MAX_BYTES`` (mirrors grep fallback).
+
+        The returned triples carry the absolute ``Path`` as-scanned; the
+        caller still runs ``ensure_in_workspace`` on the relative string
+        to catch symlinks that resolve outside the workspace.
+        """
+        ws_root = self._ctx.workspace_root
+        collected: list[tuple[int, str, Path]] = []
+        for p in ws_root.rglob("*"):
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in _P1_ALLOWED_EXTS:
+                continue
+            try:
+                rel_parts = p.relative_to(ws_root).parts
+            except ValueError:
+                continue
+            if rel_parts and rel_parts[0] == ".codebus":
+                continue
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            if size > _P1_MAX_BYTES:
+                continue
+            rel_str = "/".join(rel_parts)
+            collected.append((len(rel_parts), rel_str, p))
+        collected.sort(key=lambda t: (t[0], t[1]))
+        return collected
+
+    @staticmethod
+    def _read_text_or_none(resolved: Path) -> str | None:
+        """Read ``resolved`` as UTF-8, returning ``None`` on failure.
+
+        Mirrors the grep fallback's forgiving stance: files that fail
+        decode / stat / open are skipped rather than raising so one
+        corrupt file does not break a whole workspace scan.
+        """
+        try:
+            return resolved.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            return None
+
+    def _find_definition_line(
+        self, rel_path: str, symbol: str
+    ) -> int | None:
+        """Return the 1-indexed line number of the first def-site hit in ``rel_path``.
+
+        Used by ``find_callers`` to exclude the same line ``trace_import``
+        resolved to. When the file cannot be read or no definition
+        pattern matches (e.g. sibling export re-exporting a symbol),
+        returns ``None`` so no exclusion happens and every hit survives.
+        """
+        try:
+            resolved = ensure_in_workspace(rel_path, self._ctx)
+        except PathEscapeError:
+            return None
+        text = self._read_text_or_none(resolved)
+        if text is None:
+            return None
+        escaped = re.escape(symbol)
+        combined = re.compile(
+            "|".join(
+                f"(?:{template.format(sym=escaped)})"
+                for template in _DEFINITION_PATTERN_TEMPLATES
+            )
+        )
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if combined.search(line):
+                return line_no
         return None

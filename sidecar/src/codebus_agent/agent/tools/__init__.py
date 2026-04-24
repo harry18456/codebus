@@ -1,10 +1,28 @@
-"""Folder-mode Explorer tools — populated in explorer-tools-p0 Sections 5+7+9+11+13+15.
+"""Folder-mode Explorer tools package.
 
-Re-exports land at the bottom of the apply phase; during scaffolding the
-module is intentionally empty so Section 3+ RED tests fail with
-`ImportError`, matching the pattern established by
-`explorer-react-loop-p0`'s scaffolding stubs.
+Re-exports the concrete ``FolderTools`` implementation and the shared
+schemas so callers can import everything tool-related from one module.
+
+Schema inventory:
+
+- ``SearchHit`` — ``search`` / KB result shape (explorer-tools-p0)
+- ``DirEntry`` — ``list_dir`` one-level entry (explorer-tools-p0)
+- ``FileMatch`` — ``find_callers`` call-site shape (explorer-tools-p1)
 """
 from __future__ import annotations
 
-__all__: list[str] = []
+from codebus_agent.agent.tools.folder_tools import FolderTools
+from codebus_agent.agent.tools.schemas import (
+    Content,
+    DirEntry,
+    FileMatch,
+    SearchHit,
+)
+
+__all__ = [
+    "Content",
+    "DirEntry",
+    "FileMatch",
+    "FolderTools",
+    "SearchHit",
+]

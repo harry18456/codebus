@@ -46,3 +46,25 @@ def test_dir_entry_size_non_negative() -> None:
     DirEntry(name="empty", kind="file", size=0)  # OK
     with pytest.raises(ValidationError):
         DirEntry(name="bad", kind="file", size=-1)
+
+
+def test_file_match_shape() -> None:
+    """Backs openspec/changes/explorer-tools-p1/specs/explorer-tools/spec.md
+    Requirement: find_callers returns sanitized call-site FileMatches.
+
+    FileMatch is intentionally minimal — path / line / snippet. No
+    column / end_line / ast_node metadata; Agent callers fall back to
+    ``read_file`` when they need surrounding lines.
+    """
+    from codebus_agent.agent.tools.schemas import FileMatch
+
+    raw = {"path": "src/app.py", "line": 14, "snippet": "kb = KnowledgeBase(path)"}
+    fm = FileMatch.model_validate_json(json.dumps(raw))
+    assert fm.path == raw["path"]
+    assert fm.line == raw["line"]
+    assert fm.snippet == raw["snippet"]
+
+    with pytest.raises(ValidationError):
+        FileMatch(path="a", line=0, snippet="")  # line must be ≥ 1
+    with pytest.raises(ValidationError):
+        FileMatch(path="a", line=-5, snippet="")
