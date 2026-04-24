@@ -19,7 +19,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from codebus_agent.agent.types import ExplorerAction, JudgeVerdict, ToolCall
+from codebus_agent.agent.types import (
+    CoverageResult,
+    ExplorerAction,
+    JudgeVerdict,
+    ToolCall,
+)
 from codebus_agent.api import create_app
 from codebus_agent.providers.llm_call_logger import LLMCallLogger
 from codebus_agent.providers.mock import MockProvider, MockScript
@@ -60,6 +65,7 @@ async def test_explore_endpoint_emits_full_event_sequence(tmp_path: Path) -> Non
 
     reasoning_script = MockScript()
     judge_script = MockScript()
+    coverage_script = MockScript()
 
     # Seed three ExplorerActions — two with tool_calls, one empty — plus
     # three JudgeVerdicts so each iteration resolves deterministically.
@@ -89,6 +95,12 @@ async def test_explore_endpoint_emits_full_event_sequence(tmp_path: Path) -> Non
                 reason="ok",
             )
         )
+    # `coverage-gap-recurse`: run_explorer calls coverage.check once
+    # after main-loop convergence. Budget=3 drains to 0 → the three
+    # iterations above empty the reasoning + judge scripts; coverage
+    # then fires and reads a pinned CoverageResult. Empty gaps block
+    # recursion (skip_reason="no_gaps") so no second `check` call.
+    coverage_script.push(CoverageResult(gaps=[]))
 
     app = create_app(bearer_token=bearer)
     app.state.llm_reasoning_provider = _make_tracked_factory(
@@ -96,6 +108,9 @@ async def test_explore_endpoint_emits_full_event_sequence(tmp_path: Path) -> Non
     )
     app.state.llm_judge_provider = _make_tracked_factory(
         ProviderRole.JUDGE, "judge", judge_script
+    )
+    app.state.llm_coverage_provider = _make_tracked_factory(
+        ProviderRole.JUDGE, "coverage", coverage_script
     )
 
     transport = httpx.ASGITransport(app=app)
@@ -154,9 +169,12 @@ async def test_explore_endpoint_emits_full_event_sequence(tmp_path: Path) -> Non
             assert 0 <= e["step"] < 3, f"step out of range: {e}"
 
     # usage_delta lines carry the provider's default_module.
+    # `coverage-gap-recurse` adds a third evaluator — coverage runs once
+    # after main-loop convergence so its `module="coverage"` tag joins
+    # the set alongside reasoning / judge.
     usage_events = [e for e in events if e.get("type") == "usage_delta"]
     modules = {e["module"] for e in usage_events}
-    assert modules <= {"reasoning", "judge"}, (
+    assert modules <= {"reasoning", "judge", "coverage"}, (
         f"unexpected module labels on usage_delta: {modules}"
     )
 

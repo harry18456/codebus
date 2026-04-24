@@ -142,6 +142,16 @@ def wire_kb_dependencies(
             default_module="chat",
             role=ProviderRole.CHAT,
         )
+        # `coverage-gap-recurse` (D-012 follow-up): Coverage rides the
+        # JUDGE role (low-temp structured evaluator) but tags cost
+        # records `module="coverage"` so `token_usage.jsonl` can split
+        # judge vs coverage rounds. See design Decision 7.
+        app.state.llm_coverage_provider = _make_chat_provider_factory(
+            model="gpt-4o-mini",
+            temperature=0.0,
+            default_module="coverage",
+            role=ProviderRole.JUDGE,
+        )
     else:
         app.state.kb_provider = None
         app.state.kb_query_provider = None
@@ -150,6 +160,7 @@ def wire_kb_dependencies(
         app.state.llm_reasoning_provider = None
         app.state.llm_judge_provider = None
         app.state.llm_chat_provider = None
+        app.state.llm_coverage_provider = None
 
 
 def _make_tracker_factory() -> Callable[[Path], UsageTracker]:

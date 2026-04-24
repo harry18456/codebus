@@ -19,4 +19,6 @@ Folder-mode baggage (`docs/agent-explorer-spec.md` §十二).
 """
 from __future__ import annotations
 
-__all__: list[str] = []
+from .coverage import LLMCoverageChecker
+
+__all__: list[str] = ["LLMCoverageChecker"]

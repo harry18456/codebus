@@ -148,18 +148,32 @@ async def run_explorer(
         state.step_count += 1
         state.budget_steps_left -= 1
 
-    # 7. Coverage check + 遞迴補查 — P0 以 _COVERAGE_RECURSION_ENABLED=False 夾住,
-    # 由 coverage-gap-recurse change 打開並補上遞迴深度上限。
+    # 7. Coverage check + 遞迴補查 — `coverage-gap-recurse` 翻開
+    # `_COVERAGE_RECURSION_ENABLED=True` 並填滿本段。Coverage round Step
+    # 不自增 `state.step_count`（它不是 ReAct iteration，而是 wrap-up
+    # 評估），下一輪遞迴第一個 iteration 接回原 `state.step_count` 繼續。
     if _COVERAGE_RECURSION_ENABLED:
         gaps = await coverage.check(state)
-        if gaps and state.budget_steps_left > 0:
-            _enqueue_gap_investigation(state, gaps)
-            return await run_explorer(...)  # 遞迴
+        budget_ok = state.budget_steps_left > 0
+        depth_ok = _depth + 1 < _COVERAGE_MAX_DEPTH  # 合法 depth 0/1/2
+        skip_reason = _coverage_skip_reason(gaps, budget_ok=budget_ok, depth_ok=depth_ok)
+        will_recurse = skip_reason is None
+        _emitter.emit({"type": "coverage_gaps", "round": _depth, "gaps": [...],
+                       "will_recurse": will_recurse, "skip_reason": skip_reason})
+        if gaps:  # Decision 8：空 gaps 只發 SSE、不寫 Step
+            logger.write(Step(
+                step=state.step_count, ts=now(),
+                thought=f"[coverage] round-{_depth+1} gaps={len(gaps)} will_recurse={will_recurse}",
+                tool_calls=[], tool_results=[], judge_verdict=None, tokens_used=0,
+            ))
+        if will_recurse:
+            _enqueue_gap_investigation(state, gaps)  # pending_queue + messages 雙推
+            return await run_explorer(..., _depth=_depth + 1)  # tail recursion
 
     return ExplorerResult(
         stations=list(state.stations),
         log_path=str(logger.path),
-        stopped_reason=reason or "budget_exhausted",
+        stopped_reason=reason or "budget_exhausted",  # 遞迴時 innermost 原樣傳回
     )
 
 
@@ -180,7 +194,7 @@ def _should_stop(
 - 一個 while 迴圈，所有決策透明，debug 時 stack trace 乾淨
 - Think / Act / Observe / Judge / Log / Update 分函式，每段獨立可測
 - Cancel 走 `asyncio.Event`，每輪迴圈開頭檢查一次
-- Recursive call 用在 Coverage gap 補查，容易讀但要設遞迴深度上限（預設 3）；P0 以 flag 夾住不跑
+- Recursive call 用在 Coverage gap 補查（`coverage-gap-recurse` landed）：`_COVERAGE_MAX_DEPTH=3` 硬上限（主 loop + 最多 2 次 gap 補查），遞迴條件 `_depth + 1 < _COVERAGE_MAX_DEPTH`；kill-switch 仍在（`_COVERAGE_RECURSION_ENABLED=False` 整段跳過）
 - `_MIN_STATIONS_FOR_CONVERGENCE = 3` 是 P0 收斂下限常數（spec `Explorer loop stops...` 的 sensible P0 default）
 
 ---
@@ -303,42 +317,60 @@ async def _execute_one(call, tools, ctx) -> ToolResult:
 
 **都是 one-shot LLM call，不進 ReAct 迴圈，各自獨立函式。**
 
-**P0 落地形狀（`explorer-react-loop-p0`）**：`LLMJudge(provider_factory, workspace_root)` 在建構期呼一次 factory（shape 與 `app.state.llm_judge_provider(ws)` 一致）拿到 **workspace-scoped TrackedProvider**，之後 evaluate 只重用該 provider；這和 chat-provider-wiring 定的 per-workspace 稽核落地點對齊（`token_usage.jsonl` / `llm_calls.jsonl` 依 workspace 自動分流）。registry-based 寫法（下方 code block）是往後若要合併多 provider 的參考形狀，P0 未實作。`CoverageChecker` 在 P0 只有 Protocol 抽象，LLM impl 延到 `coverage-gap-recurse` change。
+**真實落地形狀**（`explorer-react-loop-p0` + `coverage-gap-recurse`）：兩個 evaluator 都在建構期呼一次 `provider_factory(workspace_root)` 拿 workspace-scoped TrackedProvider，之後重用；shape 與 `app.state.llm_judge_provider(ws)` / `app.state.llm_coverage_provider(ws)` 一致，每筆 call 的稽核記錄自動落到 workspace-scoped `token_usage.jsonl` / `llm_calls.jsonl` / `sanitize_audit.jsonl`。Coverage 透過 `default_module="coverage"` 跟 Judge 的 `module="judge"` 拆帳。
 
 ```python
-class Judge:
-    def __init__(self, registry: ProviderRegistry):
-        self._registry = registry
+class LLMJudge:
+    def __init__(
+        self,
+        provider_factory: Callable[[Path], TrackedProvider],
+        workspace_root: Path,
+    ) -> None:
+        self._provider = provider_factory(Path(workspace_root))
+
+    def set_emitter(self, emitter: SSEEmitter | None) -> None:
+        self._provider.set_emitter(emitter)  # usage_delta / llm_call 轉發
 
     async def evaluate(
         self,
         state: ExplorerState,
         results: list[ToolResult],
     ) -> JudgeVerdict:
-        prompt = render_judge_prompt(state.task, results)
-        # Judge / Coverage 屬 JUDGE role（Haiku 等級，低溫）
-        provider = self._registry.get(ProviderRole.JUDGE)
-        return await provider.chat_structured(
-            messages=[Message(role="user", content=prompt)],
-            response_model=JudgeVerdict,
-        )
+        messages = [
+            ProviderMessage(role="system", content=JUDGE_SYSTEM),
+            ProviderMessage(role="user", content=render_judge_prompt(state, results)),
+        ]
+        return await self._provider.chat(messages, response_model=JudgeVerdict)
 
 
-class CoverageChecker:
-    def __init__(self, registry: ProviderRegistry):
-        self._registry = registry
+class LLMCoverageChecker:
+    # 類比 LLMJudge 的 one-shot 形狀 — 不進 ReAct 子迴圈、不呼叫 ExplorerTools、
+    # 不改 state；只渲染一次 prompt、打一次 chat、回 result.gaps。
+    def __init__(
+        self,
+        provider_factory: Callable[[Path], TrackedProvider],
+        workspace_root: Path,
+    ) -> None:
+        self._provider = provider_factory(Path(workspace_root))
+
+    def set_emitter(self, emitter: SSEEmitter | None) -> None:
+        self._provider.set_emitter(emitter)
 
     async def check(self, state: ExplorerState) -> list[Gap]:
-        prompt = render_coverage_prompt(state.task, state.stations)
-        provider = self._registry.get(ProviderRole.JUDGE)
-        result: CoverageResult = await provider.chat_structured(
-            messages=[Message(role="user", content=prompt)],
-            response_model=CoverageResult,
-        )
-        return result.gaps
+        messages = [
+            ProviderMessage(role="system", content=COVERAGE_SYSTEM),
+            ProviderMessage(role="user", content=render_coverage_prompt(state)),
+        ]
+        result = await self._provider.chat(messages, response_model=CoverageResult)
+        return list(result.gaps)
+
+
+# explorer.py module constants (coverage-gap-recurse)
+_COVERAGE_MAX_DEPTH: int = 3      # main loop + 最多 2 次 gap 補查
+_COVERAGE_RECURSION_ENABLED: bool = True  # kill-switch；False 時整段 coverage 跳過
 ```
 
-**為什麼不在 Explorer 迴圈內跑**：Judge 每步都跑，但它自己不是 ReAct；Coverage 只在收斂時跑一次。這樣邏輯分層乾淨，也方便 Phase 2 Topic mode 換同名 component。
+**為什麼不在 Explorer 迴圈內跑**：Judge 每步都跑，但它自己不是 ReAct；Coverage 只在主迴圈收斂後跑一次。遞迴條件是 `len(gaps) > 0 AND budget > 0 AND _depth + 1 < _COVERAGE_MAX_DEPTH`；滿足時 `_enqueue_gap_investigation(state, gaps)` 把 gap targets 塞進 `pending_queue` + 寫一條 `role="user"` 摘要訊息、然後 tail-recurse `run_explorer(..., _depth=_depth+1)`。邏輯分層乾淨，也方便 Phase 2 Topic mode 換同名 component。
 
 ---
 
@@ -391,7 +423,7 @@ def render_explorer_prompt(state: ExplorerState, tool_specs: list) -> str:
 | LLM rate limit (429) | Provider 層 exponential backoff 3 次；仍錯 → 往上丟，sidecar 回 SSE error event |
 | Context overflow | 觸發 §十 壓縮策略；仍超過 → stop 並回 partial result |
 | Cancel signal | `asyncio.Event` 每輪迴圈開頭檢查，cancel 時收斂成 partial 回傳 |
-| Coverage 遞迴過深 | 上限 3 層，超過停止並記 log warning |
+| Coverage 遞迴過深 | ✅ 步驟 20 landed（`coverage-gap-recurse`）：`_COVERAGE_MAX_DEPTH=3`，遞迴條件 `_depth + 1 < _COVERAGE_MAX_DEPTH`；觸頂時寫一筆 Step `will_recurse=False` 並 emit `coverage_gaps` event `skip_reason="max_depth_reached"` 後停止 |
 
 **原則**：不往上崩，最後至少給 partial result（已產出的 stations），讓 Module 5 可以試著產教材。
 

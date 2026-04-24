@@ -65,16 +65,24 @@ def _make_tracked_factory(
 @pytest.fixture
 def app_with_explore_deps(bearer: str):
     """Build the real app and inject `llm_reasoning_provider` /
-    `llm_judge_provider` factories that satisfy the endpoint's expectations.
+    `llm_judge_provider` / `llm_coverage_provider` factories that satisfy
+    the endpoint's expectations.
+
+    `coverage-gap-recurse` added the `llm_coverage_provider` slot —
+    the endpoint's 503 gate requires all three factories to be wired.
     """
     app = create_app(bearer_token=bearer)
     reasoning_script = MockScript()
     judge_script = MockScript()
+    coverage_script = MockScript()
     app.state.llm_reasoning_provider = _make_tracked_factory(
         ProviderRole.REASONING, "reasoning", reasoning_script
     )
     app.state.llm_judge_provider = _make_tracked_factory(
         ProviderRole.JUDGE, "judge", judge_script
+    )
+    app.state.llm_coverage_provider = _make_tracked_factory(
+        ProviderRole.JUDGE, "coverage", coverage_script
     )
     return app
 
@@ -158,3 +166,34 @@ def test_bearer_authentication_enforced(app_with_explore_deps, tmp_path: Path) -
         },
     )
     assert resp.status_code == 401
+
+
+def test_explore_endpoint_requires_llm_coverage_provider(
+    app_with_explore_deps, bearer: str, tmp_path: Path
+) -> None:
+    """Spec scenario `Explore endpoint requires coverage provider`.
+
+    Backs `coverage-gap-recurse` task 8.1 + design Decision 7: the
+    `llm_coverage_provider` slot is now a required dep alongside
+    `llm_reasoning_provider` / `llm_judge_provider`. When the slot is
+    None the endpoint MUST 503 with `EXPLORE_NOT_CONFIGURED` and the
+    `missing` detail list MUST include `llm_coverage_provider`.
+    """
+    app_with_explore_deps.state.llm_coverage_provider = None
+    client = TestClient(app_with_explore_deps)
+    resp = client.post(
+        "/explore",
+        json={
+            "workspace_root": str(tmp_path),
+            "task": "x",
+            "budget_steps": 0,
+            "budget_tokens": 10_000,
+        },
+        headers=_auth(bearer),
+    )
+    assert resp.status_code == 503, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "EXPLORE_NOT_CONFIGURED"
+    assert "llm_coverage_provider" in detail["missing"], (
+        f"missing list must surface `llm_coverage_provider`; saw {detail['missing']}"
+    )

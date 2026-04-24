@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from codebus_agent.agent.context_vars import current_phase_var, current_session_var
+from codebus_agent.agent.coverage import LLMCoverageChecker
 from codebus_agent.agent.emitter import TaskHandleEmitter
 from codebus_agent.agent.explorer import run_explorer
 from codebus_agent.agent.judge import LLMJudge
@@ -72,22 +73,33 @@ def _validate_workspace_root(raw: str) -> Path:
     return workspace_root
 
 
-def _require_explore_deps(request: Request) -> tuple[Any, Any]:
-    """Pull reasoning + judge provider factories from ``app.state``.
+def _require_explore_deps(request: Request) -> tuple[Any, Any, Any]:
+    """Pull reasoning + judge + coverage provider factories from ``app.state``.
 
     Mirrors ``_require_kb_deps`` — surface a 503 ``EXPLORE_NOT_CONFIGURED``
-    when the factories are not wired (the only time this happens today is
+    when any factory is not wired (the only time this happens today is
     when ``CODEBUS_OPENAI_API_KEY`` is absent, per ``wire_kb_dependencies``).
+
+    `coverage-gap-recurse` added `llm_coverage_provider` alongside the
+    reasoning / judge slots per design Decision 7. All three are
+    treated identically in the 503 path so the error message surfaces
+    every missing slot name.
     """
     state = request.app.state
     reasoning_factory = getattr(state, "llm_reasoning_provider", None)
     judge_factory = getattr(state, "llm_judge_provider", None)
-    if reasoning_factory is None or judge_factory is None:
+    coverage_factory = getattr(state, "llm_coverage_provider", None)
+    if (
+        reasoning_factory is None
+        or judge_factory is None
+        or coverage_factory is None
+    ):
         missing = [
             name
             for name, val in (
                 ("llm_reasoning_provider", reasoning_factory),
                 ("llm_judge_provider", judge_factory),
+                ("llm_coverage_provider", coverage_factory),
             )
             if val is None
         ]
@@ -99,7 +111,7 @@ def _require_explore_deps(request: Request) -> tuple[Any, Any]:
                 "missing": missing,
             },
         )
-    return reasoning_factory, judge_factory
+    return reasoning_factory, judge_factory, coverage_factory
 
 
 @router.post("/explore", status_code=status.HTTP_202_ACCEPTED)
@@ -113,7 +125,11 @@ async def explore_endpoint(
     ``_run_background_task`` wrapper as sanitized SSE ``error`` events.
     """
     workspace_root = _validate_workspace_root(request.workspace_root)
-    reasoning_factory, judge_factory = _require_explore_deps(http_request)
+    (
+        reasoning_factory,
+        judge_factory,
+        coverage_factory,
+    ) = _require_explore_deps(http_request)
 
     registry: TaskRegistry = http_request.app.state.tasks
     handle = registry.create("explore")
@@ -129,15 +145,17 @@ async def explore_endpoint(
 
     reasoning_provider = reasoning_factory(workspace_root)
     judge = LLMJudge(judge_factory, workspace_root)
+    coverage = LLMCoverageChecker(coverage_factory, workspace_root)
     emitter = TaskHandleEmitter(handle)
     # Factories build their TrackedProviders + inner LLMCallLoggers with
     # emitter=None because they're constructed at workspace-scope time,
     # before any per-task handle exists. Wire the per-task emitter now so
     # `usage_delta` / `llm_call` events land on the same SSE channel as
     # Explorer loop's own `agent_thought` / `agent_action_result` /
-    # `judge_verdict` / `progress` emits.
+    # `judge_verdict` / `progress` / `coverage_gaps` emits.
     reasoning_provider.set_emitter(emitter)
     judge.set_emitter(emitter)
+    coverage.set_emitter(emitter)
     state_obj = ExplorerState(
         task=request.task,
         budget_steps_left=request.budget_steps,
@@ -163,7 +181,7 @@ async def explore_endpoint(
                 provider=reasoning_provider,
                 tools=tools,
                 judge=judge,
-                coverage=_NullCoverage(),
+                coverage=coverage,
                 logger=reasoning_logger,
                 emitter=emitter,
             )
@@ -174,20 +192,6 @@ async def explore_endpoint(
 
     asyncio.create_task(_run_background_task(handle, _coro_factory))
     return {"task_id": handle.id}
-
-
-class _NullCoverage:
-    """Coverage checker that never reports gaps.
-
-    The real coverage recursion body lands with the
-    ``coverage-gap-recurse`` change (see ``explorer.py``
-    ``_COVERAGE_RECURSION_ENABLED = False``). Until then the Explorer
-    loop ignores coverage entirely, so a no-op satisfies the structural
-    Protocol without keeping an extra dependency alive in the endpoint.
-    """
-
-    async def check(self, state: Any) -> list[Any]:
-        return []
 
 
 __all__ = ["router", "ExploreRequest", "explore_endpoint"]

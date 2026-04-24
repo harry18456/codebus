@@ -318,14 +318,21 @@ async def test_tool_errors_do_not_crash_loop(
     assert tools.calls == ["fetch"]
 
 
-async def test_coverage_recursion_hook_remains_dormant_in_p0(
+async def test_coverage_recursion_hook_activates_after_main_loop_convergence(
     mock_script_reasoning: MockScript,
     mock_reasoning_provider: TrackedProvider,
     workspace_dir: Path,
 ) -> None:
-    """Spec scenario `Coverage recursion hook remains dormant in P0`."""
+    """Spec scenario `Coverage recursion hook activates after main loop convergence`.
+
+    Replaces the P0 `test_coverage_recursion_hook_remains_dormant_in_p0`
+    test (the dormant flag is now flipped in `coverage-gap-recurse`).
+    The new contract: `coverage.check` fires exactly once after main
+    loop convergence; when gaps are empty the recursion preconditions
+    fail → return cleanly without recursing.
+    """
     from codebus_agent.agent.explorer import run_explorer
-    from codebus_agent.agent.types import ExplorerAction, ExplorerState, Gap
+    from codebus_agent.agent.types import ExplorerAction, ExplorerState
 
     n = 3
     _push_actions(
@@ -335,10 +342,8 @@ async def test_coverage_recursion_hook_remains_dormant_in_p0(
             for i in range(n)
         ],
     )
-    # A Coverage checker returning LOTS of gaps — must NOT trigger recursion.
-    heavy_coverage = _CountingCoverage(
-        gaps=[Gap(description=f"gap {i}") for i in range(20)]
-    )
+    # Empty-gaps checker — activated hook, but no recursion.
+    empty_coverage = _CountingCoverage()
     logger = _RecordingLogger(workspace_dir / "reasoning_log.jsonl")
     state = ExplorerState(task="t", budget_steps_left=n, budget_tokens_left=10_000)
 
@@ -347,17 +352,20 @@ async def test_coverage_recursion_hook_remains_dormant_in_p0(
         provider=mock_reasoning_provider,
         tools=_DummyTools(),
         judge=_CountingJudge(lambda _s: _make_judge_verdict()),
-        coverage=heavy_coverage,
+        coverage=empty_coverage,
         logger=logger,
     )
 
-    # Total iterations == N. If recursion fired, writes would exceed N.
+    # Coverage.check fired exactly once (hook is activated).
+    assert empty_coverage.calls == 1, (
+        f"coverage.check MUST be invoked exactly once after convergence; "
+        f"saw {empty_coverage.calls}"
+    )
+    # No recursion → total Step writes == N (iterations only; no coverage
+    # Step because empty gaps).
     assert len(logger.writes) == n, (
         f"coverage recursion leaked — expected {n} writes, got {len(logger.writes)}"
     )
-    # Coverage.check MAY be called 0 or 1 time (dormant hook); MUST NOT be
-    # invoked in a recursive branch.
-    assert heavy_coverage.calls <= 1
 
 
 async def test_budget_exhaustion_terminates_loop(

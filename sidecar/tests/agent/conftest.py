@@ -117,3 +117,87 @@ def mock_judge_provider(
     workspace_dir: Path,
 ) -> TrackedProvider:
     return mock_judge_provider_factory(workspace_dir)
+
+
+# ------------------------- Coverage-gap fixtures ---------------------------
+
+
+@pytest.fixture
+def mock_script_coverage() -> MockScript:
+    """FIFO for pinned `CoverageResult` payloads consumed by MockProvider.
+
+    `coverage-gap-recurse` Section 2 tests push `CoverageResult(...)` here
+    and then drive `LLMCoverageChecker.check(state)` against the wrapped
+    provider so the assertion surface is `provider.chat` was called once
+    with `response_model=CoverageResult`.
+    """
+    return MockScript()
+
+
+@pytest.fixture
+def mock_coverage_provider_factory(
+    mock_script_coverage: MockScript,
+) -> Callable[[Path], TrackedProvider]:
+    """Workspace-scoped `TrackedProvider` factory tagged `module="coverage"`.
+
+    Shape-compatible with `app.state.llm_coverage_provider(ws)` so tests
+    pin the same DI contract the `POST /explore` endpoint will wire up
+    in Section 8. `role=ProviderRole.JUDGE` — Coverage rides the judge
+    role per `agent-core.md §七` (low-temp structured output evaluator),
+    distinct from the `module` tag which splits cost in
+    `token_usage.jsonl`.
+    """
+    return _make_factory(
+        role=ProviderRole.JUDGE,
+        default_module="coverage",
+        script=mock_script_coverage,
+    )
+
+
+@pytest.fixture
+def captured_coverage_provider(
+    mock_coverage_provider_factory: Callable[[Path], TrackedProvider],
+    workspace_dir: Path,
+) -> TrackedProvider:
+    """Pre-materialized TrackedProvider for direct `LLMCoverageChecker` wiring."""
+    return mock_coverage_provider_factory(workspace_dir)
+
+
+@pytest.fixture
+def scripted_coverage_checker():
+    """Protocol-satisfying `CoverageChecker` spy that returns preset gaps.
+
+    Mirrors P0's `_CountingCoverage` but richer: accepts either a static
+    `gaps` list (returned every call) OR a `gap_queue` (list of gap
+    lists, one consumed per call; falls back to `gaps` after the queue
+    drains). The queue form lets recursion tests stage "first round
+    reports gaps, subsequent rounds report none" without building a
+    stateful mock inline.
+
+    Each test calls `scripted_coverage_checker(gaps=[...])` or
+    `scripted_coverage_checker(gap_queue=[[g1,g2], []])` to instantiate.
+    """
+    from codebus_agent.agent.types import Gap
+
+    class _ScriptedCoverage:
+        def __init__(
+            self,
+            gaps: list[Gap] | None = None,
+            *,
+            gap_queue: list[list[Gap]] | None = None,
+        ) -> None:
+            self.calls = 0
+            self._static_gaps = list(gaps or [])
+            # Copy each sub-list so tests mutating the returned list
+            # don't leak into the scripted queue.
+            self._queue: list[list[Gap]] = (
+                [list(g) for g in gap_queue] if gap_queue is not None else []
+            )
+
+        async def check(self, state) -> list[Gap]:
+            self.calls += 1
+            if self._queue:
+                return list(self._queue.pop(0))
+            return list(self._static_gaps)
+
+    return _ScriptedCoverage
