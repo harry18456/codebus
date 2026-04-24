@@ -68,7 +68,7 @@ class LLMJudge:
             ProviderMessage(role="system", content=JUDGE_SYSTEM),
             ProviderMessage(
                 role="user",
-                content=render_judge_prompt(state.task, results),
+                content=render_judge_prompt(state, results),
             ),
         ]
         verdict = await self._provider.chat(

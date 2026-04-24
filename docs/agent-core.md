@@ -436,6 +436,8 @@ class Budget:
 
 **P0 落地形狀（`explorer-react-loop-p0`）**：`ReasoningLogger(path)` 純 sync 寫檔、只負責落地；`write(step)` 呼 `step.model_copy(update={"explorer_prompt_version": EXPLORER_PROMPT_VERSION, "judge_prompt_version": JUDGE_PROMPT_VERSION})` 後 append `model_dump_json() + "\n"`，寫失敗直接 raise（不靜默丟失）。**SSE emit 不在 `ReasoningLogger` 內**——檔案寫入與 wire 廣播是兩條獨立責任，由獨立的 `SSEEmitter` 注入處理（落地於 `agent-sse-wiring`）。
 
+> **Prompt 版本 bump + golden baseline 連動**（`explorer-judge-golden`）：`JUDGE_SYSTEM` / `render_judge_prompt` 任何 prompt 內容改動必須同步 bump `JUDGE_PROMPT_VERSION`（date-version 格式 `YYYY-MM-DD-N`）並重建 `tests/golden/demo-synthetic/expected.json` 的 `judge_prompt_version` 欄位；反之亦然——版本字串改了但 prompt 文字沒動，`sidecar/tests/golden/test_explorer_replay.py::test_golden_replay_matches_baseline` 會炸。`EXPLORER_PROMPT_VERSION` 屬獨立 scope，由 Explorer prompt 專屬 change 控制。spec 來源：`openspec/changes/explorer-judge-golden/specs/explorer-golden/spec.md`。
+
 ### SSE emit（`agent-sse-wiring` 落地形狀）
 `codebus_agent.agent.emitter` 提供 `@runtime_checkable SSEEmitter` Protocol（單方法 `emit(event: dict) -> None`）+ 兩個具體 impl：`NullEmitter`（no-op，供 in-process 測試 / golden replay）與 `TaskHandleEmitter(handle)`（fan-out 到 subscriber queue，走既有 `sse-progress-skeleton` 機制）。
 

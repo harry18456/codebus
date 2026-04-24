@@ -1,0 +1,11 @@
+{
+  "stations": [
+    { "path": "src/a.py", "role": "explorer-p0" },
+    { "path": "src/b.py", "role": "explorer-p0" },
+    { "path": "src/c.py", "role": "explorer-p0" }
+  ],
+  "stopped_reason": "budget_exhausted",
+  "step_count": 3,
+  "judge_prompt_version": "2026-04-25-1",
+  "explorer_prompt_version": "v0-p0"
+}
