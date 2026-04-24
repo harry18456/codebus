@@ -371,43 +371,18 @@ tests:
 ---
 ### Requirement: task_id format
 
-Task identifiers SHALL follow the format `{kind}_{rand}` where `kind` is one of the lowercase strings `"scan"` or `"kb"` (extensible by future capabilities) and `rand` is exactly eight lowercase hexadecimal characters generated from a cryptographic random source (e.g. `secrets.token_hex(4)`). Identifiers MUST match the regular expression `^(scan|kb)_[0-9a-f]{8}$` for tasks created within this change's scope.
+Task identifiers SHALL follow the format `{kind}_{rand}` where `kind` is one of the lowercase strings `"scan"`, `"kb"`, or `"explore"` (extensible by future capabilities) and `rand` is exactly eight lowercase hexadecimal characters generated from a cryptographic random source (e.g. `secrets.token_hex(4)`). Identifiers MUST match the regular expression `^(scan|kb|explore)_[0-9a-f]{8}$` for tasks created within scope of the `sse-progress-skeleton` change AND the `agent-sse-wiring` change that introduces the `explore` kind.
 
 #### Scenario: Generated id matches required regex
 
 - **WHEN** the sidecar creates a scan task identifier
 - **THEN** the resulting `task_id` MUST match `^scan_[0-9a-f]{8}$`
 
+#### Scenario: Explore kind follows same shape
 
-<!-- @trace
-source: sse-progress-skeleton
-updated: 2026-04-22
-code:
-  - sidecar/src/codebus_agent/scanner/models.py
-  - CLAUDE.md
-  - docs/implementation-plan.md
-  - sidecar/src/codebus_agent/api/__init__.py
-  - sidecar/src/codebus_agent/api/tasks.py
-  - sidecar/src/codebus_agent/scanner/service.py
-  - sidecar/pyproject.toml
-  - sidecar/src/codebus_agent/api/kb.py
-  - sidecar/uv.lock
-  - sidecar/src/codebus_agent/api/scan.py
-  - docs/module-1-scanner.md
-  - docs/module-2-kb-builder.md
-  - docs/sidecar-api.md
-tests:
-  - sidecar/tests/api/test_scan_stream.py
-  - sidecar/tests/api/__init__.py
-  - sidecar/tests/scanner/test_fixtures_integration.py
-  - sidecar/tests/api/test_kb_build.py
-  - sidecar/tests/api/test_task_error_containment.py
-  - sidecar/tests/api/test_task_registry.py
-  - sidecar/tests/api/test_task_result.py
-  - sidecar/tests/scanner/test_service.py
-  - sidecar/tests/api/test_tasks_sse.py
-  - sidecar/tests/scanner/test_progress_callback.py
--->
+- **WHEN** the sidecar creates an explore task identifier
+- **THEN** the resulting `task_id` MUST match `^explore_[0-9a-f]{8}$`
+- **AND** the `TaskRegistry` single-slot enforcement MUST apply equally — an in-flight `explore` task MUST block subsequent `scan` / `kb` / `explore` creations with `409 TASK_IN_FLIGHT`
 
 ---
 ### Requirement: Background task error containment
