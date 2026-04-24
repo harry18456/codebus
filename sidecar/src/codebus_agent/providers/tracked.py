@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import asdict, is_dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel
 
@@ -47,6 +47,9 @@ from .openai_chat import OpenAIChatProvider
 from .openai_embedding import OpenAIEmbeddingProvider
 from .protocol import EmbedResponse, Message, ProviderRole
 from .usage_tracker import UsageTracker
+
+if TYPE_CHECKING:
+    from ..agent.emitter import SSEEmitter
 
 
 class TrackedProvider:
@@ -76,6 +79,7 @@ class TrackedProvider:
         sanitizer_audit: SanitizerAuditLogger,
         rules_version: str,
         default_module: str | None = None,
+        emitter: "SSEEmitter | None" = None,
     ) -> None:
         if type(inner) not in self.ALLOWED_INNER_TYPES:
             raise TypeError(
@@ -122,11 +126,33 @@ class TrackedProvider:
         # "kb_build" via the wire_kb_dependencies factory so KB no longer
         # needs to call `tracker.record(...)` itself.
         self._default_module: str = default_module or ""
+        # agent-sse-wiring: optional SSE channel. Kept `| None` (rather than
+        # NullEmitter default) so the wrapper can gate emit calls behind a
+        # single `is not None` check — the emit path is already rare compared
+        # to the file-only audit writes.
+        self._emitter = emitter
+        # Local running-total accumulator so `usage_delta.session_total_cost_usd`
+        # reflects every TrackedProvider call made on this instance. UsageTracker
+        # intentionally stays append-only on disk; the running total lives in
+        # memory on the provider because that's the scope SSE consumers care
+        # about (per-provider-instance ≈ per-task for Explorer wiring).
+        self._session_total_cost_usd: float = 0.0
         self.name: str = getattr(inner, "name", "tracked")
 
     @property
     def role(self) -> ProviderRole:
         return self._role
+
+    def set_emitter(self, emitter: "SSEEmitter | None") -> None:
+        """Late-wire the SSE emitter and propagate to the inner LLMCallLogger.
+
+        Factory code (`wire_kb_dependencies`) builds `TrackedProvider` at
+        workspace-scope time, before any per-task `TaskHandle` exists.
+        `api/explore.py` calls this after the handle is created so both
+        `usage_delta` and `llm_call` events land on the task's SSE channel.
+        """
+        self._emitter = emitter
+        self._logger.set_emitter(emitter)
 
     async def chat(
         self,
@@ -181,6 +207,11 @@ class TrackedProvider:
             cost_usd=0.0,
             module=self._default_module,
         )
+        self._emit_usage_delta(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=0.0,
+        )
         return result
 
     async def embed(self, texts: list[str]) -> EmbedResponse:
@@ -229,7 +260,46 @@ class TrackedProvider:
             cost_usd=cost,
             module=self._default_module,
         )
+        self._emit_usage_delta(
+            prompt_tokens=int(result.usage.embed_tokens),
+            completion_tokens=0,
+            cost_usd=cost,
+        )
         return result
+
+    def _emit_usage_delta(
+        self,
+        *,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost_usd: float,
+    ) -> None:
+        """Fan out a `usage_delta` SSE event after a successful call.
+
+        No-op when no emitter is wired. `phase` / `step` come from the
+        module-level `ContextVar`s so the Explorer loop can scope them per
+        iteration without threading values through every call site. Running
+        total stays on the provider instance — per-task scope is exactly
+        what the Agent console consumer wants.
+        """
+        if self._emitter is None:
+            return
+        # Lazy import to avoid a circular: agent.context_vars is pure stdlib.
+        from ..agent.context_vars import current_phase, current_step
+
+        self._session_total_cost_usd += float(cost_usd)
+        self._emitter.emit(
+            {
+                "type": "usage_delta",
+                "phase": current_phase(),
+                "module": self._default_module,
+                "step": current_step(),
+                "prompt_tokens": int(prompt_tokens),
+                "completion_tokens": int(completion_tokens),
+                "cost_usd": float(cost_usd),
+                "session_total_cost_usd": round(self._session_total_cost_usd, 8),
+            }
+        )
 
     def _sanitize_messages(
         self, messages: list[Message], call_id: str

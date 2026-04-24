@@ -434,36 +434,41 @@ class Budget:
 ### 寫檔
 每步 append JSONL 到 `{workspace}/reasoning_log.jsonl`：
 
-**P0 落地形狀（`explorer-react-loop-p0`）**：`ReasoningLogger(path)` 純 sync 寫檔，**不含** SSEEmitter；`write(step)` 呼 `step.model_copy(update={"explorer_prompt_version": EXPLORER_PROMPT_VERSION, "judge_prompt_version": JUDGE_PROMPT_VERSION})` 後 append `model_dump_json() + "\n"`，寫失敗直接 raise（不靜默丟失）。SSE emit 留到 `agent-sse-wiring` change（步驟 22）注入 emitter，shape 見下方 code block。
+**P0 落地形狀（`explorer-react-loop-p0`）**：`ReasoningLogger(path)` 純 sync 寫檔、只負責落地；`write(step)` 呼 `step.model_copy(update={"explorer_prompt_version": EXPLORER_PROMPT_VERSION, "judge_prompt_version": JUDGE_PROMPT_VERSION})` 後 append `model_dump_json() + "\n"`，寫失敗直接 raise（不靜默丟失）。**SSE emit 不在 `ReasoningLogger` 內**——檔案寫入與 wire 廣播是兩條獨立責任，由獨立的 `SSEEmitter` 注入處理（落地於 `agent-sse-wiring`）。
+
+### SSE emit（`agent-sse-wiring` 落地形狀）
+`codebus_agent.agent.emitter` 提供 `@runtime_checkable SSEEmitter` Protocol（單方法 `emit(event: dict) -> None`）+ 兩個具體 impl：`NullEmitter`（no-op，供 in-process 測試 / golden replay）與 `TaskHandleEmitter(handle)`（fan-out 到 subscriber queue，走既有 `sse-progress-skeleton` 機制）。
+
+三條 emit 軌道並行，責任分開：
+
+- **Explorer loop** — `run_explorer(..., emitter=None)`（`None` default 對既有 in-process 測試相容）在每輪 Think → Act → Judge 之後 emit `agent_thought` / 每個 ToolResult 對應 `agent_action_result`（`observation` 截到 500 字）/ `judge_verdict` / 每輪尾端一筆 `progress`（`total` 在迴圈前 snapshot）。
+- **TrackedProvider** — `__init__(..., emitter=None)` + `set_emitter(emitter)`（endpoint 建完 per-task handle 後才晚綁）；成功 `chat` / `embed` 在 `tracker.record` 之後 emit `usage_delta`（失敗 path 不 emit，`session_total_cost_usd` 本地累加）。`phase` / `step` 從 `codebus_agent.agent.context_vars` 的 `ContextVar`（`current_phase_var` / `current_step_var`）讀，未設 → `None`。
+- **LLMCallLogger** — 同樣 `__init__(..., emitter=None)` + `set_emitter(emitter)`；`log` / `log_failure` 寫檔成功後 emit `llm_call`（`preview` 取 `request["messages"]` 第一個 `role="user"` 的 `content[:200]`；無 user msg → 空字串）。
 
 ```python
-class ReasoningLogger:
-    def __init__(self, path: Path, sse_emitter: SSEEmitter):
-        self._path = path
-        self._sse = sse_emitter
+# codebus_agent/agent/emitter.py
+@runtime_checkable
+class SSEEmitter(Protocol):
+    def emit(self, event: dict) -> None: ...
 
-    async def write(self, step: Step):
-        # 1. 寫檔
-        with self._path.open("a") as f:
-            f.write(step.model_dump_json() + "\n")
-        # 2. emit 到 SSE（給前端 Agent console）
-        await self._sse.emit(
-            {"type": "agent_thought", "step": step.step, "thought": step.thought,
-             "action": [c.model_dump() for c in step.tool_calls]}
-        )
-        # 3. Tool result 結束後也 emit
-        for r in step.tool_results:
-            await self._sse.emit(
-                {"type": "agent_action_result", "step": step.step,
-                 "observation": r.output[:500]}  # 截斷避免 SSE 訊息爆
-            )
-        # 4. Judge 結果
-        if step.judge_verdict:
-            await self._sse.emit(
-                {"type": "judge_verdict", "step": step.step,
-                 "relevance": step.judge_verdict.relevance,
-                 "reason": step.judge_verdict.reason}
-            )
+class NullEmitter:  # in-process default
+    def emit(self, event: dict) -> None:
+        return None
+
+class TaskHandleEmitter:
+    def __init__(self, handle: TaskHandle) -> None:
+        self._handle = handle
+    def emit(self, event: dict) -> None:
+        self._handle.emit(event)
+```
+
+`POST /explore`（`api/explore.py`）在建完 `TaskHandle` + `TaskHandleEmitter` 後：
+```python
+reasoning_provider = app.state.llm_reasoning_provider(ws)
+judge = LLMJudge(app.state.llm_judge_provider, ws)
+reasoning_provider.set_emitter(emitter)  # propagates to inner LLMCallLogger
+judge.set_emitter(emitter)
+await run_explorer(..., emitter=emitter)  # Explorer loop 端也塞 emitter
 ```
 
 對應 `sidecar-api.md` §四 SSE schema。

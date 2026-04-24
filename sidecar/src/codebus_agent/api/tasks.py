@@ -34,7 +34,7 @@ from sse_starlette.sse import EventSourceResponse
 
 logger = logging.getLogger(__name__)
 
-TaskKind = Literal["scan", "kb"]
+TaskKind = Literal["scan", "kb", "explore"]
 TaskStatus = Literal["running", "done", "error"]
 
 # Closed values per design `error event 安全性`. The endpoint MUST pick from
@@ -55,7 +55,7 @@ ERROR_CODES: frozenset[str] = frozenset(
     }
 )
 
-_VALID_KINDS: frozenset[str] = frozenset({"scan", "kb"})
+_VALID_KINDS: frozenset[str] = frozenset({"scan", "kb", "explore"})
 
 # Sentinel pushed into subscriber queues to signal "stream closed". Picked as
 # a private string so callers never collide with a real event payload.
@@ -65,8 +65,9 @@ _STREAM_CLOSE_SENTINEL: dict[str, Any] = {"__close__": True}
 def _generate_task_id(kind: TaskKind) -> str:
     """Return ``{kind}_{8-hex}``; raise ``ValueError`` on unknown kind.
 
-    Spec `task_id format`: ``^(scan|kb)_[0-9a-f]{8}$``. ``secrets.token_hex(4)``
-    yields exactly 8 lowercase hex chars from a cryptographic source.
+    Spec `task_id format` (modified by agent-sse-wiring): allowlist is
+    ``^(scan|kb|explore)_[0-9a-f]{8}$``. ``secrets.token_hex(4)`` yields
+    exactly 8 lowercase hex chars from a cryptographic source.
     """
     if kind not in _VALID_KINDS:
         raise ValueError(

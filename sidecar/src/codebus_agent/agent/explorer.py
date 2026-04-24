@@ -37,6 +37,7 @@ from typing import Any
 from codebus_agent.providers.protocol import Message as ProviderMessage
 from codebus_agent.providers.tracked import TrackedProvider
 
+from .emitter import NullEmitter, SSEEmitter
 from .prompts.explorer import EXPLORER_SYSTEM, render_explorer_prompt
 from .protocols import CoverageChecker, ExplorerTools, Judge
 from .reasoning_logger import ReasoningLogger
@@ -58,6 +59,8 @@ __all__ = ["run_explorer"]
 
 _MIN_STATIONS_FOR_CONVERGENCE: int = 3
 _COVERAGE_RECURSION_ENABLED: bool = False  # flipped by `coverage-gap-recurse`
+_OBSERVATION_TRUNCATE_LIMIT: int = 500  # chars for agent_action_result.observation
+_TRUNCATE_MARKER: str = "… [truncated]"
 
 
 def _should_stop(
@@ -217,6 +220,19 @@ def _update_state(
                     state.pending_queue.append(r.tool_name)
 
 
+def _truncate_observation(result: ToolResult) -> str:
+    """Pick the ≤500-char payload carried on `agent_action_result.observation`.
+
+    Failed tools surface `error` (already captured into `output` as
+    `ERROR: <msg>` by `_execute_one`, so reading `output` is enough); the
+    truncation marker lets the UI show "more" when a snippet is clipped.
+    """
+    source = result.output if result.output else (result.error or "")
+    if len(source) <= _OBSERVATION_TRUNCATE_LIMIT:
+        return source
+    return source[:_OBSERVATION_TRUNCATE_LIMIT] + _TRUNCATE_MARKER
+
+
 async def run_explorer(
     *,
     state: ExplorerState,
@@ -227,6 +243,7 @@ async def run_explorer(
     logger: ReasoningLogger,
     cancel_event: asyncio.Event | None = None,
     tool_specs: list[dict] | None = None,
+    emitter: SSEEmitter | None = None,
 ) -> ExplorerResult:
     """Drive the Think → Act → Observe → Judge → Log → Update loop.
 
@@ -235,6 +252,12 @@ async def run_explorer(
     wins, else call ``tools.tool_specs()`` if present, else fall back to
     an empty list. The optional Protocol method lets ``FolderTools`` (and
     future ``TopicTools``) advertise their surface without caller plumbing.
+
+    ``emitter`` (agent-sse-wiring): when set, each iteration fans out
+    `agent_thought` → `agent_action_result` → `judge_verdict` → `progress`
+    events to the caller's SSE channel. `None` keeps the legacy file-only
+    behaviour; the hot path substitutes a `NullEmitter()` so the inner
+    loop never branches on nullability.
     """
     if tool_specs is None:
         tool_specs_fn = getattr(tools, "tool_specs", None)
@@ -243,22 +266,57 @@ async def run_explorer(
         else:
             tool_specs = []
 
+    _emitter: SSEEmitter = emitter or NullEmitter()
+    # Snapshot the budget for `progress.total` so the UI bar denominator
+    # stays fixed even as `state.budget_steps_left` decrements each iter.
+    initial_budget_steps = state.budget_steps_left
+
     while True:
         should_stop, stopped_reason = _should_stop(state, cancel_event)
         if should_stop:
             break
 
+        iter_step = state.step_count
+
         # 1. Think
         thought, tool_calls = await _think(state, provider, tool_specs)
+        _emitter.emit(
+            {
+                "type": "agent_thought",
+                "step": iter_step,
+                "thought": thought,
+                "action": [c.model_dump() for c in tool_calls],
+            }
+        )
 
         # 2. Act (parallel tool dispatch; errors captured into ToolResult.error)
         results = await _execute_tools(tool_calls, tools)
+        for r in results:
+            _emitter.emit(
+                {
+                    "type": "agent_action_result",
+                    "step": iter_step,
+                    "tool": r.tool_name,
+                    "observation": _truncate_observation(r),
+                    # P0: tokens_used is not yet threaded through ToolResult.
+                    # Real token accounting lands with step-21 token-budget work.
+                    "tokens_used": 0,
+                }
+            )
 
         # 3. Observe — feed tool outputs forward into next Think
         _append_observations(state, tool_calls, results)
 
         # 4. Judge (one-shot per iteration; MUST NOT mutate state)
         verdict = await judge.evaluate(state, results)
+        _emitter.emit(
+            {
+                "type": "judge_verdict",
+                "step": iter_step,
+                "relevance": verdict.relevance,
+                "reason": verdict.reason,
+            }
+        )
 
         # 5. Log — append one JSONL line to reasoning_log.jsonl
         logger.write(
@@ -277,6 +335,17 @@ async def run_explorer(
         _update_state(state, tool_calls, results, verdict)
         state.step_count += 1
         state.budget_steps_left -= 1
+
+        # Progress tick — emitted after the Update step so `current` equals
+        # the post-increment step_count (1-indexed against total).
+        _emitter.emit(
+            {
+                "type": "progress",
+                "phase": "exploring",
+                "current": state.step_count,
+                "total": initial_budget_steps,
+            }
+        )
 
     # Coverage-gap recursion hook — gated off in P0 per spec scenario
     # `Coverage recursion hook remains dormant in P0`. The follow-up

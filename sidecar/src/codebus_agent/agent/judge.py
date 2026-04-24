@@ -50,6 +50,15 @@ class LLMJudge:
     ) -> None:
         self._provider = provider_factory(Path(workspace_root))
 
+    def set_emitter(self, emitter: object | None) -> None:
+        """Propagate `emitter` down to the wrapped TrackedProvider.
+
+        The Explorer endpoint calls this once the per-task TaskHandle is
+        created so judge-side `usage_delta` / `llm_call` events land on the
+        same SSE channel as the Explorer loop's own emits.
+        """
+        self._provider.set_emitter(emitter)  # type: ignore[arg-type]
+
     async def evaluate(
         self,
         state: "ExplorerState",

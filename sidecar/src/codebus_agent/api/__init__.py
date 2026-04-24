@@ -40,6 +40,7 @@ from typing import Any, Callable
 from fastapi import FastAPI
 
 from codebus_agent import auth
+from codebus_agent.api.explore import router as explore_router
 from codebus_agent.api.kb import router as kb_router
 from codebus_agent.api.scan import router as scan_router
 from codebus_agent.api.tasks import TaskRegistry, router as tasks_router
@@ -442,6 +443,10 @@ def create_app(
     # NOT bypass bearer。
     app.include_router(tasks_router)
     app.include_router(kb_router)
+    # Module 4 Explorer — `POST /explore` spawns the ReAct loop as a background
+    # task and pipes agent_thought / action_result / judge_verdict / usage_delta
+    # / llm_call / progress events to `/tasks/{id}/events` via SSEEmitter.
+    app.include_router(explore_router)
 
     return app
 

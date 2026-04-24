@@ -226,27 +226,36 @@
 ---
 
 ### `POST /explore`
-Explorer Agent 探索（Module 4）。async。
+Explorer Agent 探索（Module 4）。async，落地於 change `agent-sse-wiring`。
 
 **Request**
 ```json
 {
-  "workspace_id": "timeline-gdrive",
-  "task": "新增 Google Drive Adapter 同步功能",
-  "budget": { "max_steps": 40, "max_tokens": 200000 }
+  "workspace_root": "/abs/path/to/workspace",
+  "task": "trace how storage is wired",
+  "budget_steps": 10,
+  "budget_tokens": 50000
 }
 ```
 
-**Response**
-```json
-{ "task_id": "explore_def456" }
-```
+欄位：
+- `workspace_root` (string, required) — 絕對路徑，必須存在且是資料夾；不存在或非目錄 → 400 `EXPLORE_WORKSPACE_INVALID`。
+- `task` (string, required, `min_length=1`) — 使用者下的探索 prompt。
+- `budget_steps` (int, default `10`, `0 ≤ n ≤ 200`) — ReAct 迴圈上限。
+- `budget_tokens` (int, default `50000`, `≥ 0`) — 預留欄位，P0 暫未強制；真實 token accounting 由步驟 21 接手。
 
-最終結果經 `GET /tasks/{id}/result` 取：
+**Response**
+- `202 Accepted`：`{ "task_id": "explore_<8-hex>" }` — `TaskRegistry.create("explore")` 成功。
+- `409 Conflict`：`{ "detail": { "code": "TASK_IN_FLIGHT", "running_task_id": "..." } }` — 單槽已被其他 task（含 scan / kb / explore）佔用。
+- `503 Service Unavailable`：`{ "detail": { "code": "EXPLORE_NOT_CONFIGURED", "missing": [...] } }` — `llm_reasoning_provider` / `llm_judge_provider` 未注入（`CODEBUS_OPENAI_API_KEY` 未設時會命中）。
+- `401 Unauthorized` / `400 Bad Request` — 按 middleware 與 Pydantic 驗證。
+
+訂閱 `GET /tasks/{task_id}/events` 取 SSE stream（見 §四）。最終結果經 `GET /tasks/{id}/result`：
 ```json
 {
-  "stations": [ /* route.json 格式 */ ],
-  "reasoning_log_path": "workspace/timeline-gdrive/reasoning_log.jsonl"
+  "stations": [ /* route.json 格式，Station list */ ],
+  "log_path": "/abs/path/to/workspace/reasoning_log.jsonl",
+  "stopped_reason": "budget_exhausted" | "queue_empty" | "cancelled"
 }
 ```
 

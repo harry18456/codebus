@@ -5,6 +5,9 @@ Backs openspec/changes/sse-progress-skeleton/specs/sidecar-runtime/spec.md
   Requirement: Single-slot in-memory task registry
   Requirement: task_id format
 
+And openspec/changes/agent-sse-wiring/specs/sidecar-runtime/spec.md
+  Requirement: task_id format (MODIFIED — adds `explore` kind)
+
 Design `Single-slot task store over dict-based pool`: registry holds a
 single ``Optional[TaskHandle]`` rather than ``Dict[task_id, TaskHandle]``.
 Once a task transitions to ``done`` or ``error`` the handle survives in
@@ -18,7 +21,7 @@ import pytest
 
 from codebus_agent.api.tasks import TaskRegistry, _generate_task_id
 
-_TASK_ID_RE = re.compile(r"^(scan|kb)_[0-9a-f]{8}$")
+_TASK_ID_RE = re.compile(r"^(scan|kb|explore)_[0-9a-f]{8}$")
 
 
 def test_registry_is_single_slot_and_overwrites_on_new_task() -> None:
@@ -90,7 +93,7 @@ def test_terminal_handle_survives_until_overwritten() -> None:
 
 
 def test_task_id_format_matches_regex() -> None:
-    """Generated ids MUST match `^(scan|kb)_[0-9a-f]{8}$` per spec
+    """Generated ids MUST match `^(scan|kb|explore)_[0-9a-f]{8}$` per spec
     `task_id format` and design `task_id 用前綴 + 8 字 hex random`.
     """
     for _ in range(50):
@@ -99,5 +102,30 @@ def test_task_id_format_matches_regex() -> None:
         assert _TASK_ID_RE.fullmatch(scan_id), f"bad scan id {scan_id!r}"
         assert _TASK_ID_RE.fullmatch(kb_id), f"bad kb id {kb_id!r}"
 
+    # `agent-sse-wiring` extends the allowlist to reject anything else.
     with pytest.raises(ValueError):
-        _generate_task_id("explore")  # type: ignore[arg-type]
+        _generate_task_id("weird")  # type: ignore[arg-type]
+
+
+def test_explore_kind_follows_same_shape() -> None:
+    """Spec scenario `Explore kind follows same shape` (agent-sse-wiring)."""
+    registry = TaskRegistry()
+    handle = registry.create("explore")
+    assert handle is not None
+    assert _TASK_ID_RE.fullmatch(handle.id), f"bad explore id {handle.id!r}"
+    assert handle.id.startswith("explore_")
+
+    # Single-slot enforcement applies equally — while an explore is running,
+    # any subsequent create() (scan / kb / explore) MUST return None.
+    assert registry.create("scan") is None
+    assert registry.create("kb") is None
+    assert registry.create("explore") is None
+
+
+def test_invalid_kind_other_than_explore_still_rejected() -> None:
+    """Extending the allowlist to `explore` MUST NOT relax validation."""
+    registry = TaskRegistry()
+    with pytest.raises(ValueError):
+        registry.create("weird")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        _generate_task_id("anything_not_in_allowlist")  # type: ignore[arg-type]
