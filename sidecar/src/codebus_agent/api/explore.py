@@ -37,6 +37,16 @@ from codebus_agent.api.tasks import TaskRegistry, _run_background_task
 from codebus_agent.sandbox import ToolContext
 from codebus_agent.sanitizer import SanitizerEngine
 
+# `audit-path-unification`: shared workspace-audit constants live in
+# `api/_audit_paths.py` (leaf module to break circular import between
+# `api/__init__.py` and this caller). ReasoningLogger does not auto-mkdir
+# (per `agent-core` spec), so this caller MUST `mkdir(parents=True,
+# exist_ok=True)` the `<workspace>/.codebus/` parent before constructing.
+from codebus_agent.api._audit_paths import (
+    _REASONING_LOG_FILENAME,
+    _WORKSPACE_AUDIT_SUBDIR,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +185,12 @@ async def explore_endpoint(
         sanitizer=SanitizerEngine(),
     )
     tools = FolderTools(ctx=ctx, state=state_obj)
-    reasoning_logger = ReasoningLogger(workspace_root / "reasoning_log.jsonl")
+    # ReasoningLogger does not auto-mkdir its parent (per `agent-core`
+    # spec `Path stays under workspace and caller mkdirs .codebus parent`);
+    # caller MUST ensure `<workspace>/.codebus/` exists before construction.
+    audit_dir = workspace_root / _WORKSPACE_AUDIT_SUBDIR
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    reasoning_logger = ReasoningLogger(audit_dir / _REASONING_LOG_FILENAME)
 
     async def _coro_factory() -> dict[str, Any]:
         # Scope phase / session for the duration of the run so downstream

@@ -21,8 +21,9 @@ KB build production wiring (D-032):
   - ``openai_api_key`` kwarg threads through to ``wire_kb_dependencies``.
   - Factory pattern for workspace-scoped slots (``kb_provider`` /
     ``kb_usage_tracker``) so audit logs land at
-    ``<workspace>/token_usage.jsonl`` etc. even though the sidecar does
-    not know the workspace at startup.
+    ``<workspace>/.codebus/token_usage.jsonl`` etc. even though the sidecar
+    does not know the workspace at startup. (Path under ``.codebus/``
+    subdirectory per `audit-path-unification`.)
   - Missing ``openai_api_key`` leaves KB slots ``None`` — ``POST /kb/build``
     responds ``503 KB_NOT_CONFIGURED`` downstream; sidecar stays alive.
   - ``/healthz`` gets an ``openai_embedding`` dependency probe reflecting
@@ -63,8 +64,15 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
-_WORKSPACE_AUDIT_SUBDIR = ".codebus"
-_SANITIZE_AUDIT_FILENAME = "sanitize_audit.jsonl"
+# `audit-path-unification`: workspace-audit path constants live in a leaf
+# module so both this factory wiring and `api/explore.py` (caller of
+# ReasoningLogger) can import without circular dependency.
+from codebus_agent.api._audit_paths import (
+    _LLM_CALLS_FILENAME,
+    _SANITIZE_AUDIT_FILENAME,
+    _TOKEN_USAGE_FILENAME,
+    _WORKSPACE_AUDIT_SUBDIR,
+)
 
 # Kept in sync with `sidecar/src/codebus_agent/sanitizer/config.py::_BUILTIN_RULES_VERSION`
 # and `api/scan.py::_RULES_VERSION`. Bumping one SHALL bump all three
@@ -167,7 +175,9 @@ def _make_tracker_factory() -> Callable[[Path], UsageTracker]:
     """Factory for workspace-scoped UsageTracker (D-021 workspace-level path)."""
 
     def _factory(workspace_root: Path) -> UsageTracker:
-        return UsageTracker(Path(workspace_root) / "token_usage.jsonl")
+        return UsageTracker(
+            Path(workspace_root) / _WORKSPACE_AUDIT_SUBDIR / _TOKEN_USAGE_FILENAME
+        )
 
     return _factory
 
@@ -178,9 +188,10 @@ def _make_provider_factory(
     """Factory for workspace-scoped TrackedProvider wrapping OpenAIEmbeddingProvider.
 
     TrackedProvider binds three audit loggers at construction time, all
-    workspace-scoped:
-      * ``UsageTracker`` → ``<ws>/token_usage.jsonl`` (D-021)
-      * ``LLMCallLogger`` → ``<ws>/llm_calls.jsonl`` (D-022)
+    workspace-scoped under ``<ws>/.codebus/`` per the workspace-level
+    audit chain convention (`audit-path-unification`):
+      * ``UsageTracker`` → ``<ws>/.codebus/token_usage.jsonl`` (D-021)
+      * ``LLMCallLogger`` → ``<ws>/.codebus/llm_calls.jsonl`` (D-022)
       * ``SanitizerAuditLogger`` → ``<ws>/.codebus/sanitize_audit.jsonl``
 
     Constructing the raw ``OpenAIEmbeddingProvider`` inside the factory
@@ -195,8 +206,8 @@ def _make_provider_factory(
 
     def _factory(workspace_root: Path) -> TrackedProvider:
         ws = Path(workspace_root)
-        tracker = UsageTracker(ws / "token_usage.jsonl")
-        call_logger = LLMCallLogger(ws / "llm_calls.jsonl")
+        tracker = UsageTracker(ws / _WORKSPACE_AUDIT_SUBDIR / _TOKEN_USAGE_FILENAME)
+        call_logger = LLMCallLogger(ws / _WORKSPACE_AUDIT_SUBDIR / _LLM_CALLS_FILENAME)
         sanitizer_audit_path = ws / _WORKSPACE_AUDIT_SUBDIR / _SANITIZE_AUDIT_FILENAME
         sanitizer_audit = SanitizerAuditLogger(sanitizer_audit_path)
         return TrackedProvider(
@@ -240,8 +251,8 @@ def _make_chat_provider_factory(
 
     def _factory(workspace_root: Path) -> TrackedProvider:
         ws = Path(workspace_root)
-        tracker = UsageTracker(ws / "token_usage.jsonl")
-        call_logger = LLMCallLogger(ws / "llm_calls.jsonl")
+        tracker = UsageTracker(ws / _WORKSPACE_AUDIT_SUBDIR / _TOKEN_USAGE_FILENAME)
+        call_logger = LLMCallLogger(ws / _WORKSPACE_AUDIT_SUBDIR / _LLM_CALLS_FILENAME)
         sanitizer_audit_path = ws / _WORKSPACE_AUDIT_SUBDIR / _SANITIZE_AUDIT_FILENAME
         sanitizer_audit = SanitizerAuditLogger(sanitizer_audit_path)
         return TrackedProvider(

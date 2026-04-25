@@ -381,6 +381,71 @@ def test_chat_slots_are_factories_returning_tracked_providers(
     )
 
 
+def test_factory_audit_paths_land_under_codebus_subdir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`audit-path-unification` Cat 2.5-B drift guard.
+
+    Every workspace-scoped factory (`kb_provider` / `kb_query_provider` /
+    `kb_usage_tracker` / `llm_reasoning_provider` / `llm_judge_provider` /
+    `llm_chat_provider` / `llm_coverage_provider`) MUST construct its
+    audit logger at `<workspace>/.codebus/<filename>.jsonl`. Without this
+    guard, a future revert of the path convention would silently land at
+    the workspace root again — breaking the Stage-6 R-01 panel's single-
+    glob assumption.
+    """
+    monkeypatch.setenv("CODEBUS_OPENAI_API_KEY", "sk-test")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(_OPENAI_EMBED_URL).mock(
+            return_value=httpx.Response(200, json=_fake_embed_response(["ping"]))
+        )
+        mock.post(_OPENAI_CHAT_URL).mock(
+            return_value=httpx.Response(200, json=_fake_chat_response())
+        )
+        app = create_app(
+            bearer_token=_bearer(),
+            qdrant_url="http://127.0.0.1:6333",
+            openai_api_key="sk-test",
+        )
+
+    ws = tmp_path / "ws-audit-paths"
+    ws.mkdir()
+
+    expected_audit_dir = ws / ".codebus"
+
+    # `kb_usage_tracker` is a UsageTracker factory.
+    tracker = app.state.kb_usage_tracker(ws)
+    assert tracker.path == expected_audit_dir / "token_usage.jsonl", (
+        f"kb_usage_tracker MUST land at <ws>/.codebus/token_usage.jsonl; "
+        f"got {tracker.path}"
+    )
+    assert expected_audit_dir.exists(), (
+        "UsageTracker constructor MUST auto-mkdir <ws>/.codebus/ parent"
+    )
+
+    # All TrackedProvider factories share the same audit path convention.
+    chat_factory_slots = (
+        "kb_provider",
+        "kb_query_provider",
+        "llm_reasoning_provider",
+        "llm_judge_provider",
+        "llm_chat_provider",
+        "llm_coverage_provider",
+    )
+    for slot_name in chat_factory_slots:
+        factory = getattr(app.state, slot_name)
+        provider = factory(ws)
+        assert provider._tracker.path == expected_audit_dir / "token_usage.jsonl", (
+            f"{slot_name} TrackedProvider tracker MUST land at "
+            f"<ws>/.codebus/token_usage.jsonl; got {provider._tracker.path}"
+        )
+        assert provider._logger.path == expected_audit_dir / "llm_calls.jsonl", (
+            f"{slot_name} TrackedProvider logger MUST land at "
+            f"<ws>/.codebus/llm_calls.jsonl; got {provider._logger.path}"
+        )
+
+
 def test_healthz_reports_openai_chat_dependency_states(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
