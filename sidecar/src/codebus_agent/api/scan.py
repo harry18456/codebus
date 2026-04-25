@@ -48,11 +48,11 @@ from codebus_agent.scanner.service import scan
 _WORKSPACE_AUDIT_SUBDIR = ".codebus"
 _SANITIZE_AUDIT_FILENAME = "sanitize_audit.jsonl"
 
-# Rules version recorded on every sanitize_audit line; kept in sync with the
-# built-in rule table bundled in `codebus_agent.sanitizer.rules`.  Bumping this
-# string is mandatory whenever that rule table changes (see `docs/sanitizer.md
-# §六` / `docs/authorization.md §六`).
-_RULES_VERSION = "2026-04-20-1"
+# Rules version recorded on every sanitize_audit line. Single source of truth
+# is `codebus_agent.sanitizer.RULES_VERSION`; bumping that constant propagates
+# here automatically (CLAUDE.md invariant #9 / `docs/sanitizer.md §六` /
+# `docs/authorization.md §六`).
+from codebus_agent.sanitizer import RULES_VERSION as _RULES_VERSION
 
 
 router = APIRouter()

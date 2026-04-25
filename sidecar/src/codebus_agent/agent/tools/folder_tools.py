@@ -38,6 +38,7 @@ from codebus_agent.sandbox import (
     ensure_in_workspace,
 )
 from codebus_agent.sanitizer import (
+    RULES_VERSION as _SANITIZE_RULES_VERSION,
     MessageSource,
     SanitizerAuditLogger,
     SanitizerEngine,
@@ -53,7 +54,6 @@ __all__ = ["FolderTools"]
 _STATION_RELEVANCE_P0: float = 0.8  # hardcoded per spec Non-Goals; tuned by explorer-golden-sample-p0
 _READ_FILE_TRUNCATE_LIMIT: int = 12000  # chars; heuristic proxy for ≈ 3000 tokens
 _TRUNCATE_MARKER: str = "\n[... truncated ...]\n"
-_SANITIZE_RULES_VERSION: str = "2026-04-20-1"  # kept in sync with sanitizer/config.py _BUILTIN_RULES_VERSION
 
 # Text-file extensions used by both P1 symbol-navigation tools. Mirrors
 # the P0 grep fallback allowlist so ``trace_import`` / ``find_callers``

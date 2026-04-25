@@ -45,6 +45,7 @@ from .llm_call_logger import LLMCallLogger
 from .mock import MockProvider
 from .openai_chat import OpenAIChatProvider
 from .openai_embedding import OpenAIEmbeddingProvider
+from .pricing import estimate_chat_cost_usd
 from .protocol import EmbedResponse, Message, ProviderRole
 from .usage_tracker import UsageTracker
 
@@ -217,13 +218,22 @@ class TrackedProvider:
             completion_tokens=completion_tokens,
             sanitizer_pass2_applied=True,
         )
+        # `review-backlog-cleanup` (Stage 4 review Cat 3 #4): chat cost
+        # is now derived from `pricing._CHAT_PRICING`. Compute once so the
+        # `token_usage.jsonl` row and the `usage_delta` SSE event agree
+        # on the same float — audit and wire stay in lockstep.
+        cost_usd_for_chat = estimate_chat_cost_usd(
+            model_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
         self._tracker.record(
             provider=self.name,
             model=model_id,
             operation="chat",
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
-            cost_usd=0.0,
+            cost_usd=cost_usd_for_chat,
             module=self._default_module,
         )
         # Advance in-memory session counters before the SSE emit so
@@ -235,7 +245,7 @@ class TrackedProvider:
         self._emit_usage_delta(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            cost_usd=0.0,
+            cost_usd=cost_usd_for_chat,
         )
         return result
 

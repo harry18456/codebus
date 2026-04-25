@@ -75,10 +75,7 @@ from codebus_agent.api._audit_paths import (
     _WORKSPACE_AUDIT_SUBDIR,
 )
 
-# Kept in sync with `sidecar/src/codebus_agent/sanitizer/config.py::_BUILTIN_RULES_VERSION`
-# and `api/scan.py::_RULES_VERSION`. Bumping one SHALL bump all three
-# (docs/sanitizer.md §六 / CLAUDE.md invariant #9).
-_RULES_VERSION = "2026-04-20-1"
+from codebus_agent.sanitizer import RULES_VERSION as _RULES_VERSION
 
 
 def wire_kb_dependencies(

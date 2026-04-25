@@ -13,7 +13,7 @@ mapping is retained, per D-015.
 from __future__ import annotations
 
 from .audit import SanitizerAuditLogger
-from .config import PatternAllowlistEntry, SanitizerConfig
+from .config import RULES_VERSION, PatternAllowlistEntry, SanitizerConfig
 from .engine import (
     AuditEntry,
     FileSource,
@@ -29,6 +29,7 @@ __all__ = [
     "FileSource",
     "MessageSource",
     "PatternAllowlistEntry",
+    "RULES_VERSION",
     "SanitizedResult",
     "SanitizeSource",
     "SanitizerAuditLogger",

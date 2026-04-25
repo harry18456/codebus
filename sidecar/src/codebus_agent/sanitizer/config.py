@@ -23,7 +23,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict
 
-_BUILTIN_RULES_VERSION = "2026-04-20-1"
+RULES_VERSION = "2026-04-20-1"
+_BUILTIN_RULES_VERSION = RULES_VERSION  # backward-compat alias for in-package callsite
 
 
 class PatternAllowlistEntry(BaseModel):

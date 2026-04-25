@@ -26,7 +26,11 @@ from codebus_agent._audit_paths import (
     _WORKSPACE_AUDIT_SUBDIR,
 )
 from codebus_agent.agent.types import ExplorerState, Station
-from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
+from codebus_agent.sanitizer import (
+    RULES_VERSION as _DEFAULT_RULES_VERSION,
+    SanitizerAuditLogger,
+    SanitizerEngine,
+)
 
 from .log import GeneratorLogger
 from .moc import assemble_moc
@@ -50,7 +54,6 @@ __all__ = ["run_generator"]
 # (collision risk with user-existing folders).
 _TUTORIALS_DIRNAME: str = "codebus-tutorials"
 
-_DEFAULT_RULES_VERSION: str = "2026-04-20-1"
 _DEFAULT_DURATION_MINUTES: int = 15
 
 logger = logging.getLogger(__name__)

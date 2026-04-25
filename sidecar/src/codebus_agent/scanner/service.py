@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from codebus_agent.sandbox import ToolContext
-from codebus_agent.sanitizer import FileSource, SanitizerAuditLogger
+from codebus_agent.sanitizer import RULES_VERSION, FileSource, SanitizerAuditLogger
 from codebus_agent.scanner.encoding import detect_encoding
 from codebus_agent.scanner.language import identify
 from codebus_agent.scanner.models import (
@@ -72,7 +72,7 @@ async def scan(
     ctx: ToolContext,
     *,
     sanitize_audit: SanitizerAuditLogger | None = None,
-    rules_version: str = "2026-04-20-1",
+    rules_version: str = RULES_VERSION,
     session_id: str = "",
     on_progress: ScannerProgressCallback | None = None,
 ) -> ScanResult:

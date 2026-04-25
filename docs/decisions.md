@@ -674,6 +674,7 @@ Module 1（資料夾掃描）只寫「過濾垃圾檔案」，實際坑很多。
 - [x] `sidecar-api.md §四`：加 `usage_delta` event + `usage_summary` 含 `by_phase`
 - [x] `security.md §二`：四層 JSONL → 五層 JSONL（加 `token_usage.jsonl`）
 - [x] `implementation-plan.md`：第一階段插入步驟 8.5「UsageTracker 骨架」
+- [x] chat `cost_usd` 走 pricing table（`review-backlog-cleanup`，2026-04-25）：`providers/pricing.py::estimate_chat_cost_usd` + `_CHAT_PRICING` 表（`gpt-4o-mini-chat-v1`: 0.15 / 0.60 USD per 1M token、`mock-chat-v1`: 0.0 / 0.0 placeholder）；`tracked.py::chat()` 兩處 `0.0` 改成 `cost_usd_for_chat = estimate_chat_cost_usd(...)` 算一次餵 `token_usage.jsonl` + `usage_delta`，未知 model 走 0.0 + WARNING log，zero-token 不噴 warning
 - [ ] D-007 連動：benchmark 直接讀 `token_usage.jsonl`（實作期補）
 
 ---
@@ -716,6 +717,7 @@ Module 1（資料夾掃描）只寫「過濾垃圾檔案」，實際坑很多。
 - [x] `security.md §二`：五層 JSONL → 六層 JSONL（加 `llm_calls.jsonl`）
 - [x] `implementation-plan.md`：步驟 8.5 擴充為「UsageTracker + LLMCallLogger」；前端階段加步驟 28.5「LLM Calls 分頁」
 - [x] `README.md`：Demo checklist 加「LLM Calls 分頁可展示 request/response」項
+- [x] wire payload `cost_usd` 反映真值（`review-backlog-cleanup`，2026-04-25）：與 D-021 同次 land；`usage_delta` SSE event 與 `llm_calls.jsonl` 對應 chat call `cost_usd` 不再是硬寫 `0.0` 而是 pricing-table 算出的真值，前端 R-01 / O-04 顯示 reasoning + judge 不再 0 元
 - [ ] D-020 連動：前端稽核 tab 分頁數改 6（sanitize / sandbox / kb_growth / reasoning / usage / llm_calls），前端期落地
 
 ---

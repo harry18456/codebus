@@ -20,6 +20,7 @@ from .openai_embedding import (
     OpenAIEmbeddingProvider,
     OpenAIRateLimitError,
 )
+from .pricing import estimate_chat_cost_usd
 from .protocol import (
     EmbedResponse,
     LLMProvider,
@@ -53,4 +54,5 @@ __all__ = [
     "TrackedProvider",
     "Usage",
     "UsageTracker",
+    "estimate_chat_cost_usd",
 ]
