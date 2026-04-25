@@ -24,8 +24,6 @@ The sidecar project SHALL ship a PyInstaller spec file that produces a single-fi
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -47,8 +45,6 @@ The packaged sidecar binary SHALL expose a `--healthz` command-line flag that pe
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -69,6 +65,4 @@ The Tauri application SHALL embed the packaged sidecar binary through its `exter
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->

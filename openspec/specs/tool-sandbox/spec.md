@@ -107,8 +107,6 @@ The sidecar SHALL expose a helper `ensure_in_workspace(path, ctx)` that raises a
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -129,8 +127,6 @@ The repository SHALL contain a red-team test fixture that exercises every attack
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---

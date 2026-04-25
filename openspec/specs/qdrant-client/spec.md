@@ -36,8 +36,6 @@ The repository SHALL provide a platform-aware launch script that starts a Qdrant
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -68,8 +66,6 @@ The sidecar SHALL include an automated smoke test that proves `qdrant-client` ca
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---

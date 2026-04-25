@@ -45,11 +45,9 @@ from codebus_agent.providers.tracked import TrackedProvider
 from .budget import TokenBudgetProbe
 from .emitter import NullEmitter, SSEEmitter
 from .prompts.explorer import (
-    EXPLORER_PROMPT_VERSION,
     EXPLORER_SYSTEM,
     render_explorer_prompt,
 )
-from .prompts.judge import JUDGE_PROMPT_VERSION
 from .protocols import CoverageChecker, ExplorerTools, Judge
 from .reasoning_logger import ReasoningLogger
 from .types import (
@@ -598,8 +596,6 @@ async def run_explorer(
                     tool_results=[],
                     judge_verdict=None,
                     tokens_used=0,
-                    explorer_prompt_version=EXPLORER_PROMPT_VERSION,
-                    judge_prompt_version=JUDGE_PROMPT_VERSION,
                 )
             )
 

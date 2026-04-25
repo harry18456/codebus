@@ -76,8 +76,6 @@ The sidecar SHALL implement an `LLMCallLogger` that appends the full request and
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -103,8 +101,6 @@ All LLM calls in the sidecar SHALL pass through a `TrackedProvider` decorator th
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---

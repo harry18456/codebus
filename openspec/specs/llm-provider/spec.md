@@ -24,8 +24,6 @@ The sidecar SHALL define an `LLMProvider` Protocol exposing `chat` and `embed` m
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -52,8 +50,6 @@ The sidecar SHALL ship a `MockProvider` implementation whose `chat` method produ
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---

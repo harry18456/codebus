@@ -24,8 +24,6 @@ The repository SHALL contain three top-level implementation directories plus a f
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -47,8 +45,6 @@ The sidecar project SHALL use uv as its Python package manager and virtual envir
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -69,6 +65,4 @@ The repository SHALL contain `.pre-commit-config.yaml` at the root with the stag
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->

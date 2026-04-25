@@ -24,8 +24,6 @@ The sidecar process SHALL start a FastAPI application bound exclusively to `127.
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -52,8 +50,6 @@ All sidecar HTTP endpoints SHALL require a `Authorization: Bearer <token>` heade
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -75,8 +71,6 @@ The sidecar SHALL expose `GET /healthz` returning a JSON payload reflecting its 
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -98,8 +92,6 @@ At startup the sidecar SHALL emit a single-line JSON handshake to stdout so the 
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -115,8 +107,6 @@ The sidecar SHALL self-terminate when its parent process disappears, so that orp
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---

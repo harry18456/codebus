@@ -24,8 +24,6 @@ The `tauri/` project SHALL produce a runnable Tauri 2.0 desktop application that
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -47,8 +45,6 @@ The `web/` project SHALL render a landing page that proves the frontend is wired
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
 
 ---
@@ -69,6 +65,4 @@ Tauri's filesystem capability SHALL be configured with `fs.scope` so that the fr
 <!-- @trace
 source: m1-power-on
 updated: 2026-04-19
-code:
-  - web/dist
 -->
