@@ -137,11 +137,30 @@ class TrackedProvider:
         # memory on the provider because that's the scope SSE consumers care
         # about (per-provider-instance ≈ per-task for Explorer wiring).
         self._session_total_cost_usd: float = 0.0
+        # `context-compression-token-budget`: per-instance token counters
+        # advanced on every successful `chat` / `embed` (failure paths leave
+        # them unchanged, matching `session_total_cost_usd` semantic). Read
+        # by Explorer's `AggregatedTokenProbe` to drive the
+        # `budget_tokens_exhausted` `_should_stop` branch.
+        self._session_prompt_tokens: int = 0
+        self._session_completion_tokens: int = 0
         self.name: str = getattr(inner, "name", "tracked")
 
     @property
     def role(self) -> ProviderRole:
         return self._role
+
+    @property
+    def session_prompt_tokens(self) -> int:
+        return self._session_prompt_tokens
+
+    @property
+    def session_completion_tokens(self) -> int:
+        return self._session_completion_tokens
+
+    @property
+    def session_total_tokens(self) -> int:
+        return self._session_prompt_tokens + self._session_completion_tokens
 
     def set_emitter(self, emitter: "SSEEmitter | None") -> None:
         """Late-wire the SSE emitter and propagate to the inner LLMCallLogger.
@@ -207,6 +226,12 @@ class TrackedProvider:
             cost_usd=0.0,
             module=self._default_module,
         )
+        # Advance in-memory session counters before the SSE emit so
+        # downstream `TokenBudgetProbe` reads reflect the just-completed
+        # call regardless of whether an emitter is wired (Explorer
+        # budget check runs without requiring an emitter).
+        self._session_prompt_tokens += prompt_tokens
+        self._session_completion_tokens += completion_tokens
         self._emit_usage_delta(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -260,6 +285,10 @@ class TrackedProvider:
             cost_usd=cost,
             module=self._default_module,
         )
+        # Embed counts as prompt-side input only (no completion surface);
+        # bookkeeping mirrors the chat path so `session_total_tokens`
+        # reflects both code paths uniformly for Explorer's probe.
+        self._session_prompt_tokens += int(result.usage.embed_tokens)
         self._emit_usage_delta(
             prompt_tokens=int(result.usage.embed_tokens),
             completion_tokens=0,
@@ -298,6 +327,10 @@ class TrackedProvider:
                 "completion_tokens": int(completion_tokens),
                 "cost_usd": float(cost_usd),
                 "session_total_cost_usd": round(self._session_total_cost_usd, 8),
+                # `context-compression-token-budget`: running token total
+                # advanced in `chat` / `embed` success paths before this
+                # emit, so the value here reflects post-call state.
+                "session_total_tokens": int(self.session_total_tokens),
             }
         )
 

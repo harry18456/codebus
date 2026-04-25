@@ -178,11 +178,16 @@ async def run_explorer(
 
 
 def _should_stop(
-    state: ExplorerState, cancel_event: asyncio.Event | None
+    state: ExplorerState,
+    cancel_event: asyncio.Event | None,
+    token_probe: TokenBudgetProbe | None = None,
 ) -> tuple[bool, str | None]:
-    # 三分支 convergence：cancel → budget → queue_empty(with enough stations)
+    # 四分支 convergence：cancel → tokens → steps → queue_empty(with enough stations)
+    # （`context-compression-token-budget` 加入 tokens 分支；token_probe=None 時跳過）
     if cancel_event is not None and cancel_event.is_set():
         return True, "cancelled"
+    if token_probe is not None and token_probe.total() >= state.budget_tokens_left:
+        return True, "budget_tokens_exhausted"
     if state.budget_steps_left <= 0:
         return True, "budget_exhausted"
     if not state.pending_queue and len(state.stations) >= _MIN_STATIONS_FOR_CONVERGENCE:
@@ -433,29 +438,27 @@ def render_explorer_prompt(state: ExplorerState, tool_specs: list) -> str:
 
 LLM context window 有限（Claude 200k、GPT-4 128k），長探索會超過。
 
-**策略**
-1. **`messages` rolling window**：保留 system + task + 最近 N 步（預設 8），超過的舊 tool results 摘要成「已訪問 X, Y, Z」塞進 system
-2. **Tool result 截斷**：單檔讀太長（>3000 tokens）只給頭尾 + 中間 snippet，完整內容存 state.visited_files 供後續參照
-3. **State snapshot 注入**：每輪前把 `len(visited_files)`、`len(stations)`、`pending_queue[:5]` 放進 system prompt，讓 LLM 不用翻 history 也知道進度
+**✅ landed 形狀**（`context-compression-token-budget`）：
 
-壓縮觸發點：token count 到 context window 的 75% 時。
+- **`messages` rolling window**：`_MESSAGE_ROLLING_WINDOW = 16` 硬 code 常數。`_think` 把 `_to_provider_messages(state.messages[-16:])` 塞給 provider wire prompt；`state.messages` 本尊保持無損累積（`reasoning_log.jsonl` 完整記錄 Step 的 `tool_results`，不被 window 切）。跨輪記憶 context 由 `render_explorer_prompt(state, tool_specs)` 另行產生（visited / stations / pending_queue 摘要塞進 user prompt 每輪 re-render）。
+- **State snapshot**：已在 `render_explorer_prompt` 內 fold 進 user prompt（既有行為，本 change 不變），不用再去動 system prompt。
+- **Tool result 截斷**（既有多層）：SSE `agent_action_result.observation` 截 500 字、`render_judge_prompt` 對每條 ToolResult output 截 800 字、`render_explorer_prompt` 對 visited 塞 window 20 entries。三段 truncation 已覆蓋 provider wire 實況。
+
+**延後項目**：Summary compression（把 dropped messages 摘要回塞 system prompt）、token-aware window（動態按 token 切）——MVP 先 FIFO slice 16 條跑 Demo；真看到 agent 卡住才補。
 
 ---
 
 ## 十一、Budget 控制
 
-```python
-@dataclass
-class Budget:
-    max_steps: int = 40
-    max_tokens: int = 200_000
-    max_wall_seconds: int = 600     # 10 分鐘硬上限
-```
+**✅ landed 形狀**（`context-compression-token-budget`）：
 
-- 每步遞減 `budget_steps_left`
-- **Tokens 用量從 `UsageTracker.session_total()` 即時讀取**（D-021，不再 Explorer 內部估算）
-- 到 80% 時 prompt 加提示「budget 快用完，開始收斂」
-- 100% 強制 stop
+- **Step budget**：每輪 `state.budget_steps_left -= 1`；`_should_stop` 的 `"budget_exhausted"` 分支在 `<= 0` 時收斂。
+- **Token budget**：呼叫端傳 `run_explorer(..., token_probe: TokenBudgetProbe)`；`_should_stop` 的 `"budget_tokens_exhausted"` 分支在 `token_probe.total() >= state.budget_tokens_left` 時收斂。HTTP 層組 `AggregatedTokenProbe([reasoning_provider, judge.provider, coverage.provider])` 跨三顆 TrackedProvider 加總 `session_total_tokens`（`TrackedProvider` 記憶體 counter，每次成功 chat / embed 累計）。
+- **`_should_stop` precedence**（四分支）：`cancel > tokens > steps > queue_empty`。token 排在 steps 之前：token 用光是較稀見 branch，優先出它有診斷價值。
+- **80% 預警**：`_BUDGET_WARNING_PCT = 0.8`；`_maybe_emit_budget_warning(...)` 每 run 每 kind（`"tokens"` / `"steps"`）最多 emit 一次 `budget_warning` SSE event，sticky flag 穿遞迴保一致。觸發點在 Update 後、progress 前。
+- **100% 強制 stop**：由 `_should_stop` 的四分支之一發。
+
+**延後項目**：`max_wall_seconds` 硬上限（§十一 spec 列了 10 分鐘；D-007 cost benchmark 還沒跑，過早寫死會卡 run）。留給 `wall-clock-budget` 後續 change 帶 benchmark 一起做。
 
 **來自 D-007**：cost benchmark 做完再調預設值。MVP 先設保守值。
 
@@ -476,7 +479,8 @@ class Budget:
 三條 emit 軌道並行，責任分開：
 
 - **Explorer loop** — `run_explorer(..., emitter=None)`（`None` default 對既有 in-process 測試相容）在每輪 Think → Act → Judge 之後 emit `agent_thought` / 每個 ToolResult 對應 `agent_action_result`（`observation` 截到 500 字）/ `judge_verdict` / 每輪尾端一筆 `progress`（`total` 在迴圈前 snapshot）。
-- **TrackedProvider** — `__init__(..., emitter=None)` + `set_emitter(emitter)`（endpoint 建完 per-task handle 後才晚綁）；成功 `chat` / `embed` 在 `tracker.record` 之後 emit `usage_delta`（失敗 path 不 emit，`session_total_cost_usd` 本地累加）。`phase` / `step` 從 `codebus_agent.agent.context_vars` 的 `ContextVar`（`current_phase_var` / `current_step_var`）讀，未設 → `None`。
+- **TrackedProvider** — `__init__(..., emitter=None)` + `set_emitter(emitter)`（endpoint 建完 per-task handle 後才晚綁）；成功 `chat` / `embed` 在 `tracker.record` 之後 emit `usage_delta`（失敗 path 不 emit，`session_total_cost_usd` / `session_total_tokens` 本地累加；後者由 `context-compression-token-budget` 加，值 = `session_prompt_tokens + session_completion_tokens`，在 `usage_delta` event 帶出）。`phase` / `step` 從 `codebus_agent.agent.context_vars` 的 `ContextVar`（`current_phase_var` / `current_step_var`）讀，未設 → `None`。
+- **Explorer budget warning** — `run_explorer` 每輪 Update 後、`progress` 前呼 `_maybe_emit_budget_warning(...)`：`kind="tokens"`（`token_probe.total() / state.budget_tokens_left >= 0.8`）與 `kind="steps"`（`consumed / initial_budget_steps >= 0.8`）各一次 per-run sticky emit（`_BudgetWarningState` 穿 coverage 遞迴）。event 形狀：`{"type": "budget_warning", "kind": str, "current": int, "budget": int, "pct": float}`。無 emitter 時跳過；無 token_probe 時 tokens 分支跳過。
 - **LLMCallLogger** — 同樣 `__init__(..., emitter=None)` + `set_emitter(emitter)`；`log` / `log_failure` 寫檔成功後 emit `llm_call`（`preview` 取 `request["messages"]` 第一個 `role="user"` 的 `content[:200]`；無 user msg → 空字串）。
 
 ```python

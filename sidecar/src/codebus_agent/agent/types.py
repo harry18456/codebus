@@ -123,15 +123,23 @@ class ExplorerAction(BaseModel):
 class ExplorerResult(BaseModel):
     """Terminal output of `run_explorer`.
 
-    `stopped_reason` enumerates the three convergence branches defined in
+    `stopped_reason` enumerates the four convergence branches defined in
     spec Requirement `Explorer loop stops on budget exhaustion, empty
     queue, or cancel signal`. Kept as `Literal` so callers (HTTP layer,
-    golden-sample replayer) can match-case on it safely.
+    golden-sample replayer) can match-case on it safely. The
+    `budget_tokens_exhausted` branch landed with
+    `context-compression-token-budget` and fires only when a caller
+    passes a non-None `TokenBudgetProbe` to `run_explorer`.
     """
 
     stations: list[Station] = Field(default_factory=list)
     log_path: str
-    stopped_reason: Literal["budget_exhausted", "queue_empty", "cancelled"]
+    stopped_reason: Literal[
+        "budget_exhausted",
+        "queue_empty",
+        "cancelled",
+        "budget_tokens_exhausted",
+    ]
 
 
 class Step(BaseModel):

@@ -35,12 +35,14 @@ Deferred to later changes (not this one):
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from codebus_agent.providers.protocol import Message as ProviderMessage
 from codebus_agent.providers.tracked import TrackedProvider
 
+from .budget import TokenBudgetProbe
 from .emitter import NullEmitter, SSEEmitter
 from .prompts.explorer import (
     EXPLORER_PROMPT_VERSION,
@@ -81,6 +83,28 @@ _COVERAGE_RECURSION_ENABLED: bool = True
 _COVERAGE_MAX_DEPTH: int = 3
 _OBSERVATION_TRUNCATE_LIMIT: int = 500  # chars for agent_action_result.observation
 _TRUNCATE_MARKER: str = "… [truncated]"
+# `context-compression-token-budget`: fixed FIFO window on `state.messages`
+# when forwarding the provider wire prompt. Applies only to Explorer's
+# cross-iteration ReAct path — `state.messages` itself is NOT mutated.
+_MESSAGE_ROLLING_WINDOW: int = 16
+# `context-compression-token-budget`: threshold (fraction of configured
+# budget) at which an Explorer run emits a one-time `budget_warning` SSE
+# event per kind (`tokens` / `steps`). Tuneable constant — bump if Demo
+# shows 80% feels too late.
+_BUDGET_WARNING_PCT: float = 0.8
+
+
+@dataclass
+class _BudgetWarningState:
+    """Per-run sticky flags so `budget_warning` fires at most once per kind.
+
+    Built at the outermost `run_explorer` call and re-used across
+    coverage-gap recursion frames (state is threaded through the tail
+    call) so a user sees one warning per kind over the full session.
+    """
+
+    warned_tokens: bool = False
+    warned_steps: bool = False
 # `_enqueue_gap_investigation` renders at most this many gap descriptions
 # into the user-message summary (Decision 6); remaining gaps collapse into
 # `（及其他 N 項）` so the prompt stays bounded even on pathological rounds.
@@ -90,11 +114,20 @@ _COVERAGE_QUEUE_PLACEHOLDER_TRUNCATE: int = 80
 
 
 def _should_stop(
-    state: ExplorerState, cancel_event: asyncio.Event | None
+    state: ExplorerState,
+    cancel_event: asyncio.Event | None,
+    token_probe: TokenBudgetProbe | None = None,
 ) -> tuple[bool, str | None]:
-    """Return (stop?, stopped_reason)."""
+    """Return `(stop?, stopped_reason)`.
+
+    Four-branch precedence (Decision 3): cancel > token > steps > queue.
+    `token_probe=None` skips the token branch so legacy in-process
+    tests and golden-sample replay stay unaffected.
+    """
     if cancel_event is not None and cancel_event.is_set():
         return True, "cancelled"
+    if token_probe is not None and token_probe.total() >= state.budget_tokens_left:
+        return True, "budget_tokens_exhausted"
     if state.budget_steps_left <= 0:
         return True, "budget_exhausted"
     if (
@@ -118,9 +151,17 @@ async def _think(
     provider: TrackedProvider,
     tool_specs: list[dict],
 ) -> tuple[str, list[ToolCall]]:
-    """Render prompt → single chat call → return (thought, tool_calls)."""
+    """Render prompt → single chat call → return (thought, tool_calls).
+
+    Only the **last `_MESSAGE_ROLLING_WINDOW`** entries of `state.messages`
+    are forwarded to the provider; earlier ones stay on state for the
+    reasoning log. `render_explorer_prompt` still consumes the full
+    state (visited / stations summary) so the LLM never loses the
+    accumulated exploration context.
+    """
     user_prompt = render_explorer_prompt(state, tool_specs)
-    messages = _to_provider_messages(state.messages) + [
+    windowed = state.messages[-_MESSAGE_ROLLING_WINDOW:]
+    messages = _to_provider_messages(windowed) + [
         ProviderMessage(role="system", content=EXPLORER_SYSTEM),
         ProviderMessage(role="user", content=user_prompt),
     ]
@@ -299,6 +340,61 @@ def _enqueue_gap_investigation(
     )
 
 
+def _maybe_emit_budget_warning(
+    emitter: SSEEmitter | None,
+    warning_state: _BudgetWarningState,
+    state: ExplorerState,
+    initial_budget_steps: int,
+    token_probe: TokenBudgetProbe | None,
+) -> None:
+    """Fan out a `budget_warning` event once per kind per run.
+
+    Called after the Update step (budget_steps_left decremented) and
+    before the iteration's `progress` emit. No-op when `emitter is None`.
+    Tokens branch skipped when `token_probe is None`.
+    """
+    if emitter is None:
+        return
+
+    # tokens branch
+    if (
+        token_probe is not None
+        and not warning_state.warned_tokens
+        and state.budget_tokens_left > 0
+    ):
+        current = token_probe.total()
+        budget = state.budget_tokens_left
+        if current / budget >= _BUDGET_WARNING_PCT:
+            emitter.emit(
+                {
+                    "type": "budget_warning",
+                    "kind": "tokens",
+                    "current": int(current),
+                    "budget": int(budget),
+                    "pct": round(current / budget, 6),
+                }
+            )
+            warning_state.warned_tokens = True
+
+    # steps branch
+    if (
+        not warning_state.warned_steps
+        and initial_budget_steps > 0
+    ):
+        consumed = initial_budget_steps - state.budget_steps_left
+        if consumed / initial_budget_steps >= _BUDGET_WARNING_PCT:
+            emitter.emit(
+                {
+                    "type": "budget_warning",
+                    "kind": "steps",
+                    "current": int(consumed),
+                    "budget": int(initial_budget_steps),
+                    "pct": round(consumed / initial_budget_steps, 6),
+                }
+            )
+            warning_state.warned_steps = True
+
+
 def _truncate_observation(result: ToolResult) -> str:
     """Pick the ≤500-char payload carried on `agent_action_result.observation`.
 
@@ -323,7 +419,9 @@ async def run_explorer(
     cancel_event: asyncio.Event | None = None,
     tool_specs: list[dict] | None = None,
     emitter: SSEEmitter | None = None,
+    token_probe: TokenBudgetProbe | None = None,
     _depth: int = 0,
+    _warning_state: _BudgetWarningState | None = None,
 ) -> ExplorerResult:
     """Drive the Think → Act → Observe → Judge → Log → Update loop.
 
@@ -357,9 +455,15 @@ async def run_explorer(
     # Snapshot the budget for `progress.total` so the UI bar denominator
     # stays fixed even as `state.budget_steps_left` decrements each iter.
     initial_budget_steps = state.budget_steps_left
+    # Sticky warning state — constructed at the outermost frame and
+    # reused across coverage-gap recursion so `budget_warning` fires at
+    # most once per kind per Explorer session.
+    warning_state = _warning_state or _BudgetWarningState()
 
     while True:
-        should_stop, stopped_reason = _should_stop(state, cancel_event)
+        should_stop, stopped_reason = _should_stop(
+            state, cancel_event, token_probe
+        )
         if should_stop:
             break
 
@@ -422,6 +526,17 @@ async def run_explorer(
         _update_state(state, tool_calls, results, verdict)
         state.step_count += 1
         state.budget_steps_left -= 1
+
+        # Budget warning — per-kind once, fires after Update and before
+        # `progress` so consumers see the warning alongside the progress
+        # tick that pushed consumption past the threshold.
+        _maybe_emit_budget_warning(
+            emitter,
+            warning_state,
+            state,
+            initial_budget_steps,
+            token_probe,
+        )
 
         # Progress tick — emitted after the Update step so `current` equals
         # the post-increment step_count (1-indexed against total).
@@ -504,7 +619,9 @@ async def run_explorer(
                 cancel_event=cancel_event,
                 tool_specs=tool_specs,
                 emitter=emitter,
+                token_probe=token_probe,
                 _depth=_depth + 1,
+                _warning_state=warning_state,
             )
 
     return ExplorerResult(

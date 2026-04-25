@@ -178,6 +178,26 @@ async def test_explore_endpoint_emits_full_event_sequence(tmp_path: Path) -> Non
         f"unexpected module labels on usage_delta: {modules}"
     )
 
+    # `context-compression-token-budget`: every usage_delta must carry a
+    # non-negative `session_total_tokens` int reflecting the post-call
+    # TrackedProvider aggregate.
+    for ev in usage_events:
+        assert "session_total_tokens" in ev, (
+            f"usage_delta missing session_total_tokens: {ev}"
+        )
+        assert isinstance(ev["session_total_tokens"], int)
+        assert ev["session_total_tokens"] >= 0
+
+    # `context-compression-token-budget`: budget_warning is optional —
+    # short runs may not cross 80%. If emitted, the event must carry
+    # the documented wire schema.
+    warning_events = [e for e in events if e.get("type") == "budget_warning"]
+    for ev in warning_events:
+        assert ev["kind"] in {"tokens", "steps"}, ev
+        assert isinstance(ev["current"], int)
+        assert isinstance(ev["budget"], int)
+        assert isinstance(ev["pct"], (int, float))
+
     # llm_call lines carry preview ≤ 200 chars.
     llm_events = [e for e in events if e.get("type") == "llm_call"]
     for e in llm_events:

@@ -168,6 +168,60 @@ def test_bearer_authentication_enforced(app_with_explore_deps, tmp_path: Path) -
     assert resp.status_code == 401
 
 
+def test_explore_endpoint_wires_aggregated_token_probe(
+    app_with_explore_deps, bearer: str, tmp_path: Path, monkeypatch
+) -> None:
+    """Spec Decision 2 + 7: handler wires AggregatedTokenProbe across 3 providers.
+
+    Spy on `run_explorer` to capture the `token_probe` argument; assert
+    it's an `AggregatedTokenProbe` over exactly three providers
+    (reasoning + judge.provider + coverage.provider).
+    """
+    from codebus_agent.agent.budget import AggregatedTokenProbe
+    from codebus_agent.api import explore as explore_module
+    from codebus_agent.agent.types import ExplorerResult
+
+    captured: dict[str, object] = {}
+
+    async def _spy_run_explorer(*args, **kwargs):
+        captured["token_probe"] = kwargs.get("token_probe")
+        return ExplorerResult(
+            stations=[], log_path=str(tmp_path / "reasoning_log.jsonl"),
+            stopped_reason="budget_exhausted",
+        )
+
+    monkeypatch.setattr(explore_module, "run_explorer", _spy_run_explorer)
+
+    client = TestClient(app_with_explore_deps)
+    resp = client.post(
+        "/explore",
+        json={
+            "workspace_root": str(tmp_path),
+            "task": "x",
+            "budget_steps": 0,
+            "budget_tokens": 10_000,
+        },
+        headers=_auth(bearer),
+    )
+    assert resp.status_code == 202, resp.text
+
+    # Allow the background task to run so `_spy_run_explorer` is reached.
+    import time
+    for _ in range(20):
+        if captured:
+            break
+        time.sleep(0.05)
+
+    assert "token_probe" in captured, (
+        "explore handler MUST pass token_probe kwarg to run_explorer"
+    )
+    probe = captured["token_probe"]
+    assert isinstance(probe, AggregatedTokenProbe)
+    # The aggregator's internal providers tuple length must be 3 —
+    # reasoning + judge.provider + coverage.provider.
+    assert len(probe._providers) == 3
+
+
 def test_explore_endpoint_requires_llm_coverage_provider(
     app_with_explore_deps, bearer: str, tmp_path: Path
 ) -> None:

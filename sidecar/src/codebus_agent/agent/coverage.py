@@ -59,6 +59,18 @@ class LLMCoverageChecker:
     ) -> None:
         self._provider = provider_factory(Path(workspace_root))
 
+    @property
+    def provider(self) -> TrackedProvider:
+        """Expose the wrapped TrackedProvider for cross-evaluator aggregation.
+
+        `context-compression-token-budget` Decision 7 — Explorer's
+        `AggregatedTokenProbe` needs every chat-ish provider's
+        `session_total_tokens` counter across roles. Matches
+        `LLMJudge.provider` shape so the HTTP layer can treat both
+        evaluators uniformly.
+        """
+        return self._provider
+
     def set_emitter(self, emitter: "SSEEmitter | None") -> None:
         """Propagate `emitter` down to the wrapped TrackedProvider.
 

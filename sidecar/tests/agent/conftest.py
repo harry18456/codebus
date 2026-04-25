@@ -201,3 +201,37 @@ def scripted_coverage_checker():
             return list(self._static_gaps)
 
     return _ScriptedCoverage
+
+
+# ------------------------- Context/budget fixtures -------------------------
+
+
+@pytest.fixture
+def scripted_token_probe():
+    """Protocol-satisfying `TokenBudgetProbe` spy returning preset totals.
+
+    `context-compression-token-budget` Section 6/10 tests need a probe
+    whose `total()` can be scripted per call — e.g., start at 0 then
+    jump past the 80% threshold on the second check. Accepts either a
+    static `total` (returned every call) OR a `totals` queue (one
+    consumed per call; falls back to last value after queue drains).
+    """
+
+    class _ScriptedProbe:
+        def __init__(
+            self,
+            total: int = 0,
+            *,
+            totals: list[int] | None = None,
+        ) -> None:
+            self.calls = 0
+            self._static = int(total)
+            self._queue: list[int] = list(totals) if totals is not None else []
+
+        def total(self) -> int:
+            self.calls += 1
+            if self._queue:
+                return int(self._queue.pop(0))
+            return self._static
+
+    return _ScriptedProbe

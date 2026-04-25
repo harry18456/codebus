@@ -70,7 +70,7 @@ Module 1 → Module 2，讓 Explorer 有東西吃。
 | 18 | Relevance Judge（極簡 prompt）+ **reasoning_log 寫檔** | 1d | 16 | agent-core.md §十二 |
 | 19 | trace_import / find_callers | 1d | 17 | agent-explorer-spec.md §九 P1 |
 | 20 | ✅ landed（`coverage-gap-recurse`）：`LLMCoverageChecker` + 遞迴（`_COVERAGE_MAX_DEPTH=3`、`_enqueue_gap_investigation` 雙推、`coverage_gaps` SSE event、HTTP 層 `llm_coverage_provider` factory） | 1d | 18, 19 | agent-core.md §七 / §九 |
-| 21 | Context 壓縮 + Budget 控制 | 1d | 16 | agent-core.md §五 Budget |
+| 21 | ✅ landed（`context-compression-token-budget`）：`_MESSAGE_ROLLING_WINDOW=16` + `TokenBudgetProbe` / `AggregatedTokenProbe` + `_should_stop` 四分支（cancel > tokens > steps > queue）+ `budget_warning` SSE event（per-kind once）+ HTTP 層聚合三 provider `session_total_tokens` | 1d | 16 | agent-core.md §十 / §十一 |
 | 22 | SSE emit（agent_thought / judge_verdict / action_result） | 1d | 18 | sidecar-api.md §四 |
 | 23 | Golden sample 首跑（Timeline ideal-route 對比） | 1d | 17-22 | D-006 / tests/golden/... |
 

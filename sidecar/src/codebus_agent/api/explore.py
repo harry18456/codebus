@@ -24,6 +24,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from codebus_agent.agent.budget import AggregatedTokenProbe
 from codebus_agent.agent.context_vars import current_phase_var, current_session_var
 from codebus_agent.agent.coverage import LLMCoverageChecker
 from codebus_agent.agent.emitter import TaskHandleEmitter
@@ -156,6 +157,12 @@ async def explore_endpoint(
     reasoning_provider.set_emitter(emitter)
     judge.set_emitter(emitter)
     coverage.set_emitter(emitter)
+    # `context-compression-token-budget`: aggregate session token totals
+    # across reasoning / judge / coverage providers so `run_explorer`'s
+    # `_should_stop` can enforce `state.budget_tokens_left`.
+    token_probe = AggregatedTokenProbe(
+        [reasoning_provider, judge.provider, coverage.provider]
+    )
     state_obj = ExplorerState(
         task=request.task,
         budget_steps_left=request.budget_steps,
@@ -184,6 +191,7 @@ async def explore_endpoint(
                 coverage=coverage,
                 logger=reasoning_logger,
                 emitter=emitter,
+                token_probe=token_probe,
             )
         finally:
             current_phase_var.reset(phase_token)
