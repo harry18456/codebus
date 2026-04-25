@@ -35,6 +35,13 @@ The loop terminates via the `_should_stop(state)` predicate (see separate Requir
 - **AND** when `coverage.check` returns one or more `Gap` entries and the recursion preconditions defined in Requirement `Coverage-gap recursion runs after main loop convergence` are met, `run_explorer` MUST recurse into a new call with `_depth + 1`
 - **AND** when the preconditions are not met (empty gaps / budget exhausted / `_depth` has reached `_COVERAGE_MAX_DEPTH`), `run_explorer` MUST return without recursing
 
+#### Scenario: Update step uses tool_name as P0 pending_queue placeholder
+
+- **WHEN** an iteration's `JudgeVerdict` carries `should_follow_imports=True` and the iteration produced one or more non-error `ToolResult` entries
+- **THEN** the Update step MUST append `r.tool_name` (the tool's name string, e.g. `"echo"` / `"search"`) onto `state.pending_queue` for each such ToolResult — this is a P0 placeholder whose sole purpose is keeping `pending_queue` non-empty across iterations so the `_should_stop` predicate's `queue_empty` branch (which fires on `pending_queue == [] and len(stations) >= _MIN_STATIONS_FOR_CONVERGENCE`) does not terminate the run prematurely
+- **AND** consumers of `pending_queue` content MUST treat the P0 string as opaque (the value carries no symbolic / path semantics in P0)
+- **AND** real symbol or path enqueue lands when `explorer-tools-p2` introduces `follow_reference` tool semantics; that change will MODIFY this Requirement to specify the richer queue payload
+
 ---
 ### Requirement: Explorer Think step validates ExplorerAction via Instructor
 
@@ -155,31 +162,12 @@ Write failures (disk full, permission denied) MUST propagate as exceptions so th
 - **WHEN** `ReasoningLogger(path)` is constructed where `path` resolves above `workspace_root`
 - **THEN** the caller's integration site (e.g., `run_explorer`'s setup) MUST have rejected the path via `ensure_in_workspace` before construction; `ReasoningLogger` itself MAY rely on that precondition and perform no additional path check, but it MUST NOT silently create parent directories outside the workspace
 
+#### Scenario: Logger is the single source of truth for prompt version stamping
 
-<!-- @trace
-source: explorer-react-loop-p0
-updated: 2026-04-24
-code:
-  - sidecar/src/codebus_agent/agent/explorer.py
-  - sidecar/src/codebus_agent/agent/prompts/__init__.py
-  - sidecar/src/codebus_agent/agent/prompts/judge.py
-  - sidecar/src/codebus_agent/agent/__init__.py
-  - sidecar/src/codebus_agent/agent/reasoning_logger.py
-  - docs/agent-core.md
-  - sidecar/src/codebus_agent/agent/protocols.py
-  - sidecar/src/codebus_agent/agent/prompts/explorer.py
-  - sidecar/src/codebus_agent/agent/types.py
-  - CLAUDE.md
-  - sidecar/src/codebus_agent/agent/judge.py
-tests:
-  - sidecar/tests/agent/test_types.py
-  - sidecar/tests/agent/conftest.py
-  - sidecar/tests/agent/test_explorer_loop.py
-  - sidecar/tests/agent/test_reasoning_logger.py
-  - sidecar/tests/agent/test_protocols.py
-  - sidecar/tests/agent/test_judge.py
-  - sidecar/tests/agent/__init__.py
--->
+- **WHEN** any caller of `ReasoningLogger.write(step)` constructs a `Step` whose `explorer_prompt_version` / `judge_prompt_version` fields are set to caller-supplied values (including the current module-level constants)
+- **THEN** `ReasoningLogger.write` MUST overwrite those two fields via `model_copy(update={...})` with the LIVE module-level `EXPLORER_PROMPT_VERSION` / `JUDGE_PROMPT_VERSION` constants before writing, so the on-disk JSONL line carries the version values at write time regardless of caller-supplied values
+- **AND** callers (including `run_explorer`'s coverage-gap Step path) MUST NOT rely on pre-stamping the Step — the logger is the single source of truth for prompt-version stamping
+- **AND** the rationale is: any future prompt-version bump becomes a single-point edit (`prompts/explorer.py` / `prompts/judge.py` constants); double-stamping creates drift risk where the constant moves but a caller's stale literal value lands in the audit log
 
 ---
 ### Requirement: Explorer loop stops on budget exhaustion, empty queue, or cancel signal
