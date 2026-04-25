@@ -90,6 +90,7 @@ Markdown 互動 + Agent console（Demo 神器）+ 介入點。
 | # | 項目 | 工期 | 依賴 | 關聯 spec |
 |---|---|---|---|---|
 | 26 | `@nuxtjs/mdc` + Checkpoint.vue / Quiz.vue / QAEntry.vue 元件 | 2d | 24 | interactive-tutorial.md §三 |
+| 26.5 | **Auth flow（O-01 modal + `authorization_audit.jsonl` writer + 4 sidecar endpoints）** —— spec + code 同 change 落地，吃掉 `docs/authorization.md` 410 行設計，建立 `openspec/specs/authorization-audit/` capability。**Trust Layer Act 1 第一幕**，與 R-01 / O-04 / O-05 同列敘事核心 | 4d | 22, 26 | docs/authorization.md / openspec/specs/authorization-audit/（待 `auth-flow` change 建立）|
 | 27 | 站牌列表 + 內容區 + progress.json 讀寫 + 解鎖邏輯 | 2d | 26 | interactive-tutorial.md §六 |
 | 28 | **Agent console**（reasoning_log SSE stream）— Demo 神器 | 1.5d | 22 | sidecar-api.md §四 |
 | 28.5 | **LLM Calls 分頁**（list + detail modal + filter）— Demo 透明度武器 | 1d | 22, 28 | agent-core.md §十三.2 / D-022 |

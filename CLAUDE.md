@@ -99,14 +99,19 @@ M1「power-on」通電（2026-04-19 archive）後，資料層 + Module 4 Explore
 
 **三段 Sanitizer**（D-015）：Pass 1 Scanner 入 KB 前（`scanner-sanitizer-orchestration` 落地）→ Pass 2 Provider pre-flight 每次 LLM call 前（`sanitizer-safety-chain` 落地，由 `TrackedProvider` 注入 `SanitizerEngine` + `SanitizerAuditLogger`）→ Pass 3 Q&A `add_to_kb` 寫入前（待 Module 8 Q&A P0）。詳見 `docs/sanitizer.md §三`。
 
-**七層 Audit JSONL**（workspace-level 六層 + App-level 一層）：
-- `sanitize_audit.jsonl`（Sanitizer 命中；Pass 1 Scanner + Pass 2 Provider 都會寫，帶 `pass_num` 欄）
-- `tool_audit.jsonl`（Sandbox 工具呼叫；Module 4 Explorer 實作時開始填）
-- `kb_growth.jsonl`（Q&A `add_to_kb`；Module 8 實作時開始填）
-- `reasoning_log.jsonl`（ReAct 每 step；Module 4 實作時開始填）
-- `token_usage.jsonl`（D-021 + `usage-tracker-dedup`）：唯一寫入路徑是 `TrackedProvider`，`module` 欄由構造時的 `default_module` 寫入（目前值：`kb_build` / `kb_query` / `reasoning` / `judge` / `chat` / `coverage`）
-- `llm_calls.jsonl`（D-022）：完整 wire payload，`sanitizer_pass2_applied` M2 後真會翻 true
-- `~/.codebus/authorization_audit.jsonl`（跨 workspace，App-level，見 `docs/authorization.md §五`）
+**七層 Audit JSONL**（workspace-level 六層 + App-level 一層；implementation status 真實標注）：
+
+實作狀態：✅ 已實作 / ⏳ 待對應 Module 落地 / 📐 design-only（spec 在 docs/，capability spec + writer 待對應 change）
+
+- ✅ `sanitize_audit.jsonl`（Sanitizer 命中；Pass 1 Scanner + Pass 2 Provider 都會寫，帶 `pass_num` 欄；位於 `<ws>/.codebus/`）
+- ✅ `tool_audit.jsonl`（Sandbox 工具呼叫；Module 4 Explorer 實作時填入；位於 `<ws>/.codebus/`）
+- ⏳ `kb_growth.jsonl`（Q&A `add_to_kb`；待 Module 8 P0 落地，需先補 `kb_growth` capability spec + Pass 3 sanitizer hook，見 `docs/reviews/2026-04-25-stage-4.md` Module 8 預警）
+- ✅ `reasoning_log.jsonl`（ReAct 每 step；Module 4 實作時填入；位於 `<ws>/`）
+- ✅ `token_usage.jsonl`（D-021 + `usage-tracker-dedup`）：唯一寫入路徑是 `TrackedProvider`，`module` 欄由構造時的 `default_module` 寫入（目前值：`kb_build` / `kb_query` / `reasoning` / `judge` / `chat` / `coverage`）；位於 `<ws>/`
+- ✅ `llm_calls.jsonl`（D-022）：完整 wire payload，`sanitizer_pass2_applied` 在 sanitizer-safety-chain 後真會翻 true；位於 `<ws>/`
+- 📐 `~/.codebus/authorization_audit.jsonl`（跨 workspace，App-level）—— 完整設計在 `docs/authorization.md`（410 行 spec），`openspec/specs/authorization-audit/` capability + writer + 4 sidecar endpoints 待 Stage 6 步驟 26.5 `auth-flow` change 落地（見 `docs/implementation-plan.md`）
+
+**Audit 路徑不一致是已知 latent risk**（前 2 層在 `<ws>/.codebus/`、後 3 層在 `<ws>/` root）：對應前端 R-01 panel 設計時的決策點，已記錄在 `docs/reviews/2026-04-25-stage-4.md` Cat 2.5-B；建議統一到 `<ws>/.codebus/`，動工時間 TBD。
 
 ## 關鍵不變式（寫 spec / code 時必守）
 
