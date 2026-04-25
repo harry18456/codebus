@@ -1,0 +1,18 @@
+{
+  "task": "在 Timeline 專案新增 Google Drive Adapter 同步功能",
+  "must_have": [
+    "workspace/app/types/index.ts",
+    "workspace/app/services/MockStorageAdapter.ts",
+    "workspace/app/services/LocalFileAdapter.ts",
+    "workspace/app/composables/useStorage.ts",
+    "workspace/app/stores/timeline.ts"
+  ],
+  "nice_to_have": [
+    "workspace/app/stores/node.ts",
+    "workspace/app/stores/settings.ts"
+  ],
+  "noise_paths": [
+    "workspace/app/components/EventCard.vue",
+    "workspace/README.md"
+  ]
+}

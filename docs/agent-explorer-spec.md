@@ -312,15 +312,19 @@ Queue 前 5 個目標：{queue_top5}
 
 為了避免「反覆調 prompt」流於感覺，MVP 就要有：
 
-1. **Golden samples**：選 2 個熟悉的 repo + 3 個任務，人工寫「理想路線」
-2. **自動評分指標**：
-   - 核心檔案召回率（ideal 裡的檔案有幾成被 mark_station）
-   - 雜訊率（mark_station 的檔案有幾成在 ideal 外）
-   - 依賴完整度（findings 的 depends_on 是否構成 DAG 且接近 ideal）
+1. **Golden samples**：選 2 個熟悉的 repo + 3 個任務，人工寫「理想路線」（Phase A 落地：`tests/golden/demo-synthetic/`、`tests/golden/timeline-storage-adapter-synthetic/`，待打磨期擴第二份語言 fixture）
+2. **自動評分指標**（landed at `sidecar/tests/golden/scoring.py`，可重複用於未來 Explorer / Q&A / Generator fixture）：
+   - 核心檔案召回率 — `station_recall(produced, must_have)`：`len(p & m) / len(m)`，空 must_have raise `ValueError`
+   - 雜訊率 — `station_noise(produced, must_have, nice_to_have)`：`len(extras - nice_to_have) / len(extras)`，空 extras 回 `0.0`（合法 clean output）
+   - 加權合分 — `composite_score(recall, noise, depth, weights=None)`：D-006 公式 `0.5 * recall + 0.3 * (1 - noise) + 0.2 * depth`，default weights 寫死可注入 override（缺 key 必 raise `KeyError`）
+   - 依賴完整度 `depth` —— P0 暫回 `1.0` placeholder，等 Module 5 Generator 把 station `depends_on` 從教材 MOC 圖反向填回後再開新 change 實作 dep-chain 解析
+   - `IdealRoute` Pydantic schema：四欄 `task` / `must_have` / `nice_to_have` / `noise_paths`，`tests/golden/<fixture>/ideal-route.json` 為機器讀的真相
 3. **人工評分 rubric**（1-5 分）：
    - 路線順序合理性
    - 站牌粒度適中
    - 新人能看懂
+
+**Live LLM snapshot replay** 待打磨期（D-006 後續清單 `[ ] 真 LLM snapshot`）；目前 `sidecar/tests/golden/test_timeline_synthetic_replay.py` 與 `test_explorer_replay.py` 走 scripted MockProvider，介面 LLM-agnostic — 換 `OpenAIChatProvider` 一行替換即可接真 LLM。
 
 ---
 

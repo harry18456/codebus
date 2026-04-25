@@ -72,7 +72,7 @@ Module 1 → Module 2，讓 Explorer 有東西吃。
 | 20 | ✅ landed（`coverage-gap-recurse`）：`LLMCoverageChecker` + 遞迴（`_COVERAGE_MAX_DEPTH=3`、`_enqueue_gap_investigation` 雙推、`coverage_gaps` SSE event、HTTP 層 `llm_coverage_provider` factory） | 1d | 18, 19 | agent-core.md §七 / §九 |
 | 21 | ✅ landed（`context-compression-token-budget`）：`_MESSAGE_ROLLING_WINDOW=16` + `TokenBudgetProbe` / `AggregatedTokenProbe` + `_should_stop` 四分支（cancel > tokens > steps > queue）+ `budget_warning` SSE event（per-kind once）+ HTTP 層聚合三 provider `session_total_tokens` | 1d | 16 | agent-core.md §十 / §十一 |
 | 22 | SSE emit（agent_thought / judge_verdict / action_result） | 1d | 18 | sidecar-api.md §四 |
-| 23 | Golden sample 首跑（Timeline ideal-route 對比） | 1d | 17-22 | D-006 / tests/golden/... |
+| 23 | ✅ landed P0（`golden-sample-baseline`，2026-04-25）：scoring helpers (`station_recall` / `station_noise` / `composite_score` / `IdealRoute`) 在 `sidecar/tests/golden/scoring.py` 落地、`tests/golden/timeline-storage-adapter-synthetic/` 9 檔對齊 ideal-route.md 拓撲、`test_timeline_synthetic_replay.py` 全 stack scripted replay 鎖 recall=1.0 / noise=0.0 / composite ≥ 0.9 + coverage_gaps + budget_warning(steps@4/5) + usage_delta.session_total_tokens；live LLM snapshot 留待後續 change（D-006 `[ ] 打磨期`） | 1d | 17-22 | D-006 / tests/golden/... |
 
 ### 第五階段：教材與 Q&A（~5d）
 
