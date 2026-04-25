@@ -80,7 +80,7 @@ Explorer 的產出變成 tutorial.md，Q&A 讓 KB 活起來。
 
 | # | 項目 | 工期 | 依賴 | 關聯 spec |
 |---|---|---|---|---|
-| 24 | **Module 5 P0**：per-station prompt + validator + degraded fallback + tutorial.md/route.json 輸出 | 2.5d | 23 | module-5-generator.md §十四 P0 |
+| 24 | ✅ landed P0（`module-5-generator-p0`，2026-04-25 archive）：per-station prompt + validator + degraded fallback + `tutorial.md`/`route.json`/per-station markdown 多檔輸出。Decision 1（Generator output 過 Pass 1 Sanitizer，YES）/ Decision 2（`Station.depends_on` backfill 留 follow-up，`route.json` `prerequisites=[]` P0 hardcode）/ Decision 3（root 為 `<ws>/codebus-tutorials/{task_id}/` 而非 generic `tutorials/`）/ Decision 4（per-station retry quota=3 + degraded stub 隔離 + disk write 失敗不重試）。落地：`codebus_agent.generator` 套件 9 module（`runner` / `station` / `validator` / `stable_id` / `frontmatter` / `moc` / `route` / `log` / `prompts/`）+ 11 條 `module-5-generator` capability Requirement + 2 條 `sidecar-runtime` MODIFIED（task_id format 擴 `^(scan\|kb\|explore\|generate)_[0-9a-f]{8}$`、Background task error containment 加 `GENERATE_FAILED`）+ `POST /generate` endpoint + `app.state.llm_generate_provider` factory（`role=CHAT` `default_module="generate"` `temperature=0.4`）+ 第六 workspace audit filename `_GENERATOR_LOG_FILENAME`（落 `<ws>/.codebus/`）。49 generator unit/integration + 4 endpoint test = 53 新測；全 suite 751 passed / 19 skipped | 2.5d | 23 | module-5-generator.md §十四 P0 / openspec/specs/module-5-generator |
 | 25 | **Module 8 Q&A P0**：`kb_search` + RAG loop + **`add_to_kb`（Sanitizer Pass 3）** + `kb_growth.jsonl` | 2.5d | 14, 17, 18 | qa-agent.md §十一 P0 |
 
 ### 第六階段：前端（~8d）

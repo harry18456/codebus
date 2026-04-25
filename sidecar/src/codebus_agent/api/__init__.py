@@ -42,6 +42,7 @@ from fastapi import FastAPI
 
 from codebus_agent import auth
 from codebus_agent.api.explore import router as explore_router
+from codebus_agent.api.generate import router as generate_router
 from codebus_agent.api.kb import router as kb_router
 from codebus_agent.api.scan import router as scan_router
 from codebus_agent.api.tasks import TaskRegistry, router as tasks_router
@@ -160,6 +161,17 @@ def wire_kb_dependencies(
             default_module="coverage",
             role=ProviderRole.JUDGE,
         )
+        # `module-5-generator-p0`: Generator rides the CHAT role with
+        # slightly higher temperature (prose generation) but tags cost
+        # records `module="generate"` so `token_usage.jsonl` lines from
+        # ``POST /generate`` are aggregable / billable as Generator
+        # work, distinct from the standalone chat lane.
+        app.state.llm_generate_provider = _make_chat_provider_factory(
+            model="gpt-4o-mini",
+            temperature=0.4,
+            default_module="generate",
+            role=ProviderRole.CHAT,
+        )
     else:
         app.state.kb_provider = None
         app.state.kb_query_provider = None
@@ -169,6 +181,7 @@ def wire_kb_dependencies(
         app.state.llm_judge_provider = None
         app.state.llm_chat_provider = None
         app.state.llm_coverage_provider = None
+        app.state.llm_generate_provider = None
 
 
 def _make_tracker_factory() -> Callable[[Path], UsageTracker]:
@@ -469,6 +482,11 @@ def create_app(
     # task and pipes agent_thought / action_result / judge_verdict / usage_delta
     # / llm_call / progress events to `/tasks/{id}/events` via SSEEmitter.
     app.include_router(explore_router)
+    # Module 5 Generator — `POST /generate` spawns ``run_generator`` as a
+    # background task and pipes per-station `progress` / `usage_delta` /
+    # `llm_call` events to `/tasks/{id}/events` via the same emitter
+    # contract.
+    app.include_router(generate_router)
 
     return app
 

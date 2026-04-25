@@ -34,7 +34,7 @@ from sse_starlette.sse import EventSourceResponse
 
 logger = logging.getLogger(__name__)
 
-TaskKind = Literal["scan", "kb", "explore"]
+TaskKind = Literal["scan", "kb", "explore", "generate"]
 TaskStatus = Literal["running", "done", "error"]
 
 # Closed values per design `error event 安全性`. The endpoint MUST pick from
@@ -43,6 +43,8 @@ TaskStatus = Literal["running", "done", "error"]
 # KB_DIM_MISMATCH for production KB build paths (D-032 decisions 4 & 5).
 # `chat-provider-wiring` adds OPENAI_CONTEXT_EXCEEDED for oversized prompts
 # on the chat-ish roles (reasoning / judge / chat).
+# `agent-sse-wiring` adds EXPLORE_FAILED for /explore failures and
+# `module-5-generator-p0` adds GENERATE_FAILED for /generate failures.
 ERROR_CODES: frozenset[str] = frozenset(
     {
         "SCAN_FAILED",
@@ -52,10 +54,12 @@ ERROR_CODES: frozenset[str] = frozenset(
         "OPENAI_RATE_LIMITED",
         "OPENAI_CONTEXT_EXCEEDED",
         "KB_DIM_MISMATCH",
+        "EXPLORE_FAILED",
+        "GENERATE_FAILED",
     }
 )
 
-_VALID_KINDS: frozenset[str] = frozenset({"scan", "kb", "explore"})
+_VALID_KINDS: frozenset[str] = frozenset({"scan", "kb", "explore", "generate"})
 
 # Sentinel pushed into subscriber queues to signal "stream closed". Picked as
 # a private string so callers never collide with a real event payload.
@@ -244,6 +248,10 @@ def _safe_error_message(code: str) -> str:
         return "LLM context window exceeded for the chosen model"
     if code == "KB_DIM_MISMATCH":
         return "knowledge-base collection vector dimension mismatch"
+    if code == "EXPLORE_FAILED":
+        return "explore task failed"
+    if code == "GENERATE_FAILED":
+        return "tutorial generation failed"
     return "internal sidecar error"
 
 
