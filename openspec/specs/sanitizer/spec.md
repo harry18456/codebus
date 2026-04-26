@@ -557,3 +557,75 @@ tests:
   - sidecar/tests/providers/test_registry.py
   - sidecar/tests/sanitizer/test_engine.py
 -->
+
+---
+### Requirement: Pass 3 add_to_kb sanitize emits structured audit entry
+
+The Q&A `add_to_kb` write path SHALL invoke `SanitizerEngine.sanitize(text, source=FileSource(path=chunk.source, pass_="qa_add_to_kb"))` for every chunk before any KB upsert or `kb_growth.jsonl` write, per `docs/decisions.md` D-015 and `docs/qa-agent.md §三`. Each `AuditEntry` produced MUST be appended to the workspace-scoped `SanitizerAuditLogger` with `pass_num=3`, completing the three-pass audit chain (Pass 1 = scanner ingestion, Pass 2 = TrackedProvider pre-flight, Pass 3 = Q&A add_to_kb).
+
+`pass_num` is the runtime label written into `<workspace>/.codebus/sanitize_audit.jsonl`; it MUST appear on every line and is the discriminator that downstream consumers (Trust Layer R-01 / O-05 panels, audit replay) use to attribute redactions to a sanitize stage. The `source` field on Pass 3 audit lines MUST be the structured form `{"pass": "qa_add_to_kb", "path": "<chunk.source>"}` matching the existing structured shape used by Pass 1 scanner (`{"pass": "scanner", "path": ...}`).
+
+The `SanitizeSource` discriminated union (`FileSource | MessageSource`) SHALL NOT be extended for Pass 3; the existing `FileSource.pass_` string field is the explicit extension point already promised by the foundational `Sanitizer SHALL provide a stateless engine` Requirement (which states the same class is "reusable by Pass 3 without signature change"). Adding a third union variant is forbidden by this Requirement so the audit schema remains stable across Pass 1 / Pass 3 ingestion sites.
+
+#### Scenario: add_to_kb chunk with secret hits writes pass_num=3 audit line
+
+- **WHEN** Q&A `add_to_kb` is invoked with a chunk containing a string matched by the built-in secret rule set
+- **THEN** the appended `<workspace>/.codebus/sanitize_audit.jsonl` line MUST contain `"pass_num": 3`
+- **AND** the line's `source` field MUST be the JSON object `{"pass": "qa_add_to_kb", "path": "<chunk.source>"}`
+- **AND** the placeholder index MUST start at `1` for that sanitize call (Pass 3 calls share the same per-call index reset semantics as Pass 1 / Pass 2)
+
+#### Scenario: SanitizeSource union not extended
+
+- **WHEN** the codebase is inspected for `SanitizeSource = ` assignments in `codebus_agent.sanitizer`
+- **THEN** the right-hand side MUST remain exactly `FileSource | MessageSource` — Pass 3 MUST NOT introduce a new variant such as `Pass3Source` or `QASource`
+
+#### Scenario: Empty post-sanitize chunk still records hit lines
+
+- **WHEN** `add_to_kb` sanitizes a chunk whose entire text gets replaced (post-sanitize text strips to empty)
+- **THEN** every triggered redaction MUST still produce a `pass_num=3` line in `sanitize_audit.jsonl`
+- **AND** the call MUST proceed to skip the KB upsert and `kb_growth.jsonl` write per the Q&A capability's empty-chunk handling — but the sanitize audit lines MUST NOT be retroactively suppressed
+
+<!-- @trace
+source: module-8-qa-p0
+updated: 2026-04-26
+code:
+  - docs/implementation-plan.md
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/agent/types.py
+  - docs/sidecar-api.md
+  - docs/decisions.md
+  - sidecar/src/codebus_agent/agent/qa.py
+  - sidecar/src/codebus_agent/agent/prompts/__init__.py
+  - sidecar/src/codebus_agent/api/_audit_paths.py
+  - sidecar/src/codebus_agent/api/__init__.py
+  - sidecar/src/codebus_agent/agent/reasoning_logger.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - sidecar/src/codebus_agent/_audit_paths.py
+  - sidecar/src/codebus_agent/api/tasks.py
+  - sidecar/src/codebus_agent/agent/tools/qa_tools.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/__init__.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/prompts/qa.py
+tests:
+  - sidecar/tests/agent/tools/test_kb_search.py
+  - sidecar/tests/kb/test_upsert_chunk.py
+  - sidecar/tests/api/test_qa_sse_events.py
+  - sidecar/tests/agent/test_qa_types.py
+  - sidecar/tests/api/test_task_id_qa_kind.py
+  - sidecar/tests/agent/tools/test_qa_tools.py
+  - sidecar/tests/integration/__init__.py
+  - sidecar/tests/kb/test_query_filter_stations.py
+  - sidecar/tests/agent/test_qa_prompts.py
+  - sidecar/tests/agent/test_hits_confident.py
+  - sidecar/tests/agent/test_run_qa.py
+  - sidecar/tests/api/test_audit_paths_kb_growth.py
+  - sidecar/tests/kb/test_growth_logger.py
+  - sidecar/tests/api/test_qa_endpoint.py
+  - sidecar/tests/integration/test_qa_end_to_end.py
+  - sidecar/tests/agent/test_qa_budget_constants.py
+  - sidecar/tests/agent/tools/test_add_to_kb.py
+  - sidecar/tests/sanitizer/test_pass3_add_to_kb_audit.py
+-->

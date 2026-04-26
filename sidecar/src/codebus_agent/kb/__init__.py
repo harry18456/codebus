@@ -8,6 +8,7 @@ surface (``KnowledgeBase`` + payload models + chunker) per
 openspec/changes/module-2-kb-builder-p0.
 """
 from codebus_agent.kb.backend import KBQdrantBackend, QdrantHttpBackend
+from codebus_agent.kb.growth_logger import KBGrowthLogger
 from codebus_agent.kb.knowledge_base import KnowledgeBase
 from codebus_agent.kb.payload import (
     ChunkDraft,
@@ -22,6 +23,7 @@ from codebus_agent.kb.payload import (
 
 __all__ = [
     "ChunkDraft",
+    "KBGrowthLogger",
     "KBHit",
     "KBPayload",
     "KBProgressEvent",

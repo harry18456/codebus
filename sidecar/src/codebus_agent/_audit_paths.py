@@ -21,6 +21,7 @@ from __future__ import annotations
 
 __all__ = [
     "_GENERATOR_LOG_FILENAME",
+    "_KB_GROWTH_FILENAME",
     "_LLM_CALLS_FILENAME",
     "_REASONING_LOG_FILENAME",
     "_SANITIZE_AUDIT_FILENAME",
@@ -32,7 +33,7 @@ __all__ = [
 
 _WORKSPACE_AUDIT_SUBDIR = ".codebus"
 
-# Six workspace-level operational / audit JSONL filenames. All resolve
+# Workspace-level operational / audit JSONL filenames. All resolve
 # under `<workspace_root>/.codebus/`. App-level `authorization_audit.jsonl`
 # (under `~/.codebus/`) lives in a future capability and is intentionally
 # NOT listed here.
@@ -40,9 +41,12 @@ _WORKSPACE_AUDIT_SUBDIR = ".codebus"
 # `generator_log.jsonl` is per-Module operational log (parallel to
 # `reasoning_log.jsonl`), not part of the seven-layer audit chain — see
 # `module-5-generator-p0` design risks.
+# `kb_growth.jsonl` is the seventh workspace audit layer — landed with
+# `module-8-qa-p0` (Q&A `add_to_kb` write path).
 _SANITIZE_AUDIT_FILENAME = "sanitize_audit.jsonl"
 _TOOL_AUDIT_FILENAME = "tool_audit.jsonl"
 _TOKEN_USAGE_FILENAME = "token_usage.jsonl"
 _LLM_CALLS_FILENAME = "llm_calls.jsonl"
 _REASONING_LOG_FILENAME = "reasoning_log.jsonl"
 _GENERATOR_LOG_FILENAME = "generator_log.jsonl"
+_KB_GROWTH_FILENAME = "kb_growth.jsonl"

@@ -1,4 +1,4 @@
-"""KnowledgeBase build pipeline + query / find_similar surface.
+"""KnowledgeBase build pipeline + query / find_similar / upsert_chunk surface.
 
 Backs SHALL clauses in
 openspec/changes/module-2-kb-builder-p0/specs/knowledge-base/spec.md
@@ -8,11 +8,16 @@ openspec/changes/module-2-kb-builder-p0/specs/knowledge-base/spec.md
   Requirement: Embedding batch pipeline with UsageTracker wiring
   Requirement: Progress callback protocol
   Requirement: KBStats returned by build
+
+openspec/changes/module-8-qa-p0/specs/knowledge-base/spec.md
+  Requirement: KnowledgeBase query and find_similar API (MODIFIED — filter_stations)
+  Requirement: KnowledgeBase exposes upsert_chunk for Q&A add_to_kb path (ADDED)
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -38,6 +43,29 @@ from codebus_agent.scanner.models import FileEntry, ScanResult
 _BATCH_SIZE = 32
 _INFLIGHT_LIMIT = 3
 _TOKEN_ENCODING = "cl100k_base"
+
+# Stable station id regex shared with `KBPayload.related_stations` validation
+# and `kb_growth_logger`. Pre-validated in `query` / `upsert_chunk` so an
+# invalid id never reaches Qdrant or burns an embedding API call.
+_STATION_ID_RE = re.compile(r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$")
+_QA_DEDUP_THRESHOLD: float = 0.95
+
+
+def _validate_station_filter(filter_stations: list[str] | None) -> list[str] | None:
+    """Pre-validate `filter_stations`; empty list normalised to None.
+
+    Spec scenario `Empty filter_stations equivalent to None` requires
+    callers to be able to pass `[]` without conditional branching.
+    """
+    if filter_stations is None or not filter_stations:
+        return None
+    for sid in filter_stations:
+        if not isinstance(sid, str) or not _STATION_ID_RE.fullmatch(sid):
+            raise ValueError(
+                f"filter_stations entry {sid!r} must match "
+                r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$"
+            )
+    return list(filter_stations)
 
 
 def _provider_max_input_tokens(provider: LLMProvider) -> int | None:
@@ -399,7 +427,13 @@ class KnowledgeBase:
         top_k: int = 8,
         filter_path: str | None = None,
         filter_source_kind: list[str] | None = None,
+        filter_stations: list[str] | None = None,
     ) -> list[KBHit]:
+        # Pre-validate station-filter regex BEFORE embedding so an invalid
+        # id never burns an OpenAI API call (spec scenario `Invalid
+        # station id raises before query`).
+        normalized_stations = _validate_station_filter(filter_stations)
+
         await self._ensure_ready()
         response = await self._provider.embed([text])
         vector = response.vectors[0]
@@ -409,6 +443,12 @@ class KnowledgeBase:
             query_filter["file_path"] = filter_path
         if filter_source_kind:
             query_filter["source_kind"] = list(filter_source_kind)
+        if normalized_stations is not None:
+            # OR semantics across the supplied station ids — the in-memory
+            # backend treats list values as `should` membership; the live
+            # Qdrant backend is wired through `qdrant_client.search_points`
+            # which translates list filter values to `MatchAny` clauses.
+            query_filter["related_stations"] = normalized_stations
 
         return await self._backend.search_points(
             self.collection_name,
@@ -431,5 +471,53 @@ class KnowledgeBase:
             return None
         return top
 
+    # -- Q&A add_to_kb path -------------------------------------------------
 
-__all__ = ["KnowledgeBase", "_derive_workspace_id"]
+    async def upsert_chunk(self, text: str, *, payload: KBPayload) -> str:
+        """Embed-and-upsert a Q&A `add_to_kb` chunk with two-layer dedup.
+
+        Returns either:
+          * the new Qdrant `point_id` (string) when the chunk is novel
+          * the literal `"dedup:hash"` when Layer 1 hash dedup short-circuits
+            before any embedding call
+          * the literal `"dedup:sim"` when Layer 2 similarity dedup matches
+            an existing point at score ≥ `_QA_DEDUP_THRESHOLD`
+
+        Per Decision 4 (`module-8-qa-p0` design): the dedup token format
+        is closed (`{"dedup:hash", "dedup:sim"}`) so callers (notably
+        `add_to_kb`) can rely on the `dedup:` prefix to discriminate
+        without parsing further.
+        """
+        await self._ensure_ready()
+
+        # Layer 1: hash dedup short-circuits BEFORE embed so we never
+        # consume an embed token for an exact-text duplicate.
+        if await self._backend.exists_by_hash(
+            self.collection_name, payload.text_hash
+        ):
+            return "dedup:hash"
+
+        # Embed once — used for Layer 2 similarity dedup AND, on miss, for
+        # the upsert vector. The bound provider is workspace-scoped so the
+        # `default_module` tag in `token_usage.jsonl` (e.g. `"qa_agent"`)
+        # is already correct for the surrounding query path.
+        response = await self._provider.embed([text])
+        vector = response.vectors[0]
+
+        # Layer 2: similarity dedup using the freshly-embedded vector.
+        # `find_similar` re-embeds via `query(text, top_k=1)` — slightly
+        # redundant but keeps the dedup path deterministic and isolated
+        # from cached vectors.
+        similar = await self.find_similar(text, threshold=_QA_DEDUP_THRESHOLD)
+        if similar is not None:
+            return "dedup:sim"
+
+        # Both dedup layers missed — persist the chunk as a single Qdrant
+        # point and return its id.
+        point_id = str(uuid.uuid4())
+        point = {"id": point_id, "vector": vector, "payload": payload}
+        await self._backend.upsert_points(self.collection_name, [point])
+        return point_id
+
+
+__all__ = ["KnowledgeBase", "_QA_DEDUP_THRESHOLD", "_derive_workspace_id"]

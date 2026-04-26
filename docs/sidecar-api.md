@@ -278,23 +278,29 @@ Explorer Agent 探索（Module 4）。async，落地於 change `agent-sse-wiring
 ---
 
 ### `POST /qa`
-Q&A Agent 會話（Module 8，D-016）。async。
+Q&A Agent 會話（Module 8，D-016；`module-8-qa-p0` 2026-04-26 落地）。async；走 single-slot `TaskRegistry`（409 `TASK_IN_FLIGHT` 同 `/explore` / `/generate`）。
 
 **Request**
 ```json
 {
-  "workspace_id": "timeline-gdrive",
+  "workspace_root": "/abs/path/to/workspace",
   "question": "PaymentService 怎麼處理退款？",
-  "session_id": "qa_sess_abc"
+  "originating_station_id": "s02-payment"
 }
 ```
 
-**Response**
+驗證：`question` ≤ 4000 chars 非空（strip 後）；`originating_station_id` 給定時必符合 `^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$`；任何違規回 422。
+
+**Dependency check**：`kb_provider` / `kb_query_provider` / `kb_growth_logger_factory` / `llm_chat_provider` / `llm_judge_provider` 任一缺即 503 `QA_NOT_CONFIGURED`，`detail` 列出缺哪些 slot。
+
+**Response（202）**
 ```json
-{ "task_id": "qa_task_xyz" }
+{ "task_id": "qa_a1b2c3d4" }
 ```
 
-答案與 KB growth 事件走 SSE（見四）。
+`task_id` 過 `^qa_[0-9a-f]{8}$`。錯誤碼表：`QA_FAILED`（loop 例外）/ `QA_NOT_CONFIGURED`（503）/ `TASK_IN_FLIGHT`（409）/ `QA_WORKSPACE_INVALID`（400）。
+
+**SSE 事件序列**（見 §四）：`rag_hits`（一次，初始 KB 探查後）→ confident path：直接 `qa_answer` 收尾；non-confident path：`agent_thought` / `agent_action_result` 多輪 → `kb_growth`（每筆 add_to_kb 新點，dedup 不 emit）→ `qa_answer`（一次）→ `done`。`usage_delta` / `llm_call` 由 TrackedProvider 自動 emit，`module="qa_agent"`。
 
 ---
 

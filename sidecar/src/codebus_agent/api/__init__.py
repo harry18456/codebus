@@ -44,6 +44,7 @@ from codebus_agent import auth
 from codebus_agent.api.explore import router as explore_router
 from codebus_agent.api.generate import router as generate_router
 from codebus_agent.api.kb import router as kb_router
+from codebus_agent.api.qa import router as qa_router
 from codebus_agent.api.scan import router as scan_router
 from codebus_agent.api.tasks import TaskRegistry, router as tasks_router
 from codebus_agent.health import DependencyCheck, DependencyStatus, collect
@@ -69,11 +70,13 @@ logger = logging.getLogger(__name__)
 # module so both this factory wiring and `api/explore.py` (caller of
 # ReasoningLogger) can import without circular dependency.
 from codebus_agent.api._audit_paths import (
+    _KB_GROWTH_FILENAME,
     _LLM_CALLS_FILENAME,
     _SANITIZE_AUDIT_FILENAME,
     _TOKEN_USAGE_FILENAME,
     _WORKSPACE_AUDIT_SUBDIR,
 )
+from codebus_agent.kb.growth_logger import KBGrowthLogger
 
 from codebus_agent.sanitizer import RULES_VERSION as _RULES_VERSION
 
@@ -169,6 +172,20 @@ def wire_kb_dependencies(
             default_module="generate",
             role=ProviderRole.CHAT,
         )
+        # `module-8-qa-p0`: Q&A rides the CHAT role for synthesis +
+        # ReAct thinking; `default_module="qa_agent"` splits cost in
+        # `token_usage.jsonl` from generate / chat lanes.
+        app.state.llm_qa_provider = _make_chat_provider_factory(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            default_module="qa_agent",
+            role=ProviderRole.CHAT,
+        )
+        # Workspace-scoped factory for the Q&A `kb_growth.jsonl` writer.
+        # Mirrors `_make_tracker_factory` (workspace-scoped, fresh per
+        # call so cross-workspace state cannot leak). Path resolves
+        # under the audit subdir constant for single-source-of-truth.
+        app.state.kb_growth_logger_factory = _make_kb_growth_logger_factory()
     else:
         app.state.kb_provider = None
         app.state.kb_query_provider = None
@@ -179,6 +196,8 @@ def wire_kb_dependencies(
         app.state.llm_chat_provider = None
         app.state.llm_coverage_provider = None
         app.state.llm_generate_provider = None
+        app.state.llm_qa_provider = None
+        app.state.kb_growth_logger_factory = None
 
 
 def _make_tracker_factory() -> Callable[[Path], UsageTracker]:
@@ -187,6 +206,23 @@ def _make_tracker_factory() -> Callable[[Path], UsageTracker]:
     def _factory(workspace_root: Path) -> UsageTracker:
         return UsageTracker(
             Path(workspace_root) / _WORKSPACE_AUDIT_SUBDIR / _TOKEN_USAGE_FILENAME
+        )
+
+    return _factory
+
+
+def _make_kb_growth_logger_factory() -> Callable[[Path], KBGrowthLogger]:
+    """Factory for workspace-scoped `KBGrowthLogger` (Module 8 Q&A path).
+
+    Returns a fresh `KBGrowthLogger` per call so cross-workspace state
+    can never leak across instances. Path resolves under the audit
+    subdir constant `<ws>/.codebus/kb_growth.jsonl` so the workspace
+    audit chain stays consistent with the other six layers.
+    """
+
+    def _factory(workspace_root: Path) -> KBGrowthLogger:
+        return KBGrowthLogger(
+            Path(workspace_root) / _WORKSPACE_AUDIT_SUBDIR / _KB_GROWTH_FILENAME
         )
 
     return _factory
@@ -484,6 +520,10 @@ def create_app(
     # `llm_call` events to `/tasks/{id}/events` via the same emitter
     # contract.
     app.include_router(generate_router)
+    # Module 8 Q&A — `POST /qa` spawns ``run_qa`` as a background task
+    # and pipes `rag_hits` / `agent_thought` / `kb_growth` / `qa_answer`
+    # events to `/tasks/{id}/events` via the same emitter contract.
+    app.include_router(qa_router)
 
     return app
 

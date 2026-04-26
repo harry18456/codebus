@@ -412,6 +412,7 @@ D-011 定了「要做 sanitizer」沒定「怎麼做」。AI 層所有 LLM call 
 **後續**
 - [x] `docs/qa-agent.md` 寫成（2026-04-17）
 - [x] 連動更新：sanitizer.md / agent-core.md / sidecar-api.md / interactive-tutorial.md / README（詳見 `qa-agent.md §十二`）
+- [x] Module 8 Q&A P0 落地（`module-8-qa-p0`，2026-04-26 apply）：`run_qa` RAG-first 兩階段 + `KBGrowthLogger` 第七層 audit + `KnowledgeBase.upsert_chunk` 雙層 dedup + `POST /qa` endpoint + `qa_agent` 拆帳
 - [ ] 實作按 qa-agent.md §十一 工期排（P0 約 3.5d / P0+P1 約 5d）
 - [ ] KB growth 防呆閾值（見 §七）實作時確認
 
@@ -675,6 +676,7 @@ Module 1（資料夾掃描）只寫「過濾垃圾檔案」，實際坑很多。
 - [x] `security.md §二`：四層 JSONL → 五層 JSONL（加 `token_usage.jsonl`）
 - [x] `implementation-plan.md`：第一階段插入步驟 8.5「UsageTracker 骨架」
 - [x] chat `cost_usd` 走 pricing table（`review-backlog-cleanup`，2026-04-25）：`providers/pricing.py::estimate_chat_cost_usd` + `_CHAT_PRICING` 表（`gpt-4o-mini-chat-v1`: 0.15 / 0.60 USD per 1M token、`mock-chat-v1`: 0.0 / 0.0 placeholder）；`tracked.py::chat()` 兩處 `0.0` 改成 `cost_usd_for_chat = estimate_chat_cost_usd(...)` 算一次餵 `token_usage.jsonl` + `usage_delta`，未知 model 走 0.0 + WARNING log，zero-token 不噴 warning
+- [x] qa_agent module 拆帳（`module-8-qa-p0`，2026-04-26）：`app.state.llm_qa_provider` factory 帶 `default_module="qa_agent"`，每筆 Q&A run 的 `token_usage.jsonl` line 都打 `module="qa_agent"` 讓 cost 拆帳區分 chat / generate / coverage / qa_agent 四個 chat-ish lane
 - [ ] D-007 連動：benchmark 直接讀 `token_usage.jsonl`（實作期補）
 
 ---

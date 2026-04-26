@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from codebus_agent._audit_paths import (
     _GENERATOR_LOG_FILENAME,
+    _KB_GROWTH_FILENAME,
     _LLM_CALLS_FILENAME,
     _REASONING_LOG_FILENAME,
     _SANITIZE_AUDIT_FILENAME,
@@ -28,6 +29,7 @@ from codebus_agent._audit_paths import (
 
 __all__ = [
     "_GENERATOR_LOG_FILENAME",
+    "_KB_GROWTH_FILENAME",
     "_LLM_CALLS_FILENAME",
     "_REASONING_LOG_FILENAME",
     "_SANITIZE_AUDIT_FILENAME",

@@ -28,7 +28,11 @@ __all__ = [
     "ExplorerState",
     "Gap",
     "JudgeVerdict",
+    "KBCitation",
     "Message",
+    "QAAction",
+    "QAAnswer",
+    "QAState",
     "Station",
     "Step",
     "ToolCall",
@@ -150,6 +154,12 @@ class Step(BaseModel):
     etc.) so golden-sample replays can pin prompt revisions — per spec
     Requirement `ReasoningLogger appends one JSONL line per Step to
     workspace path`.
+
+    `qa_prompt_version` is the Q&A counterpart added by `module-8-qa-p0`;
+    it is mutually exclusive with explorer / judge prompt versions —
+    `ReasoningLogger` in `qa` mode strips the explorer/judge fields
+    from the serialized line so the Q&A audit trail remains clearly
+    attributed to the Q&A prompt revision in play.
     """
 
     step: int
@@ -161,3 +171,71 @@ class Step(BaseModel):
     tokens_used: int = 0
     explorer_prompt_version: str = ""
     judge_prompt_version: str = ""
+    qa_prompt_version: str = ""
+
+
+class KBCitation(BaseModel):
+    """Per-citation reference attached to a `QAAnswer`.
+
+    Mirrors the SSE `qa_answer` event payload schema so the citation
+    list can flow from `QAAnswer.citations` straight to the wire
+    without per-field translation.
+    """
+
+    file_path: str
+    line_start: int = Field(ge=0)
+    line_end: int = Field(ge=0)
+    related_stations: list[str] = Field(default_factory=list)
+
+
+class QAAction(BaseModel):
+    """Q&A Think-step output — Instructor `response_model` for `provider.chat`.
+
+    Mirrors `ExplorerAction` shape (`thought`, `tool_calls`) so the
+    same `_think`-style call seam can validate both Explorer and Q&A
+    LLM responses without per-call branching.
+    """
+
+    thought: str
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+
+
+class QAAnswer(BaseModel):
+    """Terminal Q&A output — final synthesized answer + citations.
+
+    Returned by `run_qa(...)` as the run's only success-path payload.
+    The shape is also the wire schema for the `qa_answer` SSE event.
+    """
+
+    answer: str
+    citations: list[KBCitation] = Field(default_factory=list)
+
+
+class QAState(BaseModel):
+    """Q&A session state — mirrors `ExplorerState` for `_should_stop` reuse.
+
+    The minimum fields specified by the qa-agent capability spec are
+    `question`, `originating_station_id`, `session_id`, `messages`,
+    `step_count`, `add_to_kb_session_count`, `add_to_kb_question_count`.
+    Additional ExplorerState-compatible fields (`budget_steps_left` /
+    `budget_tokens_left` / `pending_queue` / `stations` / `visited_files`)
+    carry defaults so the existing Explorer `_should_stop` helper can
+    operate against `QAState` instances without per-state branching.
+    The unused list / set fields stay empty during a Q&A run because
+    Q&A has no station / coverage concept — they're present purely as
+    structural compatibility seams.
+    """
+
+    question: str
+    originating_station_id: str | None = None
+    session_id: str
+    messages: list[Message] = Field(default_factory=list)
+    step_count: int = 0
+    add_to_kb_session_count: int = 0
+    add_to_kb_question_count: int = 0
+    # Compatibility fields for explorer._should_stop reuse.
+    budget_steps_left: int = 10
+    budget_tokens_left: int = 0
+    pending_queue: list[str] = Field(default_factory=list)
+    stations: list[Station] = Field(default_factory=list)
+    visited_files: set[str] = Field(default_factory=set)
