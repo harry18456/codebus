@@ -14,7 +14,7 @@
 ### B. 決策與脈絡
 | 文件 | 一句話 |
 |---|---|
-| [`decisions.md`](decisions.md) | ADR 風格決策日誌（D-001 ~ D-020），每決策含脈絡 / 選項 / 理由 / 後續 |
+| [`decisions.md`](decisions.md) | ADR 風格決策日誌（D-001 ~ D-032），每決策含脈絡 / 選項 / 理由 / 後續 |
 
 ### C. 架構橫切 spec
 | 文件 | 一句話 |
@@ -87,7 +87,7 @@
 
 | 狀態 | 文件 | 說明 |
 |---|---|---|
-| ✅ 完稿 | 15 份主 spec | 上方清單全部 |
+| ✅ 完稿 | 19 份主 spec | 上方清單全部 |
 | 🟡 待使用者 review | `sanitizer.md` / `module-5-generator.md` / `prompts.md` / `dev-setup.md` | 含 `TODO review` 項 |
 | 🟡 待 golden sample 調整 | `prompts.md` 五份骨架 | 實作期對照分數迭代 |
 | 🟡 待實作回頭補 | `module-2-kb-builder.md` embedding dim、`dev-setup.md` .env 模型名 | LLM 供應商 API 細節確認後填 |

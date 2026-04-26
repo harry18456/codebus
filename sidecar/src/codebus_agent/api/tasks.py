@@ -71,9 +71,12 @@ _STREAM_CLOSE_SENTINEL: dict[str, Any] = {"__close__": True}
 def _generate_task_id(kind: TaskKind) -> str:
     """Return ``{kind}_{8-hex}``; raise ``ValueError`` on unknown kind.
 
-    Spec `task_id format` (modified by agent-sse-wiring): allowlist is
-    ``^(scan|kb|explore)_[0-9a-f]{8}$``. ``secrets.token_hex(4)`` yields
-    exactly 8 lowercase hex chars from a cryptographic source.
+    Spec `task_id format` (last extended by `module-8-qa-p0`): allowlist
+    is ``^(scan|kb|explore|generate|qa)_[0-9a-f]{8}$`` — five kinds total
+    (scan / kb from `sse-progress-skeleton`, explore from
+    `agent-sse-wiring`, generate from `module-5-generator-p0`, qa from
+    `module-8-qa-p0`). ``secrets.token_hex(4)`` yields exactly 8
+    lowercase hex chars from a cryptographic source.
     """
     if kind not in _VALID_KINDS:
         raise ValueError(

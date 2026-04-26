@@ -414,7 +414,7 @@ D-011 定了「要做 sanitizer」沒定「怎麼做」。AI 層所有 LLM call 
 - [x] 連動更新：sanitizer.md / agent-core.md / sidecar-api.md / interactive-tutorial.md / README（詳見 `qa-agent.md §十二`）
 - [x] Module 8 Q&A P0 落地（`module-8-qa-p0`，2026-04-26 apply）：`run_qa` RAG-first 兩階段 + `KBGrowthLogger` 第七層 audit + `KnowledgeBase.upsert_chunk` 雙層 dedup + `POST /qa` endpoint + `qa_agent` 拆帳
 - [x] `kb_growth.entry_id` 為真實 Qdrant `point_id`（`review-2-critical-fix`，2026-04-26）：`upsert_chunk` 簽名改 `tuple[str, str]`（`outcome` + 真實 `point_id`），`add_to_kb` 解構後寫真實 id 進 `kb_growth.jsonl.entry_id` —— Trust Layer R-01 panel 可直接 join 回 Qdrant point；`docs/sidecar-api.md §四 + qa-agent.md §八` 的 `answer_stream` 字面對齊 production `qa_answer` 一次性 non-streaming
-- [ ] 實作按 qa-agent.md §十一 工期排（P0 約 3.5d / P0+P1 約 5d）
+- [x] 實作按 qa-agent.md §十一 工期排（P0 約 3.5d / P0+P1 約 5d）—— P0 落地（`module-8-qa-p0`，2026-04-26）；P1（多輪記憶 / `add_to_kb` rollback / KB ops UI）留 Phase 2
 - [ ] KB growth 防呆閾值（見 §七）實作時確認
 
 ---
@@ -652,7 +652,7 @@ Module 1（資料夾掃描）只寫「過濾垃圾檔案」，實際坑很多。
    - Q&A 單一提問的 `qa_sess_abc` 是 `session_id` 底下的 **sub-session**（對應 `phase=qa`），Q&A 多輪對話 / 重新整理 UI 不換 `session_id`
    - 路線跑一次花多少錢 = `session_total()`（到 Generate 結束為止），不需手動拼湊
 4. **落地五件事**：
-   - `{workspace}/token_usage.jsonl`（第五層稽核 JSONL）
+   - `{workspace}/.codebus/token_usage.jsonl`（第五層稽核 JSONL；`audit-path-unification` 從 `<ws>/` root 搬到 `.codebus/` 子目錄）
    - SSE event type `usage_delta`（前端 Agent console 即時顯示）
    - Session 結束算 summary（總 tokens / 總 $ / `by_module` + **`by_phase`** 兩種 breakdown）
    - `phase` ∈ `scan / kb_build / explore / generate / qa`（跨模組統計維度）
@@ -693,7 +693,7 @@ Module 1（資料夾掃描）只寫「過濾垃圾檔案」，實際坑很多。
 
 ### 決策
 1. **新增 `LLMCallLogger`**（與 `UsageTracker` 平行，都掛在 `TrackedProvider` wrapper 內）
-2. **第六層稽核 JSONL：`llm_calls.jsonl`**
+2. **第六層稽核 JSONL：`{workspace}/.codebus/llm_calls.jsonl`**（`audit-path-unification` 從 `<ws>/` root 搬到 `.codebus/` 子目錄）
    - 每筆：`request_id` / `ts` / `session_id` / `module` / `step_id` / `provider` / `model` / `call_type` / `request` / `response` / `usage` / `latency_ms` / `error`
    - `request.messages` 為 **post-Sanitizer Pass 2** 版本（實際 wire payload）
 3. **SSE event `llm_call`** — 即時廣播給 UI（list view 不需等檔案 tail）
@@ -793,7 +793,7 @@ Topic mode 原本只定義抽象的 `workspace_source: { query, seed_urls, domai
 ### 連動更新
 - [x] 新建 `docs/workspace-lifecycle.md`（本 ADR 的 spec 細節）
 - [ ] `README.md §六` 更新資料夾結構說明（目前仍是舊版，實作期前改）
-- [ ] `security.md §二` 七層 audit 路徑對齊（六層 workspace-level + 一層 App-level）
+- [x] `security.md §二` 七層 audit 路徑對齊（六層 workspace-level + 一層 App-level；`audit-path-unification` 後 workspace-level 全在 `<ws>/.codebus/`）
 - [ ] `.gitignore` 模板：新建 workspace 時自動寫 repo 根 `.codebus/.gitignore`
 
 ---

@@ -210,6 +210,23 @@ Token budget enforcement MUST NOT fire when the caller passes no `TokenBudgetPro
 - **THEN** the `budget_tokens_exhausted` branch MUST NOT fire regardless of `state.budget_tokens_left` value
 - **AND** every previously-passing test in `sidecar/tests/agent/` that calls `run_explorer` without a `token_probe` MUST continue to pass with identical terminal behaviour
 
+
+<!-- @trace
+source: explorer-react-loop-p0
+updated: 2026-04-25
+extended_by: context-compression-token-budget
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/budget.py
+  - sidecar/src/codebus_agent/agent/types.py
+tests:
+  - sidecar/tests/agent/test_explorer_loop.py
+  - sidecar/tests/agent/test_token_budget_enforcement.py
+  - sidecar/tests/agent/test_budget_probe.py
+docs:
+  - docs/agent-core.md
+-->
+
 ---
 ### Requirement: ExplorerTools, Judge, and CoverageChecker are structural Protocols
 
@@ -354,6 +371,21 @@ The innermost `run_explorer` call's `stopped_reason` MUST propagate unchanged th
 - **AND** one extra `Step` line MUST be written with `thought` starting `[coverage] round-1 gaps=1 will_recurse=False`
 - **AND** `_enqueue_gap_investigation` MUST NOT be invoked (no mutation on `state.pending_queue` / `state.messages`)
 
+
+<!-- @trace
+source: coverage-gap-recurse
+updated: 2026-04-24
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/coverage.py
+  - sidecar/src/codebus_agent/agent/types.py
+tests:
+  - sidecar/tests/agent/test_coverage_recursion.py
+  - sidecar/tests/agent/test_coverage.py
+docs:
+  - docs/agent-core.md
+-->
+
 ---
 ### Requirement: LLMCoverageChecker produces one-shot CoverageResult
 
@@ -385,6 +417,21 @@ The prompt module `codebus_agent.agent.prompts.coverage` SHALL expose `COVERAGE_
 
 - **WHEN** `codebus_agent.agent.prompts.coverage.COVERAGE_PROMPT_VERSION` is imported
 - **THEN** the value MUST be a non-empty string in date-version format `YYYY-MM-DD-N` so reasoning_log replay can compare prompt revisions across runs
+
+
+<!-- @trace
+source: coverage-gap-recurse
+updated: 2026-04-24
+code:
+  - sidecar/src/codebus_agent/agent/coverage.py
+  - sidecar/src/codebus_agent/agent/prompts/coverage.py
+  - sidecar/src/codebus_agent/agent/types.py
+tests:
+  - sidecar/tests/agent/test_coverage.py
+  - sidecar/tests/agent/prompts/test_coverage_prompt.py
+docs:
+  - docs/agent-core.md
+-->
 
 ---
 ### Requirement: Explorer applies rolling message window before each Think call
@@ -420,3 +467,15 @@ Judge and Coverage Checker one-shot calls MUST NOT apply the window: their `rend
 - **WHEN** `run_explorer` recurses into a coverage-gap frame (`_depth=_depth+1`) and that frame's first `_think` call is invoked
 - **THEN** the windowing MUST apply identically — `provider.chat` MUST receive `state.messages[-_MESSAGE_ROLLING_WINDOW:]` plus appended `system` + `user` messages
 - **AND** the `_enqueue_gap_investigation` user-summary message MUST be visible in the windowed slice (because it is the most recent entry appended to `state.messages` before recursion)
+
+
+<!-- @trace
+source: context-compression-token-budget
+updated: 2026-04-25
+code:
+  - sidecar/src/codebus_agent/agent/explorer.py
+tests:
+  - sidecar/tests/agent/test_message_rolling_window.py
+docs:
+  - docs/agent-core.md
+-->

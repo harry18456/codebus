@@ -126,12 +126,23 @@ async def add_to_kb(args: AddToKBArgs, ctx: ToolContext) -> str:
             # sanitize_stats 由 KB 層或呼叫者填；若 scrub 不回 stats 用 default {}
         )
         try:
-            point_id = await ctx.kb.upsert_chunk(clean, payload=payload)
+            outcome, point_id = await ctx.kb.upsert_chunk(clean, payload=payload)
         except KBGrowthExceeded as e:
             return f"budget exhausted: {e}"
 
-        # 4. 寫稽核 log（kb_growth.jsonl，UI 可看 / rollback）
-        await ctx.kb_growth_log.write(point_id, chunk, args.reason)
+        # 4. 寫稽核 log（kb_growth.jsonl，UI 可看 / rollback；keyword-only 簽名）
+        ctx.kb_growth_logger.write(
+            point_id=point_id,
+            source=chunk.source,
+            reason=args.reason,
+            related_stations=list(chunk.related_stations),
+            originating_station_id=ctx.originating_station_id,
+            sanitize_stats={"hits": 0},
+            chunk_size_chars=len(clean),
+            dedup_skipped=outcome.startswith("dedup_"),
+            session_id=ctx.session_id,
+            question=ctx.question,
+        )
         added.append(point_id)
     return f"added {len(added)} chunks: {added}"
 ```
