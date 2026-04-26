@@ -24,6 +24,35 @@ from codebus_agent.api.tasks import (
 )
 
 
+def test_error_codes_frozenset_exact_ten_elements() -> None:
+    """Spec scenario: "Error code table is exhaustively enumerated".
+
+    The production frozenset MUST equal exactly the ten codes the spec
+    enumerates — no more, no fewer. Drift here means future task kinds
+    (or stale aliases) ship without a Spectra change.
+    """
+    assert ERROR_CODES == {
+        "SCAN_FAILED",
+        "KB_BUILD_FAILED",
+        "EXPLORE_FAILED",
+        "GENERATE_FAILED",
+        "QA_FAILED",
+        "OPENAI_AUTH_FAILED",
+        "OPENAI_RATE_LIMITED",
+        "OPENAI_CONTEXT_EXCEEDED",
+        "KB_DIM_MISMATCH",
+        "INTERNAL_ERROR",
+    }
+
+
+def test_kb_embed_failed_alias_not_present() -> None:
+    """Spec invariant: the historical alias `KB_EMBED_FAILED` MUST NOT
+    reappear in the production frozenset. Defensive guard so a future
+    refactor re-introducing the alias trips this test before shipping.
+    """
+    assert "KB_EMBED_FAILED" not in ERROR_CODES
+
+
 async def test_background_exception_emits_safe_error_event() -> None:
     """Spec scenario: "Background task exception surfaces as safe error event".
 

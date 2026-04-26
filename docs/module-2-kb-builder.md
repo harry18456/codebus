@@ -284,7 +284,7 @@ Body: { "workspace_root": "<abs>", "scan_result": <ScanResult JSON> }
   on_progress=…)`；wire 翻譯規則見上方 §六「Progress 回報」。
 - 終端 `KBStats` 透過 `_run_background_task` wrapper 寫入 `handle.result`，
   消費端用 `GET /tasks/{id}/result` 取（詳見 `sidecar-api.md §三-bis`）。
-- 任何 build 例外被 wrapper 收斂成 sanitized SSE `error` event（`KB_EMBED_FAILED`
+- 任何 build 例外被 wrapper 收斂成 sanitized SSE `error` event（`KB_BUILD_FAILED`
   / `OPENAI_AUTH_FAILED` / `OPENAI_RATE_LIMITED` / `KB_DIM_MISMATCH` / `INTERNAL_ERROR`），
   不洩漏 traceback；完整 traceback 只進 logger。
 

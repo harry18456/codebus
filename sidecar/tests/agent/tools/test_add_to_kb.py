@@ -54,7 +54,7 @@ def _make_sanitizer(*, redact_to: str = "clean text", entries: int = 1) -> Any:
 
 def _build_ctx(
     *,
-    upsert_return: str = "new-pt-01",
+    upsert_return: tuple[str, str] = ("new", "new-pt-01"),
     sanitizer: Any = None,
     state: Any = None,
 ) -> tuple[_FakeCtx, MagicMock]:
@@ -130,13 +130,17 @@ async def test_empty_post_sanitize_chunk_skipped() -> None:
 
 @pytest.mark.anyio("asyncio")
 async def test_dedup_hit_records_growth_log_with_dedup_skipped_true() -> None:
-    ctx, _ = _build_ctx(upsert_return="dedup:hash")
+    real_existing_pt = "00000000-1111-2222-3333-444444444444"
+    ctx, _ = _build_ctx(upsert_return=("dedup_hash", real_existing_pt))
     chunk = AddToKBChunk(text="hi", source="src/x.py:1-5", related_stations=[])
     out = await add_to_kb(AddToKBArgs(chunks=[chunk]), ctx)
-    assert "dedup:hash" in out
+    assert "dedup_hash" in out
     ctx.kb_growth_logger.write.assert_called_once()
     kwargs = ctx.kb_growth_logger.write.call_args.kwargs
     assert kwargs["dedup_skipped"] is True
+    # `entry_id` MUST be the real existing point id, not a sentinel.
+    assert kwargs["point_id"] == real_existing_pt
+    assert not kwargs["point_id"].startswith("dedup:")
 
 
 @pytest.mark.anyio("asyncio")

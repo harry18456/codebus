@@ -587,9 +587,9 @@ class UsageTracker:
         }
         """
 
-    async def emit_summary(self) -> None:
-        """Session 結束（或 phase 結束）時呼叫，SSE emit 一筆
-        { type: 'usage_summary', by_module, by_phase, ... }"""
+    # NOTE：原本設計的 `emit_summary` 已移除（review-2-critical-fix）。
+    # client-side 由累積 `usage_delta` 算 session total —— 每筆 `usage_delta`
+    # 都帶 `session_total_cost_usd` + `session_total_tokens`。
 ```
 
 ### 落地點
@@ -643,9 +643,10 @@ def _check_budget(state: ExplorerState, tracker: UsageTracker, budget: Budget) -
 ### SSE event
 
 ```json
-{ "type": "usage_delta", "module": "explorer", "step": 3, "prompt_tokens": 1240, "completion_tokens": 180, "cost_usd": 0.0042, "session_total_cost_usd": 0.031 }
-{ "type": "usage_summary", "total_tokens": 45200, "total_cost_usd": 0.12, "by_module": { "explorer": 0.08, "judge": 0.02, "generator": 0.015, "kb_build": 0.005 } }
+{ "type": "usage_delta", "module": "explorer", "step": 3, "prompt_tokens": 1240, "completion_tokens": 180, "cost_usd": 0.0042, "session_total_cost_usd": 0.031, "session_total_tokens": 45200 }
 ```
+
+每筆 `usage_delta` 都帶 `session_total_cost_usd` + `session_total_tokens`，client-side 不需另一個 summary 事件即可即時渲染 cost panel（review-2-critical-fix 拿掉舊的 session-level summary 事件設計）。
 
 ---
 

@@ -49,7 +49,7 @@ TaskStatus = Literal["running", "done", "error"]
 ERROR_CODES: frozenset[str] = frozenset(
     {
         "SCAN_FAILED",
-        "KB_EMBED_FAILED",
+        "KB_BUILD_FAILED",
         "INTERNAL_ERROR",
         "OPENAI_AUTH_FAILED",
         "OPENAI_RATE_LIMITED",
@@ -230,7 +230,7 @@ def _classify_exception(exc: BaseException) -> str:
     if name == "ScanError" or "scan" in name.lower():
         return "SCAN_FAILED"
     if "embed" in name.lower() or "kb" in name.lower():
-        return "KB_EMBED_FAILED"
+        return "KB_BUILD_FAILED"
     return "INTERNAL_ERROR"
 
 
@@ -238,7 +238,7 @@ def _safe_error_message(code: str) -> str:
     """Map an error code to a human-readable, sanitized message."""
     if code == "SCAN_FAILED":
         return "scan task failed"
-    if code == "KB_EMBED_FAILED":
+    if code == "KB_BUILD_FAILED":
         return "knowledge-base build failed"
     if code == "OPENAI_AUTH_FAILED":
         return "OpenAI authentication failed; verify CODEBUS_OPENAI_API_KEY"

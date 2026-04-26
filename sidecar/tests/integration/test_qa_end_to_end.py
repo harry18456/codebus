@@ -13,6 +13,7 @@ is asserted alongside the SSE event sequence.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,8 +23,18 @@ import pytest
 
 from codebus_agent.agent.qa import run_qa
 from codebus_agent.agent.reasoning_logger import ReasoningLogger
+from codebus_agent.agent.tools.add_to_kb import (
+    AddToKBArgs,
+    AddToKBChunk,
+    add_to_kb,
+)
 from codebus_agent.agent.types import QAAction, QAAnswer, QAState, ToolCall
+from codebus_agent.kb.growth_logger import KBGrowthLogger
 from codebus_agent.kb.payload import KBHit, KBPayload
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 
 
 class _SpyEmitter:
@@ -146,7 +157,7 @@ async def test_react_path_with_add_to_kb_full_stack(tmp_path: Path) -> None:
             pass
 
     fake_kb = MagicMock()
-    fake_kb.upsert_chunk = AsyncMock(return_value="new-pt-01")
+    fake_kb.upsert_chunk = AsyncMock(return_value=("new", "new-pt-01"))
 
     emitter = _SpyEmitter()
 
@@ -201,3 +212,123 @@ async def test_react_path_with_add_to_kb_full_stack(tmp_path: Path) -> None:
     assert log_path.exists()
     log_lines = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(log_lines) >= 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_dedup_path_writes_real_point_id_to_kb_growth(tmp_path: Path) -> None:
+    """Dedup-skipped writes MUST record the real Qdrant point id (UUID
+    format) — never the legacy `"dedup:hash"` / `"dedup:sim"` sentinels.
+
+    Spec scenario `Dedup-skipped write records existing point id`
+    (kb-growth capability), driving the round-trip from KB tuple return
+    through `add_to_kb` into `kb_growth.jsonl`.
+    """
+    existing_pt_id = "deadbeef-0000-1111-2222-333344445555"
+
+    growth_path = tmp_path / ".codebus" / "kb_growth.jsonl"
+    growth_logger = KBGrowthLogger(growth_path)
+
+    class _Sanitizer:
+        def sanitize(self, text, source):
+            return MagicMock(text=text, entries=[])
+
+    class _SanitizerAudit:
+        def append(self, **kwargs):
+            pass
+
+    fake_kb = MagicMock()
+    fake_kb.upsert_chunk = AsyncMock(
+        return_value=("dedup_hash", existing_pt_id)
+    )
+
+    class _Ctx:
+        def __init__(self):
+            self.sanitizer = _Sanitizer()
+            self.sanitizer_audit = _SanitizerAudit()
+            self.kb = fake_kb
+            self.kb_growth_logger = growth_logger
+            self.qa_state = QAState(question="q", session_id="qa_dedup")
+            self.question = "q"
+            self.originating_station_id = "s02-storage"
+            self.session_id = "qa_dedup"
+            self.emitter = None
+
+    chunk = AddToKBChunk(
+        text="duplicate content",
+        source="src/y.py:1-3",
+        related_stations=["s02-storage"],
+    )
+    await add_to_kb(AddToKBArgs(chunks=[chunk], source="src/y.py", reason="r"), _Ctx())
+
+    assert growth_path.exists()
+    lines = [
+        json.loads(line)
+        for line in growth_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(lines) == 1
+    line = lines[0]
+    assert _UUID_RE.match(line["entry_id"]), line["entry_id"]
+    assert line["entry_id"] == existing_pt_id
+    assert line["dedup_skipped"] is True
+    assert not line["entry_id"].startswith("dedup:")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pass3_sanitize_audit_records_real_rules_version(tmp_path: Path) -> None:
+    """Pass 3 sanitize hit MUST stamp the real `RULES_VERSION` constant
+    into `sanitize_audit.jsonl.rules_version` — never the legacy
+    `"rules-unknown"` placeholder.
+
+    Spec invariant 9 (CLAUDE.md) + `Single source of truth for
+    rules_version constant` Scenario.
+    """
+    from codebus_agent.sanitizer import (
+        RULES_VERSION,
+        SanitizerAuditLogger,
+        SanitizerEngine,
+    )
+
+    audit_path = tmp_path / ".codebus" / "sanitize_audit.jsonl"
+    growth_path = tmp_path / ".codebus" / "kb_growth.jsonl"
+
+    sanitizer = SanitizerEngine()
+    sanitizer_audit = SanitizerAuditLogger(audit_path)
+    growth_logger = KBGrowthLogger(growth_path)
+
+    fake_kb = MagicMock()
+    fake_kb.upsert_chunk = AsyncMock(return_value=("new", "11111111-2222-3333-4444-555555555555"))
+
+    class _Ctx:
+        def __init__(self):
+            self.sanitizer = sanitizer
+            self.sanitizer_audit = sanitizer_audit
+            self.kb = fake_kb
+            self.kb_growth_logger = growth_logger
+            self.qa_state = QAState(question="q", session_id="qa_pass3")
+            self.question = "q"
+            self.originating_station_id = "s02-storage"
+            self.session_id = "qa_pass3"
+            self.emitter = None
+
+    chunk = AddToKBChunk(
+        text="contact alice@example.com for details",
+        source="src/notes.md:1-1",
+        related_stations=["s02-storage"],
+    )
+    await add_to_kb(
+        AddToKBArgs(chunks=[chunk], source="src/notes.md", reason="r"),
+        _Ctx(),
+    )
+
+    assert audit_path.exists()
+    audit_lines = [
+        json.loads(line)
+        for line in audit_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(audit_lines) >= 1
+    first = audit_lines[0]
+    assert first["rules_version"] == RULES_VERSION
+    assert first["rules_version"] != "rules-unknown"
+    assert first["pass"] == 3

@@ -284,7 +284,7 @@ GET /tasks/{id}/events  (SSE)
     ├─ {"type": "agent_thought", ...}
     ├─ {"type": "agent_action_result", ...}
     ├─ {"type": "kb_growth", "entry_id": "...", "source": "...", "related_stations": [...]}
-    ├─ {"type": "answer_stream", "delta": "..."}
+    ├─ {"type": "qa_answer", "answer": "...", "citations": [{"file_path": "...", "line_start": N, "line_end": N, "related_stations": [...]}]}
     └─ {"type": "done"}
 ```
 
@@ -348,6 +348,6 @@ GET /tasks/{id}/events  (SSE)
 - [x] `sanitizer.md` §三觸發點：`add_to_kb` 寫入前必過 sanitize（Pass 3，同 pre-flight 路徑）
 - [x] `agent-core.md` §十四：加 `agent/qa.py`
 - [x] `agent-explorer-spec.md` §十二 trait 抽象：補「Q&A mode」共用 tool set（§12.6 表 + §12.7 `QATools` / `QASelfCheck`）
-- [x] `sidecar-api.md`：新增 `POST /qa` + SSE 事件類型（`rag_hits` / `kb_growth` / `answer_stream`）
+- [x] `sidecar-api.md`：新增 `POST /qa` + SSE 事件類型（`rag_hits` / `kb_growth` / `qa_answer`，P0 一次性 non-streaming）
 - [x] `interactive-tutorial.md`：完成教材後的「繼續問問題」入口連結到 Q&A（§四 `<QAEntry>` 元件）
 - [x] `README.md` Module 清單加 Module 8（Q&A Agent）+ Phase 1 功能補

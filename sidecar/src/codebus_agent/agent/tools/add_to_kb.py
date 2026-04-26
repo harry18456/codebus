@@ -27,7 +27,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from codebus_agent.kb.payload import KBPayload
-from codebus_agent.sanitizer import FileSource
+from codebus_agent.sanitizer import RULES_VERSION, FileSource
 
 
 __all__ = ["AddToKBArgs", "AddToKBChunk", "add_to_kb"]
@@ -121,14 +121,7 @@ async def add_to_kb(args: AddToKBArgs, ctx: Any) -> str:
         if bad is not None:
             return f"invalid station_id: {bad}"
 
-    rules_version = getattr(sanitizer, "rules_version", None) or "rules-unknown"
-    # Try to introspect the sanitizer's rules_version constant if available.
-    try:
-        from codebus_agent.sanitizer import RULES_VERSION
-
-        rules_version = RULES_VERSION
-    except Exception:
-        pass
+    rules_version = RULES_VERSION
 
     emitter = getattr(ctx, "emitter", None)
 
@@ -177,11 +170,13 @@ async def add_to_kb(args: AddToKBArgs, ctx: Any) -> str:
             created_at=datetime.now(timezone.utc),
             related_stations=list(chunk.related_stations),
         )
-        upsert_result = await kb.upsert_chunk(clean, payload=payload)
-        dedup_skipped = upsert_result.startswith("dedup:")
+        outcome, real_point_id = await kb.upsert_chunk(clean, payload=payload)
+        dedup_skipped = outcome.startswith("dedup_")
         # Stage 4: growth log — written for both new and dedup-skipped paths.
+        # `entry_id` MUST be the real Qdrant point id (never a sentinel)
+        # so Trust Layer R-01 can join `kb_growth.jsonl` rows back to KB.
         growth_logger.write(
-            point_id=upsert_result,
+            point_id=real_point_id,
             source=chunk.source,
             reason=args.reason,
             related_stations=list(chunk.related_stations),
@@ -200,7 +195,7 @@ async def add_to_kb(args: AddToKBArgs, ctx: Any) -> str:
                 emitter.emit(
                     {
                         "type": "kb_growth",
-                        "entry_id": upsert_result,
+                        "entry_id": real_point_id,
                         "source": chunk.source,
                         "related_stations": list(chunk.related_stations),
                         "originating_station_id": originating_station_id,
@@ -221,7 +216,7 @@ async def add_to_kb(args: AddToKBArgs, ctx: Any) -> str:
             except Exception:
                 pass
 
-        response_tokens.append(upsert_result)
+        response_tokens.append(outcome)
 
     return ", ".join(response_tokens) if response_tokens else "no chunks processed"
 

@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 
 from codebus_agent.kb.knowledge_base import KnowledgeBase
 from codebus_agent.kb.payload import KBHit, KBPayload
@@ -76,8 +81,10 @@ async def test_hash_dedup_short_circuits(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(provider, "embed", _spy_embed)
     monkeypatch.setattr(backend, "upsert_points", _spy_upsert)
 
-    result = await kb.upsert_chunk("hello", payload=_payload("hello"))
-    assert result == "dedup:hash"
+    outcome, point_id = await kb.upsert_chunk("hello", payload=_payload("hello"))
+    assert outcome == "dedup_hash"
+    assert isinstance(point_id, str) and point_id != ""
+    assert not point_id.startswith("dedup:")
     assert embed_calls == []
     assert upsert_calls == []
 
@@ -120,8 +127,11 @@ async def test_similarity_dedup_after_embed(tmp_path: Path, monkeypatch) -> None
 
     monkeypatch.setattr(provider, "embed", _counting_embed)
 
-    result = await kb.upsert_chunk("hello rephrased", payload=_payload("hello rephrased"))
-    assert result == "dedup:sim"
+    outcome, point_id = await kb.upsert_chunk(
+        "hello rephrased", payload=_payload("hello rephrased")
+    )
+    assert outcome == "dedup_sim"
+    assert point_id == fake_hit.point_id
     # Layer 1 missed → embed called exactly once for the dedup probe.
     assert len(embed_calls) == 1
     assert upsert_calls == []
@@ -143,17 +153,24 @@ async def test_new_chunk_returns_point_id(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(backend, "upsert_points", _capture_upsert)
 
-    result = await kb.upsert_chunk("totally novel text", payload=_payload("totally novel text"))
-    assert isinstance(result, str)
-    assert result != ""
-    assert not result.startswith("dedup:")
+    outcome, point_id = await kb.upsert_chunk(
+        "totally novel text", payload=_payload("totally novel text")
+    )
+    assert outcome == "new"
+    assert isinstance(point_id, str)
+    assert point_id != ""
+    assert not point_id.startswith("dedup:")
+    # Spec scenario `New write records new point id`: real Qdrant point id,
+    # syntactically valid UUID format.
+    assert _UUID_RE.match(point_id), point_id
     assert len(upsert_calls) == 1
-    assert upsert_calls[0][0]["id"] == result
+    assert upsert_calls[0][0]["id"] == point_id
 
 
 @pytest.mark.anyio("asyncio")
-async def test_dedup_token_format_reserved(tmp_path: Path, monkeypatch) -> None:
-    """All `"dedup:"`-prefixed return values MUST be drawn from a closed set."""
+async def test_outcome_literal_closed_set(tmp_path: Path, monkeypatch) -> None:
+    """`outcome` MUST be drawn from `{"new", "dedup_hash", "dedup_sim"}` and
+    `point_id` MUST never carry the legacy `"dedup:"` sentinel prefix."""
     backend = InMemoryQdrantBackend()
     provider = SpyProvider()
     kb = _make_kb(backend, provider, tmp_path)
@@ -166,7 +183,9 @@ async def test_dedup_token_format_reserved(tmp_path: Path, monkeypatch) -> None:
         kb.collection_name,
         [{"id": str(uuid.uuid4()), "vector": seed_resp.vectors[0], "payload": seed_payload}],
     )
-    layer_1 = await kb.upsert_chunk("hash-me", payload=_payload("hash-me"))
+    layer_1_outcome, layer_1_pt = await kb.upsert_chunk(
+        "hash-me", payload=_payload("hash-me")
+    )
 
     # 2) Layer 2 hit (force find_similar to return a high-score hit)
     fake_hit = KBHit(point_id="x", score=0.99, payload=_payload("x"))
@@ -175,7 +194,44 @@ async def test_dedup_token_format_reserved(tmp_path: Path, monkeypatch) -> None:
         return fake_hit
 
     monkeypatch.setattr(kb, "find_similar", _force_layer2)
-    layer_2 = await kb.upsert_chunk("a fresh text", payload=_payload("a fresh text"))
+    layer_2_outcome, layer_2_pt = await kb.upsert_chunk(
+        "a fresh text", payload=_payload("a fresh text")
+    )
 
-    for token in (layer_1, layer_2):
-        assert token in {"dedup:hash", "dedup:sim"}, token
+    assert layer_1_outcome in {"new", "dedup_hash", "dedup_sim"}
+    assert layer_2_outcome in {"new", "dedup_hash", "dedup_sim"}
+    assert layer_1_outcome == "dedup_hash"
+    assert layer_2_outcome == "dedup_sim"
+    for pt in (layer_1_pt, layer_2_pt):
+        assert not pt.startswith("dedup:"), pt
+
+
+@pytest.mark.anyio("asyncio")
+async def test_dedup_hash_returns_real_existing_point_id(tmp_path: Path) -> None:
+    """Layer 1 hash dedup MUST return the real existing Qdrant point id —
+    not a sentinel. Spec scenario `Hash dedup short-circuits before embed`.
+    """
+    backend = InMemoryQdrantBackend()
+    provider = SpyProvider()
+    kb = _make_kb(backend, provider, tmp_path)
+    await backend.ensure_collection(kb.collection_name, expected_dim=EMBEDDING_DIM)
+
+    # Seed an exact-text point under a known UUID so we can assert equality.
+    existing_pt_id = str(uuid.uuid4())
+    seed_resp = await provider.embed(["seed-text"])
+    await backend.upsert_points(
+        kb.collection_name,
+        [
+            {
+                "id": existing_pt_id,
+                "vector": seed_resp.vectors[0],
+                "payload": _payload("seed-text"),
+            }
+        ],
+    )
+
+    outcome, real_id = await kb.upsert_chunk(
+        "seed-text", payload=_payload("seed-text")
+    )
+    assert outcome == "dedup_hash"
+    assert real_id == existing_pt_id

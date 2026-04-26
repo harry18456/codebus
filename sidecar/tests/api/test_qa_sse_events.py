@@ -113,7 +113,7 @@ async def test_kb_growth_event_emitted_on_new_chunk(tmp_path: Path) -> None:
     sanitizer.sanitize.return_value = MagicMock(text="hello", entries=[])
     sanitizer_audit = MagicMock()
     kb = MagicMock()
-    kb.upsert_chunk = AsyncMock(return_value="new-pt-01")
+    kb.upsert_chunk = AsyncMock(return_value=("new", "new-pt-01"))
     growth_logger = MagicMock()
     emitter = _SpyEmitter()
 
@@ -146,12 +146,17 @@ async def test_kb_growth_event_emitted_on_new_chunk(tmp_path: Path) -> None:
 
 @pytest.mark.anyio("asyncio")
 async def test_kb_growth_event_omitted_on_dedup_skip(tmp_path: Path) -> None:
-    """`upsert_chunk` returning `dedup:hash` MUST NOT emit `kb_growth`."""
+    """`upsert_chunk` returning `("dedup_hash", real_id)` MUST NOT emit
+    `kb_growth` (dedup-skipped writes still hit the audit log but skip
+    the SSE event per spec scenario `kb_growth event omitted on dedup skip`).
+    """
     sanitizer = MagicMock()
     sanitizer.sanitize.return_value = MagicMock(text="hello", entries=[])
     sanitizer_audit = MagicMock()
     kb = MagicMock()
-    kb.upsert_chunk = AsyncMock(return_value="dedup:hash")
+    kb.upsert_chunk = AsyncMock(
+        return_value=("dedup_hash", "11111111-2222-3333-4444-555555555555")
+    )
     growth_logger = MagicMock()
     emitter = _SpyEmitter()
 

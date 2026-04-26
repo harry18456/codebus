@@ -473,20 +473,41 @@ class KnowledgeBase:
 
     # -- Q&A add_to_kb path -------------------------------------------------
 
-    async def upsert_chunk(self, text: str, *, payload: KBPayload) -> str:
+    async def _lookup_existing_point_id_by_hash(
+        self, text_hash: str
+    ) -> str | None:
+        # Consistency fallback: future iterations may extend
+        # `KBQdrantBackend` Protocol with a dedicated
+        # `find_point_id_by_hash(collection, text_hash)`; until then, reuse
+        # `search_points` with a zero vector and an exact-match filter on
+        # the unique `text_hash` field. Hash uniqueness means the single
+        # candidate either matches or the bucket is empty.
+        hits = await self._backend.search_points(
+            self.collection_name,
+            [0.0] * self._embedding_dim,
+            limit=1,
+            query_filter={"text_hash": text_hash},
+        )
+        if not hits:
+            return None
+        return hits[0].point_id
+
+    async def upsert_chunk(
+        self, text: str, *, payload: KBPayload
+    ) -> tuple[str, str]:
         """Embed-and-upsert a Q&A `add_to_kb` chunk with two-layer dedup.
 
-        Returns either:
-          * the new Qdrant `point_id` (string) when the chunk is novel
-          * the literal `"dedup:hash"` when Layer 1 hash dedup short-circuits
-            before any embedding call
-          * the literal `"dedup:sim"` when Layer 2 similarity dedup matches
-            an existing point at score ≥ `_QA_DEDUP_THRESHOLD`
+        Returns `(outcome, point_id)`:
+          * `outcome` is one of `{"new", "dedup_hash", "dedup_sim"}`
+          * `point_id` is the real Qdrant point id — for both new writes
+            and dedup-skipped writes — and never carries the legacy
+            `"dedup:"` sentinel prefix
 
-        Per Decision 4 (`module-8-qa-p0` design): the dedup token format
-        is closed (`{"dedup:hash", "dedup:sim"}`) so callers (notably
-        `add_to_kb`) can rely on the `dedup:` prefix to discriminate
-        without parsing further.
+        Per `review-2-critical-fix` Decision 2: callers (notably
+        `add_to_kb`) MUST destructure the tuple and discriminate on
+        `outcome`; the second element flows directly into
+        `kb_growth.jsonl.entry_id` so audit consumers (Trust Layer R-01)
+        can join back to a Qdrant point unambiguously.
         """
         await self._ensure_ready()
 
@@ -495,7 +516,13 @@ class KnowledgeBase:
         if await self._backend.exists_by_hash(
             self.collection_name, payload.text_hash
         ):
-            return "dedup:hash"
+            existing = await self._lookup_existing_point_id_by_hash(
+                payload.text_hash
+            )
+            # `<unknown>` covers the rare race where the point was deleted
+            # between `exists_by_hash` and the follow-up lookup; the
+            # standard non-race path resolves to a real UUID.
+            return ("dedup_hash", existing or "<unknown>")
 
         # Embed once — used for Layer 2 similarity dedup AND, on miss, for
         # the upsert vector. The bound provider is workspace-scoped so the
@@ -510,14 +537,14 @@ class KnowledgeBase:
         # from cached vectors.
         similar = await self.find_similar(text, threshold=_QA_DEDUP_THRESHOLD)
         if similar is not None:
-            return "dedup:sim"
+            return ("dedup_sim", similar.point_id)
 
         # Both dedup layers missed — persist the chunk as a single Qdrant
         # point and return its id.
         point_id = str(uuid.uuid4())
         point = {"id": point_id, "vector": vector, "payload": payload}
         await self._backend.upsert_points(self.collection_name, [point])
-        return point_id
+        return ("new", point_id)
 
 
 __all__ = ["KnowledgeBase", "_QA_DEDUP_THRESHOLD", "_derive_workspace_id"]
