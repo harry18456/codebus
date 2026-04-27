@@ -20,6 +20,8 @@ import uvicorn
 
 from codebus_agent import auth, handshake, healthz, net
 from codebus_agent.api import create_app
+from codebus_agent.auth.audit_logger import AuthorizationAuditLogger
+from codebus_agent.auth.paths import authorization_audit_path
 from codebus_agent.kb import qdrant_client as _kb_qdrant
 from codebus_agent.watchdog import watch_parent
 
@@ -94,10 +96,16 @@ def run(argv: list[str] | None = None) -> None:
     # feeds the KB embedding provider. Missing → sidecar still starts;
     # POST /kb/build returns 503 KB_NOT_CONFIGURED until the env is set
     # and the sidecar restarts.
+    # `auth-flow`: default AuthorizationAuditLogger factory points at
+    # the App-level audit log under ~/.codebus/. A fresh logger per
+    # call mirrors the per-workspace KBGrowthLogger pattern; the
+    # AuthorizationAuditLogger constructor auto-mkdirs ~/.codebus/.
+    audit_path = authorization_audit_path()
     app = create_app(
         bearer_token=bearer,
         qdrant_url=_kb_qdrant.resolve_url(),
         openai_api_key=os.environ.get("CODEBUS_OPENAI_API_KEY"),
+        auth_audit_logger_factory=lambda: AuthorizationAuditLogger(audit_path),
     )
     try:
         asyncio.run(_serve(app, sock, port, bearer, args.parent_pid))

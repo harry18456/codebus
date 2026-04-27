@@ -12,9 +12,17 @@ instead. Source-level grep is the chosen mechanism (D-3 in design.md);
 ``ast.parse`` would also catch docstring / comment mentions which are
 not actually drift surfaces.
 
-Whitelist: ``codebus_agent/_audit_paths.py`` (the canonical leaf
-module — the seven literal strings live there). All other modules in
-``sidecar/src/codebus_agent/`` MUST import via the constants.
+Whitelist:
+- ``codebus_agent/_audit_paths.py`` — the workspace-level canonical
+  leaf module (the seven literal strings live there).
+- ``codebus_agent/auth/paths.py`` — the App-level sister leaf module
+  introduced by ``auth-flow``; hosts ``authorization_audit.jsonl``
+  (cross-workspace, lives under ``~/.codebus/`` not
+  ``<ws>/.codebus/``). The single-source invariant for this filename
+  is enforced separately by ``tests/auth/test_paths.py``.
+
+All other modules in ``sidecar/src/codebus_agent/`` MUST import via
+the constants.
 """
 from __future__ import annotations
 
@@ -42,11 +50,13 @@ def test_jsonl_literal_only_in_canonical_module() -> None:
     assert package_root.exists()
 
     canonical = (package_root / "_audit_paths.py").resolve()
+    auth_paths = (package_root / "auth" / "paths.py").resolve()
+    whitelist = {canonical, auth_paths}
 
     offending: dict[str, list[str]] = {}
     for py_file in package_root.rglob("*.py"):
         resolved = py_file.resolve()
-        if resolved == canonical:
+        if resolved in whitelist:
             continue
         text = resolved.read_text(encoding="utf-8")
         hits = _JSONL_LITERAL_RE.findall(text)

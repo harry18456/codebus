@@ -203,7 +203,9 @@ Provider: Anthropic · Claude Haiku 4.5 · outbound HTTPS → api.anthropic.com
 
 **Phase 2 新增 topic 模式時**，新增 flag 範例：`outbound_to_topic_domains`（對應使用者明確 ack 外部爬取）、`topic_crawl_bounded`（明確 ack 爬蟲受 domain_allowlist 限制）。schema 層不需 breaking change。
 
-**`scenario` 列舉**：`first_run` / `scope_reconfirm` / `scope_upgrade_new_kind` / `rules_version_bump` / `combined_version_and_kind`
+**`scenario` 列舉**（P0 closed set）：`first_run` / `scope_reconfirm` / `scope_upgrade_new_kind`
+
+> P1 deferred：`rules_version_bump`（rules major bump 觸發的單獨變體）/ `combined_version_and_kind`（合併情境）。在 P0 階段不接收這兩個值；引入時須走新 change 一併補對應 modal 變體與比對邏輯。
 
 **新類別場景**（`scenario: "scope_upgrade_new_kind"`）
 ```json
@@ -217,20 +219,6 @@ Provider: Anthropic · Claude Haiku 4.5 · outbound HTTPS → api.anthropic.com
   ],
   "previous_acked_kinds": ["email", "internal_domain"],
   "new_kinds_introduced": ["secret"]
-}
-```
-
-**合併場景**（`scenario: "combined_version_and_kind"`）
-```json
-{
-  ...,
-  "user_ack": [
-    "raw_stays_local",
-    "no_kb_persist",
-    "outbound_to_anthropic",
-    "rules_version:v1.2.0",
-    "new_kind:secret"
-  ]
 }
 ```
 
@@ -273,23 +261,20 @@ Provider: Anthropic · Claude Haiku 4.5 · outbound HTTPS → api.anthropic.com
 
 ## 六、`sanitizer_rules_version` 語意
 
-**格式**：semver `vMAJOR.MINOR.PATCH`（例 `v1.2.0`）
+**格式**：opaque 字串。**P0 不規範格式語意**——`grant_issued.sanitizer_rules_version` 一律 verbatim 等於呼叫時 `codebus_agent.sanitizer.RULES_VERSION` 的當下值。目前該常數為 `YYYY-MM-DD-N` date format（例：`2026-04-20-1`），由 `sanitizer/config.py` 集中決定，rules 改動時 bump（CLAUDE.md 不變式 9）。
 
-**版本升級觸發策略**
+**P0 行為**
+- `grant_issued.sanitizer_rules_version` 只是審計欄位，**不做版本比對 / 不寫 meta.json / 不檢查 `last_acked_version`**
+- 三個 P0 scenario（`first_run` / `scope_reconfirm` / `scope_upgrade_new_kind`）的觸發條件全部基於「current scan kinds vs last acked kinds」，與 `rules_version` 變化無關
+- audit log 需要時可讀回 `sanitizer_rules_version` 字串做 forensics（純字面比對；不解析 semver / date）
 
-| 變化類型 | 版本段 | 觸發 O-01 重授？ | 例 |
-|---|---|---|---|
-| Regex bug fix / typo / 重構 | PATCH | ❌ 不觸發 | 修 email regex 邊界 |
-| **加規則在既有類別**（broadening 偵測） | MINOR | ❌ 不觸發 | 加一條 JWT HS384 regex |
-| **新 kind 類別**（新信任決策） | MAJOR | ✅ 觸發 (c) 變體 | 加入 `biometric_id` 類別 |
-| **改 kind 語意**（既有 kind 涵蓋變廣） | MAJOR | ✅ 觸發 (c) 變體 | email 現在也包含 username-only 格式 |
+**P1 deferred**（後續 change 落地時統一決定）
+- 是否從 date format 切 semver `vMAJOR.MINOR.PATCH`、是否要寫 migration 把既有 audit log 的 date 字串轉換
+- `~/.codebus/sanitizer_rules_meta.json` 記錄 `last_acked_version` 的機制
+- 啟動時比對 `last_acked_version` vs `current_version` → 觸發 `rules_version_bump` modal 變體（對應 §五 P1 deferred 的兩個 scenario 值）
+- 版本升級觸發策略表（PATCH / MINOR / MAJOR 對應觸發行為）
 
-**原則**：使用者 ack 的是「**我同意這些 kind 類別會被替換**」。不改 kind 語意的升級 = 沒有新信任決策 = 不需重授。
-
-**實作**
-- `~/.codebus/sanitizer_rules_meta.json` 記錄當前版本
-- 啟動時比對 `last_acked_version` vs `current_version`：MAJOR 差異 → 觸發 (c)
-- 版本號寫死在 sanitizer config bundle，不由使用者改
+> 原則不變：使用者 ack 的是「**我同意這些 kind 類別會被替換**」。不改 kind 語意的 rules 升級 = 沒有新信任決策。但此原則的**自動觸發**邏輯整段 P1 才落地——P0 階段使用者必須透過 `scope_upgrade_new_kind`（kind 變化）或 Settings 主動 revoke（trigger=`settings_revoke`）才會重授。
 
 ---
 
@@ -312,9 +297,9 @@ Provider: Anthropic · Claude Haiku 4.5 · outbound HTTPS → api.anthropic.com
 
 ---
 
-## 八、Sidecar Endpoints（實作期加入 `sidecar-api.md`）
+## 八、Sidecar Endpoints
 
-O-01 實作開始時把以下 endpoints 補進 `sidecar-api.md`：
+✅ 已落實（`auth-flow` change，2026-04-27 起跑）。完整 request / response schema、status code、error code 對照見 [`docs/sidecar-api.md §三`](./sidecar-api.md)。本節保留歷史摘要供快速 lookup：
 
 ### `POST /auth/grant`
 前端收到 modal 確認後呼叫。Sidecar 寫 `grant_issued`、依 `workspace_type` 初始化 ToolContext、return `session_id`。
@@ -385,17 +370,42 @@ O-01 實作開始時把以下 endpoints 補進 `sidecar-api.md`：
 
 ## 十一、實作順序
 
+對齊 `auth-flow` change（2026-04-27 起跑）的 P0 範圍與本 spec §五 / §六 校正：
+
 | 優先 | 項目 | 工期 | 依賴 |
 |---|---|---|---|
-| P0 | `authorization_audit.jsonl` writer（Python） | 0.5d | — |
-| P0 | 四個 sidecar endpoints（grant / deny / revoke / status） | 1d | audit writer |
-| P0 | Sanitizer rules version 偵測與 meta.json | 0.5d | sanitizer 模組 |
-| P0 | Scope 比對邏輯（new_kinds vs acked_kinds） | 0.5d | Sanitizer dry-run |
-| P0 | O-01 Vue 組件（3 情境切換 + 承諾 checkbox） | 1.5d | 視覺稿定稿 |
-| P1 | Settings 頁 revoke 入口 | 0.5d | endpoints |
-| P1 | Rules major bump 升級 trigger（啟動時比對） | 0.5d | version 偵測 |
+| P0 | `AuthorizationAuditLogger`（第七層 audit 唯一 writer，三事件 method） | 0.5d | — |
+| P0 | 四個 sidecar endpoints（`POST /auth/grant` / `POST /auth/deny` / `POST /auth/revoke` / `GET /auth/status`） | 1d | audit writer |
+| P0 | Scope 比對邏輯（current scan kinds vs `find_last_grant_for_workspace` 的 acked_kinds；不依賴 rules_version 變化） | 0.5d | Sanitizer dry-run（既有 `POST /scan` 的 `files[*].sanitize_stats`） |
+| P0 | O-01 Vue 組件（3 P0 情境：`first_run` / `scope_reconfirm` / `scope_upgrade_new_kind`，共用 component + props 切換） | 1.5d | 視覺稿（`design/v1/03-grant.html` 已備） |
+| P1 | Settings 頁 revoke 入口（endpoint 已是 P0；UI 入口屬 P1） | 0.5d | endpoints |
+| P1 | Sanitizer rules version 偵測與 `~/.codebus/sanitizer_rules_meta.json` 機制 | 0.5d | sanitizer 模組 |
+| P1 | Rules major bump 自動 trigger 邏輯（啟動時比對 `last_acked_version` → 觸發 `rules_version_bump` modal 變體） | 0.5d | version 偵測 |
+| P1 | `combined_version_and_kind` 合併情境 modal 變體 | 0.5d | rules version 比對 |
+| P1 | `RevokeRequest.trigger` 擴增 P1 值（`rules_version_bump` / `provider_change` / `workspace_deleted`） | 0.5d | rules version 比對 |
 
-**合計 P0**：約 4 天；**P0+P1**：約 5 天。
+**合計 P0**：約 4 天（對齊本 change 工期）；**P0+P1**：約 6.5 天。
+
+**Scope 比對邏輯細節（P0）**
+
+```
+acked_kinds = { flag.removeprefix("new_kind:")
+                for flag in last_grant.user_ack
+                if flag.startswith("new_kind:") }
+new_kinds_in_request = { flag.removeprefix("new_kind:")
+                         for flag in current_request.user_ack
+                         if flag.startswith("new_kind:") }
+new_kinds_diff = new_kinds_in_request - acked_kinds
+
+if scenario == "first_run":
+    requires last_grant is None
+elif scenario == "scope_reconfirm":
+    requires last_grant is not None AND new_kinds_diff is empty
+elif scenario == "scope_upgrade_new_kind":
+    requires last_grant is not None AND new_kinds_diff is non-empty
+```
+
+任何違反 → 400 `AUTH_INVALID_REQUEST`。詳見 `openspec/changes/auth-flow/specs/authorization-audit/spec.md::Requirement: scope upgrade detection reads the latest grant from audit log`。
 
 ---
 

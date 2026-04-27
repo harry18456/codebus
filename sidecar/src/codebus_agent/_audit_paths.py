@@ -34,9 +34,11 @@ __all__ = [
 _WORKSPACE_AUDIT_SUBDIR = ".codebus"
 
 # Workspace-level operational / audit JSONL filenames. All resolve
-# under `<workspace_root>/.codebus/`. App-level `authorization_audit.jsonl`
-# (under `~/.codebus/`) lives in a future capability and is intentionally
-# NOT listed here.
+# under `<workspace_root>/.codebus/`. The App-level authorization audit
+# JSONL (under `~/.codebus/`) lives in a sister leaf module
+# `codebus_agent.auth.paths` (filename constant + path resolver). It is
+# intentionally NOT listed here so the workspace-level vs App-level
+# audit chains stay grouped by lifecycle.
 #
 # `generator_log.jsonl` is per-Module operational log (parallel to
 # `reasoning_log.jsonl`), not part of the seven-layer audit chain — see

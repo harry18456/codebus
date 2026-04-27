@@ -40,13 +40,20 @@ from typing import Any, Callable
 
 from fastapi import FastAPI
 
-from codebus_agent import auth
+# Alias `codebus_agent.auth` as `bearer_auth` so the `from
+# codebus_agent.api.auth import router` line below cannot shadow the
+# bearer middleware module via Python's "submodule sets parent
+# attribute" import side-effect (sibling submodule with the same leaf
+# name overrides the namespace binding).
+from codebus_agent import auth as bearer_auth
+from codebus_agent.api.auth import router as auth_router
 from codebus_agent.api.explore import router as explore_router
 from codebus_agent.api.generate import router as generate_router
 from codebus_agent.api.kb import router as kb_router
 from codebus_agent.api.qa import router as qa_router
 from codebus_agent.api.scan import router as scan_router
 from codebus_agent.api.tasks import TaskRegistry, router as tasks_router
+from codebus_agent.auth.audit_logger import AuthorizationAuditLogger
 from codebus_agent.health import DependencyCheck, DependencyStatus, collect
 from codebus_agent.kb import qdrant_client as _kb_qdrant
 from codebus_agent.kb.backend import QdrantHttpBackend
@@ -403,6 +410,8 @@ def create_app(
     dependency_checks: dict[str, DependencyCheck] | None = None,
     qdrant_url: str | None = None,
     openai_api_key: str | None = None,
+    *,
+    auth_audit_logger_factory: Callable[[], AuthorizationAuditLogger] | None = None,
 ) -> FastAPI:
     """Build the sidecar FastAPI application.
 
@@ -416,6 +425,12 @@ def create_app(
     ``openai_api_key`` threads through to ``wire_kb_dependencies`` per
     the ``kb-build-production-wiring`` change. When ``None``, KB slots
     stay ``None`` and ``POST /kb/build`` returns ``503 KB_NOT_CONFIGURED``.
+
+    ``auth_audit_logger_factory`` (auth-flow): callable returning a
+    fresh ``AuthorizationAuditLogger`` per call. When ``None``, the
+    four ``/auth/*`` endpoints respond ``503 AUTH_NOT_CONFIGURED``
+    (capability spec scenario "Auth endpoints return 503 when factory
+    is None").
     """
     if not bearer_token or len(bearer_token) < 32:
         raise ValueError("bearer_token must be at least 32 characters")
@@ -495,7 +510,10 @@ def create_app(
         checks["openai_chat"] = _probe_openai_chat_not_configured
 
     app.state.dependency_checks = checks
-    auth.install(app, bearer_token)
+    # `auth-flow`: factory for the App-level AuthorizationAuditLogger.
+    # ``None`` means /auth/* endpoints respond 503 AUTH_NOT_CONFIGURED.
+    app.state.auth_audit_logger_factory = auth_audit_logger_factory
+    bearer_auth.install(app, bearer_token)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, object]:
@@ -524,6 +542,10 @@ def create_app(
     # and pipes `rag_hits` / `agent_thought` / `kb_growth` / `qa_answer`
     # events to `/tasks/{id}/events` via the same emitter contract.
     app.include_router(qa_router)
+    # `auth-flow`: four sync HTTP endpoints under /auth/. They do NOT
+    # use TaskRegistry / SSE / task_id regex; the ``Authorization
+    # endpoints registration`` Requirement explicitly forbids that.
+    app.include_router(auth_router)
 
     return app
 

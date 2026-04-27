@@ -46,6 +46,12 @@ TaskStatus = Literal["running", "done", "error"]
 # `agent-sse-wiring` adds EXPLORE_FAILED for /explore failures,
 # `module-5-generator-p0` adds GENERATE_FAILED for /generate failures, and
 # `module-8-qa-p0` adds QA_FAILED for /qa failures.
+#
+# Auth-specific HTTP error codes live in `codebus_agent.auth.errors`
+# (AUTH_WORKSPACE_INVALID / AUTH_NO_ACTIVE_GRANT / AUTH_INVALID_REQUEST /
+# AUTH_NOT_CONFIGURED) and are intentionally disjoint from this
+# SSE-channel frozenset — auth endpoints return sync HTTP responses,
+# not background-task wire events. See `auth-flow` design D-A11.
 ERROR_CODES: frozenset[str] = frozenset(
     {
         "SCAN_FAILED",
