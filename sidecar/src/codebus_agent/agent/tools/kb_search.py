@@ -12,16 +12,16 @@ multi-line rendered string consumed by the Q&A ReAct loop's prompt.
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from codebus_agent.agent.station_id import _STATION_ID_RE
 
 
 __all__ = ["KBSearchArgs", "kb_search"]
 
 
-_STATION_ID_RE = re.compile(r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$")
 _SNIPPET_TRUNCATE_LIMIT: int = 200
 
 
@@ -48,7 +48,7 @@ class KBSearchArgs(BaseModel):
             if not isinstance(sid, str) or not _STATION_ID_RE.fullmatch(sid):
                 raise ValueError(
                     f"station_filter entry {sid!r} must match "
-                    r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$"
+                    f"{_STATION_ID_RE.pattern}"
                 )
         return list(v)
 

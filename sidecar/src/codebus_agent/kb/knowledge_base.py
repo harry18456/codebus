@@ -25,6 +25,8 @@ from typing import Any
 
 import tiktoken
 
+from codebus_agent.agent.qa import _QA_DEDUP_THRESHOLD
+from codebus_agent.agent.station_id import _STATION_ID_RE
 from codebus_agent.kb.backend import KBQdrantBackend
 from codebus_agent.kb.chunker import dispatch_for_file_entry
 from codebus_agent.kb.payload import (
@@ -44,12 +46,6 @@ _BATCH_SIZE = 32
 _INFLIGHT_LIMIT = 3
 _TOKEN_ENCODING = "cl100k_base"
 
-# Stable station id regex shared with `KBPayload.related_stations` validation
-# and `kb_growth_logger`. Pre-validated in `query` / `upsert_chunk` so an
-# invalid id never reaches Qdrant or burns an embedding API call.
-_STATION_ID_RE = re.compile(r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$")
-_QA_DEDUP_THRESHOLD: float = 0.95
-
 
 def _validate_station_filter(filter_stations: list[str] | None) -> list[str] | None:
     """Pre-validate `filter_stations`; empty list normalised to None.
@@ -63,7 +59,7 @@ def _validate_station_filter(filter_stations: list[str] | None) -> list[str] | N
         if not isinstance(sid, str) or not _STATION_ID_RE.fullmatch(sid):
             raise ValueError(
                 f"filter_stations entry {sid!r} must match "
-                r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$"
+                f"{_STATION_ID_RE.pattern}"
             )
     return list(filter_stations)
 
@@ -547,4 +543,4 @@ class KnowledgeBase:
         return ("new", point_id)
 
 
-__all__ = ["KnowledgeBase", "_QA_DEDUP_THRESHOLD", "_derive_workspace_id"]
+__all__ = ["KnowledgeBase", "_derive_workspace_id"]

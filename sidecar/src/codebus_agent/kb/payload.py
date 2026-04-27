@@ -15,12 +15,13 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
+from codebus_agent.agent.station_id import _STATION_ID_RE
+
 SourceKind = Literal["code", "doc", "git_commit", "git_blame", "skeleton"]
 AddedBy = Literal["scanner", "qa_agent"]
 ProgressPhase = Literal["chunking", "embedding", "upserting", "done"]
 
 _TEXT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-_STATION_ID_RE = re.compile(r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$")
 
 
 def _validate_text_hash(value: str) -> str:
@@ -35,7 +36,7 @@ def _validate_station_id(value: str) -> str:
     if not isinstance(value, str) or not _STATION_ID_RE.fullmatch(value):
         raise ValueError(
             f"related_stations entry {value!r} must match "
-            r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$"
+            f"{_STATION_ID_RE.pattern}"
         )
     return value
 

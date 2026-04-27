@@ -20,23 +20,22 @@ a parallel audit surface that violates the single-write-path invariant.
 from __future__ import annotations
 
 import hashlib
-import re
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from codebus_agent.agent.qa import (
+    _QA_MAX_ADD_TO_KB_PER_QUESTION,
+    _QA_MAX_ADD_TO_KB_PER_SESSION,
+    _QA_MAX_CHUNK_SIZE_CHARS,
+)
+from codebus_agent.agent.station_id import _STATION_ID_RE
 from codebus_agent.kb.payload import KBPayload
 from codebus_agent.sanitizer import RULES_VERSION, FileSource
 
 
 __all__ = ["AddToKBArgs", "AddToKBChunk", "add_to_kb"]
-
-
-_STATION_ID_RE = re.compile(r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$")
-_QA_MAX_CHUNK_SIZE_CHARS: int = 2000
-_QA_MAX_ADD_TO_KB_PER_SESSION: int = 20
-_QA_MAX_ADD_TO_KB_PER_QUESTION: int = 5
 
 
 class AddToKBChunk(BaseModel):

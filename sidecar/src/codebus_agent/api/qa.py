@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
@@ -26,11 +25,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from codebus_agent.agent.emitter import TaskHandleEmitter
 from codebus_agent.agent.qa import run_qa
 from codebus_agent.agent.reasoning_logger import ReasoningLogger
+from codebus_agent.agent.station_id import _STATION_ID_RE
 from codebus_agent.agent.tools.folder_tools import FolderTools
 from codebus_agent.agent.tools.qa_tools import QATools
 from codebus_agent.agent.types import ExplorerState, QAState
 from codebus_agent.api._audit_paths import (
     _REASONING_LOG_FILENAME,
+    _SANITIZE_AUDIT_FILENAME,
     _WORKSPACE_AUDIT_SUBDIR,
 )
 from codebus_agent.api.tasks import (
@@ -46,9 +47,6 @@ logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
-
-
-_STATION_ID_RE = r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$"
 
 
 class QARequest(BaseModel):
@@ -73,9 +71,9 @@ class QARequest(BaseModel):
     def _validate_station_id(cls, v: str | None) -> str | None:
         if v is None:
             return None
-        if not re.fullmatch(_STATION_ID_RE, v):
+        if not _STATION_ID_RE.fullmatch(v):
             raise ValueError(
-                f"originating_station_id {v!r} must match {_STATION_ID_RE}"
+                f"originating_station_id {v!r} must match {_STATION_ID_RE.pattern}"
             )
         return v
 
@@ -204,7 +202,7 @@ async def qa_endpoint(
     sanitizer_engine = SanitizerEngine()
     audit_dir = workspace_root / _WORKSPACE_AUDIT_SUBDIR
     audit_dir.mkdir(parents=True, exist_ok=True)
-    sanitizer_audit = SanitizerAuditLogger(audit_dir / "sanitize_audit.jsonl")
+    sanitizer_audit = SanitizerAuditLogger(audit_dir / _SANITIZE_AUDIT_FILENAME)
 
     qa_state = QAState(
         question=request.question,

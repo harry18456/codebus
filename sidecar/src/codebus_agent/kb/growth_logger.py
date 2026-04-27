@@ -20,15 +20,13 @@ the schema remains backward-compatible because the field already exists.
 from __future__ import annotations
 
 import json
-import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from codebus_agent.agent.station_id import _STATION_ID_RE
+
 __all__ = ["KBGrowthLogger"]
-
-
-_STATION_ID_RE = re.compile(r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$")
 
 
 def _validate_station_ids(related_stations: list[str]) -> None:
@@ -36,7 +34,7 @@ def _validate_station_ids(related_stations: list[str]) -> None:
         if not isinstance(sid, str) or not _STATION_ID_RE.fullmatch(sid):
             raise ValueError(
                 f"related_stations entry {sid!r} must match "
-                r"^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$"
+                f"{_STATION_ID_RE.pattern}"
             )
 
 
