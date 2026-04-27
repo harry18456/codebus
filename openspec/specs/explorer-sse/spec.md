@@ -10,7 +10,9 @@ TBD - created by archiving change 'agent-sse-wiring'. Update Purpose after archi
 
 The sidecar SHALL expose a `POST /explore` endpoint that accepts a JSON body with `workspace_root: str`, `task: str`, and optional `budget_steps: int` / `budget_tokens: int` fields, validates the workspace root (exists, is a directory), creates an `explore`-kind task via the existing `TaskRegistry.create("explore")` single-slot store, spawns the Explorer agent as a background coroutine under the existing `_run_background_task` wrapper, and responds `202 Accepted` with `{"task_id": "explore_<8-hex>"}`. When another task is already in flight, the endpoint MUST respond `409 Conflict` with `{"code": "TASK_IN_FLIGHT"}`.
 
-The background coroutine SHALL construct a fully-wired Explorer — `ToolContext` bound to the validated workspace root (with `sanitizer=SanitizerEngine()` and `kb=app.state.kb`/`usage_tracker=app.state.kb_usage_tracker(ws)` when configured), `FolderTools(ctx, state)`, `LLMJudge` built via `app.state.llm_judge_provider`, `ReasoningLogger(workspace_root / "reasoning_log.jsonl")`, and a `TaskHandleEmitter(handle)` — then invoke `run_explorer(...)` with the emitter. On a clean return the wrapper emits `done`; on failure the wrapper emits a sanitized `error` event (existing spec `Background task error containment` continues to apply).
+The background coroutine SHALL construct a fully-wired Explorer — `ToolContext` bound to the validated workspace root (with `sanitizer=SanitizerEngine()` and `kb=app.state.kb`/`usage_tracker=app.state.kb_usage_tracker(ws)` when configured), `FolderTools(ctx, state)`, `LLMJudge` built via `app.state.llm_judge_provider`, `ReasoningLogger(workspace_root / ".codebus" / "reasoning_log.jsonl")`, and a `TaskHandleEmitter(handle)` — then invoke `run_explorer(...)` with the emitter. On a clean return the wrapper emits `done`; on failure the wrapper emits a sanitized `error` event (existing spec `Background task error containment` continues to apply).
+
+The endpoint coroutine MUST `mkdir(parents=True, exist_ok=True)` the `<workspace_root>/.codebus/` subdirectory **before** instantiating `ReasoningLogger`. Per the `agent-core` Requirement `ReasoningLogger appends one JSONL line per Step to workspace path`, `ReasoningLogger` does NOT auto-mkdir its parent directory (unlike `UsageTracker` / `LLMCallLogger` / `KBGrowthLogger` which do); the caller is responsible for ensuring the `.codebus/` subdirectory exists before construction. This invariant aligns with `audit-path-unification` (archive 2026-04-25), which moved all six workspace-level audit JSONLs from `<workspace_root>/` root into `<workspace_root>/.codebus/`.
 
 #### Scenario: Happy path returns 202 with task_id
 
@@ -34,6 +36,46 @@ The background coroutine SHALL construct a fully-wired Explorer — `ToolContext
 
 - **WHEN** `POST /explore` is called without a valid bearer token
 - **THEN** the response status MUST be `401`, identical to every other sidecar endpoint's behavior
+
+#### Scenario: ReasoningLogger lands under .codebus subdirectory
+
+- **WHEN** the endpoint coroutine constructs the `ReasoningLogger` for a successfully validated workspace root `<ws>`
+- **THEN** the logger's `path` attribute MUST equal `<ws>/.codebus/reasoning_log.jsonl`
+- **AND** the endpoint coroutine MUST have called `(<ws> / ".codebus").mkdir(parents=True, exist_ok=True)` before constructing the logger (caller-mkdir invariant — `ReasoningLogger` does NOT auto-mkdir)
+- **AND** subsequent `Step` writes from `run_explorer` MUST land in `<ws>/.codebus/reasoning_log.jsonl`, NOT in `<ws>/reasoning_log.jsonl`
+
+
+<!-- @trace
+source: spec-cleanup-stage-5-batch-b
+updated: 2026-04-27
+code:
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - docs/sidecar-api.md
+  - CLAUDE.md
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/kb/payload.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/scan.py
+tests:
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
+-->
 
 ---
 ### Requirement: Explorer loop emits agent_thought / agent_action_result / judge_verdict events

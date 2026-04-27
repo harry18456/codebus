@@ -108,7 +108,9 @@ The sidecar SHALL carry a pytest harness at `sidecar/tests/golden/test_explorer_
 - The produced `step_count` does not equal the pinned value.
 - The pinned `judge_prompt_version` does not equal the current `JUDGE_PROMPT_VERSION` at test time.
 - The pinned `explorer_prompt_version` does not equal the current `EXPLORER_PROMPT_VERSION` at test time.
-- The produced `reasoning_log.jsonl` line count does not equal the pinned `step_count`.
+- The produced `reasoning_log.jsonl` line count is NOT in the closed range `[step_count, step_count + _COVERAGE_MAX_DEPTH]` (inclusive on both ends).
+
+The reasoning-log line-count tolerance is a direct consequence of the `coverage-gap-recurse` Requirement `Coverage round writes one Step line when gaps are non-empty`: each non-empty coverage round (capped at `_COVERAGE_MAX_DEPTH` rounds total per session) appends one extra `Step` to `reasoning_log.jsonl` beyond the main-loop tally. The tolerance upper bound MUST be sourced from `codebus_agent.agent.explorer._COVERAGE_MAX_DEPTH` (the canonical single source of truth) — the harness MUST NOT hard-code the integer `3` even though that is the current value, so future tweaks to `_COVERAGE_MAX_DEPTH` automatically propagate to the drift condition without requiring a spec / harness re-edit.
 
 The harness MUST locate the fixture directory via `Path(__file__)`-based resolution, not via the process working directory, so the test runs correctly regardless of the invoking shell's cwd.
 
@@ -130,29 +132,49 @@ The harness MUST locate the fixture directory via `Path(__file__)`-based resolut
 - **THEN** the pytest MUST fail
 - **AND** the failure message MUST include a phrase instructing the implementer to re-baseline (e.g. "re-baseline required" or equivalent) so drift is not silently ignored
 
-#### Scenario: Reasoning log line count mismatch fails the harness
+#### Scenario: Reasoning log line count within main-loop and coverage-recurse range passes
 
-- **WHEN** the replay writes fewer or more `reasoning_log.jsonl` lines than `expected.json.step_count`
+- **WHEN** the replay writes a number of `reasoning_log.jsonl` lines `L` such that `step_count <= L <= step_count + _COVERAGE_MAX_DEPTH`
+- **THEN** the pytest MUST pass the line-count drift check (i.e. extra Step lines from non-empty coverage rounds MUST NOT trigger drift)
+- **AND** the tolerance upper bound MUST be obtained by importing `_COVERAGE_MAX_DEPTH` from `codebus_agent.agent.explorer`, NOT by hard-coding the integer literal in the harness
+
+#### Scenario: Reasoning log line count outside the tolerance range fails the harness
+
+- **WHEN** the replay writes either fewer than `step_count` `reasoning_log.jsonl` lines OR more than `step_count + _COVERAGE_MAX_DEPTH` lines
 - **THEN** the pytest MUST fail
+- **AND** the failure message MUST surface both the observed line count and the expected `[step_count, step_count + _COVERAGE_MAX_DEPTH]` range
 
 
 <!-- @trace
-source: explorer-judge-golden
-updated: 2026-04-24
+source: spec-cleanup-stage-5-batch-b
+updated: 2026-04-27
 code:
-  - sidecar/src/codebus_agent/agent/judge.py
-  - tests/golden/demo-synthetic/workspace/src/b.py
-  - sidecar/src/codebus_agent/agent/prompts/judge.py
-  - docs/decisions.md
-  - docs/agent-core.md
-  - tests/golden/demo-synthetic/expected.json
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - docs/sidecar-api.md
   - CLAUDE.md
-  - tests/golden/demo-synthetic/workspace/src/a.py
-  - tests/golden/demo-synthetic/workspace/src/c.py
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/kb/payload.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/scan.py
 tests:
-  - sidecar/tests/agent/test_judge_prompt.py
-  - sidecar/tests/golden/__init__.py
-  - sidecar/tests/golden/test_explorer_replay.py
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
 -->
 
 ---

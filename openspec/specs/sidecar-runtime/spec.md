@@ -442,6 +442,13 @@ The error code table SHALL be predefined (not derived from exception classes) an
 
 The historical alias `"KB_EMBED_FAILED"` (used during M2 development before this Requirement was tightened) MUST NOT appear in production code or tests. `review-2-critical-fix` (2026-04-26) renames all callsites to `"KB_BUILD_FAILED"` so the production frozenset matches this spec literally.
 
+The wire `error` event payload MAY carry a narrow, code-specific set of typed extras alongside the mandatory `code` + `message` fields. The extras whitelist is defined per error code below; any other code MUST emit only `code` + `message` with no additional fields. Extras MUST be derived exclusively from typed attributes on the exception (e.g., `getattr(exc, "expected_dim", None)`) — never from `repr(exc)` / `str(exc)` / stack frames — so the operational invariant "no raw exception text on the wire" stays intact.
+
+Extras whitelist:
+
+- `"KB_DIM_MISMATCH"`: `expected_dim: int` (the embedding dimension recorded in the existing Qdrant collection), `actual_dim: int` (the dimension produced by the currently-configured embedding model), and `suggestion: str` (a fixed remediation hint, currently `"delete collection and rebuild"`). The two integer fields MUST appear only when the underlying exception exposes the corresponding typed attribute (`isinstance(value, int)` check); the `suggestion` field MUST always be present when the error code is `"KB_DIM_MISMATCH"` so the UI can always render a human-friendly remediation step.
+- All other nine codes (`"SCAN_FAILED"` / `"KB_BUILD_FAILED"` / `"EXPLORE_FAILED"` / `"GENERATE_FAILED"` / `"QA_FAILED"` / `"OPENAI_AUTH_FAILED"` / `"OPENAI_RATE_LIMITED"` / `"OPENAI_CONTEXT_EXCEEDED"` / `"INTERNAL_ERROR"`): no extras MUST be added; the wire payload MUST contain exactly `{"type": "error", "code": ..., "message": ...}` and nothing else.
+
 #### Scenario: Background task exception surfaces as safe error event
 
 - **WHEN** a background scan task raises an exception while running
@@ -482,22 +489,68 @@ The historical alias `"KB_EMBED_FAILED"` (used during M2 development before this
 - **THEN** the frozenset MUST equal exactly `{"SCAN_FAILED", "KB_BUILD_FAILED", "EXPLORE_FAILED", "GENERATE_FAILED", "QA_FAILED", "OPENAI_AUTH_FAILED", "OPENAI_RATE_LIMITED", "OPENAI_CONTEXT_EXCEEDED", "KB_DIM_MISMATCH", "INTERNAL_ERROR"}` — ten elements, no more, no fewer
 - **AND** the docs/sidecar-api.md `§三-bis` ERROR_CODES table MUST list all ten codes with a short description for each
 
+#### Scenario: KB_DIM_MISMATCH error event carries expected_dim, actual_dim, and suggestion extras
+
+- **WHEN** a background task raises an exception that the classifier maps to `code="KB_DIM_MISMATCH"` and the underlying exception exposes integer-typed `expected_dim` and `actual_dim` attributes
+- **THEN** the emitted wire `error` event MUST be `{"type": "error", "code": "KB_DIM_MISMATCH", "message": "<safe>", "expected_dim": <int>, "actual_dim": <int>, "suggestion": "delete collection and rebuild"}`
+- **AND** the extras MUST be derived from the exception's typed attributes via `getattr(exc, "expected_dim", None)` / `getattr(exc, "actual_dim", None)`, NEVER from `repr(exc)` or `str(exc)`
+- **AND** the `suggestion` field MUST be present even when `expected_dim` / `actual_dim` are absent (so the UI always has a remediation hint to render)
+
+#### Scenario: Other error codes carry no extras beyond code and message
+
+- **WHEN** a background task raises an exception that the classifier maps to any code other than `"KB_DIM_MISMATCH"` (e.g., `"SCAN_FAILED"` / `"OPENAI_RATE_LIMITED"` / `"INTERNAL_ERROR"`)
+- **THEN** the emitted wire `error` event MUST contain exactly the keys `{"type", "code", "message"}` with no additional fields
+- **AND** even when the underlying exception has typed attributes the wire payload MUST NOT include them — the extras whitelist is closed per error code
+
+
+<!-- @trace
+source: spec-cleanup-stage-5-batch-b
+updated: 2026-04-27
+code:
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - docs/sidecar-api.md
+  - CLAUDE.md
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/kb/payload.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/scan.py
+tests:
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
+-->
+
 ---
 ### Requirement: KB dependency injection hook
 
-The sidecar SHALL expose a `wire_kb_dependencies(app, *, openai_api_key, qdrant_url)` function that populates `app.state.kb_backend`, `app.state.kb_provider`, `app.state.kb_usage_tracker`, `app.state.kb_embedding_dim`, `app.state.kb_query_provider`, `app.state.llm_reasoning_provider`, `app.state.llm_judge_provider`, and `app.state.llm_chat_provider` from resolved runtime inputs. The startup path (`main.py`) SHALL call this hook with values read from the `CODEBUS_OPENAI_API_KEY` and `CODEBUS_QDRANT_URL` environment variables (with existing resolver fallback for `CODEBUS_QDRANT_URL`). Missing values SHALL result in the corresponding slot being left as `None` rather than raising at startup, so the sidecar stays degraded-but-alive — `POST /kb/build`, `POST /kb/query`, and any chat-ish caller (e.g., Module 4 Explorer) all return their respective `503 *_NOT_CONFIGURED` errors.
+The sidecar SHALL expose a `wire_kb_dependencies(app, *, openai_api_key, qdrant_url)` function that populates **all twelve** workspace-scoped `app.state` slots from resolved runtime inputs: `app.state.kb_backend`, `app.state.kb_provider`, `app.state.kb_query_provider`, `app.state.kb_usage_tracker`, `app.state.kb_embedding_dim`, `app.state.llm_reasoning_provider`, `app.state.llm_judge_provider`, `app.state.llm_chat_provider`, `app.state.llm_coverage_provider`, `app.state.llm_generate_provider`, `app.state.llm_qa_provider`, and `app.state.kb_growth_logger_factory`. The startup path (`main.py`) SHALL call this hook with values read from the `CODEBUS_OPENAI_API_KEY` and `CODEBUS_QDRANT_URL` environment variables (with existing resolver fallback for `CODEBUS_QDRANT_URL`). Missing values SHALL result in the corresponding slot being left as `None` rather than raising at startup, so the sidecar stays degraded-but-alive — `POST /kb/build`, `POST /kb/query`, `POST /explore`, `POST /generate`, and `POST /qa` all return their respective `503 *_NOT_CONFIGURED` errors.
 
-The chat-ish slots (`llm_reasoning_provider` / `llm_judge_provider` / `llm_chat_provider`) added by `chat-provider-wiring` follow the same factory-of-`TrackedProvider` pattern as the embedding slots: each slot is `Callable[[Path], TrackedProvider]`, the factory builds a workspace-scoped TrackedProvider wrapping `OpenAIChatProvider` with role-appropriate `default_module` (`"reasoning"`, `"judge"`, `"chat"`) and per-role temperature defaults (`reasoning`: 0.1, `judge`: 0.0, `chat`: 0.2). All three default to model `"gpt-4o-mini"`.
+The chat-ish slots follow the same factory-of-`TrackedProvider` pattern as the embedding slots: each slot is `Callable[[Path], TrackedProvider]`, the factory builds a workspace-scoped TrackedProvider wrapping `OpenAIChatProvider` with role-appropriate `default_module` (`"reasoning"` / `"judge"` / `"chat"` / `"coverage"` / `"generate"` / `"qa_agent"`) and per-role temperature defaults (`reasoning`: 0.1, `judge` / `coverage`: 0.0, `chat` / `qa_agent`: 0.2, `generate`: 0.4). All chat-ish slots default to model `"gpt-4o-mini"`. The `kb_growth_logger_factory` slot is `Callable[[Path], KBGrowthLogger]` returning a `KBGrowthLogger` whose `path` resolves under `<workspace_root>/.codebus/kb_growth.jsonl`; it lands with the `module-8-qa-p0` Q&A pipeline and is required by the `/qa` endpoint.
 
-#### Scenario: Both env vars present wire all eight slots
+#### Scenario: Both env vars present wire all twelve slots
 
 - **WHEN** the sidecar is started with `CODEBUS_OPENAI_API_KEY` set and Qdrant reachable at the resolved URL
-- **THEN** all of `app.state.kb_backend`, `app.state.kb_provider`, `app.state.kb_query_provider`, `app.state.kb_usage_tracker`, `app.state.kb_embedding_dim`, `app.state.llm_reasoning_provider`, `app.state.llm_judge_provider`, and `app.state.llm_chat_provider` MUST be non-`None` after `create_app` returns
+- **THEN** all twelve of `app.state.kb_backend`, `app.state.kb_provider`, `app.state.kb_query_provider`, `app.state.kb_usage_tracker`, `app.state.kb_embedding_dim`, `app.state.llm_reasoning_provider`, `app.state.llm_judge_provider`, `app.state.llm_chat_provider`, `app.state.llm_coverage_provider`, `app.state.llm_generate_provider`, `app.state.llm_qa_provider`, and `app.state.kb_growth_logger_factory` MUST be non-`None` after `create_app` returns
 
 #### Scenario: Missing OpenAI API key leaves provider slot as None
 
 - **WHEN** the sidecar is started without `CODEBUS_OPENAI_API_KEY` set
-- **THEN** all OpenAI-dependent slots MUST be `None` (`kb_provider`, `kb_query_provider`, `kb_embedding_dim`, `llm_reasoning_provider`, `llm_judge_provider`, `llm_chat_provider`); the sidecar MUST still start successfully (stdout handshake line emitted, `/healthz` reachable), and `app.state.qdrant_client` MUST still be constructed when `CODEBUS_QDRANT_URL` is present
+- **THEN** all OpenAI-dependent slots MUST be `None` (`kb_provider`, `kb_query_provider`, `kb_embedding_dim`, `llm_reasoning_provider`, `llm_judge_provider`, `llm_chat_provider`, `llm_coverage_provider`, `llm_generate_provider`, `llm_qa_provider`, `kb_growth_logger_factory`); the sidecar MUST still start successfully (stdout handshake line emitted, `/healthz` reachable), and `app.state.qdrant_client` MUST still be constructed when `CODEBUS_QDRANT_URL` is present
 
 #### Scenario: UsageTracker slot is a factory, not a prebuilt instance
 
@@ -511,8 +564,13 @@ The chat-ish slots (`llm_reasoning_provider` / `llm_judge_provider` / `llm_chat_
 
 #### Scenario: Chat-ish provider slots are factories returning TrackedProviders with role-appropriate default_module
 
-- **WHEN** `app.state.llm_reasoning_provider`, `app.state.llm_judge_provider`, or `app.state.llm_chat_provider` is invoked with a workspace path
-- **THEN** the returned provider MUST be a `TrackedProvider` wrapping an `OpenAIChatProvider` with role-appropriate `default_module` (`"reasoning"`, `"judge"`, `"chat"` respectively) and matching `ProviderRole` (`REASONING`, `JUDGE`, `CHAT`); each slot MUST produce distinct TrackedProvider instances per call (no shared state across workspaces)
+- **WHEN** `app.state.llm_reasoning_provider`, `app.state.llm_judge_provider`, `app.state.llm_chat_provider`, `app.state.llm_coverage_provider`, `app.state.llm_generate_provider`, or `app.state.llm_qa_provider` is invoked with a workspace path
+- **THEN** the returned provider MUST be a `TrackedProvider` wrapping an `OpenAIChatProvider` with role-appropriate `default_module` (`"reasoning"` / `"judge"` / `"chat"` / `"coverage"` / `"generate"` / `"qa_agent"` respectively) and matching `ProviderRole` (`REASONING` / `JUDGE` / `CHAT` / `JUDGE` / `CHAT` / `CHAT`); each slot MUST produce distinct TrackedProvider instances per call (no shared state across workspaces)
+
+#### Scenario: KB growth logger factory targets the workspace .codebus subdirectory
+
+- **WHEN** `app.state.kb_growth_logger_factory` is invoked with a workspace path by the `POST /qa` endpoint
+- **THEN** the slot MUST be callable with signature `(workspace_root: Path) -> KBGrowthLogger`, and the returned logger MUST resolve its `path` to `<workspace_root>/.codebus/kb_growth.jsonl` (the seventh workspace-level audit JSONL per the `kb-growth` capability single-source contract)
 
 #### Scenario: Healthz smoke probe bypasses TrackedProvider
 
@@ -527,27 +585,39 @@ The chat-ish slots (`llm_reasoning_provider` / `llm_judge_provider` / `llm_chat_
 #### Scenario: Healthz reflects OpenAI chat configuration state
 
 - **WHEN** `GET /healthz` is called after `chat-provider-wiring` lands
-- **THEN** the response `dependencies` map MUST also contain an `openai_chat` key whose `status` is one of `"ok"` (API key set and a startup smoke chat completion against `gpt-4o-mini` succeeded), `"degraded"` (API key set but smoke call failed), or `"not-configured"` (API key absent). The `openai_chat` probe SHALL invoke a raw `OpenAIChatProvider`, NOT through a `TrackedProvider`, mirroring the embedding probe's bypass rule (operational check MUST NOT pollute audit trail). One probe covers all three chat-ish roles since they share the same OpenAI API + key.
+- **THEN** the response `dependencies` map MUST also contain an `openai_chat` key whose `status` is one of `"ok"` (API key set and a startup smoke chat completion against `gpt-4o-mini` succeeded), `"degraded"` (API key set but smoke call failed), or `"not-configured"` (API key absent). The `openai_chat` probe SHALL invoke a raw `OpenAIChatProvider`, NOT through a `TrackedProvider`, mirroring the embedding probe's bypass rule (operational check MUST NOT pollute audit trail). One probe covers all chat-ish roles since they share the same OpenAI API + key.
 
 
 <!-- @trace
-source: chat-provider-wiring
-updated: 2026-04-23
+source: spec-cleanup-stage-5-batch-b
+updated: 2026-04-27
 code:
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
   - docs/sidecar-api.md
-  - sidecar/src/codebus_agent/api/__init__.py
-  - sidecar/src/codebus_agent/providers/tracked.py
-  - sidecar/src/codebus_agent/api/tasks.py
-  - docs/llm-provider.md
-  - sidecar/scripts/smoke_chat_provider.py
-  - sidecar/src/codebus_agent/providers/__init__.py
-  - docs/module-2-kb-builder.md
-  - sidecar/src/codebus_agent/providers/openai_chat.py
   - CLAUDE.md
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/kb/payload.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/scan.py
 tests:
-  - sidecar/tests/providers/test_tracked_provider.py
-  - sidecar/tests/test_wire_kb_dependencies.py
-  - sidecar/tests/providers/test_openai_chat.py
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
 -->
 
 ---
@@ -591,7 +661,7 @@ The sidecar SHALL expose `POST /qa` whose request body is a Pydantic model with 
 
 The endpoint SHALL require all of the following `app.state` slots populated before spawning: `kb_provider`, `kb_query_provider`, `kb_growth_logger_factory`, `llm_chat_provider`, `llm_judge_provider`. When any required slot is `None` or missing, the endpoint MUST respond with `503` and a body containing `code="QA_NOT_CONFIGURED"` whose `detail` field enumerates the missing slot names so operators can diagnose configuration gaps without reading sidecar logs. Returning `503` MUST NOT consume a `TaskRegistry` slot.
 
-When validation passes and dependencies are populated, the endpoint SHALL allocate a `task_id` matching `^qa_[0-9a-f]{8}$`, register the task with the single-slot `TaskRegistry` (returning `409 TASK_IN_FLIGHT` when another task of any kind is currently in flight), spawn the Q&A coroutine via the same `_run_background_task` wrapper used by `/explore` and `/generate`, and respond synchronously with `{"task_id": "<qa_xxxxxxxx>"}`.
+When validation passes and dependencies are populated, the endpoint SHALL allocate a `task_id` matching `^qa_[0-9a-f]{8}$`, register the task with the single-slot `TaskRegistry` (returning `409 TASK_IN_FLIGHT` when another task of any kind is currently in flight), spawn the Q&A coroutine via the same `_run_background_task` wrapper used by `/explore` and `/generate`, and respond with HTTP `202 Accepted` and body `{"task_id": "<qa_xxxxxxxx>"}`. The 202 status code MUST match the convention used by all other task-spawning endpoints (`/scan?stream=true` / `/kb/build` / `/explore` / `/generate`) so clients can apply uniform `if status === 202: subscribe to SSE` logic.
 
 The Q&A coroutine SHALL drive `codebus_agent.agent.qa.run_qa(...)` to completion, route SSE events through the registered task subscriber channel, and surface failures via the `error` event with `code="QA_FAILED"` per the error containment Requirement.
 
@@ -622,7 +692,7 @@ The Q&A coroutine SHALL drive `codebus_agent.agent.qa.run_qa(...)` to completion
 #### Scenario: Successful spawn returns task_id
 
 - **WHEN** `POST /qa` is called with valid body and all dependencies present
-- **THEN** the response MUST be `200` with body `{"task_id": "<qa_xxxxxxxx>"}` matching `^qa_[0-9a-f]{8}$`
+- **THEN** the response MUST be `202` with body `{"task_id": "<qa_xxxxxxxx>"}` matching `^qa_[0-9a-f]{8}$`
 - **AND** a single `TaskRegistry` slot MUST be occupied
 - **AND** the background coroutine MUST begin emitting `rag_hits` followed by either `qa_answer` (success) or `error` (failure) on the task's SSE stream
 
@@ -639,47 +709,37 @@ The Q&A coroutine SHALL drive `codebus_agent.agent.qa.run_qa(...)` to completion
 - **THEN** the emitted `error` event's `message` field MUST NOT contain any substring of `question`
 - **AND** the full exception MUST be visible in the sidecar standard logger only
 
+
 <!-- @trace
-source: module-8-qa-p0
-updated: 2026-04-26
+source: spec-cleanup-stage-5-batch-b
+updated: 2026-04-27
 code:
-  - docs/implementation-plan.md
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
   - sidecar/src/codebus_agent/agent/tools/kb_search.py
-  - sidecar/src/codebus_agent/agent/types.py
-  - docs/sidecar-api.md
-  - docs/decisions.md
-  - sidecar/src/codebus_agent/agent/qa.py
-  - sidecar/src/codebus_agent/agent/prompts/__init__.py
-  - sidecar/src/codebus_agent/api/_audit_paths.py
-  - sidecar/src/codebus_agent/api/__init__.py
-  - sidecar/src/codebus_agent/agent/reasoning_logger.py
-  - CLAUDE.md
-  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
-  - sidecar/src/codebus_agent/_audit_paths.py
-  - sidecar/src/codebus_agent/api/tasks.py
-  - sidecar/src/codebus_agent/agent/tools/qa_tools.py
-  - sidecar/src/codebus_agent/kb/growth_logger.py
-  - sidecar/src/codebus_agent/api/qa.py
-  - sidecar/src/codebus_agent/kb/__init__.py
   - sidecar/src/codebus_agent/kb/knowledge_base.py
-  - sidecar/src/codebus_agent/agent/prompts/qa.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - docs/sidecar-api.md
+  - CLAUDE.md
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/kb/payload.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/scan.py
 tests:
-  - sidecar/tests/agent/tools/test_kb_search.py
-  - sidecar/tests/kb/test_upsert_chunk.py
-  - sidecar/tests/api/test_qa_sse_events.py
-  - sidecar/tests/agent/test_qa_types.py
-  - sidecar/tests/api/test_task_id_qa_kind.py
-  - sidecar/tests/agent/tools/test_qa_tools.py
-  - sidecar/tests/integration/__init__.py
-  - sidecar/tests/kb/test_query_filter_stations.py
-  - sidecar/tests/agent/test_qa_prompts.py
-  - sidecar/tests/agent/test_hits_confident.py
-  - sidecar/tests/agent/test_run_qa.py
-  - sidecar/tests/api/test_audit_paths_kb_growth.py
-  - sidecar/tests/kb/test_growth_logger.py
-  - sidecar/tests/api/test_qa_endpoint.py
-  - sidecar/tests/integration/test_qa_end_to_end.py
-  - sidecar/tests/agent/test_qa_budget_constants.py
-  - sidecar/tests/agent/tools/test_add_to_kb.py
-  - sidecar/tests/sanitizer/test_pass3_add_to_kb_audit.py
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
 -->
+
+---

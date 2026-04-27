@@ -224,7 +224,9 @@ tests:
 ---
 ### Requirement: Embedding batch pipeline with UsageTracker wiring
 
-The builder SHALL group chunks into batches of 32 and SHALL submit at most three batches to `provider.embed()` concurrently, enforced by an `asyncio.Semaphore(3)`. Each batch's `EmbedResponse.usage` MUST be recorded via `ctx.usage_tracker.record(usage=response.usage, module="kb_build")`. When a single chunk exceeds the provider's declared maximum input token count, the builder MUST split the chunk into halves and retry; when the halved chunk still exceeds the limit, the builder MUST skip it, emit a warning into `KBStats.warnings`, and MUST NOT raise.
+The builder SHALL group chunks into batches of 32 and SHALL submit at most three batches to `provider.embed()` concurrently, enforced by an `asyncio.Semaphore(3)`. Each batch's `EmbedResponse.usage` SHALL be recorded into `<workspace_root>/.codebus/token_usage.jsonl` exactly once per batch via the **`TrackedProvider` automatic recording path**: when the bound provider is a `TrackedProvider` constructed with `default_module="kb_build"`, the wrapper writes the line on every successful `embed()` return, and `KnowledgeBase.build` MUST NOT call `usage_tracker.record(...)` itself. This invariant is the load-bearing rule of `usage-tracker-dedup` (archive 2026-04-23) — a manual `tracker.record(...)` from the builder would produce two lines per batch (one from the wrapper, one from the builder), breaking the dedup contract that "every embed line MUST equal one batch".
+
+When a single chunk exceeds the provider's declared maximum input token count, the builder MUST split the chunk into halves and retry; when the halved chunk still exceeds the limit, the builder MUST skip it, emit a warning into `KBStats.warnings`, and MUST NOT raise.
 
 #### Scenario: Batch size capped at 32
 
@@ -236,10 +238,12 @@ The builder SHALL group chunks into batches of 32 and SHALL submit at most three
 - **WHEN** the builder runs against a provider whose `embed()` blocks until released and 10 batches are queued
 - **THEN** at most 3 `embed()` invocations MUST be concurrently in-flight at any moment
 
-#### Scenario: UsageTracker records one entry per batch
+#### Scenario: UsageTracker records exactly one entry per batch via TrackedProvider only
 
-- **WHEN** the builder processes 64 chunks (two batches) through a provider that returns non-zero `usage`
-- **THEN** `usage_tracker.record` MUST be called at least twice with `module="kb_build"` and the sum of recorded `prompt_tokens` MUST equal the provider's reported total
+- **WHEN** the builder processes 64 chunks (two batches) through a `TrackedProvider` whose `default_module="kb_build"` and whose inner provider returns non-zero `usage`
+- **THEN** the `<workspace_root>/.codebus/token_usage.jsonl` file MUST gain exactly two lines whose `operation == "embed"` and `module == "kb_build"`
+- **AND** `KnowledgeBase.build` MUST NOT itself invoke `usage_tracker.record(...)` (the wrapper is the single writer; the dedup contract from `usage-tracker-dedup` requires `len(embed_lines) == KBStats.batches_embedded`)
+- **AND** the sum of recorded `prompt_tokens` MUST equal the provider's reported total
 
 #### Scenario: Oversized chunk split then skipped
 
@@ -248,31 +252,35 @@ The builder SHALL group chunks into batches of 32 and SHALL submit at most three
 
 
 <!-- @trace
-source: module-2-kb-builder-p0
-updated: 2026-04-21
+source: spec-cleanup-stage-5-batch-b
+updated: 2026-04-27
 code:
-  - sidecar/uv.lock
-  - sidecar/src/codebus_agent/kb/backend.py
-  - sidecar/src/codebus_agent/kb/qdrant_client.py
-  - sidecar/src/codebus_agent/providers/usage_tracker.py
-  - CLAUDE.md
-  - sidecar/src/codebus_agent/kb/payload.py
-  - sidecar/pyproject.toml
-  - sidecar/src/codebus_agent/kb/__init__.py
-  - docs/implementation-plan.md
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
   - sidecar/src/codebus_agent/kb/knowledge_base.py
-  - docs/module-2-kb-builder.md
-  - sidecar/src/codebus_agent/kb/chunker.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - docs/sidecar-api.md
+  - CLAUDE.md
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/kb/payload.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/scan.py
 tests:
-  - sidecar/tests/kb/fixtures/sample-doc.md
-  - sidecar/tests/kb/conftest.py
-  - sidecar/tests/kb/test_strategy.py
-  - sidecar/tests/kb/fixtures/sample-code.py
-  - sidecar/tests/kb/test_knowledge_base.py
-  - sidecar/tests/kb/fixtures/sample-plain.txt
-  - sidecar/tests/kb/test_qdrant_kb.py
-  - sidecar/tests/kb/test_chunker.py
-  - sidecar/tests/kb/test_payload.py
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
 -->
 
 ---
@@ -329,7 +337,7 @@ tests:
 
 The sidecar SHALL expose `KnowledgeBase.query(text: str, *, top_k: int = 8, filter_path: str | None = None, filter_source_kind: list[str] | None = None, filter_stations: list[str] | None = None) -> list[KBHit]` and `KnowledgeBase.find_similar(text: str, *, threshold: float = 0.95) -> KBHit | None`. `query` MUST embed `text` via the bound provider, search the workspace collection, and return hits ordered by descending score. `find_similar` MUST call `query(text, top_k=1)` internally and MUST return `None` when the top hit's score is strictly less than `threshold`.
 
-`filter_stations`, when not `None`, SHALL restrict results to chunks whose `payload.related_stations` contains at least one of the supplied stable station ids. The Qdrant filter expression MUST be a `should` clause that matches any element in the supplied list against the indexed `related_stations` keyword field — i.e., the filter is logically OR over the supplied ids, not AND. Each entry in `filter_stations` MUST match `^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$`; any non-matching value MUST cause `query` to raise `ValueError` before any embedding or Qdrant call. An empty list (`filter_stations=[]`) MUST be treated identically to `filter_stations=None` — no station restriction is applied — so callers can normalize a missing-vs-empty distinction without conditional branches.
+`filter_stations`, when not `None`, SHALL restrict results to chunks whose `payload.related_stations` contains at least one of the supplied stable station ids. The Qdrant filter expression MUST be a `should` clause that matches any element in the supplied list against the indexed `related_stations` keyword field — i.e., the filter is logically OR over the supplied ids, not AND. Each entry in `filter_stations` MUST match the canonical regex sourced from `codebus_agent.agent.station_id.STATION_ID_RE`; any non-matching value MUST cause `query` to raise `ValueError` before any embedding or Qdrant call. The `kb.knowledge_base` module MUST NOT redeclare its own copy of the regex literal — the `re.Pattern` object used for validation MUST be the same Python object as the canonical one (identity check via `is`). An empty list (`filter_stations=[]`) MUST be treated identically to `filter_stations=None` — no station restriction is applied — so callers can normalize a missing-vs-empty distinction without conditional branches.
 
 #### Scenario: Query returns top_k hits ordered by score
 
@@ -377,50 +385,32 @@ The sidecar SHALL expose `KnowledgeBase.query(text: str, *, top_k: int = 8, filt
 - **WHEN** `find_similar("known text", threshold=0.95)` is called and the top hit's score is `0.96`
 - **THEN** the return value MUST be a `KBHit` whose `score >= 0.95`
 
+#### Scenario: Station id regex sourced from canonical leaf module
+
+- **WHEN** `KnowledgeBase._validate_station_filter` (or equivalent internal helper) validates `filter_stations` entries
+- **THEN** the `re.Pattern` object used MUST be the same Python object as `codebus_agent.agent.station_id.STATION_ID_RE` (identity check via `is`)
+- **AND** the `kb.knowledge_base` module MUST NOT contain its own `re.compile(r"^s\d{2}-...")` call
+
 
 <!-- @trace
-source: module-8-qa-p0
-updated: 2026-04-26
+source: audit-path-unification-stage-2
+updated: 2026-04-27
 code:
-  - docs/implementation-plan.md
-  - sidecar/src/codebus_agent/agent/tools/kb_search.py
-  - sidecar/src/codebus_agent/agent/types.py
-  - docs/sidecar-api.md
-  - docs/decisions.md
-  - sidecar/src/codebus_agent/agent/qa.py
-  - sidecar/src/codebus_agent/agent/prompts/__init__.py
-  - sidecar/src/codebus_agent/api/_audit_paths.py
-  - sidecar/src/codebus_agent/api/__init__.py
-  - sidecar/src/codebus_agent/agent/reasoning_logger.py
-  - CLAUDE.md
-  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
-  - sidecar/src/codebus_agent/_audit_paths.py
-  - sidecar/src/codebus_agent/api/tasks.py
-  - sidecar/src/codebus_agent/agent/tools/qa_tools.py
   - sidecar/src/codebus_agent/kb/growth_logger.py
   - sidecar/src/codebus_agent/api/qa.py
-  - sidecar/src/codebus_agent/kb/__init__.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - sidecar/src/codebus_agent/kb/payload.py
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/api/scan.py
   - sidecar/src/codebus_agent/kb/knowledge_base.py
-  - sidecar/src/codebus_agent/agent/prompts/qa.py
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
 tests:
-  - sidecar/tests/agent/tools/test_kb_search.py
-  - sidecar/tests/kb/test_upsert_chunk.py
-  - sidecar/tests/api/test_qa_sse_events.py
-  - sidecar/tests/agent/test_qa_types.py
-  - sidecar/tests/api/test_task_id_qa_kind.py
-  - sidecar/tests/agent/tools/test_qa_tools.py
-  - sidecar/tests/integration/__init__.py
-  - sidecar/tests/kb/test_query_filter_stations.py
-  - sidecar/tests/agent/test_qa_prompts.py
-  - sidecar/tests/agent/test_hits_confident.py
-  - sidecar/tests/agent/test_run_qa.py
-  - sidecar/tests/api/test_audit_paths_kb_growth.py
-  - sidecar/tests/kb/test_growth_logger.py
-  - sidecar/tests/api/test_qa_endpoint.py
-  - sidecar/tests/integration/test_qa_end_to_end.py
-  - sidecar/tests/agent/test_qa_budget_constants.py
-  - sidecar/tests/agent/tools/test_add_to_kb.py
-  - sidecar/tests/sanitizer/test_pass3_add_to_kb_audit.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
 -->
 
 ---
@@ -518,12 +508,19 @@ tests:
 ---
 ### Requirement: POST /kb/build async endpoint
 
-The sidecar SHALL expose `POST /kb/build` that accepts a JSON request body of the shape `{"workspace_root": "<absolute path>", "scan_result": <ScanResult JSON>}`. The endpoint MUST require the bearer token via the existing authentication middleware. On a successful request the endpoint SHALL create a `kind="kb"` task in the sidecar task registry, spawn a background coroutine that invokes `KnowledgeBase.build(scan_result, on_progress=<adapter>)`, return HTTP `200` with body `{"task_id": "kb_<hex8>"}` immediately, and SHALL NOT block until the build completes. There SHALL NOT be a synchronous variant of `POST /kb/build` in this change. When the background build completes successfully the task handle's `result` MUST be set to the `KBStats` JSON returned by `build` and a `done` event MUST be emitted; when it raises, the error containment path defined by `sidecar-runtime` MUST apply.
+The sidecar SHALL expose `POST /kb/build` that accepts a JSON request body of the shape `{"workspace_root": "<absolute path>", "scan_result": <ScanResult JSON>}`. The endpoint MUST require the bearer token via the existing authentication middleware. On a successful request the endpoint SHALL create a `kind="kb"` task in the sidecar task registry, spawn a background coroutine that invokes `KnowledgeBase.build(scan_result, on_progress=<adapter>)`, return HTTP `202 Accepted` with body `{"task_id": "kb_<hex8>"}` immediately, and SHALL NOT block until the build completes. The 202 status code MUST match the convention used by all other task-spawning endpoints (`POST /scan` with stream=true / `POST /explore` / `POST /generate` / `POST /qa`) so clients can apply uniform `if status === 202: subscribe to SSE` logic. There SHALL NOT be a synchronous variant of `POST /kb/build` in this change. When the background build completes successfully the task handle's `result` MUST be set to the `KBStats` JSON returned by `build` and a `done` event MUST be emitted; when it raises, the error containment path defined by `sidecar-runtime` MUST apply.
 
-#### Scenario: Successful request returns task_id immediately
+#### Scenario: Successful request returns 202 with task_id immediately
 
 - **WHEN** a client calls `POST /kb/build` with a valid bearer token and body `{"workspace_root": "<path>", "scan_result": {...}}` while no other task is in flight
-- **THEN** the response MUST return within a small bounded latency (not blocked by KB build) with body matching `{"task_id": "kb_<hex8>"}`
+- **THEN** the HTTP response status code MUST equal `202` (Accepted)
+- **AND** the response body MUST match `{"task_id": "kb_<hex8>"}`
+- **AND** the response MUST return within a small bounded latency (not blocked by KB build)
+
+#### Scenario: Status code aligned with sibling task endpoints
+
+- **WHEN** the sidecar test suite asserts the status code returned by each task-spawning endpoint (`POST /scan?stream=true`, `POST /kb/build`, `POST /explore`, `POST /generate`, `POST /qa`) on the success path
+- **THEN** every endpoint in that set MUST return HTTP `202` (no endpoint MUST return `200` on the success path)
 
 #### Scenario: Concurrent task in flight rejected with 409
 
@@ -537,33 +534,35 @@ The sidecar SHALL expose `POST /kb/build` that accepts a JSON request body of th
 
 
 <!-- @trace
-source: sse-progress-skeleton
-updated: 2026-04-22
+source: agent-defense-depth
+updated: 2026-04-27
 code:
-  - sidecar/src/codebus_agent/scanner/models.py
-  - CLAUDE.md
-  - docs/implementation-plan.md
-  - sidecar/src/codebus_agent/api/__init__.py
-  - sidecar/src/codebus_agent/api/tasks.py
-  - sidecar/src/codebus_agent/scanner/service.py
-  - sidecar/pyproject.toml
-  - sidecar/src/codebus_agent/api/kb.py
-  - sidecar/uv.lock
-  - sidecar/src/codebus_agent/api/scan.py
-  - docs/module-1-scanner.md
-  - docs/module-2-kb-builder.md
   - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - sidecar/src/codebus_agent/api/scan.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/kb/payload.py
 tests:
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
   - sidecar/tests/api/test_scan_stream.py
-  - sidecar/tests/api/__init__.py
-  - sidecar/tests/scanner/test_fixtures_integration.py
   - sidecar/tests/api/test_kb_build.py
-  - sidecar/tests/api/test_task_error_containment.py
-  - sidecar/tests/api/test_task_registry.py
-  - sidecar/tests/api/test_task_result.py
-  - sidecar/tests/scanner/test_service.py
-  - sidecar/tests/api/test_tasks_sse.py
-  - sidecar/tests/scanner/test_progress_callback.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
 -->
 
 ---
@@ -737,8 +736,8 @@ tests:
 The sidecar SHALL expose `KnowledgeBase.upsert_chunk(text: str, *, payload: KBPayload) -> tuple[str, str]` as a public coroutine method on `KnowledgeBase`. The first element of the returned tuple is an `outcome` literal drawn from the closed set `{"new", "dedup_hash", "dedup_sim"}`; the second element is the Qdrant `point_id` (real UUID string for both new writes and dedup-skipped writes — the existing point's id when dedup matches). The method MUST execute the following steps in order:
 
 1. **Layer 1 hash dedup** — call `backend.exists_by_hash(self._collection_name, payload.text_hash)`. When the hash already exists in Qdrant, the method MUST look up the existing point's id (e.g. via `backend.search_points` filtered on `text_hash`) and return `("dedup_hash", <existing_point_id>)`. The method MUST NOT call `provider.embed`, MUST NOT issue a Qdrant upsert, and MUST NOT append a `token_usage.jsonl` line for the skipped embedding.
-2. **Embed once** — call `provider.embed([text])` exactly once. The bound provider's `default_module` SHALL be the value used for the surrounding query path (e.g. `"qa_agent"` when the `KnowledgeBase` instance is constructed with the Q&A query provider) so cost accounting flows through the existing `TrackedProvider` chain without per-call plumbing.
-3. **Layer 2 similarity dedup** — invoke `find_similar(text, threshold=0.95)` (which internally calls `query(text, top_k=1)`) and inspect the result. When the returned `KBHit` is non-`None` and its `score >= 0.95`, the method MUST return `("dedup_sim", <hit.point_id>)` without issuing a Qdrant upsert.
+2. **Embed once** — call `provider.embed([text])` exactly once. The bound provider's `default_module` SHALL be the value used for the surrounding query path (e.g. `"kb_query"` when the `KnowledgeBase` instance is constructed with the Q&A query provider — `app.state.kb_query_provider` factory in production wiring) so cost accounting flows through the existing `TrackedProvider` chain without per-call plumbing. Q&A `add_to_kb` shares the `kb_query` lane because both the query embed and the `add_to_kb` embed are downstream of the Q&A endpoint, and the chat-side cost is already separately accounted under `default_module="qa_agent"` by the `llm_qa_provider` factory.
+3. **Layer 2 similarity dedup** — invoke `find_similar(text, threshold=_QA_DEDUP_THRESHOLD)` and inspect the result. The threshold value MUST be sourced from the canonical single source `codebus_agent.agent.qa._QA_DEDUP_THRESHOLD` (identity check via `is`); the `kb.knowledge_base` module MUST NOT redeclare a local `_QA_DEDUP_THRESHOLD` constant. When the returned `KBHit` is non-`None` and its `score >= _QA_DEDUP_THRESHOLD`, the method MUST return `("dedup_sim", <hit.point_id>)` without issuing a Qdrant upsert.
 4. **Upsert** — when neither dedup layer matches, persist the chunk as a single Qdrant point with the supplied `payload` and the just-computed embedding. The method MUST return `("new", <new_point_id>)`.
 
 The `outcome` literal is the canonical discriminator. Callers (notably `add_to_kb`) MUST destructure the tuple and rely on `outcome` to distinguish dedup-skipped writes from new writes. The `point_id` value MUST always be a non-empty UUID-formatted string and MUST NOT carry sentinel prefixes (e.g. it MUST NOT be `"dedup:hash"` or `"dedup:sim"`); both the new-point and dedup-skipped paths return the real Qdrant point id so downstream audit consumers (Trust Layer R-01 panel, `kb_growth.jsonl.entry_id`) can join back to a Qdrant point unambiguously.
@@ -778,3 +777,47 @@ The `outcome` literal is the canonical discriminator. Callers (notably `add_to_k
 - **WHEN** any test reads the `point_id` element of `upsert_chunk`'s return value (across new / dedup_hash / dedup_sim outcomes)
 - **THEN** `point_id` MUST NOT start with the literal string `"dedup:"`
 - **AND** `point_id` MUST be a syntactically valid Qdrant point id (UUID-formatted string)
+
+#### Scenario: Dedup threshold sourced from canonical single source
+
+- **WHEN** any code path inside `kb.knowledge_base.upsert_chunk` references the dedup threshold
+- **THEN** the resolved value MUST be the same Python object as `codebus_agent.agent.qa._QA_DEDUP_THRESHOLD` (identity check via `is`)
+- **AND** the `kb.knowledge_base` module MUST NOT contain a local `_QA_DEDUP_THRESHOLD = 0.95` declaration
+
+#### Scenario: Embed lane is kb_query when called from the Q&A pipeline
+
+- **WHEN** `upsert_chunk` is invoked through the Q&A `add_to_kb` pipeline whose `KnowledgeBase` instance was constructed with the `app.state.kb_query_provider` factory's TrackedProvider
+- **THEN** the embed call MUST land in `<workspace_root>/.codebus/token_usage.jsonl` with `module == "kb_query"` (NOT `"qa_agent"`)
+- **AND** the chat-side Q&A reasoning cost MUST stay separately accounted under `module == "qa_agent"` via the `llm_qa_provider` factory — the two lanes MUST NOT collapse into one
+
+<!-- @trace
+source: spec-cleanup-stage-5-batch-b
+updated: 2026-04-27
+code:
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - docs/sidecar-api.md
+  - CLAUDE.md
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/kb/payload.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/scan.py
+tests:
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
+-->

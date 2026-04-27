@@ -213,6 +213,10 @@ tests:
 
 The sidecar SHALL expose a `SanitizerAuditLogger` that writes one JSON object per replacement to `{workspace}/.codebus/sanitize_audit.jsonl`. The file SHALL be append-only and each line SHALL be a single JSON object terminated by `\n`.
 
+The `sanitize_audit.jsonl` filename literal MUST appear in `sidecar/src/codebus_agent/_audit_paths.py` as the canonical `_SANITIZE_AUDIT_FILENAME` constant. All other modules in `sidecar/src/codebus_agent/` that reference the filename MUST import the constant from `_audit_paths` (or its backward-compat shim `codebus_agent.api._audit_paths`); they MUST NOT redeclare the literal string. This rule generalises the equivalent constraint that the `kb-growth` capability already imposes on `kb_growth.jsonl`, extending the single-source contract to all seven workspace-level audit JSONL filenames.
+
+Each audit line's `pass` integer MUST agree with the line's `source` shape per the cross-cutting `pass_num to source-type invariant`: `pass=1` (Pass 1, file-reading-stage Sanitize) MUST carry a file-source (`source` JSON-serialized shape reflects `FileSource(path=..., pass_=...)`); `pass=2` (Pass 2, Provider pre-flight Sanitize) MUST carry a message-source (`source` JSON-serialized shape reflects `MessageSource(message_id=...)`); `pass=3` (Pass 3, Q&A `add_to_kb` Sanitize) MAY carry either file-source or message-source because the Q&A path can sanitize file-derived chunks or chat-channel content (`docs/decisions.md` D-016). This invariant is the single semantic anchor that lets Trust Layer R-01 panel group Pass 1 vs Pass 2 redactions by source type without inspecting the underlying source string format.
+
 #### Scenario: Audit log line contains required fields
 
 - **WHEN** a Pass 1 sanitize replaces one value in `src/app.py`
@@ -229,47 +233,58 @@ The sidecar SHALL expose a `SanitizerAuditLogger` that writes one JSON object pe
 - **WHEN** two Pass calls write audit entries from two threads in the same process
 - **THEN** every written line MUST be a complete JSON object terminated by `\n` and MUST NOT be interleaved with another line's bytes
 
-<!-- @trace
-source: sanitizer-safety-chain
-updated: 2026-04-21
-code:
-  - sidecar/src/codebus_agent/sanitizer/audit.py
--->
+#### Scenario: Filename literal is single-sourced in canonical leaf module
+
+- **WHEN** any test scans `sidecar/src/codebus_agent/` for the regex `['\"][\w_-]+\.jsonl['\"]` (any `.jsonl` quoted string literal)
+- **THEN** every match MUST originate from `sidecar/src/codebus_agent/_audit_paths.py`
+- **AND** no other module in the package tree MUST contain a `*.jsonl` quoted string literal
+- **AND** the rule applies to all seven workspace-level audit filenames: `sanitize_audit.jsonl`, `tool_audit.jsonl`, `token_usage.jsonl`, `llm_calls.jsonl`, `reasoning_log.jsonl`, `generator_log.jsonl`, `kb_growth.jsonl`
+
+#### Scenario: pass_num to source-type invariant
+
+- **WHEN** any test scans `<workspace>/.codebus/sanitize_audit.jsonl` for every line written by sidecar production code
+- **THEN** every line whose `pass` field equals `1` MUST carry a `source` whose serialized shape reflects `FileSource(path=..., pass_=...)` — NEVER a `MessageSource(...)` shape
+- **AND** every line whose `pass` field equals `2` MUST carry a `source` whose serialized shape reflects `MessageSource(message_id=...)` — NEVER a `FileSource(...)` shape
+- **AND** every line whose `pass` field equals `3` MAY carry either a `FileSource` or `MessageSource` shape (Q&A `add_to_kb` accepts both per D-016)
+
+#### Scenario: Explorer tool error path runs Pass 2 sanitize
+
+- **WHEN** the Explorer ReAct loop's `_execute_tools` catches an exception from a tool invocation and the resulting error string is about to be written into `ToolResult.output`
+- **THEN** the production code path MUST invoke `SanitizerEngine.sanitize(error_text, source=MessageSource(message_id=f"explorer_step_{step_idx}_tool_error"))` before populating `ToolResult.output`
+- **AND** any sanitize hits MUST produce one `<workspace>/.codebus/sanitize_audit.jsonl` line per hit with `pass=2` and `source` shape reflecting `MessageSource(message_id=...)`
+- **AND** the `ToolResult.output` ultimately written into the `Step` log MUST be the post-sanitize string (containing `<REDACTED:>` placeholders for any redactions)
 
 
 <!-- @trace
-source: sanitizer-safety-chain
-updated: 2026-04-21
+source: agent-defense-depth
+updated: 2026-04-27
 code:
-  - sidecar/src/codebus_agent/sandbox.py
-  - sidecar/src/codebus_agent/providers/tracked.py
-  - sidecar/uv.lock
-  - sidecar/src/codebus_agent/sanitizer/engine.py
-  - sidecar/src/codebus_agent/sanitizer/audit.py
-  - sidecar/src/codebus_agent/sanitizer/__init__.py
-  - sidecar/src/codebus_agent/sanitizer/config.py
-  - sidecar/pyproject.toml
-  - sidecar/src/codebus_agent/sanitizer/rules.py
+  - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - sidecar/src/codebus_agent/api/scan.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/kb/payload.py
 tests:
-  - sidecar/tests/providers/test_registry_guard_roles.py
-  - sidecar/tests/providers/test_tracked_provider.py
-  - sidecar/tests/sanitizer/fixtures/internal_ids_sample.txt
-  - sidecar/tests/sandbox/test_tool_audit.py
-  - sidecar/tests/sanitizer/fixtures/pii_sample.txt
-  - sidecar/tests/sanitizer/test_config.py
-  - sidecar/tests/sanitizer/test_audit.py
-  - sidecar/tests/providers/test_no_outbound_per_role.py
-  - sidecar/tests/providers/test_registry_role_dispatch.py
-  - sidecar/tests/sanitizer/__init__.py
-  - sidecar/tests/providers/test_tracked_role_audit.py
-  - sidecar/tests/providers/test_tracked_pass2.py
-  - sidecar/tests/sanitizer/test_allowlist.py
-  - sidecar/tests/sanitizer/test_rules.py
-  - sidecar/tests/test_sanitizer_safety_chain_integration.py
-  - sidecar/tests/sanitizer/fixtures/secret_sample.txt
-  - sidecar/tests/test_phase9_jsonl_acceptance.py
-  - sidecar/tests/providers/test_registry.py
-  - sidecar/tests/sanitizer/test_engine.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
 -->
 
 ---
@@ -561,17 +576,19 @@ tests:
 ---
 ### Requirement: Pass 3 add_to_kb sanitize emits structured audit entry
 
-The Q&A `add_to_kb` write path SHALL invoke `SanitizerEngine.sanitize(text, source=FileSource(path=chunk.source, pass_="qa_add_to_kb"))` for every chunk before any KB upsert or `kb_growth.jsonl` write, per `docs/decisions.md` D-015 and `docs/qa-agent.md §三`. Each `AuditEntry` produced MUST be appended to the workspace-scoped `SanitizerAuditLogger` with `pass_num=3`, completing the three-pass audit chain (Pass 1 = scanner ingestion, Pass 2 = TrackedProvider pre-flight, Pass 3 = Q&A add_to_kb).
+The Q&A `add_to_kb` write path SHALL invoke `SanitizerEngine.sanitize(text, source=FileSource(path=chunk.source, pass_="qa_add_to_kb"))` for every chunk before any KB upsert or `kb_growth.jsonl` write, per `docs/decisions.md` D-015 and `docs/qa-agent.md §三`. Each `AuditEntry` produced MUST be appended to the workspace-scoped `SanitizerAuditLogger` with `pass_num=3` (Python keyword argument), completing the three-pass audit chain (Pass 1 = scanner ingestion, Pass 2 = TrackedProvider pre-flight, Pass 3 = Q&A add_to_kb).
 
-`pass_num` is the runtime label written into `<workspace>/.codebus/sanitize_audit.jsonl`; it MUST appear on every line and is the discriminator that downstream consumers (Trust Layer R-01 / O-05 panels, audit replay) use to attribute redactions to a sanitize stage. The `source` field on Pass 3 audit lines MUST be the structured form `{"pass": "qa_add_to_kb", "path": "<chunk.source>"}` matching the existing structured shape used by Pass 1 scanner (`{"pass": "scanner", "path": ...}`).
+**Naming convention — Python param vs JSONL key are intentionally different**: `pass_num` is the **Python keyword argument name** on `SanitizerAuditLogger.append(*, entry, pass_num, rules_version, session_id)`; the corresponding **JSONL key written to `<workspace>/.codebus/sanitize_audit.jsonl` is bare `pass`** (the integer value 1, 2, or 3 stays the same). The mismatch is deliberate: the Python name avoids shadowing the `pass` reserved keyword, while the JSONL key stays terse for readability in the audit panel. Implementers MUST NOT introduce `pass_num` as a JSONL key (e.g. by renaming the line dict's `"pass"` key) — every consumer (Trust Layer R-01 / O-05 panels, golden replay diff, audit join queries) reads the bare `pass` key directly.
+
+`pass_num` (Python) / `pass` (JSONL) is the runtime label that downstream consumers use to attribute redactions to a sanitize stage. The `source` field on Pass 3 audit lines MUST be the structured form `{"pass": "qa_add_to_kb", "path": "<chunk.source>"}` matching the existing structured shape used by Pass 1 scanner (`{"pass": "scanner", "path": ...}`). Note that the `pass` *value* inside the `source` object is a free-form string label (e.g. `"qa_add_to_kb"` / `"scanner"` / `"explorer_read_file"` / `"find_callers"` / `"grep_search"`) distinct from the integer-valued top-level `pass` key on the same JSONL line — both keys legitimately coexist with different semantics: the top-level integer marks which of the three Sanitize passes fired, the nested string marks which call-site within that pass produced the entry.
 
 The `SanitizeSource` discriminated union (`FileSource | MessageSource`) SHALL NOT be extended for Pass 3; the existing `FileSource.pass_` string field is the explicit extension point already promised by the foundational `Sanitizer SHALL provide a stateless engine` Requirement (which states the same class is "reusable by Pass 3 without signature change"). Adding a third union variant is forbidden by this Requirement so the audit schema remains stable across Pass 1 / Pass 3 ingestion sites.
 
-#### Scenario: add_to_kb chunk with secret hits writes pass_num=3 audit line
+#### Scenario: add_to_kb chunk with secret hits writes pass=3 audit line
 
 - **WHEN** Q&A `add_to_kb` is invoked with a chunk containing a string matched by the built-in secret rule set
-- **THEN** the appended `<workspace>/.codebus/sanitize_audit.jsonl` line MUST contain `"pass_num": 3`
-- **AND** the line's `source` field MUST be the JSON object `{"pass": "qa_add_to_kb", "path": "<chunk.source>"}`
+- **THEN** the appended `<workspace>/.codebus/sanitize_audit.jsonl` line MUST contain the JSONL key `"pass"` with integer value `3` (NOT a key named `"pass_num"` — the Python param name does not propagate to the wire schema)
+- **AND** the line's `source` field MUST be the JSON object `{"pass": "qa_add_to_kb", "path": "<chunk.source>"}` (the inner `pass` string label is distinct from the top-level integer `pass` key on the same line — both legitimately coexist)
 - **AND** the placeholder index MUST start at `1` for that sanitize call (Pass 3 calls share the same per-call index reset semantics as Pass 1 / Pass 2)
 
 #### Scenario: SanitizeSource union not extended
@@ -582,50 +599,44 @@ The `SanitizeSource` discriminated union (`FileSource | MessageSource`) SHALL NO
 #### Scenario: Empty post-sanitize chunk still records hit lines
 
 - **WHEN** `add_to_kb` sanitizes a chunk whose entire text gets replaced (post-sanitize text strips to empty)
-- **THEN** every triggered redaction MUST still produce a `pass_num=3` line in `sanitize_audit.jsonl`
+- **THEN** every triggered redaction MUST still produce a `pass=3` line in `sanitize_audit.jsonl` (using the JSONL key `"pass"` with integer value `3`, not `"pass_num"`)
 - **AND** the call MUST proceed to skip the KB upsert and `kb_growth.jsonl` write per the Q&A capability's empty-chunk handling — but the sanitize audit lines MUST NOT be retroactively suppressed
 
+#### Scenario: JSONL key is bare `pass`, never `pass_num`
+
+- **WHEN** any test reads a line from `<workspace>/.codebus/sanitize_audit.jsonl` produced by `SanitizerAuditLogger.append`
+- **THEN** the parsed JSON object MUST contain a key named exactly `"pass"` with an integer value in `{1, 2, 3}`
+- **AND** the parsed JSON object MUST NOT contain a key named `"pass_num"` at the top level (the Python keyword argument name MUST NOT leak to the wire schema)
+- **AND** this rule applies uniformly to all three passes (Pass 1 scanner / Pass 2 provider pre-flight / Pass 3 add_to_kb) — none of them MUST emit `"pass_num"` as a JSONL top-level key
+
 <!-- @trace
-source: module-8-qa-p0
-updated: 2026-04-26
+source: spec-cleanup-stage-5-batch-b
+updated: 2026-04-27
 code:
-  - docs/implementation-plan.md
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
   - sidecar/src/codebus_agent/agent/tools/kb_search.py
-  - sidecar/src/codebus_agent/agent/types.py
-  - docs/sidecar-api.md
-  - docs/decisions.md
-  - sidecar/src/codebus_agent/agent/qa.py
-  - sidecar/src/codebus_agent/agent/prompts/__init__.py
-  - sidecar/src/codebus_agent/api/_audit_paths.py
-  - sidecar/src/codebus_agent/api/__init__.py
-  - sidecar/src/codebus_agent/agent/reasoning_logger.py
-  - CLAUDE.md
-  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
-  - sidecar/src/codebus_agent/_audit_paths.py
-  - sidecar/src/codebus_agent/api/tasks.py
-  - sidecar/src/codebus_agent/agent/tools/qa_tools.py
-  - sidecar/src/codebus_agent/kb/growth_logger.py
-  - sidecar/src/codebus_agent/api/qa.py
-  - sidecar/src/codebus_agent/kb/__init__.py
   - sidecar/src/codebus_agent/kb/knowledge_base.py
-  - sidecar/src/codebus_agent/agent/prompts/qa.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - docs/sidecar-api.md
+  - CLAUDE.md
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/kb/payload.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/scan.py
 tests:
-  - sidecar/tests/agent/tools/test_kb_search.py
-  - sidecar/tests/kb/test_upsert_chunk.py
-  - sidecar/tests/api/test_qa_sse_events.py
-  - sidecar/tests/agent/test_qa_types.py
-  - sidecar/tests/api/test_task_id_qa_kind.py
-  - sidecar/tests/agent/tools/test_qa_tools.py
-  - sidecar/tests/integration/__init__.py
-  - sidecar/tests/kb/test_query_filter_stations.py
-  - sidecar/tests/agent/test_qa_prompts.py
-  - sidecar/tests/agent/test_hits_confident.py
-  - sidecar/tests/agent/test_run_qa.py
-  - sidecar/tests/api/test_audit_paths_kb_growth.py
-  - sidecar/tests/kb/test_growth_logger.py
-  - sidecar/tests/api/test_qa_endpoint.py
-  - sidecar/tests/integration/test_qa_end_to_end.py
-  - sidecar/tests/agent/test_qa_budget_constants.py
-  - sidecar/tests/agent/tools/test_add_to_kb.py
-  - sidecar/tests/sanitizer/test_pass3_add_to_kb_audit.py
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
 -->

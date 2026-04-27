@@ -26,7 +26,17 @@ The loop terminates via the `_should_stop(state)` predicate (see separate Requir
 #### Scenario: Tool errors do not crash the loop
 
 - **WHEN** a tool invocation inside `_execute_tools` raises any exception
-- **THEN** the exception MUST be captured into the corresponding `ToolResult.error` field (and `ToolResult.output` MUST hold a sanitized error string), the loop MUST continue to the Judge / Log / Update sub-steps, and the `Step` line written for that iteration MUST record the failed `ToolResult` verbatim
+- **THEN** the exception MUST be captured into the corresponding `ToolResult.error` field, the loop MUST continue to the Judge / Log / Update sub-steps, and the `Step` line written for that iteration MUST record the failed `ToolResult` verbatim
+- **AND** the `ToolResult.output` populated for the error path MUST be Pass 2 sanitized: the loop MUST invoke `ctx.sanitizer.sanitize(error_text, source=MessageSource(message_id=f"explorer_step_{state.step_count}_tool_error"))` before assigning the result string into `ToolResult.output`, and any sanitize hits MUST append one line to `<workspace>/.codebus/sanitize_audit.jsonl` with `pass_num=2`
+- **AND** the sanitized error string assigned to `ToolResult.output` MUST NOT contain raw secrets or PII even when the original exception message embeds user input (e.g. file path, search keyword, symbol name)
+
+#### Scenario: Tool error string sanitized through Pass 2
+
+- **WHEN** a tool invocation raises an exception whose string representation contains a literal that the Sanitizer's built-in rules detect as a secret (e.g. `ValueError("api_key=sk-AKIAIOSFODNN7EXAMPLE invalid")`)
+- **THEN** the resulting `ToolResult.output` string MUST contain a `<REDACTED:` placeholder
+- **AND** the `ToolResult.output` MUST NOT contain the raw `sk-AKIAIOSFODNN7EXAMPLE` literal
+- **AND** `<workspace>/.codebus/sanitize_audit.jsonl` MUST have at least one new line with `pass_num=2`
+- **AND** the audit line's `source` MUST reflect a `MessageSource` shape (NOT a `FileSource` — the error string is message-channel content, not file content)
 
 #### Scenario: Coverage recursion hook activates after main loop convergence
 
@@ -41,6 +51,39 @@ The loop terminates via the `_should_stop(state)` predicate (see separate Requir
 - **THEN** the Update step MUST append `r.tool_name` (the tool's name string, e.g. `"echo"` / `"search"`) onto `state.pending_queue` for each such ToolResult — this is a P0 placeholder whose sole purpose is keeping `pending_queue` non-empty across iterations so the `_should_stop` predicate's `queue_empty` branch (which fires on `pending_queue == [] and len(stations) >= _MIN_STATIONS_FOR_CONVERGENCE`) does not terminate the run prematurely
 - **AND** consumers of `pending_queue` content MUST treat the P0 string as opaque (the value carries no symbolic / path semantics in P0)
 - **AND** real symbol or path enqueue lands when `explorer-tools-p2` introduces `follow_reference` tool semantics; that change will MODIFY this Requirement to specify the richer queue payload
+
+
+<!-- @trace
+source: agent-defense-depth
+updated: 2026-04-27
+code:
+  - docs/sidecar-api.md
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - sidecar/src/codebus_agent/api/scan.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - CLAUDE.md
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/kb/payload.py
+tests:
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+-->
 
 ---
 ### Requirement: Explorer Think step validates ExplorerAction via Instructor
@@ -234,7 +277,7 @@ The sidecar SHALL expose three `typing.Protocol` types in `codebus_agent.agent.p
 
 The Protocol surface is the day-1 abstraction that unlocks future reuse: Q&A Agent (Module 8) and Topic-mode Explorer (Phase 2) supply their own implementations without touching the core loop. Therefore the P0 shape MUST NOT leak Folder-mode-specific assumptions (e.g. file paths) into the Protocol signatures — use abstract types like `SearchHit`, `Content`, `Target` defined alongside the Protocols.
 
-`ExplorerTools` SHALL additionally declare an OPTIONAL `tool_specs() -> list[dict]` method that returns the tool-spec list consumed by `render_explorer_prompt(state, tool_specs)`. The method is OPTIONAL at the Protocol level (implementors are permitted to omit it) and `run_explorer` MUST provide a fallback empty list when absent. Concrete Folder-mode `FolderTools` (landed by `explorer-tools-p0`) SHALL implement `tool_specs()` to return one dict per exposed tool with keys `name` / `description` / `parameters` so the Explorer Think-step prompt advertises its real tool surface instead of the empty `[]` default supplied in P0.
+`ExplorerTools` SHALL additionally declare an OPTIONAL `tool_specs() -> list[dict]` method that returns the tool-spec list consumed by `render_explorer_prompt(state, tool_specs)`. The method is OPTIONAL at the Protocol level (implementors are permitted to omit it) and `run_explorer` MUST provide a fallback empty list when absent. Concrete Folder-mode `FolderTools` (landed by `explorer-tools-p0` and extended by `explorer-tools-p1`) SHALL implement `tool_specs()` to return one dict per exposed tool with keys `name` / `description` / `parameters` so the Explorer Think-step prompt advertises its real tool surface instead of the empty `[]` default supplied in P0. The full P0+P1 tool surface is six entries: the four P0 tools (`search` / `list_dir` / `read_file` / `mark_station`) plus the two P1 differentiated weapons (`trace_import` / `find_callers`).
 
 #### Scenario: MockTools satisfies ExplorerTools structurally
 
@@ -256,38 +299,41 @@ The Protocol surface is the day-1 abstraction that unlocks future reuse: Q&A Age
 
 - **WHEN** a `FolderTools` instance is passed to `run_explorer`
 - **AND** `tool_specs()` is invoked on that instance
-- **THEN** the return value MUST be a `list[dict]` containing at least one entry for each of `search` / `list_dir` / `read_file` / `mark_station`
+- **THEN** the return value MUST be a `list[dict]` containing at least one entry for each of the six P0+P1 tools: `search` / `list_dir` / `read_file` / `mark_station` / `trace_import` / `find_callers`
 - **AND** each entry MUST carry `name` / `description` / `parameters` keys so the prompt render can advertise them to the LLM
+- **AND** the list MUST NOT silently drop the two P1 tools (`trace_import` / `find_callers`) added by `explorer-tools-p1` — both MUST be present alongside the four P0 tools so the LLM sees the full Folder-mode tool surface
 
 
 <!-- @trace
-source: explorer-tools-p0
-updated: 2026-04-24
+source: spec-cleanup-stage-5-batch-b
+updated: 2026-04-27
 code:
-  - docs/agent-explorer-spec.md
-  - sidecar/src/codebus_agent/agent/protocols.py
-  - sidecar/src/codebus_agent/agent/tools/__init__.py
-  - docs/tool-sandbox.md
-  - sidecar/src/codebus_agent/agent/tools/schemas.py
-  - sidecar/src/codebus_agent/sandbox.py
-  - sidecar/src/codebus_agent/agent/explorer.py
-  - CLAUDE.md
   - sidecar/src/codebus_agent/agent/tools/folder_tools.py
+  - sidecar/src/codebus_agent/agent/tools/kb_search.py
+  - sidecar/src/codebus_agent/kb/knowledge_base.py
+  - sidecar/src/codebus_agent/agent/explorer.py
+  - sidecar/src/codebus_agent/agent/station_id.py
+  - sidecar/src/codebus_agent/agent/tools/add_to_kb.py
+  - docs/sidecar-api.md
+  - CLAUDE.md
+  - docs/reviews/2026-04-26-stage-5.md
+  - sidecar/src/codebus_agent/kb/payload.py
+  - sidecar/src/codebus_agent/api/kb.py
+  - sidecar/src/codebus_agent/api/qa.py
+  - sidecar/src/codebus_agent/kb/growth_logger.py
+  - sidecar/src/codebus_agent/api/scan.py
 tests:
-  - sidecar/tests/agent/tools/test_read_file.py
-  - sidecar/tests/agent/tools/test_search.py
-  - sidecar/tests/agent/test_explorer_loop_with_real_tools.py
-  - sidecar/tests/agent/test_protocols.py
-  - sidecar/tests/agent/tools/test_folder_tools_structural.py
-  - sidecar/tests/agent/test_explorer_loop.py
-  - sidecar/tests/sandbox/test_tool_context_optional_deps.py
-  - sidecar/tests/agent/tools/test_mark_station.py
-  - sidecar/tests/agent/tools/__init__.py
-  - sidecar/tests/agent/tools/test_folder_tools_audit.py
-  - sidecar/tests/agent/tools/conftest.py
-  - sidecar/tests/agent/tools/test_tool_specs.py
-  - sidecar/tests/agent/tools/test_list_dir.py
-  - sidecar/tests/agent/tools/test_schemas.py
+  - sidecar/tests/api/test_scan_stream.py
+  - sidecar/tests/agent/test_station_id_constant.py
+  - sidecar/tests/agent/tools/test_grep_fallback_sanitize.py
+  - sidecar/tests/api/test_kb_build.py
+  - sidecar/tests/test_no_jsonl_literal_drift.py
+  - sidecar/tests/agent/test_explorer_error_sanitize.py
+  - sidecar/tests/agent/test_qa_constants_single_source.py
+  - sidecar/tests/api/test_kb_build_status_code.py
+  - sidecar/tests/api/test_kb_build_production.py
+  - sidecar/tests/agent/tools/test_pass1_source_type.py
+  - sidecar/tests/sanitizer/test_pass_source_invariant.py
 -->
 
 ---

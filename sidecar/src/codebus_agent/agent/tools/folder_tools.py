@@ -27,6 +27,11 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from codebus_agent._audit_paths import (
+    _SANITIZE_AUDIT_FILENAME,
+    _TOOL_AUDIT_FILENAME,
+    _WORKSPACE_AUDIT_SUBDIR,
+)
 from codebus_agent.agent.protocols import Content, Target
 from codebus_agent.agent.tools.schemas import DirEntry, FileMatch, SearchHit
 from codebus_agent.agent.types import ExplorerState, Station
@@ -39,7 +44,7 @@ from codebus_agent.sandbox import (
 )
 from codebus_agent.sanitizer import (
     RULES_VERSION as _SANITIZE_RULES_VERSION,
-    MessageSource,
+    FileSource,
     SanitizerAuditLogger,
     SanitizerEngine,
 )
@@ -115,7 +120,7 @@ class FolderTools:
         self._sanitize_audit: SanitizerAuditLogger | None = None
         # tool_audit.jsonl lives alongside sanitize_audit.jsonl.
         self._tool_audit_path = (
-            ctx.workspace_root / ".codebus" / "tool_audit.jsonl"
+            ctx.workspace_root / _WORKSPACE_AUDIT_SUBDIR / _TOOL_AUDIT_FILENAME
         )
 
     # ------------------------------------------------------------------
@@ -318,7 +323,21 @@ class FolderTools:
 
     def _search_via_grep(self, keyword: str) -> list[SearchHit]:
         """Filesystem fallback — walks workspace, filters to text-file
-        extensions the Scanner also keeps, caps to 100 hits."""
+        extensions the Scanner also keeps, caps to 100 hits.
+
+        Each hit's snippet is run through Pass 1 sanitize before being
+        wrapped in a `SearchHit` so the grep path mirrors the KB path
+        (which is sanitized at build time). `ctx.sanitizer is None`
+        fails loud — invariant #3 (`LLM 看到的一定是 Sanitize 過的`)
+        forbids the fallback from leaking raw snippets.
+        """
+        if self._ctx.sanitizer is None:
+            raise ValueError(
+                "search via grep fallback requires ctx.sanitizer to be "
+                "configured; raw snippets MUST NOT reach the Agent without "
+                "Pass 1 redaction"
+            )
+        audit_logger = self._get_sanitize_audit_logger()
         allowed = {".py", ".md", ".ts", ".tsx", ".rs", ".go", ".js", ".jsx"}
         # Borrow Scanner's oversized threshold so grep results mirror the
         # file set KB would have indexed (binary + oversize are excluded).
@@ -365,7 +384,25 @@ class FolderTools:
             if score == 0.0:
                 score = 0.01  # occurrences > 0 should never be zero relevance
             rel = str(p.relative_to(ws_root)).replace("\\", "/")
-            results.append(SearchHit(path=rel, snippet=snippet, score=score))
+            # Pass 1 sanitize on the grep-fallback snippet — `FileSource`
+            # keeps the cross-cutting `pass_num to source-type invariant`
+            # (pass=1 → file-source) intact. Each hit costs one sanitize
+            # call; grep fallback is a cold path (KB hit short-circuits)
+            # so per-hit overhead is acceptable.
+            sanitized = self._ctx.sanitizer.sanitize(
+                snippet,
+                source=FileSource(path=rel, pass_="grep_search"),
+            )
+            for entry in sanitized.entries:
+                audit_logger.append(
+                    entry=entry,
+                    pass_num=1,
+                    rules_version=_SANITIZE_RULES_VERSION,
+                    session_id=self._ctx.session_id or "sess-unknown",
+                )
+            results.append(
+                SearchHit(path=rel, snippet=sanitized.text, score=score)
+            )
         return results
 
     async def list_dir(self, path: str) -> list[DirEntry]:
@@ -440,9 +477,18 @@ class FolderTools:
         text = self._truncate_if_large(text)
 
         # Sanitize Pass 1 — engine emits placeholders; audit logger pins
-        # each hit to sanitize_audit.jsonl with pass_num=1.
+        # each hit to sanitize_audit.jsonl with pass_num=1. The audit line
+        # carries `FileSource(path=<workspace-relative>, pass_="explorer_read_file")`
+        # so the cross-cutting `pass_num to source-type invariant`
+        # (`sanitizer` capability) holds: pass=1 → file-source.
+        rel_for_source = (
+            str(resolved.relative_to(self._ctx.workspace_root)).replace("\\", "/")
+            if resolved.is_absolute()
+            else path.replace("\\", "/")
+        )
         result = self._ctx.sanitizer.sanitize(
-            text, source=MessageSource(message_id=f"read_file:{path}")
+            text,
+            source=FileSource(path=rel_for_source, pass_="explorer_read_file"),
         )
         audit_logger = self._get_sanitize_audit_logger()
         for entry in result.entries:
@@ -467,10 +513,10 @@ class FolderTools:
 
     def _get_sanitize_audit_logger(self) -> SanitizerAuditLogger:
         if self._sanitize_audit is None:
-            audit_dir = self._ctx.workspace_root / ".codebus"
+            audit_dir = self._ctx.workspace_root / _WORKSPACE_AUDIT_SUBDIR
             audit_dir.mkdir(exist_ok=True)
             self._sanitize_audit = SanitizerAuditLogger(
-                audit_dir / "sanitize_audit.jsonl"
+                audit_dir / _SANITIZE_AUDIT_FILENAME
             )
         return self._sanitize_audit
 
@@ -620,11 +666,12 @@ class FolderTools:
         audit_logger = self._get_sanitize_audit_logger()
         results: list[FileMatch] = []
         for _depth, rel_str, line_no, raw_line in raw_matches:
+            # Pass 1 sanitize on each call-site snippet. `FileSource` keeps
+            # the cross-cutting `pass_num to source-type invariant` (pass=1 →
+            # file-source) intact; the call-site path is the natural source.
             sanitized = self._ctx.sanitizer.sanitize(
                 raw_line,
-                source=MessageSource(
-                    message_id=f"find_callers:{rel_str}:{line_no}"
-                ),
+                source=FileSource(path=rel_str, pass_="find_callers"),
             )
             for entry in sanitized.entries:
                 audit_logger.append(

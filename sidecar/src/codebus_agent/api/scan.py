@@ -26,9 +26,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
+from codebus_agent._audit_paths import (
+    _SANITIZE_AUDIT_FILENAME,
+    _WORKSPACE_AUDIT_SUBDIR,
+)
 from codebus_agent.api.tasks import (
     ERROR_CODES,
     TaskHandle,
@@ -39,14 +43,6 @@ from codebus_agent.sandbox import ToolContext
 from codebus_agent.sanitizer import SanitizerAuditLogger, SanitizerEngine
 from codebus_agent.scanner.models import ScannerProgressEvent, ScanResult
 from codebus_agent.scanner.service import scan
-
-# Workspace-level sanitize_audit.jsonl — lives alongside other workspace audit
-# artefacts under `<workspace_root>/.codebus/`.  Per D-025 this is a provisional
-# location for M1; a future change will relocate workspace audit to
-# `~/.codebus/workspaces/{id}/` once workspace_id plumbing lands.  Schema and
-# JSONL contents do not depend on the enclosing directory.
-_WORKSPACE_AUDIT_SUBDIR = ".codebus"
-_SANITIZE_AUDIT_FILENAME = "sanitize_audit.jsonl"
 
 # Rules version recorded on every sanitize_audit line. Single source of truth
 # is `codebus_agent.sanitizer.RULES_VERSION`; bumping that constant propagates
@@ -133,6 +129,7 @@ def _build_scan_inputs(
 async def scan_endpoint(
     request: ScanRequest,
     http_request: Request,
+    response: Response,
     stream: bool = False,
 ) -> Any:
     """執行 workspace scan。
@@ -190,6 +187,7 @@ async def scan_endpoint(
         return result.model_dump(mode="json")
 
     asyncio.create_task(_run_background_task(handle, _coro_factory))
+    response.status_code = status.HTTP_202_ACCEPTED
     return {"task_id": handle.id}
 
 
