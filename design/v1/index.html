@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · 全流程 Design Canvas</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  iframe { width: 100%; height: 100%; border: 0; display: block; background: #0b0d10; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+  // 1280x800 frame (matches CodeBus app default size)
+  const W = 1280, H = 800;
+  const Frame = ({ src }) => (
+    <iframe src={src} loading="lazy" />
+  );
+
+  function App() {
+    return (
+      <DesignCanvas minScale={0.08} maxScale={2}>
+        <DCSection
+          id="onboarding"
+          title="① Onboarding · 通電前"
+          subtitle="從第一次開啟 → 取得授權 → KB 建好。Trust Layer 把 Sanitizer 與授權同意鎖在這一段。"
+        >
+          <DCArtboard id="01-home" label="01 · Home（首啟動）" width={W} height={H}>
+            <Frame src="01-home.html" />
+          </DCArtboard>
+          <DCArtboard id="02-folder" label="02 · 選 Workspace 資料夾" width={W} height={H}>
+            <Frame src="02-folder-pick.html" />
+          </DCArtboard>
+          <DCArtboard id="03-grant" label="03 · O-01 · Grant Modal" width={W} height={H}>
+            <Frame src="03-grant.html" />
+          </DCArtboard>
+          <DCArtboard id="04-scan" label="04 · Scan + Pass 1 Sanitize" width={W} height={H}>
+            <Frame src="04-scan.html" />
+          </DCArtboard>
+          <DCArtboard id="05-kb" label="05 · KB Build（Embed）" width={W} height={H}>
+            <Frame src="05-kb-build.html" />
+          </DCArtboard>
+
+          <DCPostIt top={-12} left={W * 0.5 + 90} rotate={-3} width={210}>
+            授權同意是這個產品的核心—— O-01 不是「跳過」按鈕。
+          </DCPostIt>
+        </DCSection>
+
+        <DCSection
+          id="explore"
+          title="② Explore · Agent 工作中"
+          subtitle="使用者下任務 → Explorer ReAct → Coverage 補查 → Route 確認。SSE 即時串到 R-01。"
+        >
+          <DCArtboard id="06-task" label="06 · 任務輸入（Workspace 主畫面）" width={W} height={H}>
+            <Frame src="06-task-input.html" />
+          </DCArtboard>
+          <DCArtboard id="07-react" label="07 · Explorer ReAct（Think→Act→Judge）" width={W} height={H}>
+            <Frame src="07-explorer-react.html" />
+          </DCArtboard>
+          <DCArtboard id="08-route" label="08 · Route 確認（5 站 + edit）" width={W} height={H}>
+            <Frame src="08-route-confirm.html" />
+          </DCArtboard>
+
+          <DCPostIt top={-12} left={W * 0.5 - 90} rotate={2} width={220}>
+            Audit panel 全程都在右側——不是事後報表，是當場可看的稽核。
+          </DCPostIt>
+        </DCSection>
+
+        <DCSection
+          id="generate"
+          title="③ Generate · 教材落地"
+          subtitle="Module 5 多檔輸出（MOC + stations/s0X-slug.md + route.json）+ degraded fallback。"
+        >
+          <DCArtboard id="09-gen" label="09 · Generator 進度" width={W} height={H}>
+            <Frame src="09-generator.html" />
+          </DCArtboard>
+          <DCArtboard id="10-notion" label="10 · Tutorial · Notion 風（長文）" width={W} height={H}>
+            <Frame src="10-tutorial-notion.html" />
+          </DCArtboard>
+          <DCArtboard id="11-slide" label="11 · Tutorial · Slideshow 風（一站一頁）" width={W} height={H}>
+            <Frame src="11-tutorial-slideshow.html" />
+          </DCArtboard>
+
+          <DCPostIt top={-12} left={W * 1.5 + 100} rotate={-2} width={230}>
+            10 / 11 是同份 route 的兩種閱讀模式——使用者可選喜好；資料層完全相同。
+          </DCPostIt>
+        </DCSection>
+
+        <DCSection
+          id="learn-loop"
+          title="④ Learn Loop · 教材 → Q&A → KB 成長"
+          subtitle="Module 8 D-016：學生在站上⌘K 提問 → RAG → ReAct 補查 → add_to_kb → 下次自動命中。差異化敘事核心。"
+        >
+          <DCArtboard id="12-qa" label="12 · Q&A Drawer（站 3 上召喚）" width={W} height={H}>
+            <Frame src="12-qa-drawer.html" />
+          </DCArtboard>
+
+          <DCPostIt top={-12} left={W + 90} rotate={3} width={240}>
+            kb_growth 是這個產品的賣點——KB 不是凍結的，學生問一次就長一筆。
+          </DCPostIt>
+        </DCSection>
+
+        <DCSection
+          id="trust-layer"
+          title="⑤ Trust Layer · 看得到的稽核"
+          subtitle="Audit panel 不是 log dump——任一列點開都能進到 Sanitizer Diff（O-05）或 LLM Call Inspector（O-04）。LOCKED / UNLOCKED 雙模。"
+        >
+          <DCArtboard id="13-llm" label="13 · O-04 · LLM Call Inspector" width={W} height={H}>
+            <Frame src="13-llm-call-inspector.html" />
+          </DCArtboard>
+          <DCArtboard id="14-sanitize" label="14 · O-05 · Sanitizer Diff" width={W} height={H}>
+            <Frame src="14-sanitizer-diff.html" />
+          </DCArtboard>
+
+          <DCPostIt top={-12} left={W * 0.5 + 60} rotate={-2} width={240}>
+            Placeholder 是單向的——左欄原值僅 in-memory，不會 copy 到 KB / log / 網路。
+          </DCPostIt>
+        </DCSection>
+      </DesignCanvas>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

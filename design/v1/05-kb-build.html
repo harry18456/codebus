@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · Building KB</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<style>
+  .work { padding: 32px 40px 80px; max-width: 760px; }
+  .breadcrumb {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em;
+    color: var(--text-mute); text-transform: uppercase; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .breadcrumb .sep { color: var(--panel-4); }
+  .breadcrumb .now { color: var(--accent); }
+  .breadcrumb .done { color: var(--green); }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.015em; }
+  .lede { color: var(--text-dim); font-size: 13px; margin-bottom: 28px; }
+
+  .stages {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px;
+  }
+  .stage-card {
+    padding: 16px 18px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .stage-card.active {
+    border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 4%, var(--panel));
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 8%, transparent);
+  }
+  .stage-card.done { opacity: .85; }
+  .sc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .sc-head .name { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .sc-head .name .pill { font-family: var(--mono); font-size: 9.5px; padding: 2px 6px; background: var(--panel-2); border-radius: 3px; color: var(--text-mute); letter-spacing: 0.04em; }
+  .stage-card.done .name .pill { background: color-mix(in oklab, var(--green) 18%, var(--panel-2)); color: var(--green); }
+  .stage-card.active .name .pill { background: color-mix(in oklab, var(--accent) 18%, var(--panel-2)); color: var(--accent); }
+  .sc-head .meta { font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); }
+  .bar { height: 4px; background: var(--panel-3); border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+  .bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 4px; transition: width .25s; }
+  .stage-card.done .bar > span { background: var(--green); width: 100%; }
+  .sc-foot { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+
+  /* embed pipeline visual */
+  .pipe {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 22px; margin-bottom: 24px;
+  }
+  .pipe-h {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em;
+    color: var(--text-mute); text-transform: uppercase; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .pipe-h .live { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: cb-pulse 2s infinite; }
+  .pipe-h .right { margin-left: auto; color: var(--text-dim); }
+  .pipe-flow {
+    display: grid; grid-template-columns: 1fr 30px 1fr 30px 1fr 30px 1fr; gap: 0;
+    align-items: stretch;
+  }
+  .node {
+    padding: 12px; background: var(--panel-2); border: 1px solid var(--border-soft);
+    border-radius: 8px; text-align: center;
+  }
+  .node.on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 6%, var(--panel-2)); }
+  .node .ico { width: 28px; height: 28px; margin: 0 auto 6px; display: grid; place-items: center; color: var(--text-dim); }
+  .node.on .ico { color: var(--accent); }
+  .node .lbl { font-size: 11px; color: var(--text); font-weight: 500; }
+  .node .sub { font-family: var(--mono); font-size: 10px; color: var(--text-mute); margin-top: 3px; }
+  .node.on .sub { color: var(--accent); }
+  .arrow {
+    display: grid; place-items: center; color: var(--panel-4);
+    position: relative;
+  }
+  .arrow::before {
+    content: ''; position: absolute; inset: 0; left: 4px; right: 4px; top: 50%;
+    border-top: 1px dashed var(--border); transform: translateY(-50%);
+  }
+  .arrow.on::before { border-top-color: var(--accent); border-top-style: solid; animation: dash 1.2s linear infinite; }
+  @keyframes dash { 0% { opacity: .3 } 50% { opacity: 1 } 100% { opacity: .3 } }
+  .arrow svg { position: relative; background: var(--panel); padding: 0 2px; color: var(--text-mute); }
+  .arrow.on svg { color: var(--accent); }
+
+  .embed-stat {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    padding: 14px 16px; background: var(--panel); border: 1px solid var(--border-soft);
+    border-radius: 8px;
+  }
+  .stat-card .k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--text-mute); text-transform: uppercase; margin-bottom: 4px; }
+  .stat-card .v { font-size: 18px; font-weight: 500; letter-spacing: -0.01em; }
+  .stat-card .delta { font-family: var(--mono); font-size: 10.5px; color: var(--green); margin-left: 5px; }
+
+  .strategy {
+    padding: 12px 16px; background: var(--panel); border: 1px solid var(--border-soft);
+    border-radius: 8px; margin-bottom: 24px;
+    font-size: 12px; color: var(--text-dim);
+    display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
+  }
+  .strategy svg { color: var(--accent); }
+  .strategy code { font-family: var(--mono); font-size: 11px; color: var(--accent); padding: 1px 5px; background: var(--panel-2); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="cb-app">
+  <div id="topbar"></div>
+  <div class="cb-split">
+    <div class="cb-stage">
+      <div class="work">
+        <div class="breadcrumb">
+          <span class="done">① pick ✓</span><span class="sep">›</span>
+          <span class="done">② grant ✓</span><span class="sep">›</span>
+          <span class="done">③ scan ✓</span><span class="sep">›</span>
+          <span class="now">④ kb</span><span class="sep">›</span>
+          <span>⑤ ready</span>
+        </div>
+
+        <h1>正在向量化你的程式碼</h1>
+        <p class="lede">每段 chunk 都已經是 Sanitize 過的版本——OpenAI 看到的字串和你看到的 audit 完全一致。</p>
+
+        <div class="stages">
+          <div class="stage-card done">
+            <div class="sc-head">
+              <div class="name">Module 1 · Scanner <span class="pill">DONE</span></div>
+              <div class="meta">189 files · 4.7s</div>
+            </div>
+            <div class="bar"><span></span></div>
+            <div class="sc-foot"><span>掃描完成</span><span>100%</span></div>
+          </div>
+          <div class="stage-card active">
+            <div class="sc-head">
+              <div class="name">Module 2 · KB Builder <span class="pill">EMBEDDING</span></div>
+              <div class="meta">SSE · kb_b8e1d402</div>
+            </div>
+            <div class="bar"><span style="width: 78%"></span></div>
+            <div class="sc-foot"><span>chunk <span style="color:var(--text)">114</span> / 147</span><span>78%</span></div>
+          </div>
+        </div>
+
+        <div class="strategy">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h16M4 12h16M4 20h10"/></svg>
+          <div>
+            分塊策略 · <code>token-window</code> · 800 tok/chunk · overlap 80 · model <code>text-embedding-3-small</code> · dim 1536
+          </div>
+          <span style="font-family:var(--mono);font-size:10.5px;color:var(--text-mute)">module=kb_build</span>
+        </div>
+
+        <div class="pipe">
+          <div class="pipe-h">
+            <span class="live"></span>per-chunk pipeline
+            <span class="right">當前 chunk #114 · src/storage/local-file.ts</span>
+          </div>
+          <div class="pipe-flow">
+            <div class="node">
+              <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/></svg></div>
+              <div class="lbl">chunk</div><div class="sub">800 tok</div>
+            </div>
+            <div class="arrow on"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10m-3-3 3 3-3 3"/></svg></div>
+            <div class="node on">
+              <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+              <div class="lbl">Sanitizer P1</div><div class="sub">2 redact</div>
+            </div>
+            <div class="arrow on"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10m-3-3 3 3-3 3"/></svg></div>
+            <div class="node on">
+              <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2v6m0 8v6m-10-10h6m8 0h6"/><circle cx="12" cy="12" r="3"/></svg></div>
+              <div class="lbl">embed</div><div class="sub">openai · 1536</div>
+            </div>
+            <div class="arrow"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10m-3-3 3 3-3 3"/></svg></div>
+            <div class="node">
+              <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg></div>
+              <div class="lbl">qdrant</div><div class="sub">upsert</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="embed-stat">
+          <div class="stat-card"><div class="k">CHUNKS</div><div class="v">114<span class="delta">+33</span></div></div>
+          <div class="stat-card"><div class="k">TOKENS</div><div class="v">68.4K<span class="delta">+19K</span></div></div>
+          <div class="stat-card"><div class="k">COST</div><div class="v">$0.014<span class="delta">+$0.004</span></div></div>
+          <div class="stat-card"><div class="k">ETA</div><div class="v">~12s</div></div>
+        </div>
+
+      </div>
+    </div>
+    <div id="audit"></div>
+  </div>
+</div>
+
+<script src="shell.js"></script>
+<script>
+  document.getElementById('topbar').innerHTML = window.CB_TOPBAR({
+    workspace: 'demo-synthetic',
+    task: 'kb_b8e1d402',
+    kill: 'READY'
+  });
+  // active tab on TOKEN — kb_build burning embeddings right now
+  window.CB_mountAudit('#audit', {
+    activeTab: 'token',
+    counts: { sanitize: 18, tool: 0, reasoning: 0, token: 114, llm: 1, kb_growth: 0, generator: 0 },
+    fresh: 0
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · Tutorial · Notion-style</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<style>
+  /* Notion-like 3-pane: stations rail, content, audit */
+  .reader { display: grid; grid-template-columns: 250px 1fr; height: 100%; min-height: 0; }
+
+  /* stations rail */
+  .rail {
+    border-right: 1px solid var(--border); background: var(--panel);
+    overflow-y: auto; padding: 16px 0;
+  }
+  .rail-h {
+    padding: 0 18px 14px; border-bottom: 1px solid var(--border-soft); margin-bottom: 10px;
+  }
+  .rail-h .label { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em; color: var(--text-mute); text-transform: uppercase; margin-bottom: 6px; }
+  .rail-h .title { font-size: 14px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; }
+  .rail-h .subtitle { font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); margin-top: 6px; }
+
+  .toc-section { padding: 0 8px; }
+  .toc-section .group {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; color: var(--text-mute);
+    text-transform: uppercase; padding: 12px 10px 6px;
+  }
+  .toc {
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .toc-item {
+    display: grid; grid-template-columns: 26px 1fr; gap: 8px;
+    padding: 6px 10px; border-radius: 6px;
+    cursor: pointer; align-items: center; transition: background .12s;
+  }
+  .toc-item:hover { background: var(--panel-2); }
+  .toc-item.active { background: color-mix(in oklab, var(--accent) 12%, var(--panel-2)); }
+  .toc-item.active .name { color: var(--text); }
+  .toc-item .num {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--panel-3); color: var(--text-mute);
+    font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+    display: grid; place-items: center;
+  }
+  .toc-item.active .num { background: var(--accent); color: #0a1014; }
+  .toc-item.done .num { background: color-mix(in oklab, var(--green) 25%, var(--panel-3)); color: var(--green); }
+  .toc-item.degraded .num { background: color-mix(in oklab, var(--orange) 25%, var(--panel-3)); color: var(--orange); }
+  .toc-item .name { font-size: 12.5px; color: var(--text-dim); line-height: 1.35; }
+  .toc-item .meta { font-family: var(--mono); font-size: 9.5px; color: var(--text-mute); margin-top: 2px; }
+
+  .toc-progress {
+    margin: 14px 18px 18px; padding: 12px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 8px;
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-dim);
+  }
+  .toc-progress .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .toc-progress .bar { height: 4px; background: var(--panel-3); border-radius: 4px; margin-top: 6px; overflow: hidden; }
+  .toc-progress .bar > span { display: block; height: 100%; background: var(--green); width: 60%; border-radius: 4px; }
+
+  /* content pane */
+  .content {
+    overflow-y: auto; padding: 0; min-height: 0; background: var(--bg);
+  }
+  .content-inner { max-width: 760px; margin: 0 auto; padding: 48px 56px 96px; }
+
+  .meta-strip {
+    display: flex; gap: 12px; align-items: center; margin-bottom: 18px;
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-mute);
+  }
+  .meta-strip .role-chip {
+    padding: 2px 8px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase;
+    background: color-mix(in oklab, var(--green) 15%, var(--panel-2)); color: var(--green);
+  }
+  .meta-strip .pill {
+    padding: 2px 8px; border-radius: 3px; background: var(--panel-2); color: var(--text-dim);
+  }
+
+  h1.title { font-size: 36px; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 10px; line-height: 1.15; }
+  .subtitle { color: var(--text-dim); font-size: 16px; margin-bottom: 30px; line-height: 1.6; }
+
+  /* source ref panel */
+  .source-ref {
+    margin: 0 0 32px; padding: 12px 14px;
+    background: var(--panel); border: 1px solid var(--border-soft); border-radius: 8px;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
+    font-size: 12px;
+  }
+  .source-ref .ico { color: var(--text-mute); }
+  .source-ref .info .path { font-family: var(--mono); color: var(--accent); font-size: 12px; }
+  .source-ref .info .meta { color: var(--text-mute); font-size: 11px; margin-top: 2px; font-family: var(--mono); }
+  .source-ref a { color: var(--text-dim); font-size: 11.5px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 5px; }
+  .source-ref a:hover { color: var(--text); border-color: var(--panel-4); }
+
+  /* prose */
+  .prose { color: var(--text); font-size: 15.5px; line-height: 1.75; }
+  .prose h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 36px 0 14px; }
+  .prose h3 { font-size: 17px; font-weight: 600; margin: 28px 0 10px; }
+  .prose p { margin: 0 0 18px; color: var(--text-dim); }
+  .prose strong { color: var(--text); font-weight: 600; }
+  .prose code { font-family: var(--mono); font-size: 13.5px; color: var(--accent); padding: 1px 6px; background: var(--panel-2); border-radius: 4px; }
+  .prose ul { padding-left: 22px; color: var(--text-dim); margin: 0 0 18px; }
+  .prose ul li { margin-bottom: 6px; }
+  .prose blockquote {
+    margin: 0 0 18px; padding: 12px 18px;
+    border-left: 3px solid var(--accent); background: color-mix(in oklab, var(--accent) 4%, var(--panel));
+    color: var(--text-dim); font-size: 14px; border-radius: 0 6px 6px 0;
+  }
+
+  /* code block */
+  .codeblock {
+    margin: 0 0 24px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 9px; overflow: hidden;
+  }
+  .cb-h {
+    padding: 8px 14px; background: var(--panel-2); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-mute);
+  }
+  .cb-h .file { color: var(--accent); }
+  .cb-h .right { display: flex; gap: 8px; }
+  .cb-h .right span { padding: 1px 6px; background: var(--panel); border-radius: 3px; font-size: 9.5px; }
+  .cb-h .right .redact { color: var(--purple); background: color-mix(in oklab, var(--purple) 10%, var(--panel)); }
+
+  pre.code {
+    margin: 0; padding: 14px 18px; overflow-x: auto;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.7; color: var(--text);
+  }
+  pre.code .kw { color: oklch(78% 0.13 280); }
+  pre.code .str { color: oklch(75% 0.12 145); }
+  pre.code .com { color: var(--text-mute); }
+  pre.code .fn { color: oklch(78% 0.12 60); }
+  pre.code .placeholder { color: var(--purple); padding: 0 4px; background: color-mix(in oklab, var(--purple) 14%, transparent); border-radius: 3px; }
+
+  /* try-it block */
+  .try {
+    margin: 24px 0 28px; padding: 16px 18px;
+    background: linear-gradient(135deg, color-mix(in oklab, var(--accent-2) 10%, var(--panel)), var(--panel));
+    border: 1px solid color-mix(in oklab, var(--accent-2) 30%, var(--border));
+    border-radius: 10px;
+  }
+  .try .h {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; color: var(--accent-2);
+    text-transform: uppercase; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .try .h svg { width: 14px; height: 14px; }
+  .try p { margin: 0 0 8px; color: var(--text); font-size: 13.5px; line-height: 1.6; }
+  .try ol { padding-left: 20px; color: var(--text-dim); margin: 0; font-size: 13px; }
+  .try ol li { margin-bottom: 5px; }
+
+  /* footer nav */
+  .pager {
+    margin-top: 60px; padding-top: 28px; border-top: 1px solid var(--border);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  .pager a {
+    padding: 14px 18px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 9px; cursor: pointer; transition: all .15s; text-decoration: none;
+    display: block;
+  }
+  .pager a:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .pager .label { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; color: var(--text-mute); text-transform: uppercase; margin-bottom: 4px; }
+  .pager .name { font-size: 14px; font-weight: 500; color: var(--text); }
+  .pager .next { text-align: right; }
+
+  /* qa fab */
+  .qa-fab {
+    position: fixed; bottom: 26px; right: 412px; z-index: 50;
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 18px;
+    background: linear-gradient(180deg, var(--accent), color-mix(in oklab, var(--accent) 80%, #000));
+    color: #0a1014; border-radius: 999px; font-weight: 600; font-size: 13px;
+    box-shadow: 0 10px 30px -10px color-mix(in oklab, var(--accent) 60%, transparent),
+                0 0 0 1px color-mix(in oklab, var(--accent) 50%, transparent);
+  }
+  .qa-fab svg { width: 16px; height: 16px; }
+  .qa-fab .kbd {
+    font-family: var(--mono); font-size: 10px; padding: 1px 6px;
+    background: rgba(0,0,0,.18); border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+<div class="cb-app">
+  <div id="topbar"></div>
+  <div class="cb-split">
+    <div class="cb-stage">
+      <div class="reader">
+        <!-- left rail -->
+        <div class="rail">
+          <div class="rail-h">
+            <div class="label">Tutorial · MOC</div>
+            <div class="title">Storage adapter 怎麼運作，以及怎麼換成自己的實作</div>
+            <div class="subtitle">5 stations · ~8 min · explore_4f2a8b91</div>
+          </div>
+          <div class="toc-section">
+            <div class="group">▸ STATIONS</div>
+            <div class="toc">
+              <div class="toc-item done"><div class="num">1</div><div><div class="name">介面定義</div><div class="meta">types.ts</div></div></div>
+              <div class="toc-item done"><div class="num">2</div><div><div class="name">Mock 範本</div><div class="meta">mock.ts</div></div></div>
+              <div class="toc-item active"><div class="num">3</div><div><div class="name">Production 落地</div><div class="meta">local-file.ts</div></div></div>
+              <div class="toc-item degraded"><div class="num">4</div><div><div class="name">Bootstrap 接線</div><div class="meta">bootstrap.ts · stub</div></div></div>
+              <div class="toc-item"><div class="num">5</div><div><div class="name">驗收測試</div><div class="meta">storage.test.ts</div></div></div>
+            </div>
+          </div>
+          <div class="toc-progress">
+            <div class="row"><span>進度</span><span style="color:var(--text)">3 / 5</span></div>
+            <div class="bar"><span></span></div>
+            <div class="row" style="margin-top:10px"><span>Q&amp;A 已問</span><span style="color:var(--text)">0</span></div>
+          </div>
+        </div>
+
+        <!-- content -->
+        <div class="content">
+          <div class="content-inner">
+            <div class="meta-strip">
+              <span class="role-chip">production</span>
+              <span class="pill">站 3 / 5</span>
+              <span class="pill">stable_id · storage.LocalFileAdapter</span>
+              <span style="margin-left:auto;color:var(--text-mute)">depends_on: s01-types</span>
+            </div>
+
+            <h1 class="title">Production 怎麼把資料真的落到本機檔</h1>
+            <p class="subtitle">站 1 看完介面、站 2 看完最簡單的 Mock 之後，這一站把 <code style="color:var(--accent);font-family:var(--mono);font-size:14px">read / write / delete</code> 真的接到檔案系統。</p>
+
+            <div class="source-ref">
+              <svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/><path d="M14 2v6h6"/></svg>
+              <div class="info">
+                <div class="path">src/storage/local-file.ts</div>
+                <div class="meta">commit a3f2e91 · 90 lines · Sanitizer Pass 1: 2 redact</div>
+              </div>
+              <a href="#">在 IDE 開啟 ↗</a>
+            </div>
+
+            <div class="prose">
+              <p>重點不在 <code>fs</code> API，而在 <strong>atomic write</strong> 的兩段式手法——先寫 <code>.tmp</code> 再 rename——這是面對「程式中途被殺」也不會壞檔的標準做法。看完這一站你應該能：</p>
+              <ul>
+                <li>講清楚為什麼不能直接 <code>fs.writeFile</code> 蓋舊檔</li>
+                <li>把 atomic write 抄到自己的 adapter 裡</li>
+                <li>知道哪些 fs 錯誤要包起來、哪些可以往上丟</li>
+              </ul>
+
+              <h2>關鍵程式段</h2>
+              <p>整檔 90 行，但<strong>真正關鍵</strong>是這 18 行——其它都是 boilerplate。</p>
+
+              <div class="codeblock">
+                <div class="cb-h">
+                  <span class="file">src/storage/local-file.ts <span style="color:var(--text-mute)">· lines 34-51</span></span>
+                  <div class="right"><span>typescript</span><span class="redact">Pass 1 redact ×2</span></div>
+                </div>
+                <pre class="code"><span class="kw">async</span> <span class="fn">write</span>&lt;T&gt;(key: <span class="kw">string</span>, value: T): <span class="kw">Promise</span>&lt;<span class="kw">void</span>&gt; {
+  <span class="kw">const</span> path = <span class="fn">resolveKey</span>(<span class="kw">this</span>.root, key);
+  <span class="kw">const</span> tmp  = <span class="str">`${path}.tmp`</span>;
+  <span class="com">// API key 在 init 時讀取（已被 Sanitizer 替換）</span>
+  <span class="kw">const</span> apiKey = <span class="str">"<span class="placeholder">&lt;REDACTED:secret#1&gt;</span>"</span>;
+
+  <span class="kw">try</span> {
+    <span class="kw">await</span> fs.<span class="fn">writeFile</span>(tmp, JSON.<span class="fn">stringify</span>(value), <span class="str">"utf8"</span>);
+    <span class="kw">await</span> fs.<span class="fn">rename</span>(tmp, path);  <span class="com">// ← 真正關鍵的一行</span>
+  } <span class="kw">catch</span> (err) {
+    <span class="kw">await</span> fs.<span class="fn">unlink</span>(tmp).<span class="fn">catch</span>(() =&gt; {});  <span class="com">// 清掉殘骸</span>
+    <span class="kw">throw new</span> <span class="fn">StorageError</span>(<span class="str">"write failed"</span>, { cause: err });
+  }
+}</pre>
+              </div>
+
+              <h3>為什麼 rename 是關鍵</h3>
+              <p>POSIX 保證 <code>rename</code> 在同一個 file system 內是 atomic——要嘛<strong>整個</strong>新檔取代舊檔，要嘛舊檔完整保留，沒有「半個檔」這種狀態。對照之下 <code>fs.writeFile</code> 直接寫目標路徑，被中斷就是壞檔。</p>
+
+              <blockquote>
+                這個手法其實在 git、SQLite、各種 logger 都看得到。學會這 18 行你就懂了一個跨領域的通用 idiom。
+              </blockquote>
+
+              <h2>怎麼套到自己的 adapter</h2>
+              <p>把 <code>fs.writeFile</code> 換成你的 backend（HTTP PUT、IndexedDB、雲儲存）後，<strong>atomic write 的等價手法是什麼</strong>，是設計新 adapter 必須回答的第一個問題：</p>
+              <ul>
+                <li>HTTP backend → 用 <code>If-Match</code> ETag 做 optimistic lock</li>
+                <li>IndexedDB → 包在 <code>readwrite</code> transaction 裡（天然 atomic）</li>
+                <li>S3-compatible → multipart upload 完成才換指針</li>
+              </ul>
+
+              <div class="try">
+                <div class="h">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                  動手試試
+                </div>
+                <p>把站 2 的 <code>MockStorageAdapter</code> 改成「故意中途丟錯」的版本，再用站 5 的 contract test 跑一次：</p>
+                <ol>
+                  <li>複製 <code>src/storage/mock.ts</code> 為 <code>flaky.ts</code></li>
+                  <li>在 <code>write()</code> 內 50% 機率 throw 一個假的 IO error</li>
+                  <li>跑 <code>npm test storage</code>——觀察哪個 test fail，比較 mock vs local-file 對失敗的處理</li>
+                </ol>
+              </div>
+
+              <h2>站 4 為什麼是 stub？</h2>
+              <p>原本第 4 站要寫 <code>bootstrap.ts</code> 怎麼選 adapter，但 Generator 第 3 次重試仍打到 context length 上限——這通常表示路線太長或這站訊息量超過模型一次能消化的量。輸出的 stub 已經寫進 <code>generator_log.jsonl</code>（看右側 generator tab）；你可以針對這站重跑 Explorer，或直接問 Q&amp;A Agent。</p>
+
+              <div class="pager">
+                <a>
+                  <div class="label">← 上一站</div>
+                  <div class="name">02 · Mock 範本</div>
+                </a>
+                <a class="next">
+                  <div class="label">下一站 →</div>
+                  <div class="name">04 · Bootstrap 接線 <span style="color:var(--orange);font-size:11px">(stub)</span></div>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="qa-fab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10Z"/></svg>
+        問 CodeBus
+        <span class="kbd">⌘ K</span>
+      </button>
+
+    </div>
+    <div id="audit"></div>
+  </div>
+</div>
+
+<script src="shell.js"></script>
+<script>
+  document.getElementById('topbar').innerHTML = window.CB_TOPBAR({
+    workspace: 'demo-synthetic',
+    task: 'explore_4f2a8b91',
+    tab: 'learn',
+    kill: 'READY'
+  });
+  window.CB_mountAudit('#audit', {
+    activeTab: 'generator',
+    counts: { sanitize: 31, tool: 23, reasoning: 12, token: 18, llm: 12, kb_growth: 0, generator: 9 }
+  });
+</script>
+</body>
+</html>

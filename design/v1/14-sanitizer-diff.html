@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · O-05 Sanitizer Diff</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<style>
+  /* ───── Hero strip ───── */
+  .hero {
+    padding: 18px 28px 14px; border-bottom: 1px solid var(--border-soft);
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--purple) 7%, var(--bg)) 0%,
+      var(--bg) 100%);
+  }
+  .hero h1 {
+    font-size: 17px; font-weight: 600; margin: 0 0 4px; color: var(--text);
+    display: flex; align-items: center; gap: 9px;
+  }
+  .hero h1 .lock {
+    width: 22px; height: 22px; border-radius: 5px; display: grid; place-items: center;
+    background: color-mix(in oklab, var(--purple) 18%, var(--panel-2)); color: var(--purple);
+  }
+  .hero p {
+    margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.55;
+    max-width: 680px;
+  }
+  .hero p code {
+    font-family: var(--mono); font-size: 11px; padding: 1px 5px;
+    background: var(--panel-2); border-radius: 3px; color: var(--accent);
+  }
+  .hero .meta {
+    margin-top: 10px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-mute);
+  }
+  .hero .meta .pill {
+    padding: 3px 8px; border-radius: 4px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--text-dim);
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .hero .meta .pill.purple { color: var(--purple); border-color: color-mix(in oklab, var(--purple) 35%, var(--border)); background: color-mix(in oklab, var(--purple) 8%, var(--panel)); }
+  .hero .meta .pill b { color: var(--text); font-weight: 500; }
+
+  /* unlocked banner */
+  .unlock {
+    padding: 9px 28px; background: color-mix(in oklab, var(--orange) 10%, var(--panel));
+    border-bottom: 1px solid color-mix(in oklab, var(--orange) 25%, var(--border));
+    font-family: var(--mono); font-size: 10.5px; color: var(--orange);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .unlock .ico { width: 14px; height: 14px; flex-shrink: 0; }
+  .unlock .right { margin-left: auto; color: var(--text-mute); }
+  .unlock .right b { color: var(--text); font-weight: 500; }
+  .unlock .right code { color: var(--accent); }
+
+  /* ───── Toolbar ───── */
+  .tb {
+    padding: 10px 28px; border-bottom: 1px solid var(--border-soft);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: var(--panel);
+  }
+  .tb .seg {
+    display: flex; background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 6px;
+    padding: 2px; font-family: var(--mono); font-size: 10.5px;
+  }
+  .tb .seg button { padding: 4px 10px; border-radius: 4px; color: var(--text-mute); }
+  .tb .seg button.on { background: var(--panel-4); color: var(--text); }
+  .tb .seg button:hover:not(.on) { color: var(--text-dim); }
+  .tb .lbl { color: var(--text-mute); font-family: var(--mono); font-size: 10.5px; }
+  .tb .filter {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .tb .chip {
+    padding: 3px 8px; border-radius: 4px; font-family: var(--mono); font-size: 10px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--text-dim);
+    display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  }
+  .tb .chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .tb .chip.on { color: var(--text); border-color: var(--panel-4); background: var(--panel-3); }
+  .tb .chip.secret .dot { background: var(--red); }
+  .tb .chip.email .dot { background: var(--accent); }
+  .tb .chip.domain .dot { background: var(--orange); }
+  .tb .chip.path .dot { background: var(--accent-2); }
+  .tb .right { margin-left: auto; display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10.5px; }
+  .tb .right .nav-btn {
+    width: 22px; height: 22px; border-radius: 4px; display: grid; place-items: center;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--text-mute);
+  }
+  .tb .right .nav-btn:hover { color: var(--text); }
+  .tb .right .pos { color: var(--text); }
+
+  /* ───── Two-pane diff ───── */
+  .diff-wrap {
+    display: grid; grid-template-columns: 1fr 1fr;
+    flex: 1; min-height: 0; overflow: hidden;
+  }
+  .pane { display: flex; flex-direction: column; min-height: 0; }
+  .pane.left { border-right: 1px solid var(--border); }
+  .pane-h {
+    padding: 9px 18px; border-bottom: 1px solid var(--border-soft); flex-shrink: 0;
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 11px;
+    background: var(--panel);
+  }
+  .pane.left .pane-h { color: var(--orange); }
+  .pane.right .pane-h { color: var(--purple); }
+  .pane-h .icn { width: 14px; height: 14px; }
+  .pane-h .right {
+    margin-left: auto; font-size: 10px; color: var(--text-mute);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .pane-h .right .pill {
+    padding: 1px 7px; border-radius: 3px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--text-dim);
+  }
+  .pane.left .pane-h .pill.lock {
+    background: color-mix(in oklab, var(--orange) 14%, var(--panel-2));
+    border-color: color-mix(in oklab, var(--orange) 35%, var(--border));
+    color: var(--orange);
+  }
+  .pane.right .pane-h .pill.wire {
+    background: color-mix(in oklab, var(--green) 14%, var(--panel-2));
+    border-color: color-mix(in oklab, var(--green) 35%, var(--border));
+    color: var(--green);
+  }
+
+  .code-body {
+    flex: 1; min-height: 0; overflow: auto;
+    background: var(--panel-2);
+  }
+  table.code {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--mono); font-size: 12px; line-height: 1.7;
+  }
+  table.code td {
+    padding: 0 10px; vertical-align: top;
+    border: none;
+  }
+  table.code td.ln {
+    width: 42px; text-align: right; user-select: none;
+    color: var(--text-mute); padding-right: 14px;
+    border-right: 1px solid var(--border-soft);
+    font-size: 10.5px;
+  }
+  table.code td.code-cell {
+    color: var(--text-dim); white-space: pre; padding-left: 14px;
+  }
+  table.code tr.changed td { background: color-mix(in oklab, var(--purple) 5%, transparent); }
+  table.code tr.changed.left td { background: color-mix(in oklab, var(--orange) 7%, transparent); }
+  table.code tr.cursor td.ln {
+    color: var(--accent); font-weight: 600;
+    background: color-mix(in oklab, var(--accent) 10%, transparent);
+    border-right-color: var(--accent);
+  }
+
+  /* token highlights */
+  .raw {
+    color: oklch(70% 0.16 25); background: color-mix(in oklab, var(--orange) 22%, transparent);
+    padding: 0 3px; border-radius: 2px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--orange) 35%, transparent);
+  }
+  .ph {
+    color: var(--purple); background: color-mix(in oklab, var(--purple) 22%, transparent);
+    padding: 0 4px; border-radius: 2px; font-weight: 500;
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--purple) 40%, transparent);
+  }
+  .kw { color: oklch(78% 0.12 280); }
+  .str { color: oklch(75% 0.12 145); }
+  .com { color: var(--text-mute); font-style: italic; }
+  .fn { color: oklch(80% 0.1 60); }
+
+  /* ───── Detail strip (bottom) ───── */
+  .detail {
+    border-top: 1px solid var(--border); flex-shrink: 0;
+    background: var(--panel); padding: 12px 28px;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center;
+  }
+  .detail .arrow {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: color-mix(in oklab, var(--purple) 20%, var(--panel-2));
+    color: var(--purple); display: grid; place-items: center;
+    border: 1px solid color-mix(in oklab, var(--purple) 40%, var(--border));
+  }
+  .detail .body {
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .detail .body .seg-arrow { color: var(--purple); margin: 0 2px; }
+  .detail .body .raw, .detail .body .ph { font-size: 11.5px; }
+  .detail .meta-row {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;
+    font-family: var(--mono); font-size: 10px; color: var(--text-mute);
+  }
+  .detail .meta-row .pill {
+    padding: 1px 7px; border-radius: 3px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--text-dim);
+  }
+  .detail .meta-row .pill b { color: var(--text); font-weight: 500; }
+  .detail .actions { display: flex; gap: 6px; }
+  .detail .actions button {
+    padding: 5px 11px; border: 1px solid var(--border); border-radius: 5px;
+    background: var(--panel-2); color: var(--text-dim); font-family: var(--mono); font-size: 10.5px;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .detail .actions button:hover { color: var(--text); border-color: var(--panel-4); }
+
+  /* ── stage column flex ── */
+  .cb-stage { display: flex; flex-direction: column; min-height: 0; }
+</style>
+</head>
+<body>
+<div class="cb-app">
+  <div id="topbar"></div>
+  <div class="cb-split">
+    <div class="cb-stage">
+
+      <!-- Hero -->
+      <div class="hero">
+        <h1>
+          <span class="lock">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </span>
+          Sanitizer Diff · <span style="color:var(--text-mute);font-weight:400">storage/local-file.ts</span>
+        </h1>
+        <p>左欄是<b>原檔在本機磁碟上的樣子</b>（永遠不離開機器）。右欄是<b>送進 KB 與 LLM 之前的版本</b>。Placeholder 是單向的——<code>&lt;REDACTED:secret#1&gt;</code> 不存在反查表，原值不會被 copy 到 KB / log / 網路。</p>
+        <div class="meta">
+          <span class="pill">file <b>storage/local-file.ts</b> · 142 lines</span>
+          <span class="pill purple"><b>4</b> placeholders</span>
+          <span class="pill">rules <b>2026-04-20-1</b></span>
+          <span class="pill">pass_num <b>1</b> · scanner</span>
+          <span class="pill">audit line <b>14</b> of <b>31</b></span>
+        </div>
+      </div>
+
+      <!-- Unlocked banner -->
+      <div class="unlock">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
+        <span><b style="color:var(--text)">Audit unlock</b> 啟用中——左欄原值僅在此會話 in-memory 顯示，不寫盤、不上傳。離開頁面即釋放。</span>
+        <span class="right">unlocked at <b>14:31:08</b> · <code>session_only</code></span>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="tb">
+        <span class="lbl">view</span>
+        <div class="seg">
+          <button class="on">side-by-side</button>
+          <button>inline</button>
+          <button>raw jsonl</button>
+        </div>
+        <span class="lbl" style="margin-left:6px">kinds</span>
+        <div class="filter">
+          <span class="chip secret on"><span class="dot"></span>secret · 1</span>
+          <span class="chip email on"><span class="dot"></span>email · 1</span>
+          <span class="chip domain on"><span class="dot"></span>internal-domain · 1</span>
+          <span class="chip path on"><span class="dot"></span>abs-path · 1</span>
+        </div>
+        <div class="right">
+          <span style="color:var(--text-mute)">jump</span>
+          <button class="nav-btn" title="上一筆">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 15l-6-6-6 6"/></svg>
+          </button>
+          <span class="pos">2 <span style="color:var(--text-mute)">/ 4</span></span>
+          <button class="nav-btn" title="下一筆">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Two-pane diff -->
+      <div class="diff-wrap">
+
+        <!-- LEFT pane: pre-sanitize -->
+        <div class="pane left">
+          <div class="pane-h">
+            <svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            <span>pre-sanitize · disk source</span>
+            <span class="right">
+              <span class="pill lock">🔒 in-memory only</span>
+              <span class="pill">UTF-8 · LF</span>
+            </span>
+          </div>
+          <div class="code-body">
+            <table class="code">
+              <tr><td class="ln">8</td><td class="code-cell"><span class="kw">import</span> { <span class="fn">readFile</span>, <span class="fn">writeFile</span> } <span class="kw">from</span> <span class="str">'fs/promises'</span>;</td></tr>
+              <tr><td class="ln">9</td><td class="code-cell"><span class="kw">import</span> <span class="kw">type</span> { <span class="fn">StorageAdapter</span> } <span class="kw">from</span> <span class="str">'./types'</span>;</td></tr>
+              <tr><td class="ln">10</td><td class="code-cell"></td></tr>
+              <tr><td class="ln">11</td><td class="code-cell"><span class="com">// Owner: <span class="raw">jane.lee@acme.dev</span> · pinged on 2026-03-12</span></td></tr>
+              <tr class="changed left"><td class="ln">12</td><td class="code-cell"><span class="kw">const</span> API_KEY = <span class="str">'<span class="raw">sk-proj-A8x2NvpQ9ZmK4LcRq4Tm</span>'</span>;</td></tr>
+              <tr><td class="ln">13</td><td class="code-cell"><span class="kw">const</span> <span class="fn">MIRROR</span> = <span class="str">'<span class="raw">git.acme-corp.internal</span>'</span>;</td></tr>
+              <tr><td class="ln">14</td><td class="code-cell"><span class="kw">const</span> <span class="fn">CACHE_DIR</span> = <span class="str">'<span class="raw">/Users/jane.lee/Library/CodeBus/cache</span>'</span>;</td></tr>
+              <tr><td class="ln">15</td><td class="code-cell"></td></tr>
+              <tr><td class="ln">16</td><td class="code-cell"><span class="kw">export class</span> <span class="fn">LocalFileAdapter</span> <span class="kw">implements</span> <span class="fn">StorageAdapter</span> {</td></tr>
+              <tr><td class="ln">17</td><td class="code-cell">  <span class="kw">async</span> <span class="fn">write</span>(key: <span class="kw">string</span>, value: <span class="kw">unknown</span>) {</td></tr>
+              <tr class="cursor"><td class="ln">18</td><td class="code-cell">    <span class="kw">const</span> path = <span class="str">`${<span class="fn">CACHE_DIR</span>}/${key}.json`</span>;</td></tr>
+              <tr><td class="ln">19</td><td class="code-cell">    <span class="kw">await</span> <span class="fn">writeFile</span>(path, <span class="fn">JSON</span>.<span class="fn">stringify</span>(value));</td></tr>
+              <tr><td class="ln">20</td><td class="code-cell">  }</td></tr>
+              <tr><td class="ln">21</td><td class="code-cell">  <span class="kw">async</span> <span class="fn">read</span>(key: <span class="kw">string</span>) {</td></tr>
+              <tr><td class="ln">22</td><td class="code-cell">    <span class="kw">const</span> raw = <span class="kw">await</span> <span class="fn">readFile</span>(<span class="str">`${<span class="fn">CACHE_DIR</span>}/${key}.json`</span>, <span class="str">'utf8'</span>);</td></tr>
+              <tr><td class="ln">23</td><td class="code-cell">    <span class="kw">return</span> <span class="fn">JSON</span>.<span class="fn">parse</span>(raw);</td></tr>
+              <tr><td class="ln">24</td><td class="code-cell">  }</td></tr>
+              <tr><td class="ln">25</td><td class="code-cell">}</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- RIGHT pane: post-sanitize -->
+        <div class="pane right">
+          <div class="pane-h">
+            <svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 5-3.5 8-9 9-5.5-1-9-4-9-9V5l9-3 9 3v7z"/></svg>
+            <span>post-sanitize · KB & wire payload</span>
+            <span class="right">
+              <span class="pill wire">✓ shipped</span>
+              <span class="pill">4 placeholders</span>
+            </span>
+          </div>
+          <div class="code-body">
+            <table class="code">
+              <tr><td class="ln">8</td><td class="code-cell"><span class="kw">import</span> { <span class="fn">readFile</span>, <span class="fn">writeFile</span> } <span class="kw">from</span> <span class="str">'fs/promises'</span>;</td></tr>
+              <tr><td class="ln">9</td><td class="code-cell"><span class="kw">import</span> <span class="kw">type</span> { <span class="fn">StorageAdapter</span> } <span class="kw">from</span> <span class="str">'./types'</span>;</td></tr>
+              <tr><td class="ln">10</td><td class="code-cell"></td></tr>
+              <tr class="changed"><td class="ln">11</td><td class="code-cell"><span class="com">// Owner: <span class="ph">&lt;REDACTED:email#1&gt;</span> · pinged on 2026-03-12</span></td></tr>
+              <tr class="changed"><td class="ln">12</td><td class="code-cell"><span class="kw">const</span> API_KEY = <span class="str">'<span class="ph">&lt;REDACTED:secret#1&gt;</span>'</span>;</td></tr>
+              <tr class="changed"><td class="ln">13</td><td class="code-cell"><span class="kw">const</span> <span class="fn">MIRROR</span> = <span class="str">'<span class="ph">&lt;REDACTED:internal-domain#1&gt;</span>'</span>;</td></tr>
+              <tr class="changed"><td class="ln">14</td><td class="code-cell"><span class="kw">const</span> <span class="fn">CACHE_DIR</span> = <span class="str">'<span class="ph">&lt;REDACTED:abs-path#1&gt;</span>'</span>;</td></tr>
+              <tr><td class="ln">15</td><td class="code-cell"></td></tr>
+              <tr><td class="ln">16</td><td class="code-cell"><span class="kw">export class</span> <span class="fn">LocalFileAdapter</span> <span class="kw">implements</span> <span class="fn">StorageAdapter</span> {</td></tr>
+              <tr><td class="ln">17</td><td class="code-cell">  <span class="kw">async</span> <span class="fn">write</span>(key: <span class="kw">string</span>, value: <span class="kw">unknown</span>) {</td></tr>
+              <tr class="cursor"><td class="ln">18</td><td class="code-cell">    <span class="kw">const</span> path = <span class="str">`${<span class="fn">CACHE_DIR</span>}/${key}.json`</span>;</td></tr>
+              <tr><td class="ln">19</td><td class="code-cell">    <span class="kw">await</span> <span class="fn">writeFile</span>(path, <span class="fn">JSON</span>.<span class="fn">stringify</span>(value));</td></tr>
+              <tr><td class="ln">20</td><td class="code-cell">  }</td></tr>
+              <tr><td class="ln">21</td><td class="code-cell">  <span class="kw">async</span> <span class="fn">read</span>(key: <span class="kw">string</span>) {</td></tr>
+              <tr><td class="ln">22</td><td class="code-cell">    <span class="kw">const</span> raw = <span class="kw">await</span> <span class="fn">readFile</span>(<span class="str">`${<span class="fn">CACHE_DIR</span>}/${key}.json`</span>, <span class="str">'utf8'</span>);</td></tr>
+              <tr><td class="ln">23</td><td class="code-cell">    <span class="kw">return</span> <span class="fn">JSON</span>.<span class="fn">parse</span>(raw);</td></tr>
+              <tr><td class="ln">24</td><td class="code-cell">  }</td></tr>
+              <tr><td class="ln">25</td><td class="code-cell">}</td></tr>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Detail strip: focused hit -->
+      <div class="detail">
+        <div class="arrow" title="這一筆 audit row 對應 line 12">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </div>
+        <div>
+          <div class="body">
+            <span style="color:var(--text-mute)">line 12 ·</span>
+            <span class="raw">sk-proj-A8x2NvpQ9ZmK4LcRq4Tm</span>
+            <svg class="seg-arrow" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            <span class="ph">&lt;REDACTED:secret#1&gt;</span>
+          </div>
+          <div class="meta-row">
+            <span class="pill">kind <b>secret</b></span>
+            <span class="pill">detector <b>detect-secrets · openai-api-key</b></span>
+            <span class="pill">entropy <b>4.81</b></span>
+            <span class="pill">first seen <b>14:23:08.142</b></span>
+            <span class="pill">also in <b>3 files</b></span>
+          </div>
+        </div>
+        <div class="actions">
+          <button title="複製 placeholder">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            placeholder
+          </button>
+          <button title="開原檔到 line 12">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            開原檔
+          </button>
+          <button title="false positive · 回報" style="color:var(--orange);border-color:color-mix(in oklab, var(--orange) 30%, var(--border))">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg>
+            報誤判
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <div id="audit"></div>
+  </div>
+</div>
+
+<script src="shell.js"></script>
+<script>
+  document.getElementById('topbar').innerHTML = window.CB_TOPBAR({
+    workspace: 'demo-synthetic',
+    task: 'scan_a3f81c4d',
+    tab: 'audit',
+    kill: 'READY'
+  });
+  window.CB_mountAudit('#audit', {
+    activeTab: 'sanitize',
+    counts: { sanitize: 31, tool: 0, reasoning: 0, token: 0, llm: 4, kb_growth: 0, generator: 0 }
+  });
+</script>
+</body>
+</html>

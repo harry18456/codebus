@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · O-04 LLM Call Inspector</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<style>
+  /* ───── Underlay (R-01 stage faintly visible behind inspector) ───── */
+  .cb-stage { position: relative; }
+  .underlay { padding: 28px 36px; opacity: 0.5; }
+  .underlay h2 { font-size: 18px; font-weight: 600; margin: 0 0 14px; color: var(--text); }
+  .ulay-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .ulay-card { padding: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+  .ulay-card .lbl { font-family: var(--mono); font-size: 10px; color: var(--text-mute); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 6px; }
+  .ulay-card .v { font-family: var(--mono); font-size: 13px; color: var(--text); }
+  .stage-dim {
+    position: absolute; inset: 0; background: color-mix(in oklab, #000 50%, transparent);
+    backdrop-filter: blur(1.5px); z-index: 5; pointer-events: none;
+  }
+
+  /* ───── Inspector slide-in ───── */
+  .insp {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 720px;
+    background: var(--panel); border-left: 1px solid var(--border);
+    box-shadow: -28px 0 70px -10px rgba(0, 0, 0, 0.55);
+    z-index: 10; display: flex; flex-direction: column; min-height: 0;
+  }
+
+  /* head */
+  .insp-head {
+    padding: 12px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center;
+  }
+  .insp-head .ico {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--accent-2), oklch(75% 0.16 280));
+    display: grid; place-items: center; color: #0b0d10;
+  }
+  .insp-head .meta .t1 { font-size: 13.5px; font-weight: 600; }
+  .insp-head .meta .t2 { font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); margin-top: 2px; display: flex; align-items: center; gap: 8px; }
+  .insp-head .meta .t2 .req-id { color: var(--text-dim); }
+  .insp-head .meta .t2 .sep { color: var(--border); }
+  .insp-head .meta .t2 .step { color: var(--accent); }
+  .insp-head .nav {
+    display: flex; align-items: center; gap: 4px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 2px; font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  }
+  .insp-head .nav button {
+    width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px;
+    color: var(--text-mute);
+  }
+  .insp-head .nav button:hover { background: var(--panel-3); color: var(--text); }
+  .insp-head .nav .cur { padding: 0 8px; color: var(--text); font-weight: 500; }
+  .insp-head .close {
+    width: 26px; height: 26px; border-radius: 5px; display: grid; place-items: center;
+    color: var(--text-mute); cursor: pointer;
+  }
+  .insp-head .close:hover { background: var(--panel-2); color: var(--text); }
+
+  /* status strip */
+  .strip {
+    padding: 10px 18px; border-bottom: 1px solid var(--border-soft); flex-shrink: 0;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: color-mix(in oklab, var(--green) 5%, var(--panel));
+    font-family: var(--mono); font-size: 10.5px;
+  }
+  .strip .badge {
+    padding: 3px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--border-soft); background: var(--panel-2); color: var(--text-dim);
+  }
+  .strip .badge.green { color: var(--green); border-color: color-mix(in oklab, var(--green) 35%, var(--border)); background: color-mix(in oklab, var(--green) 8%, var(--panel)); }
+  .strip .badge.purple { color: var(--purple); border-color: color-mix(in oklab, var(--purple) 35%, var(--border)); background: color-mix(in oklab, var(--purple) 8%, var(--panel)); }
+  .strip .badge.accent { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, var(--border)); background: color-mix(in oklab, var(--accent) 8%, var(--panel)); }
+  .strip .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .strip .lbl { color: var(--text-mute); margin-right: 2px; }
+  .strip .right { margin-left: auto; color: var(--text-mute); }
+  .strip .right b { color: var(--text); font-weight: 500; }
+
+  /* tabs */
+  .tabs {
+    display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    padding: 0 18px; gap: 0;
+  }
+  .tabs button {
+    padding: 10px 14px; font-size: 12px; color: var(--text-mute); border-bottom: 2px solid transparent;
+    margin-bottom: -1px; display: flex; align-items: center; gap: 6px;
+  }
+  .tabs button:hover { color: var(--text-dim); }
+  .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tabs button .count {
+    font-family: var(--mono); font-size: 9.5px; padding: 1px 5px; border-radius: 3px;
+    background: var(--panel-2); color: var(--text-mute);
+  }
+  .tabs button.active .count { background: color-mix(in oklab, var(--accent) 18%, var(--panel-2)); color: var(--accent); }
+
+  /* body */
+  .insp-body { flex: 1; overflow-y: auto; min-height: 0; padding: 18px; }
+  .insp-body > * { margin-bottom: 18px; }
+
+  /* section card */
+  .sec { background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 9px; overflow: hidden; }
+  .sec-h {
+    padding: 9px 14px; display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--border-soft);
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-mute);
+  }
+  .sec-h .num {
+    padding: 1px 7px; border-radius: 3px; background: var(--panel-3); color: var(--text); font-size: 10px;
+  }
+  .sec-h .now { color: var(--accent); }
+  .sec-h .right {
+    margin-left: auto; font-family: var(--mono); font-size: 10px;
+    color: var(--text-mute); letter-spacing: 0; text-transform: none; display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ───── DIFF VIEW (Pass 2) — the key visual ───── */
+  .diff {
+    display: grid; grid-template-columns: 1fr 28px 1fr; gap: 0;
+    background: var(--panel); border-bottom: 1px solid var(--border-soft);
+  }
+  .diff-col { padding: 0; min-width: 0; }
+  .diff-col .col-h {
+    padding: 8px 14px; font-family: var(--mono); font-size: 10px; color: var(--text-mute);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    border-bottom: 1px solid var(--border-soft);
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel-2);
+  }
+  .diff-col.left .col-h { color: var(--orange); }
+  .diff-col.left .col-h .lock {
+    font-size: 9.5px; padding: 1px 6px; border-radius: 3px;
+    background: color-mix(in oklab, var(--orange) 14%, var(--panel-3)); color: var(--orange);
+    margin-left: auto;
+  }
+  .diff-col.right .col-h { color: var(--purple); }
+  .diff-col.right .col-h .ok {
+    font-size: 9.5px; padding: 1px 6px; border-radius: 3px;
+    background: color-mix(in oklab, var(--green) 14%, var(--panel-3)); color: var(--green);
+    margin-left: auto;
+  }
+  .diff-arrow {
+    display: flex; align-items: center; justify-content: center; padding-top: 32px;
+    color: var(--purple);
+  }
+  .diff-arrow svg { width: 18px; height: 18px; }
+
+  pre.code {
+    margin: 0; padding: 12px 14px;
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.65; color: var(--text-dim);
+    overflow-x: auto; white-space: pre;
+  }
+  pre.code .role { color: var(--accent); }
+  pre.code .key { color: oklch(80% 0.1 60); }
+  pre.code .str { color: oklch(75% 0.12 145); }
+  pre.code .com { color: var(--text-mute); }
+  pre.code .raw {
+    color: oklch(70% 0.16 25); background: color-mix(in oklab, var(--orange) 18%, transparent);
+    padding: 0 2px; border-radius: 2px;
+  }
+  pre.code .ph {
+    color: var(--purple); background: color-mix(in oklab, var(--purple) 18%, transparent);
+    padding: 0 3px; border-radius: 2px; font-weight: 500;
+  }
+
+  /* diff stat row */
+  .stat {
+    padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-mute);
+    background: color-mix(in oklab, var(--purple) 5%, var(--panel-2));
+  }
+  .stat .pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 4px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--text-dim);
+  }
+  .stat .pill b { color: var(--text); font-weight: 500; }
+  .stat .pill.purple { color: var(--purple); border-color: color-mix(in oklab, var(--purple) 35%, var(--border)); background: color-mix(in oklab, var(--purple) 8%, var(--panel-2)); }
+  .stat .pill.purple b { color: var(--purple); }
+  .stat .pill.green { color: var(--green); border-color: color-mix(in oklab, var(--green) 35%, var(--border)); background: color-mix(in oklab, var(--green) 8%, var(--panel-2)); }
+  .stat .right { margin-left: auto; color: var(--text-dim); }
+  .stat .right code {
+    font-family: var(--mono); font-size: 10px; color: var(--accent); padding: 0 4px;
+    background: var(--panel); border-radius: 3px;
+  }
+
+  /* tools / config kv */
+  .kv {
+    display: grid; grid-template-columns: 140px 1fr; gap: 4px 14px;
+    padding: 12px 14px; font-family: var(--mono); font-size: 11px;
+  }
+  .kv dt { color: var(--text-mute); }
+  .kv dd { margin: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  .kv dd code {
+    font-family: var(--mono); font-size: 10.5px; padding: 0 4px;
+    background: var(--panel); border-radius: 3px; color: var(--accent);
+  }
+  .kv dd .role-chip {
+    padding: 1px 7px; border-radius: 3px; font-size: 10px;
+    background: color-mix(in oklab, var(--accent) 14%, var(--panel)); color: var(--accent);
+  }
+
+  /* response answer */
+  .ans {
+    padding: 14px; font-size: 12.5px; color: var(--text); line-height: 1.65;
+    background: var(--panel);
+  }
+  .ans p { margin: 0 0 8px; }
+  .ans p:last-child { margin-bottom: 0; }
+  .ans code {
+    font-family: var(--mono); font-size: 11.5px; padding: 0 4px;
+    background: var(--panel-2); border-radius: 3px; color: var(--accent-2);
+  }
+  .ans .ph {
+    color: var(--purple); background: color-mix(in oklab, var(--purple) 14%, transparent);
+    padding: 0 3px; border-radius: 2px; font-family: var(--mono); font-size: 11px;
+  }
+
+  /* tokens grid */
+  .tk-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--border-soft);
+  }
+  .tk {
+    padding: 12px 14px; border-right: 1px solid var(--border-soft);
+    font-family: var(--mono);
+  }
+  .tk:last-child { border-right: none; }
+  .tk .lbl { font-size: 9.5px; color: var(--text-mute); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
+  .tk .num { font-size: 18px; color: var(--text); font-weight: 500; letter-spacing: -0.02em; }
+  .tk .num small { font-size: 11px; color: var(--text-mute); margin-left: 3px; }
+  .tk.cost .num { color: var(--accent); }
+
+  /* timeline */
+  .tl {
+    padding: 12px 14px; font-family: var(--mono); font-size: 11px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .tl-bar {
+    height: 22px; background: var(--panel); border: 1px solid var(--border-soft); border-radius: 4px;
+    position: relative; overflow: hidden;
+  }
+  .tl-seg {
+    position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding: 0 6px;
+    color: rgba(11, 13, 16, 0.85); font-size: 9.5px; font-weight: 500;
+    text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+  }
+  .tl-seg.s1 { left: 0%;  width: 8%;  background: var(--purple); }
+  .tl-seg.s2 { left: 8%;  width: 78%; background: var(--accent-2); color: rgba(11, 13, 16, 0.85); }
+  .tl-seg.s3 { left: 86%; width: 14%; background: var(--green); }
+  .tl-marks {
+    display: flex; justify-content: space-between; color: var(--text-mute); font-size: 9.5px;
+  }
+  .tl-marks span b { color: var(--text); font-weight: 500; }
+
+  /* foot */
+  .insp-foot {
+    border-top: 1px solid var(--border); flex-shrink: 0; background: var(--panel);
+    padding: 10px 18px; display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 11px; color: var(--text-mute);
+  }
+  .insp-foot .path { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .insp-foot .path code { color: var(--accent); }
+  .insp-foot button {
+    padding: 5px 11px; border: 1px solid var(--border); border-radius: 5px;
+    background: var(--panel-2); color: var(--text-dim); font-family: var(--mono); font-size: 10.5px;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  }
+  .insp-foot button:hover { color: var(--text); border-color: var(--panel-4); }
+</style>
+</head>
+<body>
+<div class="cb-app">
+  <div id="topbar"></div>
+  <div class="cb-split">
+    <div class="cb-stage">
+
+      <!-- Underlay: R-01 stage hint (faintly behind) -->
+      <div class="underlay">
+        <h2>Workspace · explore_4f2a8b91</h2>
+        <div class="ulay-grid">
+          <div class="ulay-card"><div class="lbl">Stage</div><div class="v">Explorer · running</div></div>
+          <div class="ulay-card"><div class="lbl">Step</div><div class="v">3 / 18</div></div>
+          <div class="ulay-card"><div class="lbl">Stations</div><div class="v">2 marked</div></div>
+          <div class="ulay-card"><div class="lbl">Cost</div><div class="v">$0.018 · 12.4k tok</div></div>
+        </div>
+      </div>
+      <div class="stage-dim"></div>
+
+      <!-- ── Inspector slide-in ── -->
+      <aside class="insp">
+
+        <div class="insp-head">
+          <div class="ico">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          </div>
+          <div class="meta">
+            <div class="t1">LLM Call Inspector</div>
+            <div class="t2">
+              <span class="req-id">req_8c4f02ae</span>
+              <span class="sep">·</span>
+              <span class="step">step 7 (Think)</span>
+              <span class="sep">·</span>
+              <span>14:22:37.421</span>
+            </div>
+          </div>
+          <div class="nav">
+            <button title="上一筆">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <span class="cur">7 / 18</span>
+            <button title="下一筆">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          </div>
+          <div class="close" title="收起 Esc">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </div>
+        </div>
+
+        <!-- Status strip -->
+        <div class="strip">
+          <span class="lbl">role</span>
+          <span class="badge accent"><span class="dot"></span>reasoning</span>
+          <span class="lbl">module</span>
+          <span class="badge">explorer</span>
+          <span class="lbl">model</span>
+          <span class="badge">gpt-4o-mini</span>
+          <span class="badge purple"><span class="dot"></span>Pass 2 sanitize ON</span>
+          <span class="badge green"><span class="dot"></span>response 200</span>
+          <span class="right">latency <b>1284 ms</b> · cost <b>$0.0019</b></span>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+          <button class="active">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Wire payload
+          </button>
+          <button>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6A8.4 8.4 0 0 1 12.5 3h.5a8.5 8.5 0 0 1 8 8v.5z"/></svg>
+            Response
+          </button>
+          <button>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            Tokens & cost
+          </button>
+          <button>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            Timeline
+          </button>
+          <button style="margin-left:auto">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8"/></svg>
+            raw <span class="count">JSON</span>
+          </button>
+        </div>
+
+        <!-- Body -->
+        <div class="insp-body">
+
+          <!-- ◉ THE KEY SECTION: Pass 2 sanitize diff -->
+          <div class="sec">
+            <div class="sec-h">
+              <span class="num">①</span>
+              <span class="now">request.messages</span>
+              <span style="color:var(--text-mute)">· post-Pass-2 wire payload</span>
+              <span class="right">
+                <span style="color:var(--purple)">●</span> sanitizer_pass2_applied = <b style="color:var(--text)">true</b>
+              </span>
+            </div>
+
+            <div class="diff">
+              <!-- LEFT: pre-sanitize (NEVER stored — this view requires audit unlock) -->
+              <div class="diff-col left">
+                <div class="col-h">
+                  <span>pre-sanitize · in-memory only</span>
+                  <span class="lock">🔒 audit unlock</span>
+                </div>
+<pre class="code">[
+  { <span class="key">"role"</span>: <span class="role">"system"</span>,
+    <span class="key">"content"</span>: <span class="str">"You are an Explorer agent..."</span> },
+  { <span class="key">"role"</span>: <span class="role">"user"</span>,
+    <span class="key">"content"</span>: <span class="str">"Read storage/local-file.ts.
+Found the api key:
+  const key = <span class="raw">\"sk-proj-A8x2N…q4Tm\"</span>;
+Owner: <span class="raw">jane.lee@acme.dev</span>
+Internal mirror: <span class="raw">git.acme-corp.internal</span>
+What does write() do?"</span> }
+]</pre>
+              </div>
+
+              <div class="diff-arrow">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              </div>
+
+              <!-- RIGHT: post-sanitize (this is what shipped on the wire) -->
+              <div class="diff-col right">
+                <div class="col-h">
+                  <span>post-sanitize · on wire ✓</span>
+                  <span class="ok">written to llm_calls.jsonl</span>
+                </div>
+<pre class="code">[
+  { <span class="key">"role"</span>: <span class="role">"system"</span>,
+    <span class="key">"content"</span>: <span class="str">"You are an Explorer agent..."</span> },
+  { <span class="key">"role"</span>: <span class="role">"user"</span>,
+    <span class="key">"content"</span>: <span class="str">"Read storage/local-file.ts.
+Found the api key:
+  const key = \"<span class="ph">&lt;REDACTED:secret#1&gt;</span>\";
+Owner: <span class="ph">&lt;REDACTED:email#1&gt;</span>
+Internal mirror: <span class="ph">&lt;REDACTED:internal-domain#1&gt;</span>
+What does write() do?"</span> }
+]</pre>
+              </div>
+            </div>
+
+            <div class="stat">
+              <span class="pill purple"><b>3</b> placeholders</span>
+              <span class="pill">secret <b>×1</b></span>
+              <span class="pill">email <b>×1</b></span>
+              <span class="pill">internal-domain <b>×1</b></span>
+              <span class="pill green">✓ pre-flight clean</span>
+              <span class="right">rules <code>2026-04-20-1</code> · diff bytes <b style="color:var(--text)">−47</b></span>
+            </div>
+          </div>
+
+          <!-- ② config / tools -->
+          <div class="sec">
+            <div class="sec-h">
+              <span class="num">②</span>
+              <span>request config</span>
+              <span class="right">openai · chat.completions</span>
+            </div>
+            <dl class="kv">
+              <dt>model</dt><dd><code>gpt-4o-mini</code></dd>
+              <dt>temperature</dt><dd><code>0.1</code> <span style="color:var(--text-mute)">· role <span class="role-chip">reasoning</span></span></dd>
+              <dt>max_tokens</dt><dd><code>1024</code></dd>
+              <dt>tools</dt>
+              <dd>
+                <code>search</code>, <code>list_dir</code>, <code>read_file</code>,
+                <code>trace_import</code>, <code>find_callers</code>, <code>mark_station</code>
+                <span style="color:var(--text-mute)">· 6 specs</span>
+              </dd>
+              <dt>tool_choice</dt><dd><code>auto</code></dd>
+              <dt>response_format</dt><dd><code>instructor · ExplorerThought</code></dd>
+            </dl>
+          </div>
+
+          <!-- ③ response (with placeholder echo) -->
+          <div class="sec">
+            <div class="sec-h">
+              <span class="num">③</span>
+              <span>response.content</span>
+              <span class="right">stop_reason: <code style="font-family:var(--mono);color:var(--accent)">tool_calls</code> · 247 tok</span>
+            </div>
+            <div class="ans">
+              <p>I should read <code>storage/local-file.ts</code> end-to-end before judging. The key insight likely sits between the API surface and the implementation. The redacted secret <span class="ph">&lt;REDACTED:secret#1&gt;</span> is loaded at construction — not relevant to <code>write()</code>'s control flow, so I'll skip it.</p>
+              <p style="font-family:var(--mono);font-size:11.5px;color:var(--text-mute);border-left:2px solid var(--accent);padding-left:10px;margin-top:10px">
+                → tool_call: <code>read_file</code>(path=<code>"storage/local-file.ts"</code>, line_range=<code>[1, 80]</code>)
+              </p>
+            </div>
+          </div>
+
+          <!-- ④ usage breakdown -->
+          <div class="sec">
+            <div class="sec-h">
+              <span class="num">④</span>
+              <span>usage</span>
+              <span class="right">→ token_usage.jsonl + usage_delta SSE</span>
+            </div>
+            <div class="tk-grid">
+              <div class="tk"><div class="lbl">prompt</div><div class="num">1,284<small>tok</small></div></div>
+              <div class="tk"><div class="lbl">completion</div><div class="num">247<small>tok</small></div></div>
+              <div class="tk"><div class="lbl">total</div><div class="num">1,531<small>tok</small></div></div>
+              <div class="tk cost"><div class="lbl">cost (chat)</div><div class="num">$0.0019</div></div>
+            </div>
+          </div>
+
+          <!-- ⑤ timeline -->
+          <div class="sec">
+            <div class="sec-h">
+              <span class="num">⑤</span>
+              <span>timeline</span>
+              <span class="right">↑ wall 1284 ms · ↓ Pass 2 took 8 ms</span>
+            </div>
+            <div class="tl">
+              <div class="tl-bar">
+                <div class="tl-seg s1">Pass 2 · 8ms</div>
+                <div class="tl-seg s2">OpenAI request → first token · 998ms</div>
+                <div class="tl-seg s3">stream · 278ms</div>
+              </div>
+              <div class="tl-marks">
+                <span><b>14:22:37.421</b> request_id created</span>
+                <span><b>+1284 ms</b> response complete</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Foot: jsonl path + actions -->
+        <div class="insp-foot">
+          <span class="path">source <code>&lt;ws&gt;/.codebus/llm_calls.jsonl</code> · line <b style="color:var(--text)">14</b></span>
+          <button title="複製 request_id">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            req_id
+          </button>
+          <button title="開檔案">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            開 jsonl
+          </button>
+        </div>
+
+      </aside>
+
+    </div>
+
+    <div id="audit"></div>
+  </div>
+</div>
+
+<script src="shell.js"></script>
+<script>
+  document.getElementById('topbar').innerHTML = window.CB_TOPBAR({
+    workspace: 'demo-synthetic',
+    task: 'explore_4f2a8b91',
+    tab: 'audit',
+    kill: 'READY'
+  });
+  // Audit panel: jump to llm_calls tab and highlight row 14 as the source
+  window.CB_mountAudit('#audit', {
+    activeTab: 'llm',
+    counts: { sanitize: 31, tool: 23, reasoning: 12, token: 18, llm: 18, kb_growth: 0, generator: 9 }
+  });
+</script>
+</body>
+</html>

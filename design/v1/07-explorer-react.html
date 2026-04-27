@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · Explorer thinking</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<style>
+  .work { padding: 24px 36px 80px; max-width: 880px; }
+  /* task header */
+  .taskbar {
+    padding: 14px 18px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; margin-bottom: 22px;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center;
+  }
+  .taskbar .ico {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: color-mix(in oklab, var(--accent) 12%, var(--panel-2));
+    display: grid; place-items: center; color: var(--accent);
+  }
+  .taskbar .q { font-size: 13.5px; line-height: 1.45; }
+  .taskbar .meta { font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); margin-top: 2px; letter-spacing: 0.04em; }
+  .taskbar .meta .now { color: var(--accent); }
+  .taskbar .ctrl {
+    display: flex; gap: 6px;
+  }
+  .taskbar .ctrl button {
+    padding: 5px 10px; font-family: var(--mono); font-size: 10.5px;
+    border: 1px solid var(--border); border-radius: 5px; color: var(--text-dim);
+    background: var(--panel-2);
+  }
+  .taskbar .ctrl button:hover { color: var(--text); border-color: var(--panel-4); }
+  .taskbar .ctrl button.stop { border-color: color-mix(in oklab, var(--red) 35%, var(--border)); color: var(--red); }
+
+  /* progress strip */
+  .progress {
+    margin-bottom: 22px;
+    display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center;
+  }
+  .steps-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+  }
+  .step-cell {
+    height: 6px; background: var(--panel-3); border-radius: 3px; position: relative; overflow: hidden;
+  }
+  .step-cell.done { background: var(--green); }
+  .step-cell.now { background: var(--panel-3); }
+  .step-cell.now::before {
+    content: ''; position: absolute; inset: 0; width: 60%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    animation: stepfill 1.6s ease-in-out infinite alternate;
+  }
+  @keyframes stepfill { from { width: 20% } to { width: 95% } }
+  .progress .label { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); display: flex; gap: 12px; }
+  .progress .label .now { color: var(--accent); }
+
+  /* coverage warning banner */
+  .cov-warn {
+    margin-bottom: 18px; padding: 8px 12px;
+    background: color-mix(in oklab, var(--yellow) 8%, var(--panel));
+    border: 1px solid color-mix(in oklab, var(--yellow) 30%, var(--border));
+    border-radius: 8px; font-size: 11.5px; color: var(--text-dim);
+    display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+  }
+  .cov-warn svg { color: var(--yellow); }
+  .cov-warn .label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--yellow); text-transform: uppercase; margin-right: 6px; }
+
+  /* react step cards */
+  .timeline { display: flex; flex-direction: column; gap: 14px; position: relative; }
+  .timeline::before {
+    content: ''; position: absolute; left: 19px; top: 8px; bottom: 8px;
+    width: 2px; background: linear-gradient(180deg, var(--green) 0%, var(--green) 65%, var(--accent) 65%, var(--panel-3) 100%);
+    border-radius: 2px;
+  }
+
+  .step {
+    display: grid; grid-template-columns: 40px 1fr; gap: 14px; position: relative;
+  }
+  .step .marker {
+    width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--panel); border: 2px solid var(--green); color: var(--green);
+    font-family: var(--mono); font-weight: 600; font-size: 12px; z-index: 1;
+  }
+  .step.now .marker { border-color: var(--accent); color: var(--accent); animation: cb-pulse 2s infinite; }
+  .step.queued .marker { border-color: var(--panel-4); color: var(--text-mute); border-style: dashed; }
+  .step.coverage .marker { border-color: var(--yellow); color: var(--yellow); }
+
+  .step-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  .step.now .step-card { border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 6%, transparent); }
+  .step.coverage .step-card { border-color: color-mix(in oklab, var(--yellow) 35%, var(--border)); }
+
+  .sc-head {
+    padding: 10px 14px; display: flex; align-items: center; gap: 10px;
+    background: var(--panel-2); border-bottom: 1px solid var(--border-soft);
+  }
+  .sc-head .label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 2px 7px; border-radius: 3px;
+    background: color-mix(in oklab, var(--accent) 18%, var(--panel)); color: var(--accent);
+  }
+  .step.coverage .sc-head .label { background: color-mix(in oklab, var(--yellow) 18%, var(--panel)); color: var(--yellow); }
+  .sc-head .label.judge { background: color-mix(in oklab, var(--green) 18%, var(--panel)); color: var(--green); }
+  .sc-head .label.act { background: color-mix(in oklab, var(--purple) 18%, var(--panel)); color: var(--purple); }
+
+  .sc-head .title { font-size: 12.5px; flex: 1; }
+  .sc-head .meta { font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); }
+
+  .sc-body { padding: 14px; }
+  .sc-body .think {
+    font-size: 13.5px; line-height: 1.6; color: var(--text);
+    padding: 4px 0;
+  }
+  .sc-body .think .em { color: var(--accent); }
+
+  /* tool calls */
+  .tool {
+    margin: 10px 0 0; padding: 0;
+    background: var(--panel-2); border: 1px solid var(--border-soft);
+    border-radius: 7px; overflow: hidden;
+  }
+  .tool-row {
+    padding: 8px 12px; display: grid; grid-template-columns: auto 1fr auto;
+    gap: 10px; align-items: center; font-family: var(--mono); font-size: 11.5px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .tool-row:last-child { border-bottom: none; }
+  .tool-row .fn { color: var(--purple); }
+  .tool-row .arg { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tool-row .arg .v { color: var(--text); }
+  .tool-row .res {
+    font-size: 10px; padding: 2px 7px; border-radius: 3px;
+    background: var(--panel); color: var(--text-mute); letter-spacing: 0.04em;
+  }
+  .tool-row .res.ok { color: var(--green); background: color-mix(in oklab, var(--green) 12%, var(--panel)); }
+  .tool-row .res.kb { color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, var(--panel)); }
+  .tool-row .res.deny { color: var(--red); background: color-mix(in oklab, var(--red) 12%, var(--panel)); }
+
+  /* observation */
+  .obs {
+    margin-top: 10px; padding: 10px 12px;
+    background: var(--panel-2); border-left: 2px solid var(--text-mute);
+    border-radius: 0 6px 6px 0; font-family: var(--mono); font-size: 11px;
+    color: var(--text-dim); line-height: 1.55; white-space: pre-wrap;
+    max-height: 130px; overflow-y: auto;
+  }
+  .obs .placeholder { color: var(--purple); padding: 0 4px; background: color-mix(in oklab, var(--purple) 14%, transparent); border-radius: 3px; }
+
+  /* judge verdict */
+  .verdict {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center;
+  }
+  .verdict .relv {
+    font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--green);
+    line-height: 1; min-width: 56px;
+  }
+  .verdict .relv .max { font-size: 12px; color: var(--text-mute); }
+  .verdict .why { font-size: 12.5px; color: var(--text-dim); line-height: 1.55; }
+  .verdict .why .key { color: var(--text); }
+  .verdict .station {
+    padding: 6px 12px;
+    background: color-mix(in oklab, var(--green) 12%, var(--panel-2));
+    border: 1px solid color-mix(in oklab, var(--green) 35%, var(--border));
+    border-radius: 7px; font-family: var(--mono); font-size: 11px; color: var(--green);
+    text-align: center; white-space: nowrap;
+  }
+  .verdict .station .small { font-size: 9.5px; opacity: .7; letter-spacing: 0.06em; text-transform: uppercase; }
+
+  /* coverage card */
+  .gaps { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .gap {
+    padding: 8px 12px; background: var(--panel-2); border: 1px solid var(--border-soft);
+    border-radius: 6px; font-size: 12px; color: var(--text-dim);
+    display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+  }
+  .gap .arrow { color: var(--yellow); }
+  .gap .target { font-family: var(--mono); color: var(--text); }
+  .gap .add { font-family: var(--mono); font-size: 10px; color: var(--accent); }
+
+  /* now-thinking step (live) */
+  .step.now .typing {
+    display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle;
+  }
+  .step.now .typing span {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+    animation: typing 1.2s infinite;
+  }
+  .step.now .typing span:nth-child(2) { animation-delay: .15s }
+  .step.now .typing span:nth-child(3) { animation-delay: .3s }
+  @keyframes typing { 0%, 60%, 100% { opacity: .25 } 30% { opacity: 1 } }
+</style>
+</head>
+<body>
+<div class="cb-app">
+  <div id="topbar"></div>
+  <div class="cb-split">
+    <div class="cb-stage">
+      <div class="work">
+
+        <div class="taskbar">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+          <div>
+            <div class="q">理解 Storage adapter 怎麼運作，以及怎麼換成自己的實作</div>
+            <div class="meta">task=<span class="now">explore_4f2a8b91</span> · started 14:24:01 · run #1</div>
+          </div>
+          <div class="ctrl">
+            <button>暫停</button>
+            <button class="stop">停止</button>
+          </div>
+        </div>
+
+        <div class="progress">
+          <div class="steps-grid">
+            <div class="step-cell done"></div>
+            <div class="step-cell done"></div>
+            <div class="step-cell done"></div>
+            <div class="step-cell now"></div>
+            <div class="step-cell"></div>
+          </div>
+          <div class="label">step <span class="now">4</span> / 5 · <span style="color:var(--text)">3 stations</span></div>
+        </div>
+
+        <div class="cov-warn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2 1 21h22L12 2Z"/><path d="M12 9v6M12 18h.01"/></svg>
+          <div><span class="label">budget</span>已用 80% step（4/5）。如果 Coverage 補查還想跑，會先彈 modal 問你。</div>
+          <a href="m-04-budget-warning.html" style="font-family:var(--mono);font-size:11px;color:var(--yellow);text-decoration:underline">看 modal →</a>
+        </div>
+
+        <div class="timeline">
+
+          <!-- step 01 — done -->
+          <div class="step">
+            <div class="marker">01</div>
+            <div class="step-card">
+              <div class="sc-head">
+                <span class="label">THINK</span>
+                <span class="title">先看 storage 模組長什麼樣，找出共通介面</span>
+                <span class="meta">14:24:01 · 412 tokens · $0.0008</span>
+              </div>
+              <div class="sc-body">
+                <div class="think">使用者想學<span class="em">「Storage adapter 介面 + 換實作」</span>。先列出 <span class="em">src/storage/</span> 結構，再讀第一個檔抓出 Protocol 簽名——這樣後面才能對照其它實作。</div>
+                <div class="tool">
+                  <div class="tool-row"><span class="fn">list_dir</span><span class="arg"><span class="v">"/src/storage"</span></span><span class="res ok">8 entries</span></div>
+                  <div class="tool-row"><span class="fn">read_file</span><span class="arg"><span class="v">"/src/storage/types.ts"</span> · lines 1-80</span><span class="res ok">2.1 KB</span></div>
+                </div>
+                <div class="obs">[list_dir] types.ts, mock.ts, local-file.ts, indexeddb.ts, memory.ts, README.md, __tests__/, __mocks__/
+
+[read_file] export interface Storage&lt;T&gt; {
+  read(key: string): Promise&lt;T | null&gt;;
+  write(key: string, value: T): Promise&lt;void&gt;;
+  delete(key: string): Promise&lt;void&gt;;
+  // ... API key registered as <span class="placeholder">&lt;REDACTED:secret#1&gt;</span>
+}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- step 02 — judge after step 1 -->
+          <div class="step">
+            <div class="marker">02</div>
+            <div class="step-card">
+              <div class="sc-head">
+                <span class="label judge">JUDGE</span>
+                <span class="title">types.ts 是介面真源頭，標為站 1</span>
+                <span class="meta">14:24:07 · 384 tokens · $0.0006</span>
+              </div>
+              <div class="sc-body">
+                <div class="verdict">
+                  <div class="relv">0.8 <span class="max">/ 1.0</span></div>
+                  <div class="why"><span class="key">為什麼是站：</span>檔案直接定義使用者要學的 Storage interface，是 dependency root。建議下一步去找實作（mock / local-file / memory）並追測試。</div>
+                  <div class="station">★ STATION 1<br><span class="small">types · interface</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- step 03 — done with multi-tool act -->
+          <div class="step">
+            <div class="marker">03</div>
+            <div class="step-card">
+              <div class="sc-head">
+                <span class="label act">ACT</span>
+                <span class="title">同時讀 mock + local-file + memory，看 3 種實作怎麼接介面</span>
+                <span class="meta">14:24:11 · 720 tokens · $0.0011</span>
+              </div>
+              <div class="sc-body">
+                <div class="think">三個實作有不同重點：mock 是測試替身，local-file 是 production 落 disk，memory 是 dev 加速。<span class="em">trace_import</span> 讓我直接挑 production 的那條鏈。</div>
+                <div class="tool">
+                  <div class="tool-row"><span class="fn">read_file</span><span class="arg"><span class="v">"/src/storage/mock.ts"</span></span><span class="res ok">1.4 KB</span></div>
+                  <div class="tool-row"><span class="fn">read_file</span><span class="arg"><span class="v">"/src/storage/local-file.ts"</span></span><span class="res ok">2.8 KB · 2 redact</span></div>
+                  <div class="tool-row"><span class="fn">read_file</span><span class="arg"><span class="v">"/src/storage/memory.ts"</span></span><span class="res ok">980 B</span></div>
+                  <div class="tool-row"><span class="fn">trace_import</span><span class="arg"><span class="v">symbol="LocalFileAdapter"</span></span><span class="res kb">used in 4 files</span></div>
+                </div>
+                <div class="obs">[trace_import] LocalFileAdapter ← src/storage/index.ts:12
+                                ← src/app/bootstrap.ts:8
+                                ← tests/storage.test.ts:5
+                                ← src/migrations/index.ts:3</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- step 03b — judge -->
+          <div class="step">
+            <div class="marker" style="border-color:var(--green);color:var(--green)">✓</div>
+            <div class="step-card">
+              <div class="sc-head">
+                <span class="label judge">JUDGE</span>
+                <span class="title">兩條鏈值得收：mock 對齊測試、local-file 對齊 production</span>
+                <span class="meta">14:24:18 · 290 tokens · $0.0005</span>
+              </div>
+              <div class="sc-body">
+                <div class="verdict">
+                  <div class="relv">0.8 <span class="max">/ 1.0</span></div>
+                  <div class="why">「換成自己的實作」最好的範本就是 mock（測試替身）+ local-file（真檔案落地）兩端對照——把它們當第 2、3 站，學員照樣本 copy 一份就能跑。</div>
+                  <div class="station">★ STATIONS 2 + 3<br><span class="small">mock · local-file</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- step 04 — NOW thinking -->
+          <div class="step now">
+            <div class="marker">04</div>
+            <div class="step-card">
+              <div class="sc-head">
+                <span class="label">THINK · LIVE</span>
+                <span class="title">追到「app bootstrap 怎麼選 adapter」<span class="typing"><span></span><span></span><span></span></span></span>
+                <span class="meta">14:24:24 · streaming…</span>
+              </div>
+              <div class="sc-body">
+                <div class="think">三個實作搞清楚了。剩下一個關鍵問題——production 怎麼決定用哪個？我猜 <span class="em">bootstrap.ts</span> 看 env 切換。讀完應該能畫出完整路線。</div>
+                <div class="tool">
+                  <div class="tool-row"><span class="fn">read_file</span><span class="arg"><span class="v">"/src/app/bootstrap.ts"</span> · lines 1-60</span><span class="res ok">running…</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- step 05 — coverage queued -->
+          <div class="step queued">
+            <div class="marker">05</div>
+            <div class="step-card" style="opacity:.6">
+              <div class="sc-head">
+                <span class="label" style="background:var(--panel);color:var(--text-mute)">QUEUED</span>
+                <span class="title">Coverage check：補檢查還沒看過的角落</span>
+                <span class="meta">round 1 of 3</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+    <div id="audit"></div>
+  </div>
+</div>
+
+<script src="shell.js"></script>
+<script>
+  document.getElementById('topbar').innerHTML = window.CB_TOPBAR({
+    workspace: 'demo-synthetic',
+    task: 'explore_4f2a8b91',
+    tab: 'reasoning',
+    kill: 'READY'
+  });
+  // active tab on REASONING — that's what's streaming
+  window.CB_mountAudit('#audit', {
+    activeTab: 'reasoning',
+    counts: { sanitize: 23, tool: 12, reasoning: 7, token: 7, llm: 4, kb_growth: 0, generator: 0 },
+    fresh: 0
+  });
+</script>
+</body>
+</html>

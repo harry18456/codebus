@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · Grant access</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  body { background: #06080a; }
+  .topbar {
+    height: 44px; display: flex; align-items: center; padding: 0 16px;
+    border-bottom: 1px solid var(--border); background: var(--panel); gap: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .logo { width: 22px; height: 22px; border-radius: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center; font-size: 12px; color: #0b0d10; }
+  .step-trail { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); margin-left: 14px; }
+  .step-trail .now { color: var(--accent); }
+  .step-trail .done { color: var(--green); }
+  .spacer { flex: 1; }
+
+  /* dimmed bg behind modal */
+  .stage { height: calc(100vh - 44px); display: grid; place-items: center;
+    background: rgba(0,0,0,.55); }
+
+  .modal {
+    width: 720px; max-height: 92vh; overflow: hidden;
+    background: var(--panel); border: 1px solid var(--border-soft);
+    border-radius: 14px; box-shadow: 0 30px 80px -10px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.02);
+    display: flex; flex-direction: column;
+  }
+  .m-head { padding: 22px 28px 16px; border-bottom: 1px solid var(--border); }
+  .m-eyebrow {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em;
+    color: var(--purple); text-transform: uppercase; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .m-eyebrow svg { width: 14px; height: 14px; }
+  .m-head h1 { font-size: 19px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .m-head .lede { font-size: 12.5px; color: var(--text-dim); line-height: 1.55; }
+  .m-head .lede code { font-family: var(--mono); font-size: 11px; color: var(--accent); padding: 1px 5px; background: var(--panel-2); border-radius: 3px; }
+
+  .ws-summary {
+    margin-top: 14px; padding: 10px 12px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 8px;
+    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+    display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+  }
+  .ws-summary .pill {
+    font-size: 9.5px; padding: 2px 7px; background: color-mix(in oklab, var(--accent) 15%, var(--panel-3));
+    border-radius: 3px; color: var(--accent); letter-spacing: 0.05em;
+  }
+  .ws-summary svg { color: var(--text-mute); }
+
+  .m-body { overflow-y: auto; padding: 12px 28px 4px; }
+
+  .grants { display: flex; flex-direction: column; gap: 10px; padding: 8px 0 12px; }
+  .grant {
+    border: 1px solid var(--border-soft); border-radius: 10px;
+    background: var(--panel-2);
+    transition: border-color .15s, background .15s;
+  }
+  .grant:hover { border-color: var(--panel-4); }
+  .grant.req { border-color: color-mix(in oklab, var(--purple) 25%, var(--border)); background: color-mix(in oklab, var(--purple) 4%, var(--panel-2)); }
+  .grant.opt { border-style: dashed; }
+
+  .g-row { display: grid; grid-template-columns: 32px 1fr auto; gap: 14px; padding: 14px 16px; align-items: start; }
+  .g-icon {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: var(--panel-3); display: grid; place-items: center;
+    color: var(--text-dim);
+  }
+  .g-icon svg { width: 16px; height: 16px; }
+  .grant.req .g-icon { background: color-mix(in oklab, var(--purple) 15%, var(--panel-3)); color: var(--purple); }
+  .grant.optnet .g-icon { background: color-mix(in oklab, var(--orange) 12%, var(--panel-3)); color: var(--orange); }
+  .grant.optqa .g-icon { background: color-mix(in oklab, var(--accent) 12%, var(--panel-3)); color: var(--accent); }
+
+  .g-info .title { font-size: 13px; font-weight: 500; margin-bottom: 3px; display: flex; align-items: center; gap: 8px; }
+  .g-info .badge {
+    font-family: var(--mono); font-size: 9.5px; padding: 1px 6px;
+    border-radius: 3px; letter-spacing: 0.05em;
+    background: color-mix(in oklab, var(--purple) 18%, transparent); color: var(--purple);
+  }
+  .g-info .badge.opt { background: var(--panel-3); color: var(--text-mute); }
+  .g-info .desc { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+  .g-info .desc code { font-family: var(--mono); font-size: 10.5px; color: var(--accent); }
+  .g-info .meta {
+    margin-top: 7px; font-family: var(--mono); font-size: 10.5px; color: var(--text-mute);
+    display: flex; gap: 14px; flex-wrap: wrap;
+  }
+  .g-info .meta .k { color: var(--text-dim); }
+
+  /* toggle */
+  .toggle { width: 38px; height: 22px; background: var(--panel-3); border-radius: 22px;
+    position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; margin-top: 2px; }
+  .toggle.on { background: color-mix(in oklab, var(--green) 50%, var(--panel-3)); }
+  .toggle.locked { background: color-mix(in oklab, var(--purple) 35%, var(--panel-3)); cursor: not-allowed; }
+  .toggle .knob {
+    position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+    background: #fff; border-radius: 50%; transition: transform .18s;
+  }
+  .toggle.on .knob, .toggle.locked .knob { transform: translateX(16px); }
+
+  /* expand */
+  .g-expand { padding: 0 16px 14px; border-top: 1px dashed var(--border-soft); margin-top: 4px; display: none; }
+  .grant.open .g-expand { display: block; }
+  .g-expand .h {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em;
+    color: var(--text-mute); text-transform: uppercase; margin: 12px 0 6px;
+  }
+  .g-expand .modules {
+    display: flex; flex-wrap: wrap; gap: 5px; font-family: var(--mono); font-size: 10.5px;
+  }
+  .g-expand .modules .chip {
+    padding: 2px 7px; background: var(--panel); border: 1px solid var(--border-soft);
+    border-radius: 4px; color: var(--text-dim);
+  }
+  .g-expand .audit-line {
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-dim);
+    background: var(--panel); padding: 6px 10px; border-radius: 4px;
+    border: 1px solid var(--border-soft); white-space: nowrap; overflow-x: auto;
+  }
+  .g-expand .audit-line .k { color: var(--accent); }
+  .g-expand .audit-line .s { color: var(--green); }
+
+  .more {
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-mute);
+    margin-top: 8px; cursor: pointer;
+  }
+  .more:hover { color: var(--accent); }
+
+  /* sanitizer rules version pin */
+  .rules-pin {
+    margin: 8px 0 14px; padding: 10px 12px;
+    background: color-mix(in oklab, var(--purple) 6%, var(--panel-2));
+    border: 1px solid color-mix(in oklab, var(--purple) 25%, var(--border));
+    border-radius: 8px;
+    display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center;
+    font-size: 12px; color: var(--text-dim);
+  }
+  .rules-pin svg { color: var(--purple); }
+  .rules-pin code { font-family: var(--mono); font-size: 11px; color: var(--purple); padding: 1px 6px; background: color-mix(in oklab, var(--purple) 12%, transparent); border-radius: 3px; }
+
+  /* footer */
+  .m-foot {
+    padding: 16px 28px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    background: color-mix(in oklab, var(--panel-2) 50%, var(--panel));
+  }
+  .m-foot .left { font-family: var(--mono); font-size: 10.5px; color: var(--text-mute); flex: 1; line-height: 1.5; }
+  .m-foot .left a { color: var(--text-dim); text-decoration: underline; text-decoration-color: var(--border); }
+  .m-foot button { padding: 8px 16px; border-radius: 6px; font-size: 12.5px; font-weight: 500; }
+  .m-foot .deny { background: var(--panel-3); color: var(--text-dim); border: 1px solid var(--border); }
+  .m-foot .deny:hover { color: var(--text); border-color: var(--panel-4); }
+  .m-foot .grant-btn {
+    background: linear-gradient(180deg, var(--accent), color-mix(in oklab, var(--accent) 80%, #000));
+    color: #0a1014; font-weight: 600; padding: 8px 22px;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 50%, transparent),
+                0 6px 16px -6px color-mix(in oklab, var(--accent) 60%, transparent);
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><div class="logo">🚌</div>CodeBus</div>
+  <div class="step-trail">
+    <span class="done">① pick ✓</span><span>›</span>
+    <span class="now">② grant</span><span>›</span>
+    <span>③ scan</span><span>›</span>
+    <span>④ kb</span><span>›</span>
+    <span>⑤ ready</span>
+  </div>
+  <div class="spacer"></div>
+</div>
+
+<div class="stage">
+  <div class="modal">
+    <div class="m-head">
+      <div class="m-eyebrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        Workspace authorization · 一次同意，逐項可撤
+      </div>
+      <h1>CodeBus 想要存取這個 workspace</h1>
+      <p class="lede">每一項都可以獨立拒絕。同意紀錄寫進 <code>~/.codebus/authorization_audit.jsonl</code>，附 sanitizer rules 版本 — 規則更新會請你重看一次。</p>
+
+      <div class="ws-summary">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 4a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z"/></svg>
+        <div>
+          <span style="color:var(--text)">demo-synthetic</span>
+          &nbsp;·&nbsp; workspace_id=ws_c8d2 &nbsp;·&nbsp; workspace_type=folder &nbsp;·&nbsp; 3 files
+        </div>
+        <span class="pill">FOLDER</span>
+      </div>
+    </div>
+
+    <div class="m-body">
+      <div class="rules-pin">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2L3 6v6c0 5 3.8 9.5 9 10 5.2-.5 9-5 9-10V6l-9-4Z"/></svg>
+        <div>
+          這次同意綁定 sanitizer 規則版本 <code>2026-04-20-1</code>。下次規則更新（pattern 增減）會請你重新檢視——我們不會 silent rollover。
+        </div>
+      </div>
+
+      <div class="grants">
+
+        <!-- 1: read filesystem -->
+        <div class="grant req open">
+          <div class="g-row">
+            <div class="g-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/><path d="M14 2v6h6"/></svg>
+            </div>
+            <div class="g-info">
+              <div class="title">讀取 workspace 內檔案 <span class="badge">REQUIRED</span></div>
+              <div class="desc">遍歷你選的資料夾並讀取文字檔內容。受 <code>ToolSandbox.ensure_in_workspace</code> 保護——所有 <code>../</code> 與 symlink 逃逸會被擋下並寫進 <code>tool_audit.jsonl</code>。</div>
+              <div class="meta"><span><span class="k">scope:</span> &lt;ws&gt;/**</span><span><span class="k">honors:</span> .gitignore + .codebusignore</span><span><span class="k">excludes:</span> .codebus/, node_modules/, .git/</span></div>
+            </div>
+            <div class="toggle locked" title="必要權限"><div class="knob"></div></div>
+          </div>
+          <div class="g-expand">
+            <div class="h">會用到這個權限的 module</div>
+            <div class="modules">
+              <span class="chip">scanner</span><span class="chip">explorer</span><span class="chip">generator</span><span class="chip">qa_agent</span>
+            </div>
+            <div class="h">會寫進 audit 的範例</div>
+            <div class="audit-line">{"ts":"...", "tool":"<span class="k">read_file</span>", "path":"src/storage/local.ts", "allowed":<span class="s">true</span>}</div>
+          </div>
+        </div>
+
+        <!-- 2: write .codebus -->
+        <div class="grant req">
+          <div class="g-row">
+            <div class="g-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+            </div>
+            <div class="g-info">
+              <div class="title">寫入 <code>&lt;ws&gt;/.codebus/</code> 與 <code>&lt;ws&gt;/codebus-tutorials/</code> <span class="badge">REQUIRED</span></div>
+              <div class="desc">七層 audit JSONL 與多檔教材輸出全寫在 workspace 子目錄；不出本機。把 <code>.codebus/</code> 加進你的 <code>.gitignore</code> 即可整批排除。</div>
+              <div class="meta">
+                <span><span class="k">writes:</span> sanitize_audit · tool_audit · reasoning_log · token_usage · llm_calls · kb_growth · generator_log</span>
+              </div>
+            </div>
+            <div class="toggle locked"><div class="knob"></div></div>
+          </div>
+        </div>
+
+        <!-- 3: outbound LLM -->
+        <div class="grant optnet open">
+          <div class="g-row">
+            <div class="g-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13 13 0 0 1 0 18M12 3a13 13 0 0 0 0 18"/></svg>
+            </div>
+            <div class="g-info">
+              <div class="title">送出 sanitized 文字到 OpenAI <span class="badge opt">OPTIONAL</span></div>
+              <div class="desc">關掉 → 改用 MockProvider（教材會被標記為「離線範例」）。每一次 outbound 都先過 Sanitizer Pass 2，<code>llm_calls.jsonl</code> 記下 wire payload 與 <code>sanitizer_pass2_applied=true</code>。</div>
+              <div class="meta">
+                <span><span class="k">model:</span> gpt-4o-mini · text-embedding-3-small</span>
+                <span><span class="k">key:</span> CODEBUS_OPENAI_API_KEY (此機 env)</span>
+              </div>
+            </div>
+            <div class="toggle on"><div class="knob"></div></div>
+          </div>
+          <div class="g-expand">
+            <div class="h">會用到這個權限的 module</div>
+            <div class="modules">
+              <span class="chip">kb_build (embed)</span><span class="chip">kb_query (embed)</span><span class="chip">reasoning</span><span class="chip">judge</span><span class="chip">coverage</span><span class="chip">chat</span><span class="chip">generate</span><span class="chip">qa_agent</span>
+            </div>
+            <div class="h">每一筆會記在</div>
+            <div class="audit-line">&lt;ws&gt;/.codebus/<span class="k">llm_calls.jsonl</span> · &lt;ws&gt;/.codebus/<span class="k">token_usage.jsonl</span></div>
+          </div>
+        </div>
+
+        <!-- 4: Q&A KB growth -->
+        <div class="grant optqa">
+          <div class="g-row">
+            <div class="g-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7v10l9 4 9-4V7"/><path d="M3 7l9-4 9 4-9 4-9-4Z"/></svg>
+            </div>
+            <div class="g-info">
+              <div class="title">允許 Q&amp;A Agent 把新知識回寫到 KB <span class="badge opt">OPTIONAL</span></div>
+              <div class="desc">問問題時，Agent 探索新檔案後，會把「值得沉澱」的解答 chunk 加進向量 KB。每一筆寫進 <code>kb_growth.jsonl</code> 並過 Sanitizer Pass 3；單次最多 5 chunks，整 session 上限 20。</div>
+              <div class="meta">
+                <span><span class="k">budget:</span> 5/Q · 20/session</span>
+                <span><span class="k">dedup:</span> hash + 0.95 cosine</span>
+              </div>
+            </div>
+            <div class="toggle on"><div class="knob"></div></div>
+          </div>
+        </div>
+
+        <!-- 5: telemetry — opt-in OFF -->
+        <div class="grant opt">
+          <div class="g-row">
+            <div class="g-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12l4-4 4 4 7-7M21 5h-5v5"/></svg>
+            </div>
+            <div class="g-info">
+              <div class="title">傳匿名使用統計給 CodeBus 團隊 <span class="badge opt">OPTIONAL · 預設關閉</span></div>
+              <div class="desc">只送：station 數、教材檔數、token 總額、模組分布。不送檔名、不送內容、不送 prompt。</div>
+            </div>
+            <div class="toggle"><div class="knob"></div></div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="more">▸ 進階：自訂 .codebusignore · 改 sanitizer rule set · 看完整 spec</div>
+    </div>
+
+    <div class="m-foot">
+      <div class="left">
+        Audit 寫入：<a href="#">~/.codebus/authorization_audit.jsonl</a><br>
+        rules_version=<span style="color:var(--purple)">2026-04-20-1</span> · 你可以隨時在右上 Settings 撤銷
+      </div>
+      <button class="deny">取消</button>
+      <button class="grant-btn">同意並開始掃描 →</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

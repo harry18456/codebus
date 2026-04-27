@@ -1,0 +1,42 @@
+/* CodeBus Design Tokens — extracted from r-01-workspace.html */
+:root {
+  /* surfaces */
+  --bg: #0b0d10;
+  --panel: #13161b;
+  --panel-2: #191d24;
+  --panel-3: #1f242c;
+  --panel-4: #262c35;
+  --border: #262c35;
+  --border-soft: #1c2129;
+
+  /* text */
+  --text: #e6e8eb;
+  --text-dim: #9aa3ae;
+  --text-mute: #636b76;
+
+  /* accents (oklch — color-mix friendly) */
+  --accent: oklch(72% 0.12 210);   /* cyan-blue · agent / primary */
+  --accent-2: oklch(72% 0.12 85);  /* lime · brand secondary */
+  --green: oklch(72% 0.12 155);    /* judge / success */
+  --yellow: oklch(78% 0.13 95);    /* coverage / warning */
+  --orange: oklch(73% 0.15 55);
+  --red: oklch(68% 0.17 25);       /* kill / error */
+  --purple: oklch(70% 0.16 295);   /* sanitizer / privacy */
+
+  /* type */
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --sans: 'Inter', 'Noto Sans TC', system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+a { color: inherit; }
+::selection { background: color-mix(in oklab, var(--accent) 35%, transparent); }
