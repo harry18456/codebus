@@ -887,6 +887,7 @@ npm test                        # vitest
 - [x] `openspec/config.yaml` toolchain 描述把 `Bun` 改 `npm`
 - [x] `openspec/changes/m1-power-on/{proposal,design,tasks}.md` 移除 bun.lockb 引用、改 package-lock.json
 - [x] D-019 / D-013 後續事項表「dev-setup.md」列 `uv + bun + cargo` 改為 `uv + npm + cargo`
+- [x] **2026-04-27 Nuxt 升級 3.18 → 4.4.2**（Phase 6 動工前 toolchain bump）：`web/package.json` `nuxt: ^3.18.0` → `^4.0.0`（實裝 4.4.2 + Nitro 2.13.3 + Vite 7.3.2 + Vue 3.5.32）、新增 root `web/tsconfig.json` references 4 個 Nuxt 4 sub-config（`.nuxt/tsconfig.{app,server,shared,node}.json`，Nuxt 4 不再自動建 root tsconfig）；驗證 `npm run typecheck` 全綠 + `npm run dev` HTTP 200 OK + landing render 正常；既有 `srcDir: 'app/'` 已是 Nuxt 4 預設、`@tauri-apps/api` / `@nuxtjs/tailwindcss` 全相容、`ssr: false` SPA mode 不變；本次 toolchain bump 不需另開 D-XXX，因為決策框架（npm + Nuxt + TypeScript strict）未變
 - [ ] 後續若有效能瓶頸或需求改變可重新評估，但需另開 D-XXX 並 bump dev-setup
 
 ---

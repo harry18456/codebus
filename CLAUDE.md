@@ -43,10 +43,10 @@ M1「power-on」通電（2026-04-19 archive）後，資料層 + Module 4 Explore
 
 - `sidecar/` — uv-managed Python 3.12 FastAPI sidecar。核心：app factory、ephemeral port + bearer、stdout handshake、`--parent-pid` watchdog、ToolSandbox（`ensure_in_workspace` + red team fixture）、LLMProvider Protocol + `ProviderRole` dispatch + `MockProvider` / `OpenAIEmbeddingProvider` / `OpenAIChatProvider`、`TrackedProvider`（唯一 `token_usage.jsonl` / `llm_calls.jsonl` 寫入路徑）、三段 Sanitizer 全鏈（Pass 1 Scanner / Pass 2 Provider pre-flight / Pass 3 Q&A `add_to_kb`）、Qdrant lifecycle、Module 1 Scanner、Module 2 KB Builder + KB query + dim-mismatch guard + `upsert_chunk` 雙層 dedup、Module 4 Explorer ReAct loop + LLMJudge + LLMCoverageChecker + AggregatedTokenProbe、Module 5 Generator（多檔 MOC + station files + `route.json` + per-station retry + degraded fallback）、Module 8 Q&A Agent（RAG-first → 可選 ReAct → synthesize；`KBGrowthLogger` 第七層 audit）、SSE task skeleton（5 endpoint：scan / kb/build / explore / generate / qa；10 ERROR_CODES 收斂）、PyInstaller onefile spec。
 - `tauri/src-tauri/` — Rust host + `sidecar_ping` command。`src/sidecar.rs` spawn 協定、`src/lib.rs::resolve_sidecar_path()` 在 packaged / dev 模式都找得到 sibling binary。
-- `web/` — Nuxt 3 + Tailwind + TypeScript 骨架（npm，D-026）。目前只有 landing page 與 Sidecar Ping 按鈕；Trust Layer 四站（R-01 / O-01 / O-04 / O-05）mockup 已畫好但尚未實作。
+- `web/` — Nuxt 4 + Tailwind + TypeScript 骨架（npm，D-026；2026-04-27 從 Nuxt 3 升 4.4.2，`srcDir='app/'` 對齊 4.x 預設，root `tsconfig.json` references `.nuxt/tsconfig.{app,server,shared,node}.json`）。目前只有 landing page 與 Sidecar Ping 按鈕；Trust Layer 四站（R-01 / O-01 / O-04 / O-05）mockup 已畫好但尚未實作。
 - `openspec/specs/` — 18 個 capability spec：`agent-core` / `app-packaging` / `explorer-golden` / `explorer-sse` / `explorer-tools` / `folder-scanner` / `kb-growth` / `knowledge-base` / `llm-provider` / `module-5-generator` / `qa-agent` / `qdrant-client` / `repo-layout` / `sanitizer` / `sidecar-runtime` / `tauri-shell` / `tool-sandbox` / `usage-tracking`。
 - `docs/` — 19 份 Module / Agent / 橫切層 spec + `decisions.md` ADR + `README.md` / `dev-setup.md` / `implementation-plan.md` / `prompts.md`。
-- `design/` — Phase A Trust Layer 的 3 份 HTML mockup（`r-01` / `o-01` / `o-05`）+ 14 張截圖。
+- `design/` — Phase 6 動工原件（`v0/` 2026-04-19 初版 3 份 HTML + 14 張截圖；`v1/` 2026-04-27 完整版 14 mockup + 共用骨架 tokens.css/shell.css/shell.js + design canvas；總 README 列 v0/v1 對照與 Phase 6 動工指引）。
 - `tests/golden/` — `demo-synthetic/`（比賽 demo / regression fixture）+ `timeline-gdrive-adapter/`（參考實作）。
 - `tests/fixtures/` — `precommit-violations/`（commit-gate 負測 fixture）。
 
@@ -96,7 +96,7 @@ M1「power-on」通電（2026-04-19 archive）後，資料層 + Module 4 Explore
 
 ## 架構快照
 
-**混合架構**（D-001）：Tauri 2.0 殼（Rust）↔ Python Sidecar（FastAPI）↔ Qdrant（本地向量 DB）。前端 Nuxt 3 + TypeScript + Tailwind。IPC 走 `127.0.0.1:<random-port>` + Bearer token（`docs/sidecar-api.md §一`、`openspec/specs/sidecar-runtime/spec.md`）。
+**混合架構**（D-001）：Tauri 2.0 殼（Rust）↔ Python Sidecar（FastAPI）↔ Qdrant（本地向量 DB）。前端 Nuxt 4 + TypeScript + Tailwind。IPC 走 `127.0.0.1:<random-port>` + Bearer token（`docs/sidecar-api.md §一`、`openspec/specs/sidecar-runtime/spec.md`）。
 
 **sidecar 啟動協定**（M1 已實作）：Tauri spawn binary with `--parent-pid <pid>` → sidecar 首行 stdout 印 `{"port":<int>,"bearer":"<≥32 chars>"}` → Tauri 解析後用 bearer 打 `/healthz` → 200 即通電。parent process 消失 5 秒內 sidecar 自殺（watchdog）。
 
