@@ -35,12 +35,18 @@ Deferred to later changes (not this one):
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from codebus_agent.providers.protocol import Message as ProviderMessage
 from codebus_agent.providers.tracked import TrackedProvider
+from codebus_agent.sanitizer import (
+    MessageSource,
+    SanitizerAuditLogger,
+    SanitizerEngine,
+)
 
 from .budget import TokenBudgetProbe
 from .emitter import NullEmitter, SSEEmitter
@@ -171,30 +177,47 @@ async def _think(
     return action.thought, action.tool_calls
 
 
-async def _execute_one(call: ToolCall, tools: ExplorerTools) -> ToolResult:
+async def _execute_one(
+    call: ToolCall,
+    tools: ExplorerTools,
+    *,
+    error_sanitize_fn: Callable[[str], str] | None = None,
+) -> ToolResult:
     """Route a tool call to the matching method on the tools impl.
 
     Missing methods and raised exceptions both collapse into
     ``ToolResult.error`` so the loop can record the failure and move on
     (spec scenario `Tool errors do not crash the loop`).
+
+    When ``error_sanitize_fn`` is provided, the error string written
+    into ``ToolResult.output`` is run through Pass 2 sanitize first
+    (D2.19 — `Tool error string sanitized through Pass 2`). The
+    callable owns the per-iteration ``MessageSource(message_id=...)``
+    binding so this helper stays oblivious to ``state.step_count``.
+    Backward-compat: ``None`` keeps the legacy raw-error behaviour for
+    tests that don't wire a sanitizer.
     """
     method = getattr(tools, call.name, None)
     if method is None or not callable(method):
         msg = f"unknown tool {call.name!r}"
+        raw_error_text = f"ERROR: {msg}"
+        out = error_sanitize_fn(raw_error_text) if error_sanitize_fn else raw_error_text
         return ToolResult(
             tool_call_id=call.id,
             tool_name=call.name,
-            output=f"ERROR: {msg}",
+            output=out,
             raw=None,
             error=msg,
         )
     try:
         output = await method(**call.arguments)
     except BaseException as exc:  # noqa: BLE001 — capture then record
+        raw_error_text = f"ERROR: {exc}"
+        out = error_sanitize_fn(raw_error_text) if error_sanitize_fn else raw_error_text
         return ToolResult(
             tool_call_id=call.id,
             tool_name=call.name,
-            output=f"ERROR: {exc}",
+            output=out,
             raw=None,
             error=str(exc),
         )
@@ -208,13 +231,60 @@ async def _execute_one(call: ToolCall, tools: ExplorerTools) -> ToolResult:
 
 
 async def _execute_tools(
-    calls: list[ToolCall], tools: ExplorerTools
+    calls: list[ToolCall],
+    tools: ExplorerTools,
+    *,
+    error_sanitize_fn: Callable[[str], str] | None = None,
 ) -> list[ToolResult]:
     if not calls:
         return []
     return list(
-        await asyncio.gather(*[_execute_one(c, tools) for c in calls])
+        await asyncio.gather(
+            *[
+                _execute_one(c, tools, error_sanitize_fn=error_sanitize_fn)
+                for c in calls
+            ]
+        )
     )
+
+
+def _make_error_sanitize_fn(
+    *,
+    sanitizer: SanitizerEngine | None,
+    audit: SanitizerAuditLogger | None,
+    session_id: str,
+    rules_version: str,
+    step_idx: int,
+) -> Callable[[str], str] | None:
+    """Build the per-iteration error-sanitize callable for D2.19.
+
+    Returns ``None`` when ``sanitizer`` is absent so the loop falls
+    back to raw error text (backward compat for legacy tests). When
+    present, the returned callable runs Pass 2 sanitize tagged
+    ``MessageSource(message_id=f"explorer_step_{step_idx}_tool_error")``
+    and appends each hit to ``sanitize_audit.jsonl`` with ``pass_num=2``.
+    """
+    if sanitizer is None:
+        return None
+
+    def _sanitize_error(error_text: str) -> str:
+        result = sanitizer.sanitize(
+            error_text,
+            source=MessageSource(
+                message_id=f"explorer_step_{step_idx}_tool_error"
+            ),
+        )
+        if audit is not None:
+            for entry in result.entries:
+                audit.append(
+                    entry=entry,
+                    pass_num=2,
+                    rules_version=rules_version,
+                    session_id=session_id,
+                )
+        return result.text
+
+    return _sanitize_error
 
 
 def _append_observations(
@@ -418,6 +488,10 @@ async def run_explorer(
     tool_specs: list[dict] | None = None,
     emitter: SSEEmitter | None = None,
     token_probe: TokenBudgetProbe | None = None,
+    sanitizer: SanitizerEngine | None = None,
+    sanitizer_audit: SanitizerAuditLogger | None = None,
+    session_id: str = "",
+    rules_version: str = "",
     _depth: int = 0,
     _warning_state: _BudgetWarningState | None = None,
 ) -> ExplorerResult:
@@ -478,8 +552,22 @@ async def run_explorer(
             }
         )
 
-        # 2. Act (parallel tool dispatch; errors captured into ToolResult.error)
-        results = await _execute_tools(tool_calls, tools)
+        # 2. Act (parallel tool dispatch; errors captured into ToolResult.error).
+        # D2.19: when a sanitizer is wired, the tool error path runs Pass 2
+        # sanitize before populating `ToolResult.output` so user input
+        # echoed in exception messages cannot reach the next iteration's
+        # LLM context unsanitized. The factory binds the per-iteration
+        # `MessageSource(message_id=...)` so `_execute_one` stays oblivious.
+        error_sanitize_fn = _make_error_sanitize_fn(
+            sanitizer=sanitizer,
+            audit=sanitizer_audit,
+            session_id=session_id,
+            rules_version=rules_version,
+            step_idx=iter_step,
+        )
+        results = await _execute_tools(
+            tool_calls, tools, error_sanitize_fn=error_sanitize_fn
+        )
         for r in results:
             _emitter.emit(
                 {
@@ -616,6 +704,10 @@ async def run_explorer(
                 tool_specs=tool_specs,
                 emitter=emitter,
                 token_probe=token_probe,
+                sanitizer=sanitizer,
+                sanitizer_audit=sanitizer_audit,
+                session_id=session_id,
+                rules_version=rules_version,
                 _depth=_depth + 1,
                 _warning_state=warning_state,
             )

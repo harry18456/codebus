@@ -92,7 +92,7 @@ def test_scan_with_stream_true_returns_task_id_immediately(
     )
     elapsed = time.monotonic() - started
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert elapsed < 2.0, f"stream=true blocked for {elapsed:.3f}s"
     body = resp.json()
     assert "task_id" in body
@@ -151,7 +151,7 @@ def test_scan_stream_done_then_result_returns_full_scan_result(
         json={"workspace_type": "folder", "workspace_root": str(tmp_path)},
         headers=_auth(bearer),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     task_id = resp.json()["task_id"]
     handle = registry.get(task_id)
     assert handle is not None

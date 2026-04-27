@@ -179,7 +179,7 @@ def _require_kb_deps(request: Request):
     return backend, provider_factory, tracker_factory, embedding_dim
 
 
-@router.post("/kb/build")
+@router.post("/kb/build", status_code=status.HTTP_202_ACCEPTED)
 async def kb_build_endpoint(
     request: KBBuildRequest, http_request: Request
 ) -> dict[str, str]:

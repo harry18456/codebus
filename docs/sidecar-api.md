@@ -169,10 +169,12 @@
 }
 ```
 
-**Response**
+**Response**（202 Accepted）
 ```json
 { "task_id": "kb_xyz789" }
 ```
+
+對齊其他 task-spawning endpoint（`/scan?stream=true` / `/explore` / `/generate` / `/qa` 全部回 202），讓前端可以用統一的 `if status === 202: subscribe to SSE` 邏輯處理 5 個 endpoint，不需特殊化。落地於 change `agent-defense-depth`（archive 2026-04-27）。
 
 ---
 

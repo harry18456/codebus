@@ -129,7 +129,7 @@ def test_kb_build_returns_task_id_immediately(
     )
     elapsed = time.monotonic() - started
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert elapsed < 2.0, f"endpoint blocked for {elapsed:.3f}s"
     body = resp.json()
     assert "task_id" in body
@@ -174,7 +174,7 @@ def test_kb_build_done_then_result_returns_kbstats(
         },
         headers=_auth(bearer),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     task_id = resp.json()["task_id"]
 
     handle = app_with_kb_deps.state.tasks.get(task_id)

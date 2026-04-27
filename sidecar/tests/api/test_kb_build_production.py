@@ -124,7 +124,7 @@ def test_happy_path_kbstats_nonzero_counters(bearer: str, tmp_path: Path) -> Non
         json={"workspace_root": ws_str, "scan_result": _make_scan_dict(ws=ws_str)},
         headers=_auth(bearer),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     task_id = resp.json()["task_id"]
 
     handle = app.state.tasks.get(task_id)
@@ -206,7 +206,7 @@ def test_usage_tracker_writes_to_workspace_scoped_path(
         json={"workspace_root": ws_str, "scan_result": _make_scan_dict(ws=ws_str)},
         headers=_auth(bearer),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     task_id = resp.json()["task_id"]
 
     handle = app.state.tasks.get(task_id)
@@ -278,7 +278,7 @@ def test_openai_rate_limited_surfaces_as_sse_error_event(
         json={"workspace_root": ws_str, "scan_result": _make_scan_dict(ws=ws_str)},
         headers=_auth(bearer),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     task_id = resp.json()["task_id"]
 
     handle = app.state.tasks.get(task_id)
