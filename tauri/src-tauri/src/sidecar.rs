@@ -2,6 +2,10 @@
 //! openspec/changes/m1-power-on/specs/tauri-shell/spec.md
 //!   Requirement: Tauri spawns sidecar and completes handshake
 //!   Requirement: sidecar_ping command returns /healthz result
+//!
+//! `sidecar_handshake` (Phase 6 shell extension) caches the spawned-and-
+//! parsed handshake so the frontend can obtain bearer + port without
+//! re-spawning the sidecar on every IPC call.
 
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
@@ -72,12 +76,10 @@ pub enum PingError {
     HealthStatus(u16),
 }
 
-/// Spawn the sidecar binary, read the first stdout line as a handshake,
-/// then call `GET /healthz` with the bearer and return the parsed result.
-///
-/// `sidecar_path` must point at the packaged binary (Phase 8 artifact).
-/// In M1 dev runs it is the `codebus-sidecar` shim on PATH.
-pub async fn sidecar_ping(sidecar_path: &str) -> Result<PingResult, PingError> {
+/// Spawn the sidecar binary and read its first stdout line as a handshake.
+/// The spawned process is detached — its `--parent-pid` watchdog kills it
+/// when the Tauri parent exits.
+pub fn spawn_and_handshake(sidecar_path: &str) -> Result<Handshake, PingError> {
     use std::io::{BufRead, BufReader};
 
     let parent_pid = std::process::id().to_string();
@@ -113,6 +115,21 @@ pub async fn sidecar_ping(sidecar_path: &str) -> Result<PingResult, PingError> {
         return Err(PingError::HandshakeClosed);
     }
     let hs = parse_handshake(&first_line)?;
+
+    // Detach the child handle. The sidecar process keeps running and is
+    // reaped by the OS when Tauri (its --parent-pid) exits.
+    drop(child);
+
+    Ok(hs)
+}
+
+/// Spawn the sidecar binary, read the first stdout line as a handshake,
+/// then call `GET /healthz` with the bearer and return the parsed result.
+///
+/// `sidecar_path` must point at the packaged binary (Phase 8 artifact).
+/// In M1 dev runs it is the `codebus-sidecar` shim on PATH.
+pub async fn sidecar_ping(sidecar_path: &str) -> Result<PingResult, PingError> {
+    let hs = spawn_and_handshake(sidecar_path)?;
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))

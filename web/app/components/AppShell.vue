@@ -1,15 +1,41 @@
 <script setup lang="ts">
+import { ref, computed } from 'vue'
+import { useSidecar } from '~/composables/useSidecar'
+
+interface HealthBody {
+  status: string
+}
+
+const { fetch: sidecarFetch, ready, baseUrl } = useSidecar()
+
 const pingState = ref<'idle' | 'pending' | 'ok' | 'error'>('idle')
 const pingDetail = ref<string>('')
 
-async function onPing() {
+const port = computed<string>(() => {
+  if (!baseUrl.value) {
+    return ''
+  }
+  try {
+    return new URL(baseUrl.value).port
+  } catch {
+    return ''
+  }
+})
+
+async function onPing(): Promise<void> {
   pingState.value = 'pending'
   pingDetail.value = ''
   try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    const res = await invoke<{ status: string; port: number }>('sidecar_ping')
+    if (!ready.value) {
+      throw new Error('Sidecar handshake not complete (Tauri IPC unavailable in this context)')
+    }
+    const res = await sidecarFetch('/healthz')
+    if (!res.ok) {
+      throw new Error(`/healthz returned HTTP ${res.status}`)
+    }
+    const body = (await res.json()) as HealthBody
     pingState.value = 'ok'
-    pingDetail.value = `status=${res.status} port=${res.port}`
+    pingDetail.value = `status=${body.status} port=${port.value}`
   } catch (err) {
     pingState.value = 'error'
     pingDetail.value = err instanceof Error ? err.message : String(err)
@@ -18,11 +44,12 @@ async function onPing() {
 </script>
 
 <template>
-  <main class="min-h-screen flex flex-col items-center justify-center gap-6 bg-slate-950 text-slate-100">
+  <section class="flex flex-col items-center justify-center gap-6 min-h-full px-6 py-16 bg-surface-0 text-text-base">
     <h1 class="text-4xl font-semibold tracking-tight">CodeBus</h1>
-    <p class="text-sm text-slate-400">M1 power-on — sidecar handshake smoke test</p>
+    <p class="text-sm text-text-dim">Phase 6 shell baseline · sidecar handshake smoke test</p>
     <button
-      class="rounded-md bg-indigo-500 hover:bg-indigo-400 px-4 py-2 text-sm font-medium transition"
+      type="button"
+      class="rounded-md bg-accent text-surface-0 px-4 py-2 text-sm font-medium transition hover:opacity-90 disabled:opacity-50"
       :disabled="pingState === 'pending'"
       @click="onPing"
     >
@@ -30,8 +57,8 @@ async function onPing() {
     </button>
     <pre
       v-if="pingDetail"
-      class="text-xs text-slate-300 bg-slate-900 rounded px-3 py-2 max-w-xl whitespace-pre-wrap"
+      class="text-xs text-text-dim bg-surface-1 rounded px-3 py-2 max-w-xl whitespace-pre-wrap font-mono"
       :data-state="pingState"
     >{{ pingDetail }}</pre>
-  </main>
+  </section>
 </template>

@@ -1,6 +1,7 @@
 pub mod sidecar;
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 /// Resolve the packaged sidecar binary path.
 ///
@@ -27,6 +28,15 @@ fn resolve_sidecar_path() -> PathBuf {
     PathBuf::from(name)
 }
 
+/// Tauri-managed cache for the sidecar handshake. The Mutex keeps the
+/// first-spawn result so subsequent `sidecar_handshake` IPC calls skip
+/// re-spawning. The bearer/port stay in process memory only — never
+/// persisted to disk.
+#[derive(Default)]
+pub struct SidecarState {
+    handshake: Mutex<Option<sidecar::Handshake>>,
+}
+
 #[tauri::command]
 async fn sidecar_ping() -> Result<sidecar::PingResult, String> {
     let path = resolve_sidecar_path();
@@ -38,9 +48,45 @@ async fn sidecar_ping() -> Result<sidecar::PingResult, String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn sidecar_handshake(
+    state: tauri::State<'_, SidecarState>,
+) -> Result<sidecar::Handshake, String> {
+    {
+        let guard = state
+            .handshake
+            .lock()
+            .map_err(|e| format!("handshake mutex poisoned: {e}"))?;
+        if let Some(hs) = guard.as_ref() {
+            return Ok(hs.clone());
+        }
+    }
+    let path = resolve_sidecar_path();
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "sidecar path contains non-UTF-8 characters".to_string())?
+        .to_string();
+    let hs = tauri::async_runtime::spawn_blocking(move || {
+        sidecar::spawn_and_handshake(&path_str)
+    })
+    .await
+    .map_err(|e| format!("handshake task join error: {e}"))?
+    .map_err(|e| e.to_string())?;
+    let mut guard = state
+        .handshake
+        .lock()
+        .map_err(|e| format!("handshake mutex poisoned: {e}"))?;
+    if let Some(existing) = guard.as_ref() {
+        return Ok(existing.clone());
+    }
+    *guard = Some(hs.clone());
+    Ok(hs)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .manage(SidecarState::default())
     .plugin(tauri_plugin_fs::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -52,7 +98,7 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![sidecar_ping])
+    .invoke_handler(tauri::generate_handler![sidecar_ping, sidecar_handshake])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
