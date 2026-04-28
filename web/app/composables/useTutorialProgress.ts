@@ -225,6 +225,21 @@ function setCurrentStation(stationId: string): void {
   scheduleFlush()
 }
 
+async function resetProgress(): Promise<void> {
+  // Wipe in-memory state and immediately flush an empty progress.json
+  // so the unlock-chain computeds re-derive an empty unlocked set on
+  // the next tick. The watch keyed on (checkpoints, quizzes,
+  // activeRoute) will pick this up and reset completed_station_ids
+  // to [] without further help.
+  state.value = emptyProgress()
+  dirty.value = true
+  if (debounceTimer !== null) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
+  await flushNow()
+}
+
 function isStationComplete(station: RouteStation): boolean {
   return station.required_checks.every((checkId) => {
     if (state.value.checkpoints[checkId]?.done === true) return true
@@ -310,6 +325,7 @@ interface TutorialProgressApi {
   unlockedStationIds: typeof unlockedStationIds
   canVisitStation: typeof canVisitStation
   flushNow: typeof flushNow
+  resetProgress: typeof resetProgress
 }
 
 export function useTutorialProgress(): TutorialProgressApi {
@@ -323,6 +339,7 @@ export function useTutorialProgress(): TutorialProgressApi {
     isStationComplete,
     unlockedStationIds,
     canVisitStation,
-    flushNow
+    flushNow,
+    resetProgress
   }
 }

@@ -5,8 +5,9 @@
 // state is always live, regardless of whether the LLM-authored MOC
 // markdown listed the stations correctly.
 
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
+import { useTutorialProgress } from '~/composables/useTutorialProgress'
 import type { RouteJson, RouteStation } from '~/composables/useStationRoute'
 
 const props = defineProps<{
@@ -76,6 +77,26 @@ function badgeLabel(state: MOCEntry['state']): string {
   }
 }
 
+const showResetConfirm = ref(false)
+const resetting = ref(false)
+const resetError = ref<string | null>(null)
+
+const completedCount = computed(() => props.completedStationIds.length)
+const totalCount = computed(() => props.route.stations.length)
+
+async function confirmReset(): Promise<void> {
+  resetting.value = true
+  resetError.value = null
+  try {
+    await useTutorialProgress().resetProgress()
+    showResetConfirm.value = false
+  } catch (err) {
+    resetError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    resetting.value = false
+  }
+}
+
 function handleClick(entry: MOCEntry, event: MouseEvent): void {
   if (!entry.reachable) {
     event.preventDefault()
@@ -104,6 +125,29 @@ function handleClick(entry: MOCEntry, event: MouseEvent): void {
 
     <section class="mb-10 text-[15px] leading-[1.75] moc-prose">
       <MDC :value="mocMarkdown" />
+    </section>
+
+    <section
+      class="mb-6 p-4 rounded-lg bg-surface-1 border border-border-soft flex items-center justify-between"
+    >
+      <div>
+        <div
+          class="font-mono text-[10.5px] tracking-[0.14em] uppercase text-text-mute mb-1"
+        >
+          Progress
+        </div>
+        <div class="text-text-base text-[15px]">
+          {{ completedCount }} / {{ totalCount }} 站完成
+        </div>
+      </div>
+      <button
+        type="button"
+        class="px-3 py-1.5 rounded-md text-[12.5px] bg-surface-2 text-text-dim hover:bg-surface-3 hover:text-text-base transition-colors"
+        data-testid="reset-progress"
+        @click="showResetConfirm = true"
+      >
+        ↺ 重新開始
+      </button>
     </section>
 
     <section>
@@ -144,6 +188,51 @@ function handleClick(entry: MOCEntry, event: MouseEvent): void {
       </ol>
     </section>
   </article>
+
+  <!-- Reset confirm overlay -->
+  <div
+    v-if="showResetConfirm"
+    class="fixed inset-0 z-50 grid place-items-center bg-surface-0/80"
+    data-testid="reset-confirm-overlay"
+    @click.self="showResetConfirm = false"
+  >
+    <div
+      class="max-w-[480px] w-full mx-4 p-6 rounded-lg bg-surface-1 border border-border-base"
+    >
+      <h3 class="text-[16px] font-semibold text-text-base mb-2">
+        確定清除學習紀錄？
+      </h3>
+      <p class="text-[13.5px] text-text-dim leading-relaxed mb-4">
+        會重置所有 Checkpoint 勾選、Quiz 答題與解鎖狀態，回到第一站。
+        教材 markdown 不會被刪除。
+      </p>
+      <div
+        v-if="resetError"
+        class="mb-3 p-3 rounded-md text-[12.5px] bg-red/10 text-red font-mono"
+      >
+        {{ resetError }}
+      </div>
+      <div class="flex justify-end gap-3">
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-md text-[13px] bg-surface-2 text-text-dim hover:bg-surface-3 hover:text-text-base"
+          :disabled="resetting"
+          @click="showResetConfirm = false"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-md text-[13px] bg-red text-surface-0 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+          data-testid="reset-confirm"
+          :disabled="resetting"
+          @click="confirmReset"
+        >
+          {{ resetting ? '清除中…' : '清除紀錄' }}
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
