@@ -6,12 +6,12 @@
 // elsewhere need the same query for the page to read filesystem paths
 // through the Tauri command.
 
-import matter from 'gray-matter'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import MOCIndex from '~/components/tutorial/MOCIndex.vue'
 import StationNav from '~/components/tutorial/StationNav.vue'
+import { parseFrontmatter } from '~/composables/parseFrontmatter'
 import { useStationRoute, type RouteJson } from '~/composables/useStationRoute'
 import { useTutorialFiles } from '~/composables/useTutorialFiles'
 import { useTutorialProgress } from '~/composables/useTutorialProgress'
@@ -84,7 +84,7 @@ async function bootstrap(): Promise<void> {
       )
     ])
     routeJson.value = JSON.parse(routeRaw) as RouteJson
-    const parsedMoc = matter(mocRaw)
+    const parsedMoc = parseFrontmatter(mocRaw)
     mocBody.value = parsedMoc.content
     await progress.loadProgress(workspaceRoot.value, resolution.task_id)
     progress.setRoute(routeJson.value)

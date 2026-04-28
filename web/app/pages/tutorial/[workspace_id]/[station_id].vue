@@ -5,7 +5,6 @@
 // to gate access — already-completed stations are reachable in review
 // mode regardless of the unlock-forward window.
 
-import matter from 'gray-matter'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -14,6 +13,7 @@ import StationLayout, {
   type StationFrontmatter
 } from '~/components/tutorial/StationLayout.vue'
 import StationNav from '~/components/tutorial/StationNav.vue'
+import { parseFrontmatter } from '~/composables/parseFrontmatter'
 import { useStationRoute, type RouteJson } from '~/composables/useStationRoute'
 import { useTutorialFiles } from '~/composables/useTutorialFiles'
 import { useTutorialProgress } from '~/composables/useTutorialProgress'
@@ -120,7 +120,7 @@ async function bootstrap(): Promise<void> {
       workspaceRoot.value,
       `codebus-tutorials/${resolution.task_id}/${station.file_path}`
     )
-    const parsed = matter(stationRaw)
+    const parsed = parseFrontmatter(stationRaw)
     if (!parsed.data || !parsed.data.station_id || !parsed.data.title) {
       errorMessage.value = '本站 frontmatter 損毀（缺 station_id 或 title）'
       loading.value = false
