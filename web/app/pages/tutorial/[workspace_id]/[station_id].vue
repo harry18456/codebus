@@ -191,6 +191,7 @@ watch(
       :unlocked-station-ids="unlockedStationIds"
       :completed-station-ids="completedStationIds"
       @navigate="navigateToStation"
+      @navigate-to-moc="navigateToMoc"
     />
     <div v-else class="border-r border-border-soft bg-surface-1" />
 

@@ -95,6 +95,13 @@ async function bootstrap(): Promise<void> {
   }
 }
 
+function reload(): void {
+  // MOC link from inside the rail just re-bootstraps the same page.
+  // Useful as a "I want to go home" anchor when the user is staring
+  // at the loading / error fallback.
+  void bootstrap()
+}
+
 function navigateToStation(stationId: string): void {
   if (!workspaceRoot.value) return
   void router.push({
@@ -124,6 +131,7 @@ watch(
       :unlocked-station-ids="unlockedStationIds"
       :completed-station-ids="completedStationIds"
       @navigate="navigateToStation"
+      @navigate-to-moc="reload"
     />
     <div v-else class="border-r border-border-soft bg-surface-1" />
 

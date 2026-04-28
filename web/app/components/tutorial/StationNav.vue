@@ -17,6 +17,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'navigate', stationId: string): void
+  (e: 'navigate-to-moc'): void
 }>()
 
 interface StationViewModel {
@@ -79,6 +80,15 @@ function badgeClass(state: StationViewModel['state']): string {
   <nav
     class="h-full overflow-y-auto px-2 py-4 border-r border-border-soft bg-surface-1 text-[12.5px]"
   >
+    <button
+      type="button"
+      class="mx-2 mb-2 px-3 py-2 w-[calc(100%-1rem)] text-left rounded-md bg-surface-2 hover:bg-surface-3 transition-colors flex items-center gap-2 text-text-dim hover:text-text-base"
+      data-testid="nav-to-moc"
+      @click="emit('navigate-to-moc')"
+    >
+      <span class="font-mono text-[12.5px]">←</span>
+      <span class="text-[12.5px]">教材目錄</span>
+    </button>
     <div class="px-3 pb-3 mb-2 border-b border-border-soft">
       <div
         class="font-mono text-[9.5px] tracking-[0.16em] uppercase text-text-mute mb-1"
