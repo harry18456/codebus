@@ -143,11 +143,16 @@ function onDenied(): void {
   void router.push('/')
 }
 
-function onGranted(_payload: GrantResponse): void {
-  // Phase 6 step 27 will land R-01 workspace shell at `/workspace/scan`.
+function onGranted(payload: GrantResponse): void {
+  // R-01 station-board MOC index. The page resolves task_id implicitly
+  // (D-T11): empty workspace shows generate CTA (D-T13); single / multi
+  // task picks the latest. ws_path query carries the absolute workspace
+  // path so Tauri commands can read codebus-tutorials/ filesystem entries
+  // — the workspace_id alone is a one-way SHA-256 prefix and cannot be
+  // reversed to a path.
   void router.push({
-    path: '/workspace/scan',
-    query: { path: workspacePath.value }
+    path: `/tutorial/${payload.workspace_id}/index`,
+    query: { ws_path: workspacePath.value }
   })
 }
 

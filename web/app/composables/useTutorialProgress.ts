@@ -4,8 +4,8 @@
 // Invariants:
 // - This module is the only caller of `writeProgressFile` (defensive
 //   grep enforces this).
-// - No localStorage / sessionStorage / cookies / IndexedDB — `progress.json`
-//   on disk is the canonical source of truth.
+// - No browser-side persistence — `progress.json` on disk is the
+//   canonical source of truth (per spec scenario).
 // - Writes debounce ~500ms; `beforeunload` flushes synchronously so a
 //   tick + immediate close survives.
 

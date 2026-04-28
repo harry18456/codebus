@@ -144,9 +144,10 @@ The composable MUST debounce writes (~500 ms) to avoid IPC thrash on rapid check
 
 #### Scenario: Single-writer invariant enforced by source grep
 
-- **WHEN** the test suite greps `web/app/` for direct Tauri `invoke('write_progress_file', ...)` calls
+- **WHEN** the test suite greps `web/app/` for `\.writeProgressFile\(` (the public method on `useTutorialFiles`)
 - **THEN** matches MUST be found only inside `web/app/composables/useTutorialProgress.ts`
-- **AND** any other file calling `write_progress_file` directly MUST cause the test to fail
+- **AND** the underlying Tauri `invoke('write_progress_file', ...)` call MAY appear inside `web/app/composables/useTutorialFiles.ts` as the IPC wrapper, but no other file MAY invoke it directly nor call `useTutorialFiles().writeProgressFile(...)`
+- **AND** any other file calling `writeProgressFile` MUST cause the test to fail
 
 #### Scenario: localStorage / sessionStorage / cookies never store progress data
 

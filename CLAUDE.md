@@ -44,8 +44,8 @@ CodeBus 是「把陌生 codebase 一鍵變成可走訪的 tutorial」的桌面 A
 ## 子系統
 
 - `sidecar/` — uv-managed Python 3.12 FastAPI sidecar；ToolSandbox + Sanitizer + LLM Provider + Qdrant + Modules 1/2/4/5/8 + SSE task skeleton + auth subpackage + PyInstaller spec
-- `tauri/src-tauri/` — Rust host；`sidecar_ping` / `sidecar_handshake` IPC commands；`SidecarState` Mutex cache 避免重生
-- `web/` — Nuxt 4 + Tailwind + TypeScript（npm，D-026）；`tailwind.config.ts` 從 `design/v1/tokens.css` port；`useSidecar` / `useSseTask` 兩個 composable 是前端與 sidecar 唯一通訊路徑
+- `tauri/src-tauri/` — Rust host；`sidecar_ping` / `sidecar_handshake` IPC commands + `tutorial::{read_tutorial_file, write_progress_file, list_tutorial_tasks}` 三個檔案 IPC（共用 `validate_path` helper、紅隊 14 case 在 `tests/path_safety.rs`）；`SidecarState` Mutex cache
+- `web/` — Nuxt 4 + Tailwind + TypeScript（npm，D-026）；`tailwind.config.ts` 從 `design/v1/tokens.css` port；composables: `useSidecar` / `useSseTask`（sidecar HTTP）+ `useTutorialFiles` / `useStationRoute` / `useTutorialProgress`（tutorial 檔案 IPC，後者是 progress.json 唯一寫入路徑）；`components/content/{Checkpoint,Quiz,QAEntry}.vue` mdc 自動掛載 + `components/tutorial/{StationLayout,StationNav,StationContent,MOCIndex}.vue` page-level shell；`pages/tutorial/[workspace_id]/{index,[station_id]}.vue` 兩條 R-01 路由
 - `openspec/specs/` — 18+ 個 capability spec（單一事實來源；M1 後不可直接改 archive 過的 spec，要走 `/spectra-propose`）
 - `docs/` — Module / Agent / 橫切層 spec + `decisions.md` ADR + `implementation-plan.md` 動工順序
 - `design/v1/` — Phase 6 14 mockup + 共用骨架 tokens.css/shell.css/shell.js（前端動工原件）

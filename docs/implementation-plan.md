@@ -90,9 +90,9 @@ Markdown 互動 + Agent console（Demo 神器）+ 介入點。
 | # | 項目 | 工期 | 依賴 | 關聯 spec |
 |---|---|---|---|---|
 | 25.5 | **共用骨架**（`tailwind.config.ts` design tokens + `layouts/default.vue` 三段 grid + `TopBar.vue` + 七 tab `AuditPanel.vue` + `useSidecar` / `useSseTask` composable + Tauri `sidecar_handshake` command）— Phase 6 page 級動工的前置依賴，**已完成 `phase6-shell` archive 2026-04-27** | 1.5d | 25 | openspec/specs/frontend-shell/ |
-| 26 | `@nuxtjs/mdc` + Checkpoint.vue / Quiz.vue / QAEntry.vue 元件 | 2d | 24, 25.5 | interactive-tutorial.md §三 |
+| 26 | ✅ landed（`r-01-station-board`，與步驟 27 合併實作）：`@nuxtjs/mdc` + Checkpoint.vue / Quiz.vue / QAEntry.vue 三個 mdc 互動元件契約落地，dumb + emit pattern；progress.json 寫入透過 `useTutorialProgress` composable 統一路徑 | 2d | 24, 25.5 | interactive-tutorial.md §三 / openspec/specs/interactive-tutorial/ |
 | 26.5 | **Auth flow（O-01 modal + `~/.codebus/authorization_audit.jsonl` writer + 4 sidecar endpoints）** —— `auth-flow` change 落地（2026-04-27 archive），新 capability `openspec/specs/authorization-audit/`（4 ADDED Requirements）+ `sidecar-runtime` / `frontend-shell` 各 1 Modified Requirement；校正 `docs/authorization.md` §五 / §六 / §十一 三處 spec drift。**Trust Layer Act 1 第一幕通電**，與 R-01 / O-04 / O-05 同列敘事核心；**已完成** | 4d | 22, 26 | docs/authorization.md / openspec/specs/authorization-audit/ |
-| 27 | 站牌列表 + 內容區 + progress.json 讀寫 + 解鎖邏輯 | 2d | 26 | interactive-tutorial.md §六 |
+| 27 | ✅ landed（`r-01-station-board`，與步驟 26 合併實作）：MOC 首頁 + 站牌頁 + StationLayout/Nav/Content/MOCIndex + 解鎖邏輯 + D-T11 implicit-latest task_id fallback + D-T12 `###` 次級切頁 + D-T13 empty CTA + 3 個新 Tauri command（`read_tutorial_file` / `write_progress_file` / `list_tutorial_tasks`）+ 14 case 紅隊測 | 2d | 26 | interactive-tutorial.md §六 / openspec/specs/interactive-tutorial/ |
 | 28 | **Agent console**（reasoning_log SSE stream）— Demo 神器 | 1.5d | 22 | sidecar-api.md §四 |
 | 28.5 | **LLM Calls 分頁**（list + detail modal + filter）— Demo 透明度武器 | 1d | 22, 28 | agent-core.md §十三.2 / D-022 |
 | 29 | 三個介入點（路線調整 / 重跑 / 換資料夾；Pinia + 既有 API） | 1.5d | 23, 27 | D-020 |

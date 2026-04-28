@@ -246,13 +246,13 @@ Module 5 產出多檔教材時必須（詳見 `module-5-generator.md`）：
 ## 九、實作順序建議（對齊 Module 5 + Module 7）
 
 ### P0 — MVP 必做
-1. Module 5 Generator 產出多檔教材（MOC + `stations/s{NN}-slug.md`）含 `<Checkpoint>` 與 `<Quiz>`
-2. Module 7 前端 `@nuxtjs/mdc` 掛 `Checkpoint.vue` / `Quiz.vue` / `QAEntry.vue`
-3. 投影片模式檔案級路由（`/tutorial/{workspace_id}/{station_id}`）+ prev/next 按鈕走 `route.json.stations[*]` 順序
-4. 檔內 `###` 次級分頁翻頁（up/down）
-5. frontmatter parser → `<StationLayout>` 外殼（標題、時長、degraded badge）
-6. MOC 渲染（站列表 + 連結 + `<QAEntry>`）
-7. `progress.json` 讀寫（key 用 `station_id`）+ 解鎖邏輯
+1. [x] Module 5 Generator 產出多檔教材（MOC + `stations/s{NN}-slug.md`）含 `<Checkpoint>` 與 `<Quiz>`（`module-5-generator-p0` archive 2026-04-25）
+2. [x] Module 7 前端 `@nuxtjs/mdc` 掛 `Checkpoint.vue` / `Quiz.vue` / `QAEntry.vue`（`r-01-station-board` Group 4）
+3. [x] 投影片模式檔案級路由（`/tutorial/{workspace_id}/{station_id}`）+ prev/next 按鈕走 `route.json.stations[*]` 順序（`r-01-station-board` Group 7）
+4. [x] 檔內 `###` 次級分頁翻頁（up/down）（`r-01-station-board` D-T12 / Group 6.3）
+5. [x] frontmatter parser → `<StationLayout>` 外殼（標題、時長、degraded badge）（`r-01-station-board` Group 6.1）
+6. [x] MOC 渲染（站列表 + 連結 + `<QAEntry>`）（`r-01-station-board` Group 6.4 + 7.1）
+7. [x] `progress.json` 讀寫（key 用 `station_id`）+ 解鎖邏輯（`r-01-station-board` Group 5.3）
 
 ### P1 — 時間夠加
 8. 文件模式切換

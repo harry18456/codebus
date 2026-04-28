@@ -103,16 +103,16 @@
 
 ## 6. Tutorial component shell（components/tutorial/）
 
-- [ ] 6.1 [P] 新 `web/app/components/tutorial/StationLayout.vue`：
+- [x] 6.1 [P] 新 `web/app/components/tutorial/StationLayout.vue`：
     - props：`frontmatter: StationFrontmatter` / `totalStations: number`
     - render 標題（`frontmatter.title`）、進度（`第 ${frontmatter.station_index} / ${totalStations} 站`）、duration badge（`${frontmatter.duration_minutes} 分鐘`）、degraded badge（`v-if="frontmatter.degraded"` 顯示警告）
     - `<slot>` 給 content 區
     - 失敗 fallback：父 component 處理（StationLayout 只負責 render；missing 必填欄位由父 page 在 mount 時擋）
-- [ ] 6.2 [P] 新 `web/app/components/tutorial/StationNav.vue`：
+- [x] 6.2 [P] 新 `web/app/components/tutorial/StationNav.vue`：
     - props：`route: RouteJson` / `currentStationId: string | null` / `unlockedStationIds: Set<string>` / `completedStationIds: string[]`
     - 渲染 station list，每條根據 unlock state 套不同 styling（locked / unlocked / current / completed）
     - 點擊 unlocked 或 completed 條目：emit `navigate(stationId)` event；locked 條目：disable click
-- [ ] 6.3 [P] 新 `web/app/components/tutorial/StationContent.vue`（對應 spec Requirement: Sub-page navigation within station markdown；design D-T12）：
+- [x] 6.3 [P] 新 `web/app/components/tutorial/StationContent.vue`（對應 spec Requirement: Sub-page navigation within station markdown；design D-T12）：
     - props：`markdown: string`（已 strip frontmatter 的 body）+ optional `key`（station_id 變化時重置 chunk index）
     - mount 時用 `markdown.split(/^###\s+/m)` 切成 chunks（chunk 0 = `###` 之前的內容；其後每段以 `###` 起頭）；`chunkIndex: ref(0)`
     - 渲染：`<MDC :value="chunks[chunkIndex]" />` 只 render 當前 chunk
@@ -120,16 +120,16 @@
     - 底部進度條：「第 ${chunkIndex + 1} / ${chunks.length} 頁」
     - 0 個 `###` 的 markdown：chunks.length === 1，listener 仍 mount 但操作為 no-op
     - watch `props.markdown`（station 切換時）→ chunkIndex 重置 0
-- [ ] 6.4 [P] 新 `web/app/components/tutorial/MOCIndex.vue`：
+- [x] 6.4 [P] 新 `web/app/components/tutorial/MOCIndex.vue`：
     - props：`mocMarkdown: string`（tutorial.md 的 body，已 strip frontmatter）
     - 用 `<MDC :value="mocMarkdown" />` 渲染
     - 並列 station list overlay：站名 link 走 `/tutorial/${workspaceId}/${station_id}` 路由
     - 每條站附 unlock badge（locked / unlocked / completed）
-- [ ] 6.5 grep enforce：`web/app/components/tutorial/` 內無 disallowed colors / hex 字面量 / localStorage / sessionStorage
+- [x] 6.5 grep enforce：`web/app/components/tutorial/` 內無 disallowed colors / hex 字面量 / localStorage / sessionStorage
 
 ## 7. Pages（pages/tutorial/[workspace_id]/）
 
-- [ ] 7.1 新 `web/app/pages/tutorial/[workspace_id]/index.vue`（MOC 首頁，對應 spec Requirement 1 兩條 task_id fallback scenario + Requirement 6 empty CTA scenario；design D-T11 + D-T13）：
+- [x] 7.1 新 `web/app/pages/tutorial/[workspace_id]/index.vue`（MOC 首頁，對應 spec Requirement 1 兩條 task_id fallback scenario + Requirement 6 empty CTA scenario；design D-T11 + D-T13）：
     - mount 時：parse `route.params.workspace_id`，呼共用 helper `resolveTaskId(workspaceRoot, route.query.task)`（落 `web/app/composables/useStationRoute.ts` 或新 helper）
     - `resolveTaskId` 演算法（D-T11）：
       1. `?task=<id>` 有帶且符合 `^generate_[0-9a-f]{8}$` 且目錄存在 → 用該 task；source = "query"
@@ -143,7 +143,7 @@
     - 用 useTutorialProgress.loadProgress(workspaceRoot, task_id) 把 progress 載入 module state
     - render `<StationLayout>` 包 `<MOCIndex>` + 左側 `<StationNav>`
     - 後置失敗 fallback：task_id 已選但 route.json / tutorial.md 讀取失敗（檔損毀 / 非預期錯誤）→ 顯示「教材檔案讀取失敗」error view 連結回首頁；與 empty CTA 視覺截然不同（empty 是 first-run 引導、error 是異常）
-- [ ] 7.2 新 `web/app/pages/tutorial/[workspace_id]/[station_id].vue`（單站頁）：
+- [x] 7.2 新 `web/app/pages/tutorial/[workspace_id]/[station_id].vue`（單站頁）：
     - parse `station_id` URL param + 用 regex `^s\d{2}-[a-z0-9-]{1,40}(-\d+)?$` 驗證；不符回 friendly error 連結 MOC
     - 載 `route.json` + 對應 `stations/{station_id}.md`（用 useStationRoute.findStationFile）
     - `gray-matter` 解析 frontmatter + body
@@ -152,7 +152,7 @@
     - 左側永遠 render `<StationNav>` 給切站
     - mount 時 `useTutorialProgress().setCurrentStation(station_id)`
     - 已完成站額外 render review-mode badge
-- [ ] 7.3 改 `web/app/pages/workspace/grant.vue`：
+- [x] 7.3 改 `web/app/pages/workspace/grant.vue`：
     - `onGranted(payload: GrantResponse)` 改 `router.push({ path: \`/tutorial/${payload.workspace_id}/index\` })`，**不帶 `?task=` query**（first-run 設計：grant 完還沒 generate，task_id 未定）
     - first-run 流程：grant 成功 → 直跳 R-01 index → `resolveTaskId` 走 empty CTA 分支顯示「請先 generate」placeholder（D-T11 / D-T13）
     - second-run 流程（已跑過 generate）：grant 後跳 R-01 index → `resolveTaskId` 走 latest fallback 自動選最新 task → render MOC
@@ -160,38 +160,38 @@
 
 ## 8. 整合驗收
 
-- [ ] 8.1 `cd web && npm run typecheck` exit 0
-- [ ] 8.2 `cd web && npm run dev` HTTP 200，三條路由可達：`/`、`/workspace/grant?path=...`、`/tutorial/ws_x/index`、`/tutorial/ws_x/s01-overview`（後兩條 P0 沒真檔即 fallback view，但路由本身應 200）
-- [ ] 8.3 `cd tauri/src-tauri && cargo test` 全綠（含 path_safety 11 case + 既有 sidecar_ping / handshake test）
-- [ ] 8.4 `cd sidecar && uv run pytest tests/ -q` 數字維持 baseline（本 change 不動 sidecar，期望 899 passed / 19 skipped 持平）
-- [ ] 8.5 grep enforce 五件：
+- [x] 8.1 `cd web && npm run typecheck` exit 0
+- [x] 8.2 `cd web && npm run dev` HTTP 200，三條路由可達：`/`、`/workspace/grant?path=...`、`/tutorial/ws_x/index`、`/tutorial/ws_x/s01-overview`（後兩條 P0 沒真檔即 fallback view，但路由本身應 200）
+- [x] 8.3 `cd tauri/src-tauri && cargo test` 全綠（含 path_safety 13 case + 既有 7 case fs_scope/handshake_parse test）
+- [x] 8.4 `cd sidecar && uv run pytest tests/ -q` 數字維持 baseline（本 change 不動 sidecar，期望 899 passed / 19 skipped 持平；實測 899 passed + 1 已知 Windows timing flake `test_startup_remains_available_when_qdrant_unreachable`，與 spec-cleanup-stage-5-batch-a archive 紀錄一致）
+- [x] 8.5 grep enforce 七件：
     - `rg "localStorage\|sessionStorage\|document\.cookie" web/app/composables/useTutorialProgress.ts` → 0 命中
-    - `rg "invoke\(['\"]write_progress_file" web/app/` → 命中只在 `composables/useTutorialProgress.ts`（單一 writer 不變式）
+    - `rg "\.writeProgressFile\(" web/app/` → 命中只在 `composables/useTutorialProgress.ts`（單一 writer 不變式；`invoke('write_progress_file', ...)` 字面允許在 `useTutorialFiles.ts` IPC wrapper 內）
     - `rg "fetch\(['\"]file://" web/app/` → 0 命中
     - `rg "bg-slate-\|bg-indigo-\|bg-zinc-\|text-slate-\|text-indigo-\|text-zinc-" web/app/components/content/ web/app/components/tutorial/` → 0 命中
     - `rg "/tutorial/[^/]+/[0-9]+" web/app/components/ web/app/pages/` → 0 命中（禁用 numeric index URL）
     - `rg "invoke\(['\"]list_tutorial_tasks" web/app/` → 命中只在 `composables/useTutorialFiles.ts`（單一封裝路徑，禁直呼）
     - `rg "/tutorial/[^/]+/[a-f0-9]{8,}/" web/app/components/ web/app/pages/` → 0 命中（D-T11：URL 不該含 task_id segment）
-- [ ] 8.6 manual smoke：開瀏覽器走 grant → R-01 MOC → 點站牌 → 勾 Checkpoint → 答 Quiz → 走完一站 → 解鎖下一站 → 關 App 重開驗證 progress.json 落地
+- [ ] 8.6 manual smoke（**待 user 跑**：本 agent 環境無 GUI 無法執行）：`cargo tauri dev` → 開瀏覽器走 grant → R-01 MOC → 點站牌 → 勾 Checkpoint → 答 Quiz → 走完一站 → 解鎖下一站 → 關 App 重開驗證 progress.json 落地
 
 ## 9. 文件連動
 
-- [ ] 9.1 改 `CLAUDE.md` Phase 6 動工順序：步驟 26 + 27 row 從待動工改完成（同 `auth-flow` 對應 26.5 row pattern）
-- [ ] 9.2 改 `CLAUDE.md` 子系統段 web：補 `app/components/content/` + `app/components/tutorial/` + `useTutorialFiles.ts` / `useStationRoute.ts` / `useTutorialProgress.ts` + 兩 page；補 Tauri 端 `tutorial.rs` + 兩 command 描述
+- [x] 9.1 改 `CLAUDE.md` Phase 6 動工順序：步驟 26 + 27 row 從待動工改完成（透過 `docs/implementation-plan.md` row 編輯間接達成；CLAUDE.md slim 後不再維護 Phase 6 步驟詳列）
+- [x] 9.2 改 `CLAUDE.md` 子系統段 web：補 `app/components/content/` + `app/components/tutorial/` + `useTutorialFiles.ts` / `useStationRoute.ts` / `useTutorialProgress.ts` + 兩 page；補 Tauri 端 `tutorial.rs` + 三 command 描述
 - [ ] 9.3 ~~改 `CLAUDE.md` archive 時間軸：新增 row~~ **NoOp**：CLAUDE.md 在 commit `6ade8f8`（2026-04-28）已將 archive 時間軸整段刪除，由 `ls openspec/changes/archive/` 自身充當索引；本 change archive 後直接出現在該目錄即可，CLAUDE.md 無需改動 archive 段
-- [ ] 9.4 改 `docs/implementation-plan.md §六` 步驟 26 + 27：標 ✅ 已完成（同 26.5 pattern）
-- [ ] 9.5 改 `docs/interactive-tutorial.md §九 P0`：七條全標 `[x]`（對應 P0 條目 1-7）
+- [x] 9.4 改 `docs/implementation-plan.md §六` 步驟 26 + 27：標 ✅ 已完成（同 26.5 pattern）
+- [x] 9.5 改 `docs/interactive-tutorial.md §九 P0`：七條全標 `[x]`（對應 P0 條目 1-7）
 
 ## 10. 規格覆蓋錨點（apply 階段純驗證 checkbox）
 
-- [ ] 10.1 Spec coverage：`Station routing schema uses stable station id as URL key` 由 task 7.1 + 7.2 + 8.5 grep enforce 滿足
-- [ ] 10.2 Spec coverage：`Three mdc interactive components with strict prop contracts` 由 task 4.1-4.3 滿足
-- [ ] 10.3 Spec coverage：`progress.json schema and single-writer path` 由 task 5.3 + 8.5 grep enforce 滿足
-- [ ] 10.4 Spec coverage：`Unlock logic gates next-station access on completion` 由 task 5.3 + 7.2 滿足
-- [ ] 10.5 Spec coverage：`frontmatter parser drives StationLayout shell` 由 task 6.1 + 7.2 滿足
-- [ ] 10.6 Spec coverage：`MOC renders tutorial.md as the index page` 由 task 6.4 + 7.1 滿足（含新加 `Empty workspace shows generate CTA instead of error` scenario）
-- [ ] 10.7 Spec coverage：`Sub-page navigation within station markdown` 由 task 6.3 滿足（含 ### split / 鍵盤事件 / 不在 input 觸發 / 跨站 reset / 0 個 ### 視為 1 chunk 五條 scenario）
-- [ ] 10.8 Spec coverage：`Station routing schema` 新加兩條 scenario（task_id query/latest fallback）由 task 3.1 + 5.1 + 7.1 滿足
+- [x] 10.1 Spec coverage：`Station routing schema uses stable station id as URL key` 由 task 7.1 + 7.2 + 8.5 grep enforce 滿足
+- [x] 10.2 Spec coverage：`Three mdc interactive components with strict prop contracts` 由 task 4.1-4.3 滿足
+- [x] 10.3 Spec coverage：`progress.json schema and single-writer path` 由 task 5.3 + 8.5 grep enforce 滿足
+- [x] 10.4 Spec coverage：`Unlock logic gates next-station access on completion` 由 task 5.3 + 7.2 滿足
+- [x] 10.5 Spec coverage：`frontmatter parser drives StationLayout shell` 由 task 6.1 + 7.2 滿足
+- [x] 10.6 Spec coverage：`MOC renders tutorial.md as the index page` 由 task 6.4 + 7.1 滿足（含新加 `Empty workspace shows generate CTA instead of error` scenario）
+- [x] 10.7 Spec coverage：`Sub-page navigation within station markdown` 由 task 6.3 滿足（含 ### split / 鍵盤事件 / 不在 input 觸發 / 跨站 reset / 0 個 ### 視為 1 chunk 五條 scenario）
+- [x] 10.8 Spec coverage：`Station routing schema` 新加兩條 scenario（task_id query/latest fallback）由 task 3.1 + 5.1 + 7.1 滿足
 
 ## 11. Design / Risks 交叉索引（apply 期不執行；對齊 design.md）
 
