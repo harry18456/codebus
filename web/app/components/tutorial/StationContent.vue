@@ -47,7 +47,12 @@ function splitChunks(md: string): string[] {
     }
   }
   if (buffer.length > 0) parts.push(buffer.join('\n'))
-  return parts.length === 0 ? [''] : parts
+  // Drop empty/whitespace-only chunks. The common cause is markdown
+  // that starts with a `### ` heading (after frontmatter strip): the
+  // pre-heading buffer accumulates as an empty chunk 0 and shows up
+  // as a blank "第 1 / N 頁" before any real content.
+  const cleaned = parts.filter((p) => p.trim() !== '')
+  return cleaned.length === 0 ? [''] : cleaned
 }
 
 function advance(): void {
