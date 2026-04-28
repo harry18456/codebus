@@ -4,7 +4,7 @@
 
 The R-01 station-board frontend SHALL expose two route patterns for tutorials produced by the Module 5 Generator:
 
-1. `/tutorial/{workspace_id}/index` — the MOC (table-of-contents) page rendered from `<workspace>/codebus-tutorials/{task_id}/tutorial.md`.
+1. `/tutorial/{workspace_id}` — the MOC (table-of-contents) page rendered from `<workspace>/codebus-tutorials/{task_id}/tutorial.md`. (Nuxt file routing maps `pages/tutorial/[workspace_id]/index.vue` to this bare path; a trailing `/index` segment would route into `[station_id].vue` and fail the station_id regex.)
 2. `/tutorial/{workspace_id}/{station_id}` — a single station page rendered from the corresponding `<workspace>/codebus-tutorials/{task_id}/stations/{station_id}.md`.
 
 `{workspace_id}` MUST be the sidecar-derived `ws_<12-hex>` identifier produced by `auth.service.workspace_id_for_path` (returned to the frontend in `GrantResponse.workspace_id`). `{station_id}` MUST be the D-029 stable station id of the form `s\d{2}-[a-z0-9-]{1,40}(-\d+)?` (matching the regex enforced in `kb-growth` and `module-5-generator` capabilities). Numeric station indices MUST NOT appear in the URL path because indices drift when stations are reordered after regeneration.
@@ -13,7 +13,7 @@ The page setup logic MUST refuse to render a station page when the `station_id` 
 
 #### Scenario: MOC route renders tutorial.md as the index page
 
-- **WHEN** the user navigates to `/tutorial/ws_a3f2b1c8d4e5/index`
+- **WHEN** the user navigates to `/tutorial/ws_a3f2b1c8d4e5`
 - **THEN** the page MUST load `route.json` from `<workspace>/codebus-tutorials/{task_id}/route.json` and render `tutorial.md` (the MOC) as the body
 - **AND** every station name in the MOC MUST be a hyperlink targeting `/tutorial/{workspace_id}/{station_id}` using the `station_id` value from `route.json.stations[*].station_id`
 
@@ -27,7 +27,7 @@ The page setup logic MUST refuse to render a station page when the `station_id` 
 
 - **WHEN** the user navigates to `/tutorial/ws_a3f2b1c8d4e5/2` (numeric index)
 - **THEN** the route handler MUST refuse to render the station page (regex mismatch)
-- **AND** the page MUST display a friendly error linking back to the MOC at `/tutorial/{workspace_id}/index`
+- **AND** the page MUST display a friendly error linking back to the MOC at `/tutorial/{workspace_id}`
 
 #### Scenario: Invalid station_id format triggers safe fallback
 
@@ -36,7 +36,7 @@ The page setup logic MUST refuse to render a station page when the `station_id` 
 
 #### Scenario: Index page falls back to latest task when ?task query missing
 
-- **WHEN** the user navigates to `/tutorial/ws_a3f2b1c8d4e5/index` without any `?task=...` query parameter
+- **WHEN** the user navigates to `/tutorial/ws_a3f2b1c8d4e5` without any `?task=...` query parameter
 - **THEN** the page MUST scan `<workspace>/codebus-tutorials/*/` for existing task directories
 - **AND** if exactly one task directory exists, the page MUST select that task implicitly without showing a selector UI
 - **AND** if multiple task directories exist, the page MUST select the one with the most recent `tutorial.md` frontmatter `generated_at` timestamp (falling back to directory mtime when frontmatter is missing)
@@ -44,7 +44,7 @@ The page setup logic MUST refuse to render a station page when the `station_id` 
 
 #### Scenario: Index page honors explicit ?task query when valid
 
-- **WHEN** the user navigates to `/tutorial/ws_a3f2b1c8d4e5/index?task=generate_a3f2b1c8`
+- **WHEN** the user navigates to `/tutorial/ws_a3f2b1c8d4e5?task=generate_a3f2b1c8`
 - **AND** the value matches the regex `^generate_[0-9a-f]{8}$`
 - **AND** the directory `<workspace>/codebus-tutorials/generate_a3f2b1c8/` exists
 - **THEN** the page MUST load that task's `tutorial.md` and `route.json` directly without scanning sibling directories
@@ -228,7 +228,7 @@ The frontmatter parsing logic MUST NOT throw on missing optional fields; missing
 
 ### Requirement: MOC renders tutorial.md as the index page
 
-The MOC page (`/tutorial/{workspace_id}/index`) SHALL load `<workspace>/codebus-tutorials/{task_id}/tutorial.md` and render it through `@nuxtjs/mdc`. The rendered MOC MUST display:
+The MOC page (`/tutorial/{workspace_id}`) SHALL load `<workspace>/codebus-tutorials/{task_id}/tutorial.md` and render it through `@nuxtjs/mdc`. The rendered MOC MUST display:
 
 1. The list of stations from `route.json.stations` (each with title and duration)
 2. A hyperlink per station targeting `/tutorial/{workspace_id}/{station_id}` (URL fragment uses stable station id, never numeric index)

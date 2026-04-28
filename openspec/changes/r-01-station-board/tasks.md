@@ -153,7 +153,7 @@
     - mount 時 `useTutorialProgress().setCurrentStation(station_id)`
     - 已完成站額外 render review-mode badge
 - [x] 7.3 改 `web/app/pages/workspace/grant.vue`：
-    - `onGranted(payload: GrantResponse)` 改 `router.push({ path: \`/tutorial/${payload.workspace_id}/index\` })`，**不帶 `?task=` query**（first-run 設計：grant 完還沒 generate，task_id 未定）
+    - `onGranted(payload: GrantResponse)` 改 `router.push({ path: \`/tutorial/${payload.workspace_id}\` })`，**不帶 `?task=` query**（first-run 設計：grant 完還沒 generate，task_id 未定；URL **不**帶 `/index`，Nuxt 4 file routing 把 `pages/tutorial/[workspace_id]/index.vue` map 成 `/tutorial/:workspace_id`）
     - first-run 流程：grant 成功 → 直跳 R-01 index → `resolveTaskId` 走 empty CTA 分支顯示「請先 generate」placeholder（D-T11 / D-T13）
     - second-run 流程（已跑過 generate）：grant 後跳 R-01 index → `resolveTaskId` 走 latest fallback 自動選最新 task → render MOC
     - 不在本 task 處理 task_id；R-01 index page 內 `resolveTaskId` 是唯一推導路徑（task 7.1）
@@ -161,7 +161,7 @@
 ## 8. 整合驗收
 
 - [x] 8.1 `cd web && npm run typecheck` exit 0
-- [x] 8.2 `cd web && npm run dev` HTTP 200，三條路由可達：`/`、`/workspace/grant?path=...`、`/tutorial/ws_x/index`、`/tutorial/ws_x/s01-overview`（後兩條 P0 沒真檔即 fallback view，但路由本身應 200）
+- [x] 8.2 `cd web && npm run dev` HTTP 200，四條路由可達：`/`、`/workspace/grant?path=...`、`/tutorial/ws_x`、`/tutorial/ws_x/s01-overview`（後兩條 P0 沒真檔即 fallback view，但路由本身應 200；MOC 路由 `/tutorial/{ws_id}` **不**帶 `/index` segment — 那會被解成 `[station_id].vue` 並失敗）
 - [x] 8.3 `cd tauri/src-tauri && cargo test` 全綠（含 path_safety 13 case + 既有 7 case fs_scope/handshake_parse test）
 - [x] 8.4 `cd sidecar && uv run pytest tests/ -q` 數字維持 baseline（本 change 不動 sidecar，期望 899 passed / 19 skipped 持平；實測 899 passed + 1 已知 Windows timing flake `test_startup_remains_available_when_qdrant_unreachable`，與 spec-cleanup-stage-5-batch-a archive 紀錄一致）
 - [x] 8.5 grep enforce 七件：

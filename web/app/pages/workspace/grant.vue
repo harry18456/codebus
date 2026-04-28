@@ -150,8 +150,12 @@ function onGranted(payload: GrantResponse): void {
   // path so Tauri commands can read codebus-tutorials/ filesystem entries
   // — the workspace_id alone is a one-way SHA-256 prefix and cannot be
   // reversed to a path.
+  // Nuxt 4 file routing maps `pages/tutorial/[workspace_id]/index.vue`
+  // to URL `/tutorial/:workspace_id` (no `/index` segment) — the
+  // trailing `/index` would route into `[station_id].vue` with
+  // station_id="index" and trip the regex guard.
   void router.push({
-    path: `/tutorial/${payload.workspace_id}/index`,
+    path: `/tutorial/${payload.workspace_id}`,
     query: { ws_path: workspacePath.value }
   })
 }

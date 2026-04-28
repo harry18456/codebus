@@ -168,7 +168,7 @@ function navigateToStation(targetId: string): void {
 function navigateToMoc(): void {
   if (!workspaceRoot.value) return
   void router.push({
-    path: `/tutorial/${workspaceId.value}/index`,
+    path: `/tutorial/${workspaceId.value}`,
     query: { ws_path: workspaceRoot.value }
   })
 }
