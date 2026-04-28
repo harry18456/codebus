@@ -383,3 +383,36 @@ response = await provider.chat(clean_messages, ...)
 | Token 級 streaming tool call | LLM 供應商 API 支援度不一，MVP 等整段回 |
 | Fine-tune / LoRA 管理 | 超出範圍 |
 | Vision / 多模態 | 延後至 Phase 2，見 D-028（Scanner 已保留圖片 metadata、Protocol 擴充為 additive） |
+| Reasoning model 第三維 token 追蹤（`reasoning_tokens`） | MVP 用 `gpt-4o-mini`（標準 chat、無 reasoning tokens）；換 reasoning model（o1 / o3 / gpt-5 / claude-3.7-thinking 等）時補，詳見 §九 |
+
+## 九、未來考慮：Reasoning model 第三維 token
+
+**現況**：MVP 用 `gpt-4o-mini` 標準 chat model — `Usage` 只有 `input_tokens` / `output_tokens` 兩維，`token_usage.jsonl` 與 `_CHAT_PRICING` table 也對應兩維。
+
+**Reasoning model 場景**（o1 / o3 / gpt-5 / claude-3.7-sonnet thinking 等）OpenAI / Anthropic API 多回一個 `reasoning_tokens` 欄位 — model 內部「思考」用的 token、user 看不到內容、但**計入 `completion_tokens`**：
+
+```json
+{
+  "prompt_tokens": 100,
+  "completion_tokens": 500,
+  "completion_tokens_details": {
+    "reasoning_tokens": 400
+  }
+}
+```
+
+**計費影響**：reasoning_tokens 用 output 單價計、`cost_usd` 算法不變 — 真實成本仍正確。
+
+**透明度影響**：目前 `output_tokens=500` 看不出其中 400 是思考 — Trust Layer audit 第 4 tab `token` 顯示 reasoning vs visible-output 分布的能力缺一塊。
+
+**升級 path**（換 reasoning model 前一次 follow-up，估 ~半天）：
+
+1. `Usage` Pydantic schema 加 `reasoning_tokens: int = 0`（additive、不破舊資料）
+2. `OpenAIChatProvider.chat()` parse 回應的 `completion_tokens_details.reasoning_tokens`
+3. `TrackedProvider` 把 `reasoning_tokens` 寫進 `token_usage.jsonl`
+4. Audit panel 第 4 tab `token` 顯示三維（input / reasoning / visible-output）
+5. `_CHAT_PRICING` 不變（reasoning 仍按 output 單價、無第三維單價）
+
+**現在不做的理由**：MVP model 沒這欄位、加了也永遠是 0；換 model 時順手加比現在預先 wire 維護成本低。但 schema 留 additive 餘地（步驟 1 的 default `= 0`）讓未來 migration 零阻力。
+
+**觸發條件**：選定 reasoning model 為 production 預設前；提案時引用本節 + 同時更新 `pricing.py` 加新 model entry。

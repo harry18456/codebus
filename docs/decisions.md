@@ -722,6 +722,7 @@ Module 1（資料夾掃描）只寫「過濾垃圾檔案」，實際坑很多。
 - [x] `README.md`：Demo checklist 加「LLM Calls 分頁可展示 request/response」項
 - [x] wire payload `cost_usd` 反映真值（`review-backlog-cleanup`，2026-04-25）：與 D-021 同次 land；`usage_delta` SSE event 與 `llm_calls.jsonl` 對應 chat call `cost_usd` 不再是硬寫 `0.0` 而是 pricing-table 算出的真值，前端 R-01 / O-04 顯示 reasoning + judge 不再 0 元
 - [ ] D-020 連動：前端稽核 tab 分頁數改 6（sanitize / sandbox / kb_growth / reasoning / usage / llm_calls），前端期落地
+- [ ] Reasoning model 第三維 token 追蹤：換 reasoning model（o1 / o3 / gpt-5 / claude-3.7-thinking 等）為 production default 前 wire `Usage.reasoning_tokens`、`token_usage.jsonl` 三維欄位、Audit panel `token` tab 三維顯示。詳細 path 見 `llm-provider.md §九`。MVP 用 `gpt-4o-mini` 標準 chat、無這欄，現在不做。觸發點：選定 reasoning model 為 production default 的提案
 
 ---
 
