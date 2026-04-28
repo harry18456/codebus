@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 # Alias `codebus_agent.auth` as `bearer_auth` so the `from
 # codebus_agent.api.auth import router` line below cannot shadow the
@@ -435,6 +436,23 @@ def create_app(
     if not bearer_token or len(bearer_token) < 32:
         raise ValueError("bearer_token must be at least 32 characters")
     app = FastAPI(title="codebus-sidecar", version="0.1.0")
+    # CORS allowlist for the Tauri WebView origins. Bearer auth + 127.0.0.1
+    # loopback bind remain the canonical defenses; CORS is just to let the
+    # browser-style fetch from the WebView reach localhost without preflight
+    # rejection. Dev mode loads the frontend from `http://localhost:3000`
+    # (Nuxt dev server); Tauri 2 production uses `http://tauri.localhost`
+    # on Windows/Linux and `tauri://localhost` on macOS.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:3000",
+            "http://tauri.localhost",
+            "tauri://localhost",
+        ],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
     app.state.bearer_token = bearer_token
     app.state.qdrant_client = None
     # Single-slot task registry — survives the lifetime of the app, holds at

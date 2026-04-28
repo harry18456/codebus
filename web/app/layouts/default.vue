@@ -4,6 +4,13 @@
 // `.cb-split` / `.cb-stage` / `.cb-audit` primitives in
 // `design/v1/shell.css`. Pages override the named slots; the fallback
 // content keeps the shell coherent for pages that only render a stage.
+//
+// Components imported explicitly to bypass an auto-import miss observed
+// during `cargo tauri dev` — without these the topbar slot fallback
+// renders a "Failed to resolve component: TopBar" Vue warn and the
+// 44px row stays blank.
+import TopBar from '~/components/layout/TopBar.vue'
+import AuditPanel from '~/components/audit/AuditPanel.vue'
 </script>
 
 <template>
