@@ -14,7 +14,9 @@
     "test": "echo \"test hook deferred to phase B\" && exit 0"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.1.1"
+    "@nuxtjs/mdc": "^0.21.1",
+    "@tauri-apps/api": "^2.1.1",
+    "gray-matter": "^4.0.3"
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.12.2",

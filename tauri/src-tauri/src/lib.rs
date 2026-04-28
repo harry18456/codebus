@@ -1,4 +1,5 @@
 pub mod sidecar;
+pub mod tutorial;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -98,7 +99,13 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![sidecar_ping, sidecar_handshake])
+    .invoke_handler(tauri::generate_handler![
+      sidecar_ping,
+      sidecar_handshake,
+      tutorial::read_tutorial_file,
+      tutorial::write_progress_file,
+      tutorial::list_tutorial_tasks
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
