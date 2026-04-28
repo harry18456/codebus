@@ -22,15 +22,23 @@ async function bootstrap(): Promise<void> {
     const { invoke } = await import('@tauri-apps/api/core')
     const handshake = await invoke<SidecarHandshake>('sidecar_handshake')
     if (!handshake.bearer || !Number.isInteger(handshake.port)) {
+      // eslint-disable-next-line no-console
+      console.error('[useSidecar] handshake returned invalid shape:', handshake)
       return
     }
     bearer.value = handshake.bearer
     baseUrl.value = `http://127.0.0.1:${handshake.port}`
     ready.value = true
-  } catch {
+  } catch (err) {
     // Tauri IPC unavailable (browser-only `npm run dev`, or
     // `sidecar_handshake` not yet registered). Stay in ready=false; pages can
     // surface this as a "sidecar not connected" state.
+    //
+    // Surface the real error to DevTools so manual smoke can see whether
+    // it's a missing-Tauri-runtime issue (browser context) or a real
+    // sidecar spawn failure (PingError::Spawn / HandshakeClosed / …).
+    // eslint-disable-next-line no-console
+    console.error('[useSidecar] bootstrap failed:', err)
   }
 }
 
