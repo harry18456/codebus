@@ -15,7 +15,12 @@ interface SidecarHandshake {
 const bearer = ref('')
 const baseUrl = ref('')
 const ready = ref(false)
-let bootstrapped = false
+let bootstrapPromise: Promise<void> | null = null
+
+function ensureBootstrap(): Promise<void> {
+  if (bootstrapPromise === null) bootstrapPromise = bootstrap()
+  return bootstrapPromise
+}
 
 async function bootstrap(): Promise<void> {
   try {
@@ -43,6 +48,12 @@ async function bootstrap(): Promise<void> {
 }
 
 async function sidecarFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  // Race fix: page setup() may call sidecarFetch synchronously after
+  // useSidecar(), before the async bootstrap from `ensureBootstrap`
+  // finished. Await the in-flight (or just-fired) bootstrap promise
+  // so the first call resolves cleanly instead of throwing
+  // "handshake not complete".
+  await ensureBootstrap()
   if (!ready.value) {
     throw new Error('useSidecar: handshake not complete; bearer is unavailable')
   }
@@ -196,10 +207,7 @@ interface SidecarApi {
 }
 
 export function useSidecar(): SidecarApi {
-  if (!bootstrapped) {
-    bootstrapped = true
-    void bootstrap()
-  }
+  void ensureBootstrap()
   return {
     bearer,
     baseUrl,
