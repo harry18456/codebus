@@ -61,6 +61,28 @@ const isReviewMode = computed(() =>
   completedStationIds.value.includes(stationId.value)
 )
 
+const currentStationIndex = computed<number>(() => {
+  if (!routeJson.value) return -1
+  return routeJson.value.stations.findIndex((s) => s.station_id === stationId.value)
+})
+
+const prevStation = computed(() => {
+  const idx = currentStationIndex.value
+  if (idx <= 0 || !routeJson.value) return null
+  return routeJson.value.stations[idx - 1] ?? null
+})
+
+const nextStation = computed(() => {
+  const idx = currentStationIndex.value
+  if (idx < 0 || !routeJson.value) return null
+  return routeJson.value.stations[idx + 1] ?? null
+})
+
+const nextReachable = computed(() => {
+  if (!nextStation.value || !routeJson.value) return false
+  return progress.canVisitStation(nextStation.value.station_id, routeJson.value).value
+})
+
 async function bootstrap(): Promise<void> {
   loading.value = true
   errorMessage.value = null
@@ -270,6 +292,52 @@ watch(
           :total-stations="routeJson.stations.length"
         >
           <StationContent :markdown="body" />
+          <footer
+            class="mt-10 pt-6 border-t border-border-soft grid grid-cols-2 gap-4"
+          >
+            <button
+              v-if="prevStation"
+              type="button"
+              class="text-left p-4 rounded-lg bg-surface-1 border border-border-soft hover:border-accent transition-colors"
+              data-testid="pager-prev"
+              @click="navigateToStation(prevStation.station_id)"
+            >
+              <div
+                class="font-mono text-[9.5px] tracking-[0.14em] uppercase text-text-mute mb-1"
+              >
+                ← 上一站
+              </div>
+              <div class="text-[14px] text-text-base">
+                {{ prevStation.title }}
+              </div>
+            </button>
+            <div v-else />
+            <button
+              v-if="nextStation"
+              type="button"
+              class="text-right p-4 rounded-lg bg-surface-1 border border-border-soft transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              :class="
+                nextReachable
+                  ? 'hover:border-accent cursor-pointer'
+                  : 'cursor-not-allowed'
+              "
+              :disabled="!nextReachable"
+              data-testid="pager-next"
+              @click="nextReachable && navigateToStation(nextStation.station_id)"
+            >
+              <div
+                class="font-mono text-[9.5px] tracking-[0.14em] uppercase text-text-mute mb-1"
+              >
+                {{ nextReachable ? '下一站 →' : '🔒 完成本站才解鎖' }}
+              </div>
+              <div class="text-[14px] text-text-base">
+                {{ nextStation.title }}
+              </div>
+            </button>
+            <div v-else class="text-right p-4 text-text-mute font-mono text-[10.5px]">
+              已是最後一站
+            </div>
+          </footer>
         </StationLayout>
       </template>
     </section>
