@@ -418,4 +418,11 @@ def _estimate_tokens(text: str) -> int:
 
 
 def _chat_model_id(inner: Any) -> str:
+    # Prefer the underlying OpenAI model id (e.g. "gpt-4o-mini") so the
+    # pricing-table key + audit log reflect the actual model rather than
+    # the wrapper class name. Mock/test providers that don't expose an
+    # underlying model fall back to their `name` (e.g. "mock-chat-v1").
+    underlying = getattr(inner, "_model", None)
+    if underlying:
+        return f"{underlying}-chat-v1"
     return f"{getattr(inner, 'name', 'unknown')}-chat-v1"

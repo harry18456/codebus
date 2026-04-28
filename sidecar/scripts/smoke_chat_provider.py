@@ -112,8 +112,9 @@ async def _run_async_checks(app, ws: Path) -> int:
     # Structured output — print just the shape, not the raw OpenAI response.
     print(f"[chat] result.model_dump() = {result.model_dump()}")
 
-    # (d) inspect token_usage.jsonl
-    usage_path = ws / "token_usage.jsonl"
+    # (d) inspect token_usage.jsonl — `audit-path-unification` (2026-04-25)
+    # moved every workspace audit JSONL into the `.codebus/` subdirectory.
+    usage_path = ws / ".codebus" / "token_usage.jsonl"
     if not usage_path.exists():
         print("[FAIL] token_usage.jsonl was not created")
         return 1
@@ -141,7 +142,7 @@ async def _run_async_checks(app, ws: Path) -> int:
     print(f"[PASS] {len(reasoning_rows)} reasoning row(s) confirmed")
 
     # Also peek llm_calls.jsonl to confirm wire-payload logging fires.
-    calls_path = ws / "llm_calls.jsonl"
+    calls_path = ws / ".codebus" / "llm_calls.jsonl"
     if calls_path.exists():
         call_count = sum(
             1
