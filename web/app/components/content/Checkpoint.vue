@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 
 import { useTutorialProgress } from '~/composables/useTutorialProgress'
 
@@ -16,25 +16,65 @@ const passed = computed(() => total.value > 0 && checkedCount.value === total.va
 const ID_RE = /^(station-\d+-check|s\d+-check-\d+)$/
 const idValid = ID_RE.test(props.id)
 
-function findCheckboxes(): HTMLInputElement[] {
-  const el = slotRef.value
-  if (!el) return []
-  return Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+// H3 + H4 fix: mdc renders the markdown slot asynchronously, so the
+// initial onMounted often runs before any <input type=checkbox> exists.
+// We watch the slot DOM with a MutationObserver, rebind on every
+// change, and clean both observer + listeners on unmount.
+
+interface BoundCheckbox {
+  el: HTMLInputElement
+  handler: (event: Event) => void
+}
+
+let observer: MutationObserver | null = null
+let bound: BoundCheckbox[] = []
+let warnedEmpty = false
+
+function unbindAll(): void {
+  for (const { el, handler } of bound) {
+    el.removeEventListener('change', handler)
+  }
+  bound = []
+}
+
+function rebind(): void {
+  const root = slotRef.value
+  if (!root) return
+  const live = Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+
+  // Drop listeners on detached or replaced elements.
+  unbindAll()
+
+  for (const el of live) {
+    el.disabled = false
+    const handler = (): void => {
+      recompute()
+      const progress = useTutorialProgress()
+      progress.setCheckpoint(props.id, indexOfCheckbox(el), passed.value)
+    }
+    el.addEventListener('change', handler)
+    bound.push({ el, handler })
+  }
+
+  total.value = live.length
+  recompute()
+
+  if (live.length === 0 && !warnedEmpty) {
+    warnedEmpty = true
+    // eslint-disable-next-line no-console
+    console.warn(`<Checkpoint id="${props.id}"> has no checkbox items yet`)
+  } else if (live.length > 0) {
+    warnedEmpty = false
+  }
+}
+
+function indexOfCheckbox(el: HTMLInputElement): number {
+  return bound.findIndex((b) => b.el === el)
 }
 
 function recompute(): void {
-  const boxes = findCheckboxes()
-  total.value = boxes.length
-  checkedCount.value = boxes.filter((b) => b.checked).length
-}
-
-function handleChange(_event: Event, index: number): void {
-  recompute()
-  const progress = useTutorialProgress()
-  // Spec: progress.checkpoints[id] is one { done, ts } record for the
-  // Checkpoint as a whole. Flip done=true once all items pass; flip back
-  // when the user later unchecks below the threshold.
-  progress.setCheckpoint(props.id, index, passed.value)
+  total.value = bound.length
+  checkedCount.value = bound.filter((b) => b.el.checked).length
 }
 
 onMounted(() => {
@@ -44,24 +84,26 @@ onMounted(() => {
       `<Checkpoint id="${props.id}"> does not match /^(station-\\d+-check|s\\d+-check-\\d+)$/ — rendering anyway`
     )
   }
-  const boxes = findCheckboxes()
-  total.value = boxes.length
-  if (boxes.length === 0) {
-    // eslint-disable-next-line no-console
-    console.warn(`<Checkpoint id="${props.id}"> has no checkbox items`)
-    return
+  rebind()
+  if (slotRef.value) {
+    observer = new MutationObserver(() => rebind())
+    observer.observe(slotRef.value, { childList: true, subtree: true })
   }
-  boxes.forEach((box, index) => {
-    box.disabled = false
-    box.addEventListener('change', (e) => handleChange(e, index))
-  })
-  recompute()
+})
+
+onBeforeUnmount(() => {
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
+  unbindAll()
 })
 
 watch(
   () => props.id,
   () => {
-    recompute()
+    warnedEmpty = false
+    rebind()
   }
 )
 </script>

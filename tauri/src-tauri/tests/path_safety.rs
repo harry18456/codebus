@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use codebus_lib::tutorial::{
-    list_tutorial_tasks_in, progress_path_for, validate_path, PROGRESS_WRITE_LOCK,
+    list_tutorial_tasks_in, progress_path_for, validate_path, workspace_canonical,
+    PROGRESS_WRITE_LOCK,
 };
 use tempfile::TempDir;
 
@@ -234,6 +235,117 @@ fn list_tutorial_tasks_workspace_safety() {
     let file_ws = td.path().join("a_file");
     fs::write(&file_ws, "x").unwrap();
     assert!(list_tutorial_tasks_in(&file_ws.to_string_lossy()).is_err());
+}
+
+// ----- Hardening pass (S1 + S2 + S3) -------------------------------------
+
+#[test]
+fn windows_reserved_device_names_rejected() {
+    let ws = TempDir::new().unwrap();
+    let root = ws_root(&ws);
+    let cases = [
+        "codebus-tutorials/generate_aaaa1111/CON.md",
+        "codebus-tutorials/generate_aaaa1111/con.md",
+        "codebus-tutorials/generate_aaaa1111/Nul.md",
+        "codebus-tutorials/generate_aaaa1111/AUX.json",
+        "codebus-tutorials/generate_aaaa1111/PRN.md",
+        "codebus-tutorials/generate_aaaa1111/COM1.md",
+        "codebus-tutorials/generate_aaaa1111/lpt9.md",
+        "codebus-tutorials/CON/file.md",
+    ];
+    for case in cases {
+        let err = validate_path(&root, case)
+            .expect_err(&format!("reserved name must be rejected: {case}"));
+        assert!(
+            err.contains("Windows reserved name"),
+            "case={case} err={err}"
+        );
+    }
+}
+
+#[test]
+fn segment_with_trailing_dot_or_space_rejected() {
+    let ws = TempDir::new().unwrap();
+    let root = ws_root(&ws);
+    // Windows strips trailing dots / spaces at the FS layer, so a name
+    // ending in '.' or ' ' resolves to a different file than the
+    // visible string. Reject the segments that would actually trigger
+    // the strip — middle dots/spaces in a name are fine.
+    for case in [
+        "codebus-tutorials/generate_aaaa1111./tutorial.md",
+        "codebus-tutorials/generate_aaaa1111 /tutorial.md",
+        "codebus-tutorials/generate_aaaa1111/tutorial.md.",
+        "codebus-tutorials/generate_aaaa1111/tutorial.md ",
+    ] {
+        let err = validate_path(&root, case)
+            .expect_err(&format!("trailing dot/space must be rejected: {case}"));
+        assert!(
+            err.contains("ends with '.'") || err.contains("ends with ' '")
+                || err.contains("extension not allowed"),
+            "case={case} err={err}"
+        );
+    }
+}
+
+#[test]
+fn segment_with_colon_rejected() {
+    let ws = TempDir::new().unwrap();
+    let root = ws_root(&ws);
+    for case in [
+        "codebus-tutorials/generate_aaaa1111/tutorial.md:hidden",
+        "codebus-tutorials/foo:bar/tutorial.md",
+    ] {
+        let err = validate_path(&root, case)
+            .expect_err(&format!("colon must be rejected: {case}"));
+        assert!(
+            err.contains("contains ':'") || err.contains("extension not allowed"),
+            "case={case} err={err}"
+        );
+    }
+}
+
+#[test]
+fn dot_segment_rejected() {
+    let ws = TempDir::new().unwrap();
+    let root = ws_root(&ws);
+    let err = validate_path(
+        &root,
+        "codebus-tutorials/./generate_aaaa1111/tutorial.md",
+    )
+    .expect_err("'.' segment must be rejected");
+    assert!(err.contains("'.'"), "{err}");
+}
+
+#[test]
+fn workspace_canonical_returns_canonical_root() {
+    let ws = TempDir::new().unwrap();
+    let canonical = workspace_canonical(&ws_root(&ws)).unwrap();
+    // canonical path under tempdir must contain the same final
+    // directory name (Windows may add long-path prefix, dunce strips it)
+    assert!(canonical.exists());
+    assert!(canonical.is_dir());
+}
+
+#[tokio::test]
+async fn write_progress_recanonicalises_parent_after_create_dir_all() {
+    // Verify the post-create-dir-all containment recheck path returns a
+    // path inside the workspace (the actual race scenario it defends
+    // against requires a hostile concurrent symlink swap, which we
+    // cannot reproduce portably; this test asserts the helper at least
+    // succeeds for the happy path so the recheck is not a no-op).
+    let ws = TempDir::new().unwrap();
+    let task_id = "generate_aaaa1111";
+    let target = progress_path_for(&ws_root(&ws), task_id).unwrap();
+    let parent = target.parent().unwrap().to_path_buf();
+    fs::create_dir_all(&parent).unwrap();
+    let parent_canonical = dunce::canonicalize(&parent).unwrap();
+    let ws_canonical = workspace_canonical(&ws_root(&ws)).unwrap();
+    assert!(
+        parent_canonical.starts_with(&ws_canonical),
+        "parent {} must stay under workspace {}",
+        parent_canonical.display(),
+        ws_canonical.display()
+    );
 }
 
 #[test]

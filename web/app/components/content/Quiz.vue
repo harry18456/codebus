@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useTemplateRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 
 import { useTutorialProgress } from '~/composables/useTutorialProgress'
 
@@ -13,13 +13,17 @@ const options = ref<{ letter: string; label: string }[]>([])
 const selected = ref<string | null>(null)
 const lastSubmitted = ref<string | null>(null)
 const passed = ref(false)
+const contractError = ref<string | null>(null)
 
 const ID_RE = /^s\d+-q\d+$/
 const idValid = ID_RE.test(props.id)
 
 const showRetry = computed(
-  () => lastSubmitted.value !== null && !passed.value
+  () => lastSubmitted.value !== null && !passed.value && contractError.value === null
 )
+
+let observer: MutationObserver | null = null
+let parsedOnce = false
 
 function parseOptions(): { letter: string; label: string }[] {
   const el = slotRef.value
@@ -36,9 +40,31 @@ function parseOptions(): { letter: string; label: string }[] {
   return parsed
 }
 
+function refresh(): void {
+  // H3 fix: re-parse whenever the mdc-rendered slot DOM mutates so we
+  // do not race against async markdown rendering.
+  const next = parseOptions()
+  if (next.length === 0) return // wait for mdc
+  options.value = next
+  parsedOnce = true
+
+  // H6 fix: validate that `correct` actually exists among parsed
+  // option letters; otherwise the user can never pass and the page
+  // looks broken with no diagnostic.
+  const letters = new Set(next.map((o) => o.letter))
+  if (!letters.has(props.correct)) {
+    contractError.value = `Quiz id="${props.id}" 標 correct="${props.correct}" 但 options 只有 [${[...letters].join(', ')}] — Generator 端 markdown 契約異常`
+    // eslint-disable-next-line no-console
+    console.error(contractError.value)
+  } else {
+    contractError.value = null
+  }
+}
+
 function handleSubmit(): void {
   if (selected.value === null) return
   if (passed.value) return
+  if (contractError.value !== null) return
   const isCorrect = selected.value === props.correct
   lastSubmitted.value = selected.value
   if (isCorrect) {
@@ -55,14 +81,39 @@ onMounted(() => {
       `<Quiz id="${props.id}"> does not match /^s\\d+-q\\d+$/ — rendering anyway`
     )
   }
-  options.value = parseOptions()
-  if (options.value.length === 0) {
+  refresh()
+  if (slotRef.value) {
+    observer = new MutationObserver(() => refresh())
+    observer.observe(slotRef.value, { childList: true, subtree: true, characterData: true })
+  }
+  if (!parsedOnce) {
+    // mdc has not produced <li> yet; the observer above will retry on
+    // the next mutation. Give the user a single dev-mode breadcrumb
+    // until that happens.
     // eslint-disable-next-line no-console
     console.warn(
-      `<Quiz id="${props.id}"> has no parseable options (expected '- a) ...' / '- b) ...' format)`
+      `<Quiz id="${props.id}"> waiting on mdc to render '- a) ...' / '- b) ...' options`
     )
   }
 })
+
+onBeforeUnmount(() => {
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
+})
+
+watch(
+  () => props.id,
+  () => {
+    parsedOnce = false
+    selected.value = null
+    lastSubmitted.value = null
+    passed.value = false
+    refresh()
+  }
+)
 </script>
 
 <template>
@@ -83,7 +134,19 @@ onMounted(() => {
       <slot />
     </div>
 
-    <fieldset class="space-y-2 text-[14px] text-text-dim" :disabled="passed">
+    <div
+      v-if="contractError"
+      data-testid="quiz-contract-error"
+      class="p-3 rounded-md text-[12.5px] bg-red/10 text-red font-mono leading-relaxed"
+    >
+      {{ contractError }}
+    </div>
+
+    <fieldset
+      v-else
+      class="space-y-2 text-[14px] text-text-dim"
+      :disabled="passed"
+    >
       <label
         v-for="opt in options"
         :key="opt.letter"
@@ -104,7 +167,7 @@ onMounted(() => {
       </label>
     </fieldset>
 
-    <div class="mt-3 flex items-center gap-3">
+    <div v-if="!contractError" class="mt-3 flex items-center gap-3">
       <button
         type="button"
         class="px-3 py-1.5 rounded-md text-[12.5px] bg-accent text-surface-0 font-medium disabled:opacity-50 disabled:cursor-not-allowed"

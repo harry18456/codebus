@@ -87,6 +87,7 @@ async function bootstrap(): Promise<void> {
     const parsedMoc = matter(mocRaw)
     mocBody.value = parsedMoc.content
     await progress.loadProgress(workspaceRoot.value, resolution.task_id)
+    progress.setRoute(routeJson.value)
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)
   } finally {

@@ -10,28 +10,40 @@
 //!
 //! All three share `validate_path` for path safety: absolute workspace
 //! root, `codebus-tutorials/` prefix, canonical containment, extension
-//! allowlist, and symlink-outside rejection. Logic is split between a
-//! sync `validate_path` helper (testable without a Tauri runtime) and
-//! thin async command wrappers.
+//! allowlist, segment safety (Windows reserved names / ADS colon /
+//! trailing dot/space / dotdot / dot), and symlink-outside rejection.
+//!
+//! IPC errors collapse to a fixed vocabulary
+//! (`E_INVALID_PATH` / `E_WORKSPACE_INVALID` / `E_TASK_ID_INVALID` /
+//! `E_NOT_FOUND` / `E_DENIED` / `E_NOT_REGULAR_FILE` / `E_IO`) so an
+//! XSS-tainted frontend cannot enumerate the host filesystem layout
+//! through error strings. Internal validation messages still surface
+//! through `log::warn!` for developer diagnosis (server-side only).
 
 use std::collections::BTreeMap;
+use std::io::{Error as IoError, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 
-/// Subtree of every workspace where Module 5 Generator writes tutorials.
 const TUTORIALS_SUBDIR: &str = "codebus-tutorials";
 
-/// Allowlist of extensions readable by `read_tutorial_file`. Anything
-/// outside this set is rejected even if the path otherwise validates,
-/// so a misrouted `.ssh/id_rsa`-style read can never succeed.
 const ALLOWED_EXTENSIONS: &[&str] = &["md", "json"];
 
-/// Permissive task_id regex covering Module 5 Generator output
-/// (`generate_<8 hex>`) plus future runners. Disallows path-injection
-/// characters (`.`, `/`, whitespace).
+/// Windows treats these stems as device handles regardless of
+/// extension (`con.md` blocks on console input). Match case-folded
+/// stem only — the `.md` suffix is irrelevant.
+const WINDOWS_RESERVED_NAMES: &[&str] = &[
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7",
+    "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8",
+    "lpt9",
+];
+
+const READ_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
 fn is_valid_task_id(s: &str) -> bool {
     if s.is_empty() || s.len() > 80 {
         return false;
@@ -40,9 +52,27 @@ fn is_valid_task_id(s: &str) -> bool {
         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }
 
-/// Metadata returned by `list_tutorial_tasks`. The frontend uses
-/// `frontmatter_raw` (parsed by `gray-matter`) to read `generated_at`;
-/// `dir_mtime_unix` is the mtime fallback when frontmatter is missing.
+fn is_safe_segment(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("empty path segment".to_string());
+    }
+    if name.contains(':') {
+        return Err(format!("segment contains ':' (Windows ADS / drive): {name}"));
+    }
+    if name.ends_with('.') || name.ends_with(' ') {
+        return Err(format!("segment ends with '.' or ' ': {name}"));
+    }
+    let stem_lower = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if WINDOWS_RESERVED_NAMES.iter().any(|r| *r == stem_lower) {
+        return Err(format!("segment uses Windows reserved name: {name}"));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TutorialTaskMeta {
     pub id: String,
@@ -50,24 +80,13 @@ pub struct TutorialTaskMeta {
     pub dir_mtime_unix: i64,
 }
 
-/// Validate `workspace_root` + `relative_path` for read access. Returns
-/// the canonical absolute path inside the workspace on success.
-///
-/// Defends against:
-/// - non-absolute / non-existent / non-directory workspace
-/// - `relative_path` not under `codebus-tutorials/`
-/// - `..` traversal after canonicalisation
-/// - symlinks resolving outside the workspace
-/// - extensions outside the read allowlist
 pub fn validate_path(
     workspace_root: &str,
     relative_path: &str,
 ) -> Result<PathBuf, String> {
     let ws = Path::new(workspace_root);
     if !ws.is_absolute() {
-        return Err(format!(
-            "workspace_root must be absolute: {workspace_root}"
-        ));
+        return Err(format!("workspace_root must be absolute: {workspace_root}"));
     }
     if !ws.exists() {
         return Err(format!("workspace_root does not exist: {workspace_root}"));
@@ -85,8 +104,14 @@ pub fn validate_path(
             "relative_path must start with '{prefix_with_slash}': {relative_path}"
         ));
     }
-    if rel_normalised.split('/').any(|seg| seg == "..") {
-        return Err(format!("relative_path contains '..': {relative_path}"));
+    for seg in rel_normalised.split('/') {
+        if seg == ".." {
+            return Err(format!("relative_path contains '..': {relative_path}"));
+        }
+        if seg == "." {
+            return Err(format!("relative_path contains '.': {relative_path}"));
+        }
+        is_safe_segment(seg)?;
     }
 
     let extension = Path::new(&rel_normalised)
@@ -109,8 +134,9 @@ pub fn validate_path(
         Ok(p) => p,
         Err(_) => {
             // File may not exist yet (write path) — fall back to lexical
-            // resolution, but still verify each existing ancestor doesn't
-            // symlink outside the workspace.
+            // resolution. Re-walk every existing ancestor with
+            // symlink_metadata to make sure no segment slipped in as a
+            // symlink to outside the workspace.
             let mut cursor = ws_canonical.clone();
             for segment in Path::new(&rel_normalised).iter() {
                 cursor = cursor.join(segment);
@@ -142,15 +168,10 @@ pub fn validate_path(
     Ok(joined_canonical)
 }
 
-/// Validate `workspace_root` for write access (used by
-/// `write_progress_file`). Same rules as `validate_path` but skips the
-/// relative_path / extension layer (we build the path internally).
 fn validate_workspace_for_write(workspace_root: &str) -> Result<PathBuf, String> {
     let ws = Path::new(workspace_root);
     if !ws.is_absolute() {
-        return Err(format!(
-            "workspace_root must be absolute: {workspace_root}"
-        ));
+        return Err(format!("workspace_root must be absolute: {workspace_root}"));
     }
     if !ws.exists() {
         return Err(format!("workspace_root does not exist: {workspace_root}"));
@@ -163,8 +184,6 @@ fn validate_workspace_for_write(workspace_root: &str) -> Result<PathBuf, String>
     dunce::canonicalize(ws).map_err(|e| format!("canonicalize workspace_root failed: {e}"))
 }
 
-/// Compute the absolute progress.json path for a given workspace + task.
-/// Validates `task_id` for path-injection safety before joining.
 pub fn progress_path_for(
     workspace_root: &str,
     task_id: &str,
@@ -181,9 +200,14 @@ pub fn progress_path_for(
         .join("progress.json"))
 }
 
-/// Sync helper used by both the `list_tutorial_tasks` command and the
-/// integration tests. Returns an empty Vec when `codebus-tutorials/` is
-/// absent or empty (the empty-CTA branch in D-T13).
+/// Workspace-canonical helper used by `write_progress_file` to re-check
+/// containment after `create_dir_all` (the gap between
+/// `progress_path_for` validation and the actual write is a TOCTOU
+/// window we want to slam shut).
+pub fn workspace_canonical(workspace_root: &str) -> Result<PathBuf, String> {
+    validate_workspace_for_write(workspace_root)
+}
+
 pub fn list_tutorial_tasks_in(
     workspace_root: &str,
 ) -> Result<Vec<TutorialTaskMeta>, String> {
@@ -199,7 +223,6 @@ pub fn list_tutorial_tasks_in(
         ));
     }
 
-    // Sort by id so output order is deterministic across platforms.
     let mut entries: BTreeMap<String, TutorialTaskMeta> = BTreeMap::new();
     let read_dir = std::fs::read_dir(&tutorials_dir)
         .map_err(|e| format!("read_dir {TUTORIALS_SUBDIR} failed: {e}"))?;
@@ -239,10 +262,6 @@ pub fn list_tutorial_tasks_in(
     Ok(entries.into_values().collect())
 }
 
-/// Read the YAML frontmatter block from a markdown file (between two
-/// `---` lines at the top). Returns the raw block contents (without the
-/// fences) so the frontend can parse with `gray-matter`. None when no
-/// frontmatter is present or the file is unreadable.
 fn read_frontmatter_block(path: &Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     let mut lines = content.lines();
@@ -251,9 +270,17 @@ fn read_frontmatter_block(path: &Path) -> Option<String> {
         return None;
     }
     let mut buf = String::new();
+    let mut total = 0usize;
     for line in lines {
         if line.trim() == "---" {
             return Some(buf);
+        }
+        total += line.len() + 1;
+        if total > 8 * 1024 {
+            // Cap raw frontmatter at 8KB to bound the WebView heap and
+            // gray-matter parse time. Anything larger than that is a
+            // pathological / hostile tutorial.md.
+            return None;
         }
         buf.push_str(line);
         buf.push('\n');
@@ -261,19 +288,73 @@ fn read_frontmatter_block(path: &Path) -> Option<String> {
     None
 }
 
-/// Process-wide lock that serialises `write_progress_file` writes so a
-/// torn write across multiple windows is impossible.
 pub static PROGRESS_WRITE_LOCK: Mutex<()> = Mutex::const_new(());
+
+// ----- IPC error vocabulary ------------------------------------------------
+
+/// Map an opaque internal validation error string to a fixed-vocabulary
+/// IPC code. Internal detail is `log::warn!`-ed server-side only so an
+/// XSS-tainted frontend cannot enumerate filesystem layout via error
+/// strings (the security review's "info leak via error strings" finding).
+fn wire_validation_error(detail: &str) -> String {
+    if detail.contains("workspace_root") {
+        "E_WORKSPACE_INVALID".to_string()
+    } else if detail.contains("task_id") {
+        "E_TASK_ID_INVALID".to_string()
+    } else {
+        "E_INVALID_PATH".to_string()
+    }
+}
+
+fn wire_io_error(e: &IoError) -> String {
+    match e.kind() {
+        ErrorKind::NotFound => "E_NOT_FOUND",
+        ErrorKind::PermissionDenied => "E_DENIED",
+        ErrorKind::InvalidInput => "E_NOT_REGULAR_FILE",
+        _ => "E_IO",
+    }
+    .to_string()
+}
+
+// ----- Tauri commands ------------------------------------------------------
 
 #[tauri::command]
 pub async fn read_tutorial_file(
     workspace_root: String,
     relative_path: String,
 ) -> Result<String, String> {
-    let validated = validate_path(&workspace_root, &relative_path)?;
-    tokio::fs::read_to_string(&validated)
-        .await
-        .map_err(|e| format!("read_tutorial_file failed: {e}"))
+    let validated = validate_path(&workspace_root, &relative_path).map_err(|e| {
+        log::warn!("read_tutorial_file validate_path: {e}");
+        wire_validation_error(&e)
+    })?;
+    open_and_read(&validated).await.map_err(|e| {
+        log::warn!("read_tutorial_file io {}: {e}", validated.display());
+        wire_io_error(&e)
+    })
+}
+
+/// Race-resistant read: open via `tokio::fs::File` (binds to inode at
+/// open time, decouples subsequent reads from path-string TOCTOU),
+/// then verify the inode is a regular file and within the size cap
+/// before draining bytes.
+async fn open_and_read(path: &Path) -> Result<String, IoError> {
+    let mut file = tokio::fs::File::open(path).await?;
+    let meta = file.metadata().await?;
+    if !meta.is_file() {
+        return Err(IoError::new(
+            ErrorKind::InvalidInput,
+            "not a regular file",
+        ));
+    }
+    if meta.len() > READ_MAX_BYTES {
+        return Err(IoError::new(
+            ErrorKind::InvalidInput,
+            format!("file exceeds size cap of {READ_MAX_BYTES} bytes"),
+        ));
+    }
+    let mut buf = String::with_capacity(meta.len() as usize);
+    file.read_to_string(&mut buf).await?;
+    Ok(buf)
 }
 
 #[tauri::command]
@@ -282,19 +363,53 @@ pub async fn write_progress_file(
     task_id: String,
     payload: String,
 ) -> Result<(), String> {
-    let target = progress_path_for(&workspace_root, &task_id)?;
+    let target = progress_path_for(&workspace_root, &task_id).map_err(|e| {
+        log::warn!("write_progress_file progress_path_for: {e}");
+        wire_validation_error(&e)
+    })?;
+    let ws_canonical = workspace_canonical(&workspace_root).map_err(|e| {
+        log::warn!("write_progress_file workspace_canonical: {e}");
+        wire_validation_error(&e)
+    })?;
     let parent = target
         .parent()
-        .ok_or_else(|| format!("progress path has no parent: {}", target.display()))?
+        .ok_or_else(|| "E_INVALID_PATH".to_string())?
         .to_path_buf();
 
     let _guard = PROGRESS_WRITE_LOCK.lock().await;
-    tokio::fs::create_dir_all(&parent)
+
+    tokio::fs::create_dir_all(&parent).await.map_err(|e| {
+        log::warn!("write_progress_file create_dir_all {}: {e}", parent.display());
+        wire_io_error(&e)
+    })?;
+
+    // Re-canonicalise the parent after create_dir_all so a race that
+    // swapped any ancestor for an out-of-tree symlink between
+    // progress_path_for validation and the actual write is caught
+    // before bytes hit the disk.
+    let parent_canonical = dunce::canonicalize(&parent).map_err(|e| {
+        log::warn!("write_progress_file recheck parent {}: {e}", parent.display());
+        wire_io_error(&e)
+    })?;
+    if !parent_canonical.starts_with(&ws_canonical) {
+        log::warn!(
+            "write_progress_file parent escaped workspace post create_dir_all: {} not under {}",
+            parent_canonical.display(),
+            ws_canonical.display()
+        );
+        return Err("E_INVALID_PATH".to_string());
+    }
+
+    let final_target = parent_canonical.join("progress.json");
+    tokio::fs::write(&final_target, payload.as_bytes())
         .await
-        .map_err(|e| format!("create_dir_all parent failed: {e}"))?;
-    tokio::fs::write(&target, payload.as_bytes())
-        .await
-        .map_err(|e| format!("write_progress_file failed: {e}"))
+        .map_err(|e| {
+            log::warn!(
+                "write_progress_file write {}: {e}",
+                final_target.display()
+            );
+            wire_io_error(&e)
+        })
 }
 
 #[tauri::command]
@@ -304,5 +419,12 @@ pub async fn list_tutorial_tasks(
     let ws = workspace_root.clone();
     tokio::task::spawn_blocking(move || list_tutorial_tasks_in(&ws))
         .await
-        .map_err(|e| format!("list_tutorial_tasks join error: {e}"))?
+        .map_err(|e| {
+            log::warn!("list_tutorial_tasks join error: {e}");
+            "E_IO".to_string()
+        })?
+        .map_err(|e| {
+            log::warn!("list_tutorial_tasks: {e}");
+            wire_validation_error(&e)
+        })
 }

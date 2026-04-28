@@ -22,8 +22,24 @@ function splitChunks(md: string): string[] {
   const parts: string[] = []
   const lines = md.split('\n')
   let buffer: string[] = []
+  let inFence = false
+  let fenceMarker = ''
   for (const line of lines) {
-    if (/^###\s+/.test(line) && buffer.length > 0) {
+    // H5 fix: track ``` / ~~~ fence state so '### ' inside a code
+    // block does NOT open a new chunk (would corrupt the fenced
+    // block).
+    const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+    if (fenceMatch) {
+      const marker = fenceMatch[1]!
+      if (!inFence) {
+        inFence = true
+        fenceMarker = marker
+      } else if (line.trimStart().startsWith(fenceMarker)) {
+        inFence = false
+        fenceMarker = ''
+      }
+    }
+    if (!inFence && /^###\s+/.test(line) && buffer.length > 0) {
       parts.push(buffer.join('\n'))
       buffer = [line]
     } else {

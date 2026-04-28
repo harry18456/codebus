@@ -106,6 +106,7 @@ async function bootstrap(): Promise<void> {
     }
 
     await progress.loadProgress(workspaceRoot.value, resolution.task_id)
+    progress.setRoute(routeJson.value)
     progress.setCurrentStation(stationId.value)
 
     if (!progress.canVisitStation(stationId.value, routeJson.value).value) {
