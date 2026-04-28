@@ -22,7 +22,7 @@ worktree: true
 # Custom git worktrees directory
 # worktrees_dir: .spectra/worktrees
 
-# Claude Code skill effort levels (low/medium/high/max)
+# Claude Code skill effort levels (low/medium/high/xhigh/max)
 # claude_effort:
 #   apply: high
 

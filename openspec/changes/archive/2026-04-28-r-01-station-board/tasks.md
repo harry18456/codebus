@@ -172,13 +172,13 @@
     - `rg "/tutorial/[^/]+/[0-9]+" web/app/components/ web/app/pages/` → 0 命中（禁用 numeric index URL）
     - `rg "invoke\(['\"]list_tutorial_tasks" web/app/` → 命中只在 `composables/useTutorialFiles.ts`（單一封裝路徑，禁直呼）
     - `rg "/tutorial/[^/]+/[a-f0-9]{8,}/" web/app/components/ web/app/pages/` → 0 命中（D-T11：URL 不該含 task_id segment）
-- [ ] 8.6 manual smoke（**待 user 跑**：本 agent 環境無 GUI 無法執行）：`cargo tauri dev` → 開瀏覽器走 grant → R-01 MOC → 點站牌 → 勾 Checkpoint → 答 Quiz → 走完一站 → 解鎖下一站 → 關 App 重開驗證 progress.json 落地
+- [x] 8.6 manual smoke（user 在 cargo tauri dev 真機跑）：grant → R-01 MOC → 點站牌 → 勾 Checkpoint → 答 Quiz → unlock chain s01→s02→s03 → 關 App 重啟驗 progress.json 落地、review-mode badge / Checkpoint+Quiz 自動 restore、reset 按鈕真清空。過程順帶清掉 ~10 條 baseline drift（vue-tsc / CORS / Buffer / Nuxt index URL / mdc plugin 等，commits db35365 → a0be968 之間）
 
 ## 9. 文件連動
 
 - [x] 9.1 改 `CLAUDE.md` Phase 6 動工順序：步驟 26 + 27 row 從待動工改完成（透過 `docs/implementation-plan.md` row 編輯間接達成；CLAUDE.md slim 後不再維護 Phase 6 步驟詳列）
 - [x] 9.2 改 `CLAUDE.md` 子系統段 web：補 `app/components/content/` + `app/components/tutorial/` + `useTutorialFiles.ts` / `useStationRoute.ts` / `useTutorialProgress.ts` + 兩 page；補 Tauri 端 `tutorial.rs` + 三 command 描述
-- [ ] 9.3 ~~改 `CLAUDE.md` archive 時間軸：新增 row~~ **NoOp**：CLAUDE.md 在 commit `6ade8f8`（2026-04-28）已將 archive 時間軸整段刪除，由 `ls openspec/changes/archive/` 自身充當索引；本 change archive 後直接出現在該目錄即可，CLAUDE.md 無需改動 archive 段
+- [x] 9.3 ~~改 `CLAUDE.md` archive 時間軸：新增 row~~ **NoOp**：CLAUDE.md 在 commit `6ade8f8`（2026-04-28）已將 archive 時間軸整段刪除，由 `ls openspec/changes/archive/` 自身充當索引；本 change archive 後直接出現在該目錄即可，CLAUDE.md 無需改動 archive 段
 - [x] 9.4 改 `docs/implementation-plan.md §六` 步驟 26 + 27：標 ✅ 已完成（同 26.5 pattern）
 - [x] 9.5 改 `docs/interactive-tutorial.md §九 P0`：七條全標 `[x]`（對應 P0 條目 1-7）
 
