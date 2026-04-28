@@ -154,8 +154,14 @@ watch(
       <label
         v-for="opt in options"
         :key="opt.letter"
-        class="flex items-start gap-3 cursor-pointer p-2 rounded-md hover:bg-surface-2 transition-colors"
-        :class="{ 'cursor-not-allowed': passed }"
+        class="flex items-start gap-3 p-2 rounded-md transition-colors border"
+        :class="[
+          passed && opt.letter === props.correct
+            ? 'bg-green/10 border-green cursor-default'
+            : passed
+              ? 'border-transparent cursor-not-allowed opacity-60'
+              : 'border-transparent cursor-pointer hover:bg-surface-2'
+        ]"
       >
         <input
           v-model="selected"
@@ -164,9 +170,31 @@ watch(
           :value="opt.letter"
           class="mt-[5px] cursor-pointer accent-accent"
         />
-        <span>
-          <span class="font-mono text-text-mute mr-2">{{ opt.letter }})</span>
-          {{ opt.label }}
+        <span class="flex-1">
+          <span
+            class="font-mono mr-2"
+            :class="
+              passed && opt.letter === props.correct
+                ? 'text-green'
+                : 'text-text-mute'
+            "
+            >{{ opt.letter }})</span
+          >
+          <span
+            :class="
+              passed && opt.letter === props.correct
+                ? 'text-green'
+                : 'text-text-dim'
+            "
+            >{{ opt.label }}</span
+          >
+        </span>
+        <span
+          v-if="passed && opt.letter === props.correct"
+          class="text-green font-mono text-[12.5px]"
+          aria-label="正確答案"
+        >
+          ✓
         </span>
       </label>
     </fieldset>
