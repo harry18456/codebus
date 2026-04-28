@@ -436,23 +436,6 @@ def create_app(
     if not bearer_token or len(bearer_token) < 32:
         raise ValueError("bearer_token must be at least 32 characters")
     app = FastAPI(title="codebus-sidecar", version="0.1.0")
-    # CORS allowlist for the Tauri WebView origins. Bearer auth + 127.0.0.1
-    # loopback bind remain the canonical defenses; CORS is just to let the
-    # browser-style fetch from the WebView reach localhost without preflight
-    # rejection. Dev mode loads the frontend from `http://localhost:3000`
-    # (Nuxt dev server); Tauri 2 production uses `http://tauri.localhost`
-    # on Windows/Linux and `tauri://localhost` on macOS.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",
-            "http://tauri.localhost",
-            "tauri://localhost",
-        ],
-        allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
-    )
     app.state.bearer_token = bearer_token
     app.state.qdrant_client = None
     # Single-slot task registry — survives the lifetime of the app, holds at
@@ -532,6 +515,27 @@ def create_app(
     # ``None`` means /auth/* endpoints respond 503 AUTH_NOT_CONFIGURED.
     app.state.auth_audit_logger_factory = auth_audit_logger_factory
     bearer_auth.install(app, bearer_token)
+    # CORS allowlist for Tauri WebView origins. MUST be added AFTER
+    # bearer middleware so it sits at the outermost layer (FastAPI
+    # middleware stack is LIFO — last add wins request-side priority).
+    # Bearer middleware would otherwise reject the unauthenticated
+    # OPTIONS preflight with 401 before CORSMiddleware can short-
+    # circuit it. Bearer auth + 127.0.0.1 loopback remain the canonical
+    # defenses; CORS just lets the browser-style fetch through. Dev
+    # mode loads the frontend from `http://localhost:3000` (Nuxt dev
+    # server); Tauri 2 prod uses `http://tauri.localhost` on Win/Linux
+    # and `tauri://localhost` on macOS.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:3000",
+            "http://tauri.localhost",
+            "tauri://localhost",
+        ],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
     @app.get("/healthz")
     async def healthz() -> dict[str, object]:
