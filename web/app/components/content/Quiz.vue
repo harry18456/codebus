@@ -129,8 +129,12 @@ watch(
       </span>
     </div>
 
-    <!-- Hidden slot ref used to parse markdown options at mount time -->
-    <div ref="slotRef" class="hidden">
+    <!-- Slot renders the question paragraph(s) for the user, while the
+         `- a) ... / - b) ...` option list is hidden via scoped CSS so
+         we can re-render it as radio buttons below. parseOptions still
+         walks the slot DOM (display:none doesn't affect the DOM tree)
+         and extracts the option letters + labels. -->
+    <div ref="slotRef" class="quiz-body text-text-dim text-[14px] mb-3">
       <slot />
     </div>
 
@@ -186,3 +190,27 @@ watch(
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Hide the markdown-rendered option list (`- a) ... / - b) ...`)
+   without removing it from the DOM — parseOptions walks the same
+   slot ref to extract option letters + labels and renders them as
+   radio buttons in the visible fieldset above. */
+.quiz-body :deep(ul),
+.quiz-body :deep(ol) {
+  display: none;
+}
+.quiz-body :deep(p) {
+  margin: 0 0 8px;
+  line-height: 1.6;
+  color: theme('colors.text.base');
+}
+.quiz-body :deep(code) {
+  font-family: theme('fontFamily.mono');
+  font-size: 13.5px;
+  color: theme('colors.accent');
+  padding: 1px 6px;
+  background: theme('colors.surface.2');
+  border-radius: 4px;
+}
+</style>
