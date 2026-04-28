@@ -74,6 +74,21 @@ function handleSubmit(): void {
   progress.setQuizAnswer(props.id, selected.value, isCorrect)
 }
 
+function restoreFromProgress(): void {
+  // Spec scenario "Already-completed station revisitable via URL paste"
+  // implies review-mode visuals: when the user re-enters a station
+  // they have already passed, the Quiz should reflect their answer
+  // instead of asking them to re-pick.
+  const progress = useTutorialProgress()
+  const existing = progress.state.value.quizzes[props.id]
+  if (!existing) return
+  selected.value = existing.answer
+  lastSubmitted.value = existing.answer
+  if (existing.correct) {
+    passed.value = true
+  }
+}
+
 onMounted(() => {
   if (!idValid) {
     // eslint-disable-next-line no-console
@@ -82,6 +97,7 @@ onMounted(() => {
     )
   }
   refresh()
+  restoreFromProgress()
   if (slotRef.value) {
     observer = new MutationObserver(() => refresh())
     observer.observe(slotRef.value, { childList: true, subtree: true, characterData: true })

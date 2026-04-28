@@ -45,12 +45,22 @@ function rebind(): void {
   // Drop listeners on detached or replaced elements.
   unbindAll()
 
+  // Spec scenario "Already-completed station revisitable via URL paste"
+  // implies review-mode visual restore: when progress.checkpoints[id]
+  // says done=true (the user passed previously), tick every box on
+  // mount so the user sees their completed state instead of being
+  // asked to re-tick. This stays a one-way restore: the change
+  // listeners fire on user interaction the same way as before.
+  const progress = useTutorialProgress()
+  const restored = progress.state.value.checkpoints[props.id]?.done === true
+
   for (const el of live) {
     el.disabled = false
+    if (restored) el.checked = true
     const handler = (): void => {
       recompute()
-      const progress = useTutorialProgress()
-      progress.setCheckpoint(props.id, indexOfCheckbox(el), passed.value)
+      const progress2 = useTutorialProgress()
+      progress2.setCheckpoint(props.id, indexOfCheckbox(el), passed.value)
     }
     el.addEventListener('change', handler)
     bound.push({ el, handler })
