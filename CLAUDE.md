@@ -37,7 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案概要
 
-CodeBus 是「把陌生 codebase 一鍵變成可走訪的 tutorial」的桌面 App，由 Tauri 殼（Rust）+ Python Sidecar（FastAPI）+ Qdrant（本地向量 DB）混合架構（D-001）組成。M1 通電後資料層 + Module 4 Explorer + Module 5 Generator + Module 8 Q&A 已通電，當前進入 **Phase 6 前端**（Trust Layer 四站 R-01 / O-01 / O-04 / O-05），共用骨架 + O-01 授權站已落地，剩 R-01 / O-04 / O-05 / 介入點 / Q&A UI（見 `docs/implementation-plan.md` §二第六階段）。Phase 6 期間可並行推進 D-033 Change A（`split-providers-and-pii-llm`，純後端拆三介面 + PII Provider）；Phase 6 收尾後接 D-033 Change B（`provider-settings-and-onboarding`，Setting Page + Onboarding wizard + Tauri keyring）— B 對已寫前端的影響清單見 `docs/decisions.md` D-033。
+CodeBus 是「把陌生 codebase 一鍵變成可走訪的 tutorial」的桌面 App，由 Tauri 殼（Rust）+ Python Sidecar（FastAPI）+ Qdrant（本地向量 DB）混合架構（D-001）組成。M1 通電後資料層 + Module 4 Explorer + Module 5 Generator + Module 8 Q&A 已通電，當前進入 **Phase 6 前端**（Trust Layer 四站 R-01 / O-01 / O-04 / O-05）。步驟 25.5 共用骨架 + 26 mdc 元件 + 26.5 O-01 Auth flow + 27 R-01 station board 已落地（archive 2026-04-27 ~ 04-28）；**剩** 28 Agent console（已 propose 為 `agent-console-p0`，🟡 **parked** 19 task，Demo 神器；D-033 Change A 已落地後不再有依賴阻擋）/ 28.5 LLM Calls Inspector(O-04) / 29 三介入點 / 30 Q&A UI / O-05 Sanitizer Diff tab 內容（25.5 七 tab AuditPanel 殼已在、O-05 tab 內容未接）。詳見 `docs/implementation-plan.md §二第六階段`。Phase 6 收尾後接 D-033 Change B（`provider-settings-and-onboarding`，Setting Page + Onboarding wizard + Tauri keyring）— B 對已寫前端的影響清單見 `docs/decisions.md` D-033。**D-033 Change A** 已於 2026-04-29 archive（純後端拆三介面 + PII Provider；spec 套用至 `openspec/specs/{llm-provider,sanitizer,usage-tracking,pii-provider}/`）。
 
 **查 archive 進度**：`ls openspec/changes/archive/` 是時間軸索引；每個 archive 目錄內含 `proposal.md` + `tasks.md` + `design.md` + `specs/` delta 與當時的決策脈絡，不需要在 CLAUDE.md 重複維護。
 
