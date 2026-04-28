@@ -110,7 +110,7 @@ async def test_rag_hits_precedes_any_agent_thought(tmp_path: Path) -> None:
 async def test_kb_growth_event_emitted_on_new_chunk(tmp_path: Path) -> None:
     """Successful add_to_kb new-point write MUST emit one `kb_growth` event."""
     sanitizer = MagicMock()
-    sanitizer.sanitize.return_value = MagicMock(text="hello", entries=[])
+    sanitizer.sanitize = AsyncMock(return_value=MagicMock(text="hello", entries=[]))
     sanitizer_audit = MagicMock()
     kb = MagicMock()
     kb.upsert_chunk = AsyncMock(return_value=("new", "new-pt-01"))
@@ -151,7 +151,7 @@ async def test_kb_growth_event_omitted_on_dedup_skip(tmp_path: Path) -> None:
     the SSE event per spec scenario `kb_growth event omitted on dedup skip`).
     """
     sanitizer = MagicMock()
-    sanitizer.sanitize.return_value = MagicMock(text="hello", entries=[])
+    sanitizer.sanitize = AsyncMock(return_value=MagicMock(text="hello", entries=[]))
     sanitizer_audit = MagicMock()
     kb = MagicMock()
     kb.upsert_chunk = AsyncMock(

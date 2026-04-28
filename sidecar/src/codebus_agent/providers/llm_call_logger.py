@@ -27,12 +27,28 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from .protocol import ProviderRole
 
 if TYPE_CHECKING:
     from ..agent.emitter import SSEEmitter
+
+
+# D-033 Decision 5 / 6 — closed enum over the wire schema's `role` field.
+# Four LLM-mode values map to ``ProviderRole.value``; ``"pii_detection"``
+# is reserved for future LLM-based PII providers (no production code path
+# in this change emits it). Adding a sixth value MUST be done by a
+# Spectra change that updates this Literal AND the
+# ``AuditRole enumerates legal role values`` Requirement in
+# ``openspec/specs/usage-tracking/spec.md``.
+AuditRole = Literal[
+    "reasoning",
+    "judge",
+    "chat",
+    "embed",
+    "pii_detection",
+]
 
 
 _PREVIEW_TRUNCATE_LIMIT: int = 200

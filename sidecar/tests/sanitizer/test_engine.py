@@ -2,32 +2,36 @@
 "SanitizerEngine exposes pure `sanitize` interface",
 "Placeholder format is `<REDACTED:kind#index>`",
 and "Placeholder index scope is single sanitize call".
+
+Post-D-033: ``SanitizerEngine.sanitize`` is async and consumes a
+``PIIProvider`` injected at construction. ``SanitizerEngine()`` defaults
+to a built-in ``RuleBasedPIIProvider`` so existing call sites that
+relied on the implicit M1 default rule table keep working.
 """
 from __future__ import annotations
 
 import inspect
 import re
-from unittest.mock import patch
 
 import pytest
 
+from codebus_agent.providers.pii import PIISpan
 from codebus_agent.sanitizer import (
     FileSource,
     MessageSource,
     SanitizerEngine,
     SanitizerError,
 )
-from codebus_agent.sanitizer.rules import RegexRule, Rule
-
 
 _PLACEHOLDER_RE = re.compile(
     r"<REDACTED:(email|phone|id|secret|ip|internal-domain|jwt|private-key|credential|suspect)#\d+>"
 )
 
 
-def test_engine_pass1_replaces_email_and_returns_audit_entries():
+@pytest.mark.asyncio
+async def test_engine_pass1_replaces_email_and_returns_audit_entries():
     engine = SanitizerEngine()
-    result = engine.sanitize(
+    result = await engine.sanitize(
         "contact: alice@example.com",
         source=FileSource(path="src/app.py"),
     )
@@ -42,9 +46,10 @@ def test_engine_pass1_replaces_email_and_returns_audit_entries():
     assert entry.source == "file:src/app.py"
 
 
-def test_placeholder_format_matches_redacted_kind_index():
+@pytest.mark.asyncio
+async def test_placeholder_format_matches_redacted_kind_index():
     engine = SanitizerEngine()
-    result = engine.sanitize(
+    result = await engine.sanitize(
         "phone: 0912-345-678; email: bob@example.com; ip: 10.0.0.1",
         source=FileSource(path="x.txt"),
     )
@@ -52,9 +57,10 @@ def test_placeholder_format_matches_redacted_kind_index():
     assert set(placeholders) == {"phone", "email", "ip"}
 
 
-def test_same_value_same_placeholder_within_call():
+@pytest.mark.asyncio
+async def test_same_value_same_placeholder_within_call():
     engine = SanitizerEngine()
-    result = engine.sanitize(
+    result = await engine.sanitize(
         "a: alice@example.com, b: alice@example.com",
         source=FileSource(path="src/a.py"),
     )
@@ -65,13 +71,14 @@ def test_same_value_same_placeholder_within_call():
     assert len(emails) == 1
 
 
-def test_placeholder_index_resets_across_calls():
+@pytest.mark.asyncio
+async def test_placeholder_index_resets_across_calls():
     engine = SanitizerEngine()
-    r1 = engine.sanitize(
+    r1 = await engine.sanitize(
         "a: alice@example.com",
         source=FileSource(path="src/a.py"),
     )
-    r2 = engine.sanitize(
+    r2 = await engine.sanitize(
         "b: bob@example.com",
         source=FileSource(path="src/b.py"),
     )
@@ -82,20 +89,22 @@ def test_placeholder_index_resets_across_calls():
     assert r2.entries[0].placeholder_index == 1
 
 
-def test_engine_source_string_message_prefix():
+@pytest.mark.asyncio
+async def test_engine_source_string_message_prefix():
     engine = SanitizerEngine()
-    result = engine.sanitize(
+    result = await engine.sanitize(
         "user said alice@example.com",
         source=MessageSource(message_id="chat_req_abc"),
     )
     assert result.entries[0].source == "message:chat_req_abc"
 
 
-def test_engine_no_reverse_mapping_exposed():
+@pytest.mark.asyncio
+async def test_engine_no_reverse_mapping_exposed():
     """Ensure the engine exposes no method that returns pre-sanitize values."""
     engine = SanitizerEngine()
     # Trigger a sanitize to populate any hypothetical internal state.
-    engine.sanitize("alice@example.com", source=FileSource(path="x.txt"))
+    await engine.sanitize("alice@example.com", source=FileSource(path="x.txt"))
 
     forbidden_method_names = {
         "reverse",
@@ -126,21 +135,23 @@ def test_engine_no_reverse_mapping_exposed():
             )
 
 
-def test_engine_fail_closed_raises_sanitizer_error():
-    """When a rule raises, the engine MUST raise SanitizerError chained to
-    the original exception (Decision: Fail-closed 失敗處理)."""
+@pytest.mark.asyncio
+async def test_engine_fail_closed_raises_sanitizer_error():
+    """When the injected PIIProvider raises, the engine MUST raise
+    ``SanitizerError`` chained to the original exception (Decision:
+    Fail-closed 失敗處理). Post-D-033 this is the PIIProvider-level
+    failure path; the legacy ``rules=[ExplodingRule()]`` shape was
+    removed when rule ownership moved to ``RuleBasedPIIProvider``.
+    """
 
-    class ExplodingRule:
-        rule_id = "boom_v1"
-        kind = "email"
-
-        def find(self, text: str):
+    class _ExplodingPIIProvider:
+        async def detect(self, text: str) -> list[PIISpan]:
             raise RuntimeError("regex engine crashed")
 
-    engine = SanitizerEngine(rules=[ExplodingRule()])
+    engine = SanitizerEngine(pii_provider=_ExplodingPIIProvider())
 
     with pytest.raises(SanitizerError) as exc:
-        engine.sanitize(
+        await engine.sanitize(
             "hello alice@example.com",
             source=FileSource(path="src/app.py"),
         )
@@ -152,8 +163,11 @@ def test_engine_fail_closed_raises_sanitizer_error():
     assert "regex engine crashed" in str(exc.value.__cause__)
 
 
-def test_engine_without_matches_returns_text_verbatim():
+@pytest.mark.asyncio
+async def test_engine_without_matches_returns_text_verbatim():
     engine = SanitizerEngine()
-    result = engine.sanitize("plain prose no secrets", source=FileSource(path="a.md"))
+    result = await engine.sanitize(
+        "plain prose no secrets", source=FileSource(path="a.md")
+    )
     assert result.text == "plain prose no secrets"
     assert result.entries == []

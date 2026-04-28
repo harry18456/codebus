@@ -42,13 +42,13 @@ class _FakeCtx:
 def _make_sanitizer(*, redact_to: str = "clean text", entries: int = 1) -> Any:
     sanitizer = MagicMock()
 
-    def _sanitize(text, source):
+    async def _sanitize(text, source):
         result = MagicMock()
         result.text = redact_to
         result.entries = [MagicMock() for _ in range(entries)]
         return result
 
-    sanitizer.sanitize.side_effect = _sanitize
+    sanitizer.sanitize = AsyncMock(side_effect=_sanitize)
     return sanitizer
 
 

@@ -35,7 +35,7 @@ Deferred to later changes (not this one):
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -181,7 +181,7 @@ async def _execute_one(
     call: ToolCall,
     tools: ExplorerTools,
     *,
-    error_sanitize_fn: Callable[[str], str] | None = None,
+    error_sanitize_fn: "Callable[[str], Awaitable[str]] | None" = None,
 ) -> ToolResult:
     """Route a tool call to the matching method on the tools impl.
 
@@ -201,7 +201,7 @@ async def _execute_one(
     if method is None or not callable(method):
         msg = f"unknown tool {call.name!r}"
         raw_error_text = f"ERROR: {msg}"
-        out = error_sanitize_fn(raw_error_text) if error_sanitize_fn else raw_error_text
+        out = await error_sanitize_fn(raw_error_text) if error_sanitize_fn else raw_error_text
         return ToolResult(
             tool_call_id=call.id,
             tool_name=call.name,
@@ -213,7 +213,7 @@ async def _execute_one(
         output = await method(**call.arguments)
     except BaseException as exc:  # noqa: BLE001 — capture then record
         raw_error_text = f"ERROR: {exc}"
-        out = error_sanitize_fn(raw_error_text) if error_sanitize_fn else raw_error_text
+        out = await error_sanitize_fn(raw_error_text) if error_sanitize_fn else raw_error_text
         return ToolResult(
             tool_call_id=call.id,
             tool_name=call.name,
@@ -255,7 +255,7 @@ def _make_error_sanitize_fn(
     session_id: str,
     rules_version: str,
     step_idx: int,
-) -> Callable[[str], str] | None:
+) -> "Callable[[str], Awaitable[str]] | None":
     """Build the per-iteration error-sanitize callable for D2.19.
 
     Returns ``None`` when ``sanitizer`` is absent so the loop falls
@@ -267,8 +267,8 @@ def _make_error_sanitize_fn(
     if sanitizer is None:
         return None
 
-    def _sanitize_error(error_text: str) -> str:
-        result = sanitizer.sanitize(
+    async def _sanitize_error(error_text: str) -> str:
+        result = await sanitizer.sanitize(
             error_text,
             source=MessageSource(
                 message_id=f"explorer_step_{step_idx}_tool_error"

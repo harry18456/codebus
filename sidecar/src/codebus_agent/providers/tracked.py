@@ -45,6 +45,7 @@ from .llm_call_logger import LLMCallLogger
 from .mock import MockProvider
 from .openai_chat import OpenAIChatProvider
 from .openai_embedding import OpenAIEmbeddingProvider
+from .pii import MockPIIProvider, PIISpan, RuleBasedPIIProvider
 from .pricing import estimate_chat_cost_usd
 from .protocol import EmbedResponse, Message, ProviderRole
 from .usage_tracker import UsageTracker
@@ -69,58 +70,97 @@ class TrackedProvider:
         {MockProvider, OpenAIEmbeddingProvider, OpenAIChatProvider}
     )
 
+    # D-033 Change A: PII mode allowlist. The inner classes here use the
+    # ``PIIProvider`` Protocol shape (``async detect(text)``); detection
+    # bypasses Sanitizer Pass 2 by design (the spec rationale lives at
+    # `openspec/changes/split-providers-and-pii-llm/specs/pii-provider/spec.md`
+    # — `TrackedProvider auto-bypasses Pass 2 for PII inner` Requirement).
+    # The set MUST stay disjoint from `ALLOWED_INNER_TYPES`; future LLM-
+    # based PII providers extend this set in their own Spectra changes.
+    PII_ALLOWED_INNER_TYPES: ClassVar[frozenset[type]] = frozenset(
+        {RuleBasedPIIProvider, MockPIIProvider}
+    )
+
     def __init__(
         self,
         inner: Any,
         *,
-        tracker: UsageTracker,
-        logger: LLMCallLogger,
-        role: ProviderRole,
-        sanitizer: SanitizerEngine,
-        sanitizer_audit: SanitizerAuditLogger,
-        rules_version: str,
+        tracker: UsageTracker | None = None,
+        logger: LLMCallLogger | None = None,
+        role: ProviderRole | None = None,
+        sanitizer: SanitizerEngine | None = None,
+        sanitizer_audit: SanitizerAuditLogger | None = None,
+        rules_version: str = "",
         default_module: str | None = None,
         emitter: "SSEEmitter | None" = None,
     ) -> None:
-        if type(inner) not in self.ALLOWED_INNER_TYPES:
+        inner_type = type(inner)
+        in_llm = inner_type in self.ALLOWED_INNER_TYPES
+        in_pii = inner_type in self.PII_ALLOWED_INNER_TYPES
+        if not in_llm and not in_pii:
+            llm_names = ", ".join(t.__name__ for t in self.ALLOWED_INNER_TYPES)
+            pii_names = ", ".join(t.__name__ for t in self.PII_ALLOWED_INNER_TYPES)
             raise TypeError(
-                f"TrackedProvider inner must be one of "
-                f"{{{', '.join(t.__name__ for t in self.ALLOWED_INNER_TYPES)}}}; "
-                f"got {type(inner).__name__}. Outbound LLM traffic is gated "
-                f"by this allowlist — extend ALLOWED_INNER_TYPES (and the "
-                f"spec Requirement `Outbound LLM traffic gated by "
-                f"TrackedProvider whitelist`) in a new change to add providers."
+                f"TrackedProvider inner {inner_type.__name__!r} is in neither "
+                f"ALLOWED_INNER_TYPES (LLM/Embedding lane: {{{llm_names}}}) "
+                f"nor PII_ALLOWED_INNER_TYPES (PII lane: {{{pii_names}}}). "
+                f"For an LLM/Embedding inner, extend ALLOWED_INNER_TYPES + "
+                f"the `Outbound LLM traffic gated by TrackedProvider whitelist` "
+                f"spec Requirement. For a PII inner, extend "
+                f"PII_ALLOWED_INNER_TYPES + the `TrackedProvider gates PII "
+                f"inner classes via PII_ALLOWED_INNER_TYPES` spec Requirement."
             )
-        if not isinstance(role, ProviderRole):
-            raise TypeError(
-                f"TrackedProvider role must be a ProviderRole; "
-                f"got {type(role).__name__}"
-            )
-        if sanitizer is None or not isinstance(sanitizer, SanitizerEngine):
-            raise ValueError(
-                "TrackedProvider requires a SanitizerEngine injection "
-                "(sanitizer=...). Pass 2 is non-bypassable — see "
-                "openspec/changes/sanitizer-safety-chain/specs/llm-provider/spec.md."
-            )
-        if sanitizer_audit is None or not isinstance(
-            sanitizer_audit, SanitizerAuditLogger
-        ):
-            raise ValueError(
-                "TrackedProvider requires a SanitizerAuditLogger injection "
-                "(sanitizer_audit=...). Audit trail must receive every Pass 2 hit."
-            )
-        if not isinstance(rules_version, str) or not rules_version:
-            raise ValueError(
-                "TrackedProvider requires a non-empty rules_version string "
-                "so every sanitize_audit.jsonl line can reference the rule set in effect."
-            )
-        self._inner = inner
-        self._tracker = tracker
-        self._logger = logger
-        self._role = role
-        self._sanitizer = sanitizer
-        self._sanitizer_audit = sanitizer_audit
-        self._rules_version = rules_version
+        if in_llm:
+            if not isinstance(role, ProviderRole):
+                raise TypeError(
+                    f"TrackedProvider role must be a ProviderRole; "
+                    f"got {type(role).__name__}"
+                )
+            if sanitizer is None or not isinstance(sanitizer, SanitizerEngine):
+                raise ValueError(
+                    "TrackedProvider requires a SanitizerEngine injection "
+                    "(sanitizer=...). Pass 2 is non-bypassable in LLM mode — see "
+                    "openspec/changes/sanitizer-safety-chain/specs/llm-provider/spec.md."
+                )
+            if sanitizer_audit is None or not isinstance(
+                sanitizer_audit, SanitizerAuditLogger
+            ):
+                raise ValueError(
+                    "TrackedProvider requires a SanitizerAuditLogger injection "
+                    "(sanitizer_audit=...). Audit trail must receive every Pass 2 hit."
+                )
+            if not isinstance(rules_version, str) or not rules_version:
+                raise ValueError(
+                    "TrackedProvider requires a non-empty rules_version string "
+                    "so every sanitize_audit.jsonl line can reference the rule set in effect."
+                )
+            if tracker is None or logger is None:
+                raise ValueError(
+                    "TrackedProvider in LLM mode requires both tracker (UsageTracker) "
+                    "and logger (LLMCallLogger) for token_usage / llm_calls audit lanes."
+                )
+            self._mode: str = "llm"
+            self._inner = inner
+            self._tracker = tracker
+            self._logger = logger
+            self._role: ProviderRole | None = role
+            self._sanitizer: SanitizerEngine | None = sanitizer
+            self._sanitizer_audit: SanitizerAuditLogger | None = sanitizer_audit
+            self._rules_version: str = rules_version
+        else:
+            # PII mode — no Pass 2 invocation; sanitizer / role / audit lanes
+            # left None so any wrong-mode method call (chat / embed) attempting
+            # to access them would surface clearly. The mode guard
+            # (``_assert_mode``) raises BEFORE these attributes are read on the
+            # happy path, so None values are not a runtime hazard.
+            self._mode = "pii"
+            self._inner = inner
+            self._tracker = None
+            self._logger = None
+            self._role = None
+            self._sanitizer = None
+            self._sanitizer_audit = None
+            self._rules_version = ""
         # `usage-tracker-dedup` (Option A): default_module is the SOLE label
         # path into `token_usage.jsonl`. Empty string preserves M1 records'
         # behavior (no module field meant blank). Callers like KB build pass
@@ -148,8 +188,30 @@ class TrackedProvider:
         self.name: str = getattr(inner, "name", "tracked")
 
     @property
-    def role(self) -> ProviderRole:
+    def role(self) -> ProviderRole | None:
+        """Caller-side dispatch role. ``None`` in PII mode (D-033)."""
         return self._role
+
+    @property
+    def mode(self) -> str:
+        """``"llm"`` (chat / embed) or ``"pii"`` (detect) — D-033 Decision 2."""
+        return self._mode
+
+    def _assert_mode(self, expected: str, called: str) -> None:
+        """Guard wrong-mode method calls.
+
+        Per spec ``TrackedProvider auto-bypasses Pass 2 for PII inner``
+        Scenario `Wrong-mode method calls raise`: ``chat`` / ``embed`` on
+        a PII-mode wrapper, or ``detect`` on an LLM-mode wrapper, MUST
+        raise ``RuntimeError`` whose message identifies both the actual
+        mode and the called method.
+        """
+        if self._mode != expected:
+            raise RuntimeError(
+                f"TrackedProvider in {self._mode!r} mode does not expose "
+                f"{called}() — this method requires {expected!r} mode "
+                f"(inner: {type(self._inner).__name__})"
+            )
 
     @property
     def session_prompt_tokens(self) -> int:
@@ -180,8 +242,9 @@ class TrackedProvider:
         *,
         response_model: type[BaseModel],
     ) -> BaseModel:
+        self._assert_mode("llm", "chat")
         call_id = f"chat_req_{uuid.uuid4()}"
-        sanitized_messages = self._sanitize_messages(messages, call_id)
+        sanitized_messages = await self._sanitize_messages(messages, call_id)
 
         request = _serialize_chat_request(sanitized_messages, response_model)
         model_id = _chat_model_id(self._inner)
@@ -250,8 +313,9 @@ class TrackedProvider:
         return result
 
     async def embed(self, texts: list[str]) -> EmbedResponse:
+        self._assert_mode("llm", "embed")
         call_id = f"embed_req_{uuid.uuid4()}"
-        sanitized_texts = self._sanitize_texts(texts, call_id)
+        sanitized_texts = await self._sanitize_texts(texts, call_id)
 
         request = {"texts": list(sanitized_texts)}
         prompt_tokens = sum(len(t) for t in sanitized_texts)
@@ -306,6 +370,21 @@ class TrackedProvider:
         )
         return result
 
+    async def detect(self, text: str) -> "list[PIISpan]":
+        """Forward to the inner :class:`PIIProvider`.
+
+        Per spec ``TrackedProvider auto-bypasses Pass 2 for PII inner``
+        Requirement: PII mode skips ``SanitizerEngine.sanitize`` entirely
+        and forwards the original text to the inner detector. No
+        ``llm_calls.jsonl`` / ``token_usage.jsonl`` line is written by
+        this change — the rule-based / mock PII providers shipping in
+        this change perform no LLM calls. Future LLM-based PII
+        providers (`LocalLLMPIIProvider` / `OpenAIPIIDetectionProvider`)
+        will land in subsequent changes that extend audit emission.
+        """
+        self._assert_mode("pii", "detect")
+        return await self._inner.detect(text)
+
     def _emit_usage_delta(
         self,
         *,
@@ -344,7 +423,7 @@ class TrackedProvider:
             }
         )
 
-    def _sanitize_messages(
+    async def _sanitize_messages(
         self, messages: list[Message], call_id: str
     ) -> list[Message]:
         session_id = str(uuid.uuid4())
@@ -352,7 +431,7 @@ class TrackedProvider:
 
         sanitized: list[Message] = []
         for m in messages:
-            result = self._sanitizer.sanitize(m.content, source=source)
+            result = await self._sanitizer.sanitize(m.content, source=source)
             for entry in result.entries:
                 self._sanitizer_audit.append(
                     entry=entry,
@@ -369,13 +448,13 @@ class TrackedProvider:
             )
         return sanitized
 
-    def _sanitize_texts(self, texts: list[str], call_id: str) -> list[str]:
+    async def _sanitize_texts(self, texts: list[str], call_id: str) -> list[str]:
         session_id = str(uuid.uuid4())
         source = MessageSource(message_id=call_id)
 
         sanitized: list[str] = []
         for text in texts:
-            result = self._sanitizer.sanitize(text, source=source)
+            result = await self._sanitizer.sanitize(text, source=source)
             for entry in result.entries:
                 self._sanitizer_audit.append(
                     entry=entry,

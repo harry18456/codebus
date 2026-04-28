@@ -3,6 +3,8 @@
 """
 from __future__ import annotations
 
+import pytest
+
 from codebus_agent.sanitizer import (
     FileSource,
     PatternAllowlistEntry,
@@ -25,7 +27,8 @@ def _cfg(
     )
 
 
-def test_pattern_allowlist_hit_leaves_text_and_flags_extra():
+@pytest.mark.asyncio
+async def test_pattern_allowlist_hit_leaves_text_and_flags_extra():
     # Allowlist the `noreply@` form — still detected by the email rule,
     # but the engine must keep the original text and flag the audit entry.
     cfg = _cfg(
@@ -36,7 +39,7 @@ def test_pattern_allowlist_hit_leaves_text_and_flags_extra():
     engine = SanitizerEngine(config=cfg)
 
     text = "contact: noreply@example.com"
-    result = engine.sanitize(text, source=FileSource(path="src/app.py"))
+    result = await engine.sanitize(text, source=FileSource(path="src/app.py"))
 
     assert "noreply@example.com" in result.text
     assert "<REDACTED:" not in result.text
@@ -44,7 +47,8 @@ def test_pattern_allowlist_hit_leaves_text_and_flags_extra():
     assert result.entries[0].extra.get("allowlisted") is True
 
 
-def test_pattern_allowlist_miss_redacts_normally():
+@pytest.mark.asyncio
+async def test_pattern_allowlist_miss_redacts_normally():
     cfg = _cfg(
         pattern_allowlist=[
             PatternAllowlistEntry(pattern="^noreply@", reason="no-reply mailbox"),
@@ -53,7 +57,7 @@ def test_pattern_allowlist_miss_redacts_normally():
     engine = SanitizerEngine(config=cfg)
 
     # Non-matching email is not on the allowlist → redact as usual.
-    result = engine.sanitize(
+    result = await engine.sanitize(
         "contact: alice@example.com",
         source=FileSource(path="src/app.py"),
     )
@@ -61,12 +65,13 @@ def test_pattern_allowlist_miss_redacts_normally():
     assert "<REDACTED:email#1>" in result.text
 
 
-def test_path_allowlist_glob_matches():
+@pytest.mark.asyncio
+async def test_path_allowlist_glob_matches():
     cfg = _cfg(path_allowlist=["tests/fixtures/**"])
     engine = SanitizerEngine(config=cfg)
 
     text = "hit: alice@example.com"
-    result = engine.sanitize(
+    result = await engine.sanitize(
         text,
         source=FileSource(path="tests/fixtures/pii_sample.txt"),
     )
@@ -78,12 +83,13 @@ def test_path_allowlist_glob_matches():
     assert result.entries[0].extra.get("allowlisted") is True
 
 
-def test_path_allowlist_miss_still_redacts():
+@pytest.mark.asyncio
+async def test_path_allowlist_miss_still_redacts():
     cfg = _cfg(path_allowlist=["tests/fixtures/**"])
     engine = SanitizerEngine(config=cfg)
 
     # Source not under tests/fixtures → no allowlist hit.
-    result = engine.sanitize(
+    result = await engine.sanitize(
         "hit: alice@example.com",
         source=FileSource(path="src/app.py"),
     )
@@ -92,11 +98,12 @@ def test_path_allowlist_miss_still_redacts():
     assert result.entries[0].extra.get("allowlisted") is not True
 
 
-def test_filename_allowlist():
+@pytest.mark.asyncio
+async def test_filename_allowlist():
     cfg = _cfg(filename_allowlist=[".env.example"])
     engine = SanitizerEngine(config=cfg)
 
-    result = engine.sanitize(
+    result = await engine.sanitize(
         "example_key=AKIAIOSFODNN7EXAMPLE",
         source=FileSource(path="some/dir/.env.example"),
     )
@@ -106,11 +113,12 @@ def test_filename_allowlist():
     assert all(e.extra.get("allowlisted") is True for e in result.entries)
 
 
-def test_filename_allowlist_miss():
+@pytest.mark.asyncio
+async def test_filename_allowlist_miss():
     cfg = _cfg(filename_allowlist=[".env.example"])
     engine = SanitizerEngine(config=cfg)
 
-    result = engine.sanitize(
+    result = await engine.sanitize(
         "key=AKIAIOSFODNN7EXAMPLE",
         source=FileSource(path="src/.env"),  # .env is not .env.example
     )

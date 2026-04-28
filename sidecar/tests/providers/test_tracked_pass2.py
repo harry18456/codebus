@@ -133,14 +133,11 @@ async def test_tracked_provider_sanitizer_failure_aborts_dispatch(tmp_path):
     """SanitizerError must prevent inner.chat from being called and must
     NOT produce any llm_calls.jsonl line."""
 
-    class _BoomRule:
-        rule_id = "boom_v1"
-        kind = "email"
-
-        def find(self, text):
+    class _BoomPIIProvider:
+        async def detect(self, text):
             raise RuntimeError("engine exploded")
 
-    boom_engine = SanitizerEngine(rules=[_BoomRule()])
+    boom_engine = SanitizerEngine(pii_provider=_BoomPIIProvider())
     wrapped, logger_path, audit_path = _build_wrapped(
         tmp_path, sanitizer=boom_engine
     )

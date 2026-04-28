@@ -24,10 +24,18 @@ from __future__ import annotations
 import fnmatch
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .config import SanitizerConfig
-from .rules import Rule, RuleMatch, default_rules
+
+if TYPE_CHECKING:
+    # D-033 Decision 4 — Engine consumes ``PIIProvider`` (provided by
+    # callers via the ``providers`` package) instead of holding rule
+    # instances directly. The TYPE_CHECKING guard avoids a circular
+    # import: the providers package imports the rule table at runtime,
+    # so ``sanitizer.engine`` MUST NOT import from ``providers`` at
+    # runtime.
+    from ..providers.pii import PIIProvider, PIISpan
 
 
 class SanitizerError(RuntimeError):
@@ -85,8 +93,10 @@ class SanitizedResult:
 class SanitizerEngine:
     """Deterministic, stateless-across-calls sanitizer.
 
-    ``rules`` defaults to the built-in table (see ``rules.default_rules``);
-    tests and the Pass-2 wiring can inject a custom list.
+    Span discovery is delegated to the injected ``PIIProvider``;
+    callers typically pass ``RuleBasedPIIProvider()`` (which wraps the
+    built-in rule table) but tests and future LLM-based PII flows can
+    inject other implementations.
     ``config`` is optional — when provided, its allowlists are consulted
     to mark matched spans as ``extra.allowlisted = true`` (and skip the
     textual replacement for those spans).
@@ -94,57 +104,68 @@ class SanitizerEngine:
 
     def __init__(
         self,
-        rules: list[Rule] | None = None,
+        pii_provider: "PIIProvider | None" = None,
         *,
         config: SanitizerConfig | None = None,
     ) -> None:
-        self._rules = list(rules) if rules is not None else default_rules()
+        # D-033 Decision 4: Engine no longer owns the rule table; it
+        # consumes a ``PIIProvider`` (typically ``RuleBasedPIIProvider``)
+        # and delegates span discovery via ``await pii_provider.detect(text)``.
+        # ``pii_provider=None`` lazily resolves to the default
+        # ``RuleBasedPIIProvider()`` so ``SanitizerEngine()`` continues to
+        # construct the default rule-based pipeline; lazy import avoids the
+        # circular ``sanitizer ↔ providers`` package dependency.
+        if pii_provider is None:
+            from ..providers.pii import RuleBasedPIIProvider
+
+            pii_provider = RuleBasedPIIProvider()
+        self._pii_provider = pii_provider
         self._config = config
 
-    def sanitize(self, text: str, source: SanitizeSource) -> SanitizedResult:
+    async def sanitize(self, text: str, source: SanitizeSource) -> SanitizedResult:
         formatted_source = _format_source(source)
         source_label = _format_source_label(source)
 
         try:
-            matches = self._gather_matches(text)
+            spans = await self._pii_provider.detect(text)
         except BaseException as exc:
             raise SanitizerError(
                 f"sanitize failed on {source_label}"
             ) from exc
 
-        matches = _resolve_overlaps(matches)
+        spans = _resolve_overlaps(spans)
 
         path_hit, filename_hit = self._path_allowlist_hit(source)
         pattern_allowlist = self._compiled_pattern_allowlist()
 
-        # Walk left-to-right and emit placeholders at each unmasked match.
+        # Walk left-to-right and emit placeholders at each unmasked span.
         out_parts: list[str] = []
         cursor = 0
         per_kind_next_index: dict[str, int] = {}
         per_kind_value_index: dict[tuple[str, str], int] = {}
         entries: list[AuditEntry] = []
 
-        for m in matches:
-            pattern_allowed = _pattern_allowlist_hit(m.value, pattern_allowlist)
+        for span in spans:
+            pattern_allowed = _pattern_allowlist_hit(span.value, pattern_allowlist)
             allowlisted = path_hit or filename_hit or pattern_allowed
 
-            key = (m.kind, m.value)
+            key = (span.kind, span.value)
             if key in per_kind_value_index:
                 index = per_kind_value_index[key]
                 first_seen = False
             else:
-                index = per_kind_next_index.get(m.kind, 0) + 1
-                per_kind_next_index[m.kind] = index
+                index = per_kind_next_index.get(span.kind, 0) + 1
+                per_kind_next_index[span.kind] = index
                 per_kind_value_index[key] = index
                 first_seen = True
 
             if allowlisted:
                 # Leave the original text in place; still consume input span.
-                out_parts.append(text[cursor : m.end])
+                out_parts.append(text[cursor : span.end])
             else:
-                out_parts.append(text[cursor : m.start])
-                out_parts.append(f"<REDACTED:{m.kind}#{index}>")
-            cursor = m.end
+                out_parts.append(text[cursor : span.start])
+                out_parts.append(f"<REDACTED:{span.kind}#{index}>")
+            cursor = span.end
 
             if first_seen:
                 extra: dict[str, Any] = {}
@@ -152,8 +173,8 @@ class SanitizerEngine:
                     extra["allowlisted"] = True
                 entries.append(
                     AuditEntry(
-                        rule_id=m.rule_id,
-                        kind=m.kind,
+                        rule_id=span.rule_id,
+                        kind=span.kind,
                         placeholder_index=index,
                         source=formatted_source,
                         extra=extra,
@@ -162,13 +183,6 @@ class SanitizerEngine:
 
         out_parts.append(text[cursor:])
         return SanitizedResult(text="".join(out_parts), entries=entries)
-
-    def _gather_matches(self, text: str) -> list[RuleMatch]:
-        out: list[RuleMatch] = []
-        for rule in self._rules:
-            for m in rule.find(text):
-                out.append(m)
-        return out
 
     def _path_allowlist_hit(
         self, source: SanitizeSource
@@ -238,23 +252,25 @@ def _format_source_label(source: SanitizeSource) -> str:
     raise TypeError(f"unknown SanitizeSource type: {type(source).__name__}")
 
 
-def _resolve_overlaps(matches: list[RuleMatch]) -> list[RuleMatch]:
+def _resolve_overlaps(spans: "list[PIISpan]") -> "list[PIISpan]":
     """Sort by (start, -length) and greedily drop overlaps.
 
-    Ties go to the longer span; a later match that starts before the
+    Ties go to the longer span; a later span that starts before the
     previous one's end is discarded so we never emit two placeholders
-    for the same substring.
+    for the same substring. Operates structurally on the ``start`` /
+    ``end`` fields shared by :class:`PIISpan` and the legacy
+    ``RuleMatch`` shape.
     """
-    if not matches:
+    if not spans:
         return []
-    matches.sort(key=lambda m: (m.start, -(m.end - m.start)))
-    out: list[RuleMatch] = []
+    spans.sort(key=lambda s: (s.start, -(s.end - s.start)))
+    out: list = []
     cursor = -1
-    for m in matches:
-        if m.start < cursor:
+    for span in spans:
+        if span.start < cursor:
             continue
-        out.append(m)
-        cursor = m.end
+        out.append(span)
+        cursor = span.end
     return out
 
 

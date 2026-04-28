@@ -25,7 +25,7 @@ def _build_engine_and_audit(tmp_path: Path) -> tuple[SanitizerEngine, SanitizerA
     return SanitizerEngine(), SanitizerAuditLogger(audit_path), audit_path
 
 
-def _record_pass3(
+async def _record_pass3(
     engine: SanitizerEngine,
     audit: SanitizerAuditLogger,
     *,
@@ -34,7 +34,7 @@ def _record_pass3(
     session_id: str = "qa_sess_01",
 ) -> None:
     """Run Pass 3 sanitize and route hits into audit logger."""
-    result = engine.sanitize(
+    result = await engine.sanitize(
         text, source=FileSource(path=chunk_source, pass_="qa_add_to_kb")
     )
     for entry in result.entries:
@@ -52,10 +52,11 @@ def _read_lines(audit_path: Path) -> list[dict]:
     return [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
 
 
-def test_pass_num_3_on_audit_line(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_pass_num_3_on_audit_line(tmp_path: Path) -> None:
     """Pass 3 audit lines MUST carry the pass discriminator value 3."""
     engine, audit, audit_path = _build_engine_and_audit(tmp_path)
-    _record_pass3(
+    await _record_pass3(
         engine,
         audit,
         text="email is foo@example.com",
@@ -69,10 +70,11 @@ def test_pass_num_3_on_audit_line(tmp_path: Path) -> None:
     assert lines[0]["pass"] == 3
 
 
-def test_source_field_structured_form(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_source_field_structured_form(tmp_path: Path) -> None:
     """Pass 3 audit lines MUST use the structured `{"pass", "path"}` source form."""
     engine, audit, audit_path = _build_engine_and_audit(tmp_path)
-    _record_pass3(
+    await _record_pass3(
         engine,
         audit,
         text="email is foo@example.com",
@@ -104,13 +106,14 @@ def test_sanitize_source_union_not_extended() -> None:
     assert "QASource" not in text
 
 
-def test_empty_post_sanitize_still_records_hits(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_empty_post_sanitize_still_records_hits(tmp_path: Path) -> None:
     """Even when caller-side decides to skip KB write, Pass 3 hits MUST be audited."""
     engine, audit, audit_path = _build_engine_and_audit(tmp_path)
     # Construct text so sanitizer rules redact (email rule is built-in).
     # Multiple emails so multiple audit entries land per call.
     text = "user1@example.com user2@example.com user3@example.com"
-    _record_pass3(engine, audit, text=text, chunk_source="src/secrets.py:1-3")
+    await _record_pass3(engine, audit, text=text, chunk_source="src/secrets.py:1-3")
 
     lines = _read_lines(audit_path)
     assert any(line["pass"] == 3 for line in lines)

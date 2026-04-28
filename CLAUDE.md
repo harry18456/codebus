@@ -61,7 +61,7 @@ CodeBus 是「把陌生 codebase 一鍵變成可走訪的 tutorial」的桌面 A
 
 **LLM 呼叫鏈**：所有 provider 必須包 `TrackedProvider` — registry 在實例化階段 raise 拒絕 unwrapped；inner class 走 `TrackedProvider.ALLOWED_INNER_TYPES = {MockProvider, OpenAIEmbeddingProvider, OpenAIChatProvider}` 顯式 allowlist（spec 與 code 同步）。分派走 `ProviderRole`（reasoning / judge / chat / embed），每筆 audit 記 `role` + `module`（後者由 `default_module` kwarg 寫入，是 `module` 欄唯一寫入路徑）。
 
-**三段 Sanitizer**（D-015，`docs/sanitizer.md §三`）：Pass 1 Scanner 入 KB 前 → Pass 2 Provider pre-flight 每次 LLM call 前 → Pass 3 Q&A `add_to_kb` 寫入前。Placeholder `<REDACTED:kind#N>` 無 reverse mapping，單向不可逆。
+**三段 Sanitizer**（D-015，`docs/sanitizer.md §三`）：Pass 1 Scanner 入 KB 前 → Pass 2 Provider pre-flight 每次 LLM call 前 → Pass 3 Q&A `add_to_kb` 寫入前。Placeholder `<REDACTED:kind#N>` 無 reverse mapping，單向不可逆。**D-033 後**：SanitizerEngine 消費 `PIIProvider` Protocol（預設 `RuleBasedPIIProvider` 包既有 rules，未來可注入 `LocalLLMPIIProvider` / `OpenAIPIIDetectionProvider`）；Pass 2 在 LLM/Embedding inner 仍強制執行，PIIProvider inner（藉 `TrackedProvider.PII_ALLOWED_INNER_TYPES` marker）**自動 bypass** Pass 2 — D-015 invariant 的唯一例外，外部無 flag 可開。`sanitize` 已改 `async`，三段呼叫端皆 `await`。
 
 **Trust Layer 四站**（Phase 6，敘事核心）：R-01 Workspace（六層 audit 面板）/ O-04 LLM Call Inspector / O-05 Sanitizer Diff / O-01 Grant Modal。
 

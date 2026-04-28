@@ -92,11 +92,16 @@ class EmbedResponse:
 
 @runtime_checkable
 class LLMProvider(Protocol):
-    """Structural contract every provider must satisfy.
+    """Chat-shaped Provider Protocol — D-033 narrowing.
 
-    The `@runtime_checkable` decorator lets registries use
-    `isinstance(provider, LLMProvider)` as a last-line safety net;
-    static type checkers enforce the richer generic signatures.
+    Backs `LLMProvider protocol` Requirement (post-D-033). The Protocol
+    declares ONLY `chat`; the embedding call shape lives in
+    :class:`EmbeddingProvider`. This split makes
+    `@runtime_checkable` usable for actual LLM-only inners (e.g.,
+    :class:`codebus_agent.providers.openai_chat.OpenAIChatProvider`,
+    which has no `embed` method) and removes the M1-era awkwardness
+    where every concrete class had to declare both methods to satisfy
+    the union Protocol.
     """
 
     async def chat(
@@ -107,6 +112,19 @@ class LLMProvider(Protocol):
     ) -> BaseModel:
         """Send `messages` and return a validated instance of `response_model`."""
         ...
+
+
+@runtime_checkable
+class EmbeddingProvider(Protocol):
+    """Embed-shaped Provider Protocol — D-033 introduces this split.
+
+    Backs `EmbeddingProvider protocol` Requirement. The Protocol
+    declares ONLY `embed`; chat-shaped calls live in :class:`LLMProvider`.
+
+    `EmbedResponse` retains its M1 shape (`vectors`, `usage`) so existing
+    embedding implementations satisfy the new Protocol with no signature
+    change.
+    """
 
     async def embed(self, texts: list[str]) -> EmbedResponse:
         """Return one vector per input text plus usage accounting."""

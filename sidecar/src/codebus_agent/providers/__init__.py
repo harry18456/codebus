@@ -10,7 +10,7 @@ M1 scope (`openspec/changes/m1-power-on/specs/llm-provider/spec.md`
 """
 from __future__ import annotations
 
-from .llm_call_logger import LLMCallLogger
+from .llm_call_logger import AuditRole, LLMCallLogger
 from .mock import MockProvider, MockScript
 from .openai_chat import OpenAIChatProvider, OpenAIContextLengthError
 from .openai_embedding import (
@@ -20,8 +20,10 @@ from .openai_embedding import (
     OpenAIEmbeddingProvider,
     OpenAIRateLimitError,
 )
+from .pii import MockPIIProvider, PIIProvider, PIISpan, RuleBasedPIIProvider
 from .pricing import estimate_chat_cost_usd
 from .protocol import (
+    EmbeddingProvider,
     EmbedResponse,
     LLMProvider,
     Message,
@@ -34,6 +36,8 @@ from .tracked import TrackedProvider
 from .usage_tracker import UsageTracker
 
 __all__ = [
+    "AuditRole",
+    "EmbeddingProvider",
     "EmbedResponse",
     "LLMCallLogger",
     "LLMProvider",
@@ -47,7 +51,11 @@ __all__ = [
     "OpenAIContextLengthError",
     "OpenAIEmbeddingProvider",
     "OpenAIRateLimitError",
+    "MockPIIProvider",
+    "PIIProvider",
+    "PIISpan",
     "ProviderRegistry",
+    "RuleBasedPIIProvider",
     "ProviderRegistryError",
     "ProviderRole",
     "RoleConfig",

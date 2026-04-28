@@ -1,7 +1,11 @@
 # LLM Provider 抽象介面
 
-> 來自 D-003：MVP 只接指定 LLM 供應商 API，但留 Provider 抽象層讓 Phase 2 可切 Ollama / 企業自架。
-> 實作位置：Python Sidecar `agent/providers/`。
+> 來自 D-003 / D-033：MVP 只接指定 LLM 供應商 API，但留 Provider 抽象層讓 Phase 2 可切 Ollama / 企業自架。
+> 實作位置：Python Sidecar `codebus_agent/providers/`。
+>
+> **D-033 後：Provider 抽象拆三介面** — `LLMProvider`（chat-shaped，只 `chat`）/ `EmbeddingProvider`（embed-shaped，只 `embed`，新增）/ `PIIProvider`（detect-shaped，新增；`async detect(text) -> list[PIISpan]`）。
+> TrackedProvider 是 LLM/Embedding/PII 三條 inner 的單一 audit wrapper，靠 `ALLOWED_INNER_TYPES`（LLM/Embed lane）+ `PII_ALLOWED_INNER_TYPES`（PII lane，雙 allowlist disjoint）由 inner 型別決定 mode（`"llm"` / `"pii"`）。PII mode 自動 bypass Sanitizer Pass 2 — D-015 invariant 的唯一例外，外部無 flag 可開（spec《TrackedProvider auto-bypasses Pass 2 for PII inner》Requirement）。
+> Audit 欄位 `role` 走獨立 `AuditRole = Literal["reasoning", "judge", "chat", "embed", "pii_detection"]`（5 個合法值；前 4 對齊 ProviderRole；第 5 為 PII 偵測 LLM call 預留，本 change 不寫入）。
 
 ---
 

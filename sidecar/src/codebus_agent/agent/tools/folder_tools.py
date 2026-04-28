@@ -292,7 +292,7 @@ class FolderTools:
         if self._ctx.kb is not None:
             hits = await self._search_via_kb(keyword)
         else:
-            hits = self._search_via_grep(keyword)
+            hits = await self._search_via_grep(keyword)
         self._audit_allow("search", {"keyword": keyword}, None)
         return hits
 
@@ -321,7 +321,7 @@ class FolderTools:
             results.append(SearchHit(path=rel, snippet=snippet, score=score))
         return results
 
-    def _search_via_grep(self, keyword: str) -> list[SearchHit]:
+    async def _search_via_grep(self, keyword: str) -> list[SearchHit]:
         """Filesystem fallback — walks workspace, filters to text-file
         extensions the Scanner also keeps, caps to 100 hits.
 
@@ -389,7 +389,7 @@ class FolderTools:
             # (pass=1 → file-source) intact. Each hit costs one sanitize
             # call; grep fallback is a cold path (KB hit short-circuits)
             # so per-hit overhead is acceptable.
-            sanitized = self._ctx.sanitizer.sanitize(
+            sanitized = await self._ctx.sanitizer.sanitize(
                 snippet,
                 source=FileSource(path=rel, pass_="grep_search"),
             )
@@ -486,7 +486,7 @@ class FolderTools:
             if resolved.is_absolute()
             else path.replace("\\", "/")
         )
-        result = self._ctx.sanitizer.sanitize(
+        result = await self._ctx.sanitizer.sanitize(
             text,
             source=FileSource(path=rel_for_source, pass_="explorer_read_file"),
         )
@@ -669,7 +669,7 @@ class FolderTools:
             # Pass 1 sanitize on each call-site snippet. `FileSource` keeps
             # the cross-cutting `pass_num to source-type invariant` (pass=1 →
             # file-source) intact; the call-site path is the natural source.
-            sanitized = self._ctx.sanitizer.sanitize(
+            sanitized = await self._ctx.sanitizer.sanitize(
                 raw_line,
                 source=FileSource(path=rel_str, pass_="find_callers"),
             )

@@ -153,7 +153,7 @@ async def scan(
         file_entry = enriched.entry
         if file_entry.kind == "text" and file_entry.content is not None:
             try:
-                file_entry = _apply_pass1_sanitize(
+                file_entry = await _apply_pass1_sanitize(
                     file_entry,
                     ctx=ctx,
                     sanitize_audit=sanitize_audit,
@@ -361,7 +361,7 @@ def _enrich_file_entry(
     )
 
 
-def _apply_pass1_sanitize(
+async def _apply_pass1_sanitize(
     file_entry: FileEntry,
     *,
     ctx: ToolContext,
@@ -388,7 +388,7 @@ def _apply_pass1_sanitize(
         "ctx.sanitizer must be injected for Pass 1 orchestration; "
         "see scanner-sanitizer-orchestration change"
     )
-    sanitized = ctx.sanitizer.sanitize(
+    sanitized = await ctx.sanitizer.sanitize(
         file_entry.content or "",
         FileSource(pass_="scanner", path=file_entry.path),
     )

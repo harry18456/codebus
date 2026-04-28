@@ -127,7 +127,7 @@ async def add_to_kb(args: AddToKBArgs, ctx: Any) -> str:
     response_tokens: list[str] = []
     for chunk in args.chunks:
         # Stage 1: Sanitize Pass 3 + write audit lines.
-        result = sanitizer.sanitize(
+        result = await sanitizer.sanitize(
             chunk.text,
             source=FileSource(path=chunk.source, pass_="qa_add_to_kb"),
         )

@@ -1,8 +1,10 @@
 # Sanitizer Spec — 敏感資料去識別化
 
 > Module 1 Scanner 與 Provider pre-flight 共用的「清洗器」。
-> 關聯決策：D-011（資安與合規）、D-003（Provider 抽象）。
+> 關聯決策：D-011（資安與合規）、D-003（Provider 抽象）、D-033（Provider 三介面拆分 + PIIProvider 引入）。
 > 對應 `docs/security.md` 的實作層。
+>
+> **D-033 後架構調整**（不變更 rule 內容、不 bump rules version）：`SanitizerEngine` 不再直接持有 `Rule` 列表，改為消費注入的 `PIIProvider`（預設 `RuleBasedPIIProvider()` 包既有 `default_rules()`）。`sanitize` 改為 `async` 方法以容納未來 LLM-based PII provider；現有三段呼叫端（Pass 1 Scanner / Pass 2 TrackedProvider / Pass 3 Q&A `add_to_kb`）皆已對齊 `await`。Engine 仍是 placeholder + audit emission 的單一擁有者；PIIProvider 僅負責回傳 `PIISpan`（5 欄結構同 RuleMatch）。`make_default_engine()` helper 在 `sanitizer/__init__.py` 提供「Engine + 預設 RuleBased」的快速建構入口。
 
 ---
 

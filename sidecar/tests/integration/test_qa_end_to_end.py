@@ -149,7 +149,7 @@ async def test_react_path_with_add_to_kb_full_stack(tmp_path: Path) -> None:
 
     # Sanitizer mock that returns text unchanged
     class _Sanitizer:
-        def sanitize(self, text, source):
+        async def sanitize(self, text, source):
             return MagicMock(text=text, entries=[])
 
     class _SanitizerAudit:
@@ -229,7 +229,7 @@ async def test_dedup_path_writes_real_point_id_to_kb_growth(tmp_path: Path) -> N
     growth_logger = KBGrowthLogger(growth_path)
 
     class _Sanitizer:
-        def sanitize(self, text, source):
+        async def sanitize(self, text, source):
             return MagicMock(text=text, entries=[])
 
     class _SanitizerAudit:

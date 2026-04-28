@@ -140,7 +140,7 @@ async def generate_station(
 
     # Sanitizer Pass 1 over output (Decision 1 — defense in depth).
     session_id = str(uuid.uuid4())
-    sanitized = ctx.sanitizer.sanitize(
+    sanitized = await ctx.sanitizer.sanitize(
         rendered,
         source=FileSource(
             pass_="generator",
