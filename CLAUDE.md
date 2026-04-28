@@ -37,7 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案概要
 
-CodeBus 是「把陌生 codebase 一鍵變成可走訪的 tutorial」的桌面 App，由 Tauri 殼（Rust）+ Python Sidecar（FastAPI）+ Qdrant（本地向量 DB）混合架構（D-001）組成。M1 通電後資料層 + Module 4 Explorer + Module 5 Generator + Module 8 Q&A 已通電，當前進入 **Phase 6 前端**（Trust Layer 四站 R-01 / O-01 / O-04 / O-05），共用骨架 + O-01 授權站已落地，剩 R-01 / O-04 / O-05 / 介入點 / Q&A UI（見 `docs/implementation-plan.md` §二第六階段）。
+CodeBus 是「把陌生 codebase 一鍵變成可走訪的 tutorial」的桌面 App，由 Tauri 殼（Rust）+ Python Sidecar（FastAPI）+ Qdrant（本地向量 DB）混合架構（D-001）組成。M1 通電後資料層 + Module 4 Explorer + Module 5 Generator + Module 8 Q&A 已通電，當前進入 **Phase 6 前端**（Trust Layer 四站 R-01 / O-01 / O-04 / O-05），共用骨架 + O-01 授權站已落地，剩 R-01 / O-04 / O-05 / 介入點 / Q&A UI（見 `docs/implementation-plan.md` §二第六階段）。Phase 6 期間可並行推進 D-033 Change A（`split-providers-and-pii-llm`，純後端拆三介面 + PII Provider）；Phase 6 收尾後接 D-033 Change B（`provider-settings-and-onboarding`，Setting Page + Onboarding wizard + Tauri keyring）— B 對已寫前端的影響清單見 `docs/decisions.md` D-033。
 
 **查 archive 進度**：`ls openspec/changes/archive/` 是時間軸索引；每個 archive 目錄內含 `proposal.md` + `tasks.md` + `design.md` + `specs/` delta 與當時的決策脈絡，不需要在 CLAUDE.md 重複維護。
 
