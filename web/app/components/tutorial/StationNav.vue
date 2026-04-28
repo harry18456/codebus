@@ -8,12 +8,16 @@ import { computed } from 'vue'
 
 import type { RouteJson } from '~/composables/useStationRoute'
 
-const props = defineProps<{
-  route: RouteJson
-  currentStationId: string | null
-  unlockedStationIds: Set<string>
-  completedStationIds: string[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    route: RouteJson
+    currentStationId: string | null
+    unlockedStationIds: Set<string>
+    completedStationIds: string[]
+    showMocLink?: boolean
+  }>(),
+  { showMocLink: true }
+)
 
 const emit = defineEmits<{
   (e: 'navigate', stationId: string): void
@@ -81,6 +85,7 @@ function badgeClass(state: StationViewModel['state']): string {
     class="h-full overflow-y-auto px-2 py-4 border-r border-border-soft bg-surface-1 text-[12.5px]"
   >
     <button
+      v-if="props.showMocLink"
       type="button"
       class="mx-2 mb-2 px-3 py-2 w-[calc(100%-1rem)] text-left rounded-md bg-surface-2 hover:bg-surface-3 transition-colors flex items-center gap-2 text-text-dim hover:text-text-base"
       data-testid="nav-to-moc"
