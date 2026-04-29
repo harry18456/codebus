@@ -39,4 +39,4 @@
 - [x] 6.1 `cd web && npm run typecheck` 全綠（無 `any` 殘留、SseEvent / StepBucket / ProgressSnapshot 介面定義完整）
 - [x] 6.2 `cd web && npm run test` 全綠（含本 change 新增的 sanity test + fixture 重放測 + composable 測 + 4 元件測 + page 整合測）
 - [~] 6.3 **defer 至 Phase 7 demo prep**：手動 e2e（起 sidecar + OpenAI key + 進 `/explorer/<task_id>` 看三節拍）。理由：vitest 37/37 已用 fixture 重放證明八種 SSE 事件 → 三節拍 timeline + auditRows 同步 + route change 關 SSE 路徑全通；剩下 vitest 蓋不到的是 Tauri IPC handshake + 真 LLM 視覺渲染，這兩塊 Phase 7 demo prep（README §九 第五階段）反正都會跑一次完整 demo 路線，提前重複沒有額外信心增量。Apply 階段先標記 deferred (`[~]`) 而非 done，避免假 green 訊號
-- [ ] 6.4 `pre-commit run --all-files` 全綠後 commit
+- [x] 6.4 `pre-commit run --all-files` 全綠後 commit（commit `ff49ad6`）
