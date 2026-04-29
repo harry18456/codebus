@@ -250,6 +250,18 @@ Queue 前 5 個目標：{queue_top5}
 - 失敗的嘗試**也要顯示**（步驟 5 的 0 筆），展示 Agent 會換策略
 - 可以回放（slider）讓使用者重看決策歷程
 
+### 7.1 Step Card 三節拍與 `useExplorerStream` bucket-fill state model（P0 已通電）
+
+P0 前端落地對應在 capability `agent-console`（archive `agent-console-p0`）。實作把 `explorer-sse` 的八種事件即時組裝成 ReAct **三節拍** Step Card timeline：
+
+| 節拍 | 渲染來源 | 顯示要點 |
+|---|---|---|
+| **THINK** | `agent_thought` | `thought` 文字 + `action[]` tool-call 列表（每個 `{tool, args}` 一列）|
+| **ACT** | `agent_action_result` × N | 每個 ToolResult 一列；`isError` 紅框（observation 帶 `error:` 前綴或 `traceback` 用啟發式判斷）；`tokens_used: 0` 顯示「—」（D-021 per-tool placeholder）|
+| **JUDGE** | `judge_verdict` | `relevance` 兩位小數 + `reason` 全文 |
+
+State model 採 **bucket-fill** 而非 flat event array：composable `useExplorerStream` 把每個事件 upsert 進 `Map<step, StepBucket>`，timeline `v-for` 用 `:key="bucket.step"` 穩定 DOM；reconnect 補齊事件（P1 `GET /reasoning?after_step_id=`）天然 idempotent，不需重排。Coverage banner / budget banner 各自 latest-only / per-kind latched，由 `useExplorerStream` 同 entry 分派；reasoning 系列三事件 stringify 後並行 push 到 `auditRows`（rolling window 200），由既有 `AuditPanel` reasoning tab 共用。
+
 ---
 
 ## 八、資料格式

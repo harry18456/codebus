@@ -5,6 +5,8 @@
 // from `design/v1/shell.js` is fixture-only and MUST NOT appear in this
 // component or anywhere else under `web/app/`.
 
+import { computed } from 'vue'
+
 const TAB_ORDER = [
   'sanitize',
   'tool',
