@@ -1,3 +1,4 @@
+pub mod audit_files;
 pub mod sidecar;
 pub mod tutorial;
 
@@ -104,7 +105,8 @@ pub fn run() {
       sidecar_handshake,
       tutorial::read_tutorial_file,
       tutorial::write_progress_file,
-      tutorial::list_tutorial_tasks
+      tutorial::list_tutorial_tasks,
+      audit_files::read_audit_jsonl
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

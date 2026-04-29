@@ -721,6 +721,7 @@ Module 1（資料夾掃描）只寫「過濾垃圾檔案」，實際坑很多。
 - [x] `implementation-plan.md`：步驟 8.5 擴充為「UsageTracker + LLMCallLogger」；前端階段加步驟 28.5「LLM Calls 分頁」
 - [x] `README.md`：Demo checklist 加「LLM Calls 分頁可展示 request/response」項
 - [x] wire payload `cost_usd` 反映真值（`review-backlog-cleanup`，2026-04-25）：與 D-021 同次 land；`usage_delta` SSE event 與 `llm_calls.jsonl` 對應 chat call `cost_usd` 不再是硬寫 `0.0` 而是 pricing-table 算出的真值，前端 R-01 / O-04 顯示 reasoning + judge 不再 0 元
+- [x] LLM Calls 分頁 UI 前端 P0 落地（`llm-call-inspector-p0`，2026-04-29）：新 page `/audit/llm` standalone + `LlmCallInspector` 4-tab drawer overlay（Wire payload / Response / Tokens & cost / Timeline）+ `useAuditJsonl` 橫切 composable（七層 enum、live-tail from explorer SSE、`request_id` dedup、5 MiB cap）+ 新 Tauri IPC `read_audit_jsonl` 含 Rust↔Python filename parity test + AuditPanel 新增 `select-row` emit；Explorer page `llm` tab 接通即時 live-tail。**Pre/post sanitize diff defer**（mockup 13 line 374-411）—需另開 audit-unlock capability，P0 只渲染 post-sanitize wire payload 並顯眼放 D-015 banner
 - [ ] D-020 連動：前端稽核 tab 分頁數改 6（sanitize / sandbox / kb_growth / reasoning / usage / llm_calls），前端期落地
 - [ ] Reasoning model 第三維 token 追蹤：換 reasoning model（o1 / o3 / gpt-5 / claude-3.7-thinking 等）為 production default 前 wire `Usage.reasoning_tokens`、`token_usage.jsonl` 三維欄位、Audit panel `token` tab 三維顯示。詳細 path 見 `llm-provider.md §九`。MVP 用 `gpt-4o-mini` 標準 chat、無這欄，現在不做。觸發點：選定 reasoning model 為 production default 的提案
 

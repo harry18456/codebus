@@ -15,9 +15,15 @@ import AuditPanel, {
   type AuditRow,
   type AuditTab
 } from '~/components/audit/AuditPanel.vue'
+import LlmCallInspector from '~/components/audit/LlmCallInspector.vue'
 import ConsoleTimeline from '~/components/console/ConsoleTimeline.vue'
 import CoverageBanner from '~/components/console/CoverageBanner.vue'
 import ProgressStrip from '~/components/console/ProgressStrip.vue'
+import {
+  useAuditJsonl,
+  type LlmCallEntry,
+  type UseAuditJsonlApi
+} from '~/composables/useAuditJsonl'
 import {
   useExplorerStream,
   type UseExplorerStreamApi
@@ -28,10 +34,16 @@ const TASK_ID_RE = /^explore_[0-9a-f]{8}$/
 const route = useRoute()
 const taskId = computed(() => String(route.params.task_id ?? ''))
 const taskIdValid = computed(() => TASK_ID_RE.test(taskId.value))
+const wsPath = computed<string | null>(() => {
+  const raw = route.query.ws_path
+  return typeof raw === 'string' && raw.length > 0 ? raw : null
+})
 
 // shallowRef so swapping the whole api object doesn't deep-track its inner
 // reactive Map / refs (which are already independently reactive).
 const stream = shallowRef<UseExplorerStreamApi | null>(null)
+const llmAudit = shallowRef<UseAuditJsonlApi<LlmCallEntry> | null>(null)
+const inspectorIndex = ref<number | null>(null)
 const activeTab = ref<AuditTab>('reasoning')
 
 const stepBuckets = computed(
@@ -44,12 +56,55 @@ const auditRows = computed<AuditRow[]>(
   () => stream.value?.auditRows.value ?? []
 )
 
-// Per spec: only the reasoning tab consumes live auditRows in P0; other tabs
-// receive an empty array so AuditPanel renders its empty-state placeholder.
-const tabRows = computed<AuditRow[]>(() =>
-  activeTab.value === 'reasoning' ? auditRows.value : []
+// Per spec: each tab is bound to its dedicated audit source. Reasoning →
+// useExplorerStream auditRows. LLM → useAuditJsonl(ws_path, 'llm') with
+// live-tail from the explorer stream. Other tabs → empty (placeholder).
+const llmRowsAsAuditRows = computed<AuditRow[]>(() => {
+  const entries = llmAudit.value?.entries.value ?? []
+  return entries
+    .slice()
+    .reverse()
+    .map((e) => {
+      const tsRaw = typeof e.timestamp === 'string' ? e.timestamp : ''
+      const ts = tsRaw.includes('T')
+        ? (tsRaw.split('T')[1]?.slice(0, 8) ?? tsRaw)
+        : tsRaw || '—'
+      // Live-tail events use { tokens: { prompt, completion } } shape
+      // while disk entries use prompt_tokens / completion_tokens at top
+      // level. Read both shapes defensively so the mapper stays single.
+      const prompt =
+        e.prompt_tokens ??
+        (e as unknown as { tokens?: { prompt?: number } }).tokens?.prompt ??
+        0
+      const completion =
+        e.completion_tokens ??
+        (e as unknown as { tokens?: { completion?: number } }).tokens
+          ?.completion ??
+        0
+      return {
+        ts,
+        body: `${e.role} · ${e.module ?? '—'} · ${e.model} · ${prompt + completion}t`,
+        badge: e.sanitizer_pass2_applied ? 'sanitize' : undefined,
+        badgeKind: e.sanitizer_pass2_applied
+          ? ('purple' as const)
+          : undefined
+      }
+    })
+})
+
+const tabRows = computed<AuditRow[]>(() => {
+  if (activeTab.value === 'reasoning') return auditRows.value
+  if (activeTab.value === 'llm') return llmRowsAsAuditRows.value
+  return []
+})
+const tabCounts = computed(() => ({
+  reasoning: auditRows.value.length,
+  llm: llmAudit.value?.entries.value.length ?? 0
+}))
+
+const showLlmFallback = computed(
+  () => activeTab.value === 'llm' && wsPath.value === null
 )
-const tabCounts = computed(() => ({ reasoning: auditRows.value.length }))
 
 watch(
   taskId,
@@ -59,9 +114,19 @@ watch(
       // EventSources never coexist for the same page render.
       stream.value.close()
       stream.value = null
+      llmAudit.value = null
+      inspectorIndex.value = null
     }
     if (taskIdValid.value) {
-      stream.value = useExplorerStream(newId)
+      const s = useExplorerStream(newId)
+      stream.value = s
+      // Wire up llm audit when ws_path is present. Live-tail piggybacks
+      // on this single explorer stream — no second EventSource.
+      if (wsPath.value !== null) {
+        llmAudit.value = useAuditJsonl<LlmCallEntry>(wsPath.value, 'llm', {
+          liveTailFromExplorerStream: s
+        })
+      }
     }
   },
   { immediate: true }
@@ -74,6 +139,14 @@ onBeforeUnmount(() => {
 
 function selectTab(tab: AuditTab): void {
   activeTab.value = tab
+  inspectorIndex.value = null
+}
+
+function onAuditRowSelect(displayIndex: number): void {
+  if (activeTab.value !== 'llm' || !llmAudit.value) return
+  // Display rows are reversed; translate back to underlying index.
+  const total = llmAudit.value.entries.value.length
+  inspectorIndex.value = total - 1 - displayIndex
 }
 </script>
 
@@ -129,13 +202,35 @@ function selectTab(tab: AuditTab): void {
       </div>
     </section>
 
-    <aside class="border-l border-border-soft min-h-0">
+    <aside class="border-l border-border-soft min-h-0 relative">
       <AuditPanel
         :active-tab="activeTab"
         :rows="tabRows"
         :counts="tabCounts"
         @select-tab="selectTab"
+        @select-row="onAuditRowSelect"
       />
+      <div
+        v-if="showLlmFallback"
+        class="absolute inset-0 px-4 py-6 bg-surface-1 text-text-dim text-[12px] leading-relaxed pointer-events-none"
+      >
+        <div
+          class="border border-yellow/30 bg-yellow/10 rounded p-3 font-mono text-[11px] text-text-base"
+        >
+          ws_path required for LLM audit binding
+          <p class="mt-1 text-text-mute leading-relaxed">
+            navigate via the R-01 / generator flow that supplies
+            <code>?ws_path=&lt;abs&gt;</code>; the SSE stream is open but the
+            <code>llm_calls.jsonl</code> reader needs the workspace path.
+          </p>
+        </div>
+      </div>
     </aside>
+    <LlmCallInspector
+      :rows="llmAudit?.entries.value ?? []"
+      :active-index="inspectorIndex"
+      @close="inspectorIndex = null"
+      @select-index="inspectorIndex = $event"
+    />
   </div>
 </template>

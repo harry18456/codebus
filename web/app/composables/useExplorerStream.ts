@@ -73,6 +73,11 @@ export interface UseExplorerStreamApi {
   status: Ref<SseStatus>
   error: Ref<Error | null>
   done: Ref<boolean>
+  // Raw SSE event ref forwarded from useSseTask. Exposed for external
+  // composables (e.g. useAuditJsonl) that need to live-tail typed
+  // payloads (`llm_call`, `kb_growth`, …) without opening their own
+  // EventSource. Must NOT be mutated by consumers.
+  events: Ref<SseEvent[]>
   close: () => void
 }
 
@@ -281,6 +286,7 @@ export function useExplorerStream(taskId: string): UseExplorerStreamApi {
     status: sse.status,
     error: sse.error,
     done,
+    events: sse.events,
     close
   }
 }

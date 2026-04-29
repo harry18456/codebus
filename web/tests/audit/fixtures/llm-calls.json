@@ -1,0 +1,151 @@
+[
+  {
+    "timestamp": "2026-04-29T10:00:00.123Z",
+    "request_id": "req_001",
+    "role": "reasoning",
+    "module": "explorer",
+    "provider_id": "openai",
+    "model": "gpt-4o-mini",
+    "call_type": "chat",
+    "prompt_tokens": 412,
+    "completion_tokens": 184,
+    "cost_usd": 0.0008,
+    "latency_ms": 1284,
+    "sanitizer_pass2_applied": true,
+    "request": {
+      "messages": [
+        { "role": "system", "content": "You are an Explorer agent..." },
+        { "role": "user", "content": "Read storage/local-file.ts and find the API key." }
+      ]
+    },
+    "response": {
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "I will list src/storage first."
+          }
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-04-29T10:00:01.500Z",
+    "request_id": "req_002",
+    "role": "judge",
+    "module": "judge",
+    "provider_id": "openai",
+    "model": "gpt-4o-mini",
+    "call_type": "chat",
+    "prompt_tokens": 384,
+    "completion_tokens": 96,
+    "cost_usd": 0.0006,
+    "latency_ms": 720,
+    "sanitizer_pass2_applied": true,
+    "request": {
+      "messages": [
+        { "role": "system", "content": "You judge relevance." },
+        { "role": "user", "content": "How relevant is types.ts? Score 0-1." }
+      ]
+    },
+    "response": {
+      "choices": [
+        { "message": { "role": "assistant", "content": "{\"relevance\":0.8}" } }
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-04-29T10:00:02.880Z",
+    "request_id": "req_003",
+    "role": "embed",
+    "module": "kb_build",
+    "provider_id": "openai",
+    "model": "text-embedding-3-small",
+    "call_type": "embed",
+    "prompt_tokens": 1024,
+    "completion_tokens": 0,
+    "cost_usd": null,
+    "latency_ms": 320,
+    "sanitizer_pass2_applied": false,
+    "request": {
+      "texts": ["// fixture chunk for embedding lane"]
+    },
+    "response": null
+  },
+  {
+    "timestamp": "2026-04-29T10:00:03.150Z",
+    "request_id": "req_004",
+    "role": "chat",
+    "module": "qa_agent",
+    "provider_id": "openai",
+    "model": "gpt-4o-mini",
+    "call_type": "chat",
+    "prompt_tokens": 612,
+    "completion_tokens": 240,
+    "cost_usd": 0.0011,
+    "latency_ms": 1410,
+    "sanitizer_pass2_applied": true,
+    "request": {
+      "messages": [
+        { "role": "system", "content": "You answer questions." },
+        { "role": "user", "content": "What does write() do?" }
+      ]
+    },
+    "response": {
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "It atomically writes to disk via tmp + rename."
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  {
+    "timestamp": "2026-04-29T10:00:04.020Z",
+    "request_id": "req_005",
+    "role": "reasoning",
+    "module": "explorer",
+    "provider_id": "openai",
+    "model": "gpt-4o-mini",
+    "call_type": "chat",
+    "prompt_tokens": 290,
+    "completion_tokens": 0,
+    "cost_usd": 0.0,
+    "latency_ms": null,
+    "sanitizer_pass2_applied": false,
+    "request": {
+      "messages": [
+        { "role": "system", "content": "explorer system" },
+        { "role": "user", "content": "list_dir src/storage" }
+      ]
+    },
+    "response": null,
+    "error": {
+      "class": "TimeoutError",
+      "message": "request exceeded 10s"
+    }
+  },
+  {
+    "timestamp": "2026-04-29T10:00:05.000Z",
+    "request_id": "req_dup_target",
+    "role": "chat",
+    "module": "qa_agent",
+    "provider_id": "openai",
+    "model": "gpt-4o-mini",
+    "call_type": "chat",
+    "prompt_tokens": 100,
+    "completion_tokens": 50,
+    "cost_usd": 0.0002,
+    "latency_ms": 600,
+    "sanitizer_pass2_applied": true,
+    "request": {
+      "messages": [{ "role": "user", "content": "duplicate dedup target" }]
+    },
+    "response": {
+      "choices": [{ "message": { "role": "assistant", "content": "ok" } }]
+    }
+  }
+]

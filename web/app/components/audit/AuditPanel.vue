@@ -49,8 +49,9 @@ const props = withDefaults(defineProps<Props>(), {
   rows: () => []
 })
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'select-tab', tab: AuditTab): void
+  (e: 'select-row', index: number): void
 }>()
 
 function badgeClass(kind?: AuditBadgeKind): string {
@@ -129,7 +130,10 @@ const emptyMessage = computed(() => {
         v-for="(row, idx) in rows"
         v-else
         :key="`${row.ts}-${idx}`"
+        data-testid="audit-row"
+        :data-row-index="idx"
         class="px-3.5 py-2 border-b border-border-soft grid grid-cols-[56px_1fr_auto] gap-2.5 items-baseline hover:bg-surface-2 cursor-pointer"
+        @click="emit('select-row', idx)"
       >
         <div class="text-text-mute text-[10px] pt-px">{{ row.ts }}</div>
         <div class="text-text-dim min-w-0 leading-[1.5]">{{ row.body }}</div>
