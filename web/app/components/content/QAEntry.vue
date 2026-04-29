@@ -1,17 +1,46 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
+// QAEntry — mdc-auto-imported markdown trigger button. Click invokes
+// `useQaSession().start(...)` to open the Q&A drawer overlay with the
+// pre-filled prompt. The button itself does NOT fetch the sidecar — the
+// composable is the sole network boundary, so the frontend-shell invariant
+// "QAEntry MUST NOT itself fetch any sidecar endpoint; it is a navigation
+// trigger only" stays satisfied (the imperative call is a navigation
+// trigger into useQaSession).
+//
+// Spec: openspec/changes/qa-overlay-p0/specs/qa-overlay/spec.md
+//   "<QAEntry> mdc element invokes useQaSession imperatively"
+//
+// `currentStationId` flows in via `inject` from the page-level provide in
+// the R-01 station route — see design Decision (currentStationId via
+// page-level provide rather than prop drill).
+
+import { inject, isRef, type Ref } from 'vue'
+import { useQaSession } from '~/composables/useQaSession'
 
 const props = defineProps<{
   prompt: string
 }>()
 
-const router = useRouter()
+const session = useQaSession()
+// Tests provide a plain string; the R-01 page provides a Ref<string> so the
+// injection stays reactive across SPA route param changes (route reuses the
+// same page instance). Accept either shape.
+const injected = inject<string | Ref<string> | null>('currentStationId', null)
+
+function resolveStationId(): string | null {
+  if (injected === null || injected === undefined) return null
+  if (isRef(injected)) {
+    const v = injected.value
+    return typeof v === 'string' && v.length > 0 ? v : null
+  }
+  return typeof injected === 'string' && injected.length > 0 ? injected : null
+}
 
 function handleClick(): void {
-  // P0 placeholder route — the Q&A page wiring lands in step 30
-  // (`module-8-qa-p0` UI followup). QAEntry MUST NOT itself fetch any
-  // sidecar endpoint; it is a navigation trigger only.
-  void router.push(`/qa?prompt=${encodeURIComponent(props.prompt)}`)
+  // Open drawer first so the user immediately sees the question land in
+  // the visible turn list; start() then drives the SSE pipeline.
+  session.openDrawer()
+  void session.start(props.prompt, resolveStationId())
 }
 </script>
 

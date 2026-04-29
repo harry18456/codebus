@@ -5,7 +5,7 @@
 // to gate access — already-completed stations are reachable in review
 // mode regardless of the unlock-forward window.
 
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, provide, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AuditPanel, {
@@ -62,6 +62,13 @@ const queryTask = computed(() => {
 })
 
 const stationIdValid = computed(() => STATION_ID_RE.test(stationId.value))
+
+// `qa-overlay-p0`: mdc-auto-imported `<QAEntry>` reads `currentStationId`
+// via `inject` to decide which station id to attach to the Q&A turn. The
+// page is the only level that knows the routing context, so this provide
+// is the canonical injection point — composables MUST NOT read `useRoute()`
+// to derive station id.
+provide('currentStationId', stationId)
 
 const completedStationIds = computed(() => progress.state.value.completed_station_ids)
 const unlockedStationIds = computed(() =>

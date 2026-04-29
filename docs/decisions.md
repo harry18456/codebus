@@ -416,6 +416,7 @@ D-011 定了「要做 sanitizer」沒定「怎麼做」。AI 層所有 LLM call 
 - [x] Module 8 Q&A P0 落地（`module-8-qa-p0`，2026-04-26 apply）：`run_qa` RAG-first 兩階段 + `KBGrowthLogger` 第七層 audit + `KnowledgeBase.upsert_chunk` 雙層 dedup + `POST /qa` endpoint + `qa_agent` 拆帳
 - [x] `kb_growth.entry_id` 為真實 Qdrant `point_id`（`review-2-critical-fix`，2026-04-26）：`upsert_chunk` 簽名改 `tuple[str, str]`（`outcome` + 真實 `point_id`），`add_to_kb` 解構後寫真實 id 進 `kb_growth.jsonl.entry_id` —— Trust Layer R-01 panel 可直接 join 回 Qdrant point；`docs/sidecar-api.md §四 + qa-agent.md §八` 的 `answer_stream` 字面對齊 production `qa_answer` 一次性 non-streaming
 - [x] 實作按 qa-agent.md §十一 工期排（P0 約 3.5d / P0+P1 約 5d）—— P0 落地（`module-8-qa-p0`，2026-04-26）；P1（多輪記憶 / `add_to_kb` rollback / KB ops UI）留 Phase 2
+- [x] 前端聊天 UI 落地（`qa-overlay-p0`，2026-04-29）—— drawer overlay + `useQaSession` module-level singleton + `<QAOverlay>` / `<QaTurnCard>` / `<QaCitations>` 元件 + `<QAEntry>` mdc 改 imperative + Cmd+K 全域召喚 + AuditPanel `kb_growth` tab 接通 live-tail；turns FIFO cap 50 / drawer width 480px / file:line 不可點 / rollback 留 Phase 2 對齊 §十非 P0 範圍
 - [ ] KB growth 防呆閾值（見 §七）實作時確認
 
 ---

@@ -309,6 +309,18 @@ GET /tasks/{id}/events  (SSE)
 - 「看來源」點 file:line 跳 side panel
 - 「rollback 這筆 KB 新增」在 kb_growth 事件上
 
+### P0 drawer overlay 模式（archive `qa-overlay-p0`，2026-04-29）
+
+P0 落地是 **drawer overlay** 而非獨立 page —— mockup `design/v1/12-qa-drawer.html` 設計意圖是「在站學習脈絡保留可見」，drawer 從右側滑出疊在 stage 上半透明 dim 底層。對應契約 archive 在 `openspec/specs/qa-overlay/`，要點：
+
+- `useQaSession` 是 **module-level singleton**：state（open / turns / currentTaskId / status）寫在 module scope，每個 caller 拿到同一份 ref（`Object.is` 為 true）。Layout 只 mount 一個 `<QAOverlay>` 實例，drawer 共用一條 SSE 分派軌。
+- **Cmd+K / Ctrl+K** 全域召喚（layout host 監聽 window keydown）；ESC 關閉；點 dim 底層關閉；點 aside 不關。已開狀態 Cmd+K 是 no-op（不切換、不關，避免誤觸）。
+- 多 turn 視覺骨架但 **每筆 question 是獨立 `POST /qa`**（backend 無 continue endpoint，前端不偽造 conversation continuity）；前一 turn 未 `done` / `error` 前 send button disabled（前端 gate 而非 backend race）。
+- `turns` 陣列 **FIFO cap 50**，超過自動 shift 老的；session 短命，drawer 關閉清空所有 turns（cross-session memory 留 Phase 2）。
+- `<QAEntry>` mdc 元件 **改 imperative 呼叫**（不再 `router.push('/qa?...')`）：click → `useQaSession().openDrawer()` + `useQaSession().start(prompt, currentStationId)`；`currentStationId` 透過 page-level `provide` 注入（R-01 station page 設定，MOC / explorer 等 page 不 provide → null）。
+- citation file:line **P0 不可點**（cursor default、無 hover 樣式）；station chip 點擊 emit `navigate-to-station` 給 caller 處理（drawer 自身不 router-push）。`↶ rollback` button **P0 不渲染**，KB ops UI 整套留 Phase 2。
+- AuditPanel `kb_growth` tab 採 **dual-source merge**：`useAuditJsonl(ws, 'kb_growth')` 載 disk 既有 entries + `liveTailFromQaSession` opt 訂閱 `useQaSession` 的 SSE 聚合流；dedup key `entry_id`；行為與 LLM tab 對 `liveTailFromExplorerStream` 的關係對稱。
+
 ---
 
 ## 九、失敗處理

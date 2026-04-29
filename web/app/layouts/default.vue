@@ -9,8 +9,37 @@
 // during `cargo tauri dev` — without these the topbar slot fallback
 // renders a "Failed to resolve component: TopBar" Vue warn and the
 // 44px row stays blank.
+import { onBeforeUnmount, onMounted } from 'vue'
 import TopBar from '~/components/layout/TopBar.vue'
 import AuditPanel from '~/components/audit/AuditPanel.vue'
+import QAOverlay from '~/components/qa/QAOverlay.vue'
+import { useQaSession } from '~/composables/useQaSession'
+
+// `qa-overlay-p0`: layout owns the global keyboard shortcut for the Q&A
+// drawer. Spec rationale — listener MUST live on `window` in the layout
+// host so Cmd+K can OPEN the drawer (drawer-internal listener could not
+// fire when the drawer is closed because the component is `v-if`-gated).
+const qaSession = useQaSession()
+
+function handleKeyDown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && qaSession.open.value) {
+    e.preventDefault()
+    qaSession.close()
+    return
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k' && !qaSession.open.value) {
+    e.preventDefault()
+    qaSession.openDrawer()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+})
 </script>
 
 <template>
@@ -28,5 +57,6 @@ import AuditPanel from '~/components/audit/AuditPanel.vue'
         </slot>
       </aside>
     </div>
+    <QAOverlay />
   </div>
 </template>

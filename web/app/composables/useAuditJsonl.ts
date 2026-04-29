@@ -1,6 +1,7 @@
 import { ref, watch, type Ref } from 'vue'
 import type { SseEvent } from './useSseTask'
 import type { UseExplorerStreamApi } from './useExplorerStream'
+import type { UseQaSessionApi } from './useQaSession'
 
 // useAuditJsonl — typed wrapper for the Tauri `read_audit_jsonl` IPC
 // command. Loads `<workspace_root>/.codebus/<file>.jsonl` once, then
@@ -38,7 +39,9 @@ export interface LlmCallEntry {
 
 export interface UseAuditJsonlOptions {
   liveTailFromExplorerStream?: UseExplorerStreamApi
-  // qa-overlay-p0 will add `liveTailFromQaSession?: UseQaSessionApi` later.
+  // qa-overlay-p0: kb_growth tab live-tails from useQaSession's SSE chain
+  // mirroring the explorer-stream pattern. Dedup key is `entry_id`.
+  liveTailFromQaSession?: UseQaSessionApi
 }
 
 export interface UseAuditJsonlApi<T = Record<string, unknown>> {
@@ -78,6 +81,13 @@ function asString(value: unknown): string | undefined {
 function getRequestId(entry: unknown): string | undefined {
   if (entry && typeof entry === 'object' && 'request_id' in entry) {
     return asString((entry as { request_id: unknown }).request_id)
+  }
+  return undefined
+}
+
+function getEntryId(entry: unknown): string | undefined {
+  if (entry && typeof entry === 'object' && 'entry_id' in entry) {
+    return asString((entry as { entry_id: unknown }).entry_id)
   }
   return undefined
 }
@@ -138,6 +148,42 @@ export function useAuditJsonl<T = Record<string, unknown>>(
             if (
               requestId &&
               entries.value.some((e) => getRequestId(e) === requestId)
+            ) {
+              continue
+            }
+            entries.value.push(asEntry<T>(data))
+          }
+        },
+        { immediate: false }
+      )
+    }
+  }
+
+  // Live-tail wiring (qa-overlay-p0): only `kind === 'kb_growth'` consumes
+  // `liveTailFromQaSession`'s `kb_growth` events. Dedup by `entry_id`.
+  if (kind === 'kb_growth' && opts.liveTailFromQaSession) {
+    const session = opts.liveTailFromQaSession
+    // Production: useQaSession exposes its inner SSE event chain via the
+    // private `__sseEvents` slot (analogous to useExplorerStream's hook).
+    // Tests pass the same slot inline so live-tail works identically.
+    const eventsRef = (
+      session as unknown as { __sseEvents?: Ref<SseEvent[]> }
+    ).__sseEvents
+    if (eventsRef) {
+      let cursor = eventsRef.value.length
+      watch(
+        () => eventsRef.value.length,
+        (len) => {
+          while (cursor < len) {
+            const ev = eventsRef.value[cursor]
+            cursor += 1
+            if (ev?.type !== 'kb_growth') continue
+            const data = ev.data as Record<string, unknown> | undefined
+            if (!data) continue
+            const entryId = getEntryId(data)
+            if (
+              entryId &&
+              entries.value.some((e) => getEntryId(e) === entryId)
             ) {
               continue
             }

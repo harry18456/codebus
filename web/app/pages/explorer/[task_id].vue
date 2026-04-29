@@ -34,6 +34,7 @@ import {
   type SanitizeAuditEntry,
   type UseSanitizeAuditApi
 } from '~/composables/useSanitizeAudit'
+import { useQaSession } from '~/composables/useQaSession'
 
 const TASK_ID_RE = /^explore_[0-9a-f]{8}$/
 
@@ -50,6 +51,7 @@ const wsPath = computed<string | null>(() => {
 const stream = shallowRef<UseExplorerStreamApi | null>(null)
 const llmAudit = shallowRef<UseAuditJsonlApi<LlmCallEntry> | null>(null)
 const sanitizeAudit = shallowRef<UseSanitizeAuditApi | null>(null)
+const kbGrowthAudit = shallowRef<UseAuditJsonlApi<Record<string, unknown>> | null>(null)
 // Per-inspector index — sanitize and llm overlays stay independent so
 // switching tabs preserves the prior selection on each side.
 const inspectorIndex = ref<number | null>(null)
@@ -123,16 +125,40 @@ const sanitizeRowsAsAuditRows = computed<AuditRow[]>(() => {
     })
 })
 
+const kbGrowthRowsAsAuditRows = computed<AuditRow[]>(() => {
+  const entries = kbGrowthAudit.value?.entries.value ?? []
+  return entries
+    .slice()
+    .reverse()
+    .map((e) => {
+      const tsRaw =
+        typeof (e as { ts?: unknown }).ts === 'string'
+          ? ((e as { ts: string }).ts)
+          : ''
+      const ts = tsRaw.includes('T')
+        ? (tsRaw.split('T')[1]?.slice(0, 8) ?? tsRaw)
+        : tsRaw || '—'
+      const entryId = String((e as { entry_id?: unknown }).entry_id ?? '—')
+      const source = String((e as { source?: unknown }).source ?? '')
+      return {
+        ts,
+        body: `${entryId} · ${source}`
+      }
+    })
+})
+
 const tabRows = computed<AuditRow[]>(() => {
   if (activeTab.value === 'reasoning') return auditRows.value
   if (activeTab.value === 'llm') return llmRowsAsAuditRows.value
   if (activeTab.value === 'sanitize') return sanitizeRowsAsAuditRows.value
+  if (activeTab.value === 'kb_growth') return kbGrowthRowsAsAuditRows.value
   return []
 })
 const tabCounts = computed(() => ({
   reasoning: auditRows.value.length,
   llm: llmAudit.value?.entries.value.length ?? 0,
-  sanitize: sanitizeAudit.value?.entries.value.length ?? 0
+  sanitize: sanitizeAudit.value?.entries.value.length ?? 0,
+  kb_growth: kbGrowthAudit.value?.entries.value.length ?? 0
 }))
 
 const currentSanitizeRow = computed<SanitizeAuditEntry | null>(() => {
@@ -167,6 +193,14 @@ watch(
           liveTailFromExplorerStream: s
         })
         sanitizeAudit.value = useSanitizeAudit(wsPath.value)
+        // qa-overlay-p0: kb_growth tab live-tails from useQaSession (the
+        // singleton) so add_to_kb writes from the Q&A drawer surface here
+        // immediately. Disk read still seeds the existing entries.
+        kbGrowthAudit.value = useAuditJsonl<Record<string, unknown>>(
+          wsPath.value,
+          'kb_growth',
+          { liveTailFromQaSession: useQaSession() }
+        )
       }
     }
   },

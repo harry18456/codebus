@@ -1,0 +1,58 @@
+[
+  {
+    "ts": "2026-04-29T10:00:00.000Z",
+    "session_id": "qa_old_session_1",
+    "question": "what is the timeline storage adapter?",
+    "originating_station_id": "s02-storage",
+    "entry_id": "9d3f0a7b",
+    "source": "src/storage/timeline-adapter.ts:1-44",
+    "related_stations": ["s02-storage"],
+    "reason": "Adapter pattern hides per-platform fs differences; worth pinning so future questions about platform parity hit the canonical chunk.",
+    "sanitize_stats": { "hits": 0 },
+    "chunk_size_chars": 720,
+    "dedup_skipped": false,
+    "event_type": "add"
+  },
+  {
+    "ts": "2026-04-29T10:05:30.000Z",
+    "session_id": "qa_old_session_1",
+    "question": "how does the adapter pick storage backends?",
+    "originating_station_id": "s02-storage",
+    "entry_id": "f1e22ac4",
+    "source": "src/storage/index.ts:4-10",
+    "related_stations": ["s02-storage", "s03-production"],
+    "reason": "Re-export wiring is non-obvious; the index file is the discovery seam for newcomers.",
+    "sanitize_stats": { "hits": 1 },
+    "chunk_size_chars": 240,
+    "dedup_skipped": false,
+    "event_type": "add"
+  },
+  {
+    "ts": "2026-04-29T11:30:45.123Z",
+    "session_id": "qa_session_atomic_today",
+    "question": "why atomic write?",
+    "originating_station_id": "s03-production",
+    "entry_id": "a14f9c2e",
+    "source": "src/storage/atomic.ts:12-38",
+    "related_stations": ["s03-production"],
+    "reason": "Atomic write helper is the load-bearing durability seam; future questions about partial writes / corruption will land here.",
+    "sanitize_stats": { "hits": 0 },
+    "chunk_size_chars": 980,
+    "dedup_skipped": false,
+    "event_type": "add"
+  },
+  {
+    "ts": "2026-04-29T11:32:01.500Z",
+    "session_id": "qa_session_atomic_today",
+    "question": "where are the atomic-write tests?",
+    "originating_station_id": "s03-production",
+    "entry_id": "c0a9d7e3",
+    "source": "tests/storage/atomic.test.ts:1-22",
+    "related_stations": ["s05-tests"],
+    "reason": "Test names anchor the durability contract; pinning to KB so the contract is reachable from KB queries.",
+    "sanitize_stats": { "hits": 0 },
+    "chunk_size_chars": 510,
+    "dedup_skipped": false,
+    "event_type": "add"
+  }
+]
