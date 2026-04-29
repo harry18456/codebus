@@ -16,6 +16,7 @@ import AuditPanel, {
   type AuditTab
 } from '~/components/audit/AuditPanel.vue'
 import LlmCallInspector from '~/components/audit/LlmCallInspector.vue'
+import SanitizerAuditInspector from '~/components/audit/SanitizerAuditInspector.vue'
 import ConsoleTimeline from '~/components/console/ConsoleTimeline.vue'
 import CoverageBanner from '~/components/console/CoverageBanner.vue'
 import ProgressStrip from '~/components/console/ProgressStrip.vue'
@@ -28,6 +29,11 @@ import {
   useExplorerStream,
   type UseExplorerStreamApi
 } from '~/composables/useExplorerStream'
+import {
+  useSanitizeAudit,
+  type SanitizeAuditEntry,
+  type UseSanitizeAuditApi
+} from '~/composables/useSanitizeAudit'
 
 const TASK_ID_RE = /^explore_[0-9a-f]{8}$/
 
@@ -43,7 +49,11 @@ const wsPath = computed<string | null>(() => {
 // reactive Map / refs (which are already independently reactive).
 const stream = shallowRef<UseExplorerStreamApi | null>(null)
 const llmAudit = shallowRef<UseAuditJsonlApi<LlmCallEntry> | null>(null)
+const sanitizeAudit = shallowRef<UseSanitizeAuditApi | null>(null)
+// Per-inspector index — sanitize and llm overlays stay independent so
+// switching tabs preserves the prior selection on each side.
 const inspectorIndex = ref<number | null>(null)
+const sanitizeInspectorIndex = ref<number | null>(null)
 const activeTab = ref<AuditTab>('reasoning')
 
 const stepBuckets = computed(
@@ -92,15 +102,45 @@ const llmRowsAsAuditRows = computed<AuditRow[]>(() => {
     })
 })
 
+const sanitizeRowsAsAuditRows = computed<AuditRow[]>(() => {
+  const entries = sanitizeAudit.value?.entries.value ?? []
+  return entries
+    .slice()
+    .reverse()
+    .map((e) => {
+      const tsRaw = typeof e.ts === 'string' ? e.ts : ''
+      const ts = tsRaw.includes('T')
+        ? (tsRaw.split('T')[1]?.slice(0, 8) ?? tsRaw)
+        : tsRaw || '—'
+      return {
+        ts,
+        body: e.rule_id,
+        rule_id: e.rule_id,
+        kind: e.kind,
+        placeholder_index: e.placeholder_index,
+        pass: e.pass
+      }
+    })
+})
+
 const tabRows = computed<AuditRow[]>(() => {
   if (activeTab.value === 'reasoning') return auditRows.value
   if (activeTab.value === 'llm') return llmRowsAsAuditRows.value
+  if (activeTab.value === 'sanitize') return sanitizeRowsAsAuditRows.value
   return []
 })
 const tabCounts = computed(() => ({
   reasoning: auditRows.value.length,
-  llm: llmAudit.value?.entries.value.length ?? 0
+  llm: llmAudit.value?.entries.value.length ?? 0,
+  sanitize: sanitizeAudit.value?.entries.value.length ?? 0
 }))
+
+const currentSanitizeRow = computed<SanitizeAuditEntry | null>(() => {
+  if (sanitizeAudit.value === null || sanitizeInspectorIndex.value === null) {
+    return null
+  }
+  return sanitizeAudit.value.entries.value[sanitizeInspectorIndex.value] ?? null
+})
 
 const showLlmFallback = computed(
   () => activeTab.value === 'llm' && wsPath.value === null
@@ -126,6 +166,7 @@ watch(
         llmAudit.value = useAuditJsonl<LlmCallEntry>(wsPath.value, 'llm', {
           liveTailFromExplorerStream: s
         })
+        sanitizeAudit.value = useSanitizeAudit(wsPath.value)
       }
     }
   },
@@ -139,14 +180,25 @@ onBeforeUnmount(() => {
 
 function selectTab(tab: AuditTab): void {
   activeTab.value = tab
-  inspectorIndex.value = null
+  // Per-inspector index is preserved when re-selecting the same tab — we
+  // only clear when actively switching off a tab. Both inspectors close
+  // when the user moves to a tab that doesn't host either.
+  if (tab !== 'llm') inspectorIndex.value = null
+  if (tab !== 'sanitize') sanitizeInspectorIndex.value = null
 }
 
 function onAuditRowSelect(displayIndex: number): void {
-  if (activeTab.value !== 'llm' || !llmAudit.value) return
-  // Display rows are reversed; translate back to underlying index.
-  const total = llmAudit.value.entries.value.length
-  inspectorIndex.value = total - 1 - displayIndex
+  if (activeTab.value === 'llm' && llmAudit.value) {
+    // Display rows are reversed; translate back to underlying index.
+    const total = llmAudit.value.entries.value.length
+    inspectorIndex.value = total - 1 - displayIndex
+    return
+  }
+  if (activeTab.value === 'sanitize' && sanitizeAudit.value) {
+    const total = sanitizeAudit.value.entries.value.length
+    sanitizeInspectorIndex.value = total - 1 - displayIndex
+    return
+  }
 }
 </script>
 
@@ -231,6 +283,11 @@ function onAuditRowSelect(displayIndex: number): void {
       :active-index="inspectorIndex"
       @close="inspectorIndex = null"
       @select-index="inspectorIndex = $event"
+    />
+    <SanitizerAuditInspector
+      v-if="currentSanitizeRow !== null"
+      :row="currentSanitizeRow"
+      @close="sanitizeInspectorIndex = null"
     />
   </div>
 </template>

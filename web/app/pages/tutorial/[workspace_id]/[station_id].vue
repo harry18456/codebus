@@ -5,15 +5,31 @@
 // to gate access — already-completed stations are reachable in review
 // mode regardless of the unlock-forward window.
 
-import { computed, ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import AuditPanel, {
+  type AuditRow,
+  type AuditTab
+} from '~/components/audit/AuditPanel.vue'
+import LlmCallInspector from '~/components/audit/LlmCallInspector.vue'
+import SanitizerAuditInspector from '~/components/audit/SanitizerAuditInspector.vue'
 import StationContent from '~/components/tutorial/StationContent.vue'
 import StationLayout, {
   type StationFrontmatter
 } from '~/components/tutorial/StationLayout.vue'
 import StationNav from '~/components/tutorial/StationNav.vue'
+import {
+  useAuditJsonl,
+  type LlmCallEntry,
+  type UseAuditJsonlApi
+} from '~/composables/useAuditJsonl'
 import { parseFrontmatter } from '~/composables/parseFrontmatter'
+import {
+  useSanitizeAudit,
+  type SanitizeAuditEntry,
+  type UseSanitizeAuditApi
+} from '~/composables/useSanitizeAudit'
 import { useStationRoute, type RouteJson } from '~/composables/useStationRoute'
 import { useTutorialFiles } from '~/composables/useTutorialFiles'
 import { useTutorialProgress } from '~/composables/useTutorialProgress'
@@ -195,6 +211,109 @@ function navigateToMoc(): void {
   })
 }
 
+// ---- Audit panel + per-tab inspector overlays (R-01 station chrome) ----
+//
+// The station page hosts the audit rail via the layout's `audit` slot
+// override below; the Sanitizer + LLM overlays mount at page root so
+// either can fly over the workspace surface.
+const sanitizeAudit = shallowRef<UseSanitizeAuditApi | null>(null)
+const llmAudit = shallowRef<UseAuditJsonlApi<LlmCallEntry> | null>(null)
+const auditTab = ref<AuditTab>('sanitize')
+const llmInspectorIndex = ref<number | null>(null)
+const sanitizeInspectorIndex = ref<number | null>(null)
+
+watch(
+  workspaceRoot,
+  (path) => {
+    if (path) {
+      sanitizeAudit.value = useSanitizeAudit(path)
+      llmAudit.value = useAuditJsonl<LlmCallEntry>(path, 'llm')
+    } else {
+      sanitizeAudit.value = null
+      llmAudit.value = null
+    }
+  },
+  { immediate: true }
+)
+
+const sanitizeRowsAsAuditRows = computed<AuditRow[]>(() => {
+  const entries = sanitizeAudit.value?.entries.value ?? []
+  return entries
+    .slice()
+    .reverse()
+    .map((e) => {
+      const tsRaw = typeof e.ts === 'string' ? e.ts : ''
+      const ts = tsRaw.includes('T')
+        ? (tsRaw.split('T')[1]?.slice(0, 8) ?? tsRaw)
+        : tsRaw || '—'
+      return {
+        ts,
+        body: e.rule_id,
+        rule_id: e.rule_id,
+        kind: e.kind,
+        placeholder_index: e.placeholder_index,
+        pass: e.pass
+      }
+    })
+})
+
+const llmRowsAsAuditRows = computed<AuditRow[]>(() => {
+  const entries = llmAudit.value?.entries.value ?? []
+  return entries
+    .slice()
+    .reverse()
+    .map((e) => {
+      const tsRaw = typeof e.timestamp === 'string' ? e.timestamp : ''
+      const ts = tsRaw.includes('T')
+        ? (tsRaw.split('T')[1]?.slice(0, 8) ?? tsRaw)
+        : tsRaw || '—'
+      const prompt = e.prompt_tokens ?? 0
+      const completion = e.completion_tokens ?? 0
+      return {
+        ts,
+        body: `${e.role} · ${e.module ?? '—'} · ${e.model} · ${prompt + completion}t`,
+        badge: e.sanitizer_pass2_applied ? 'sanitize' : undefined,
+        badgeKind: e.sanitizer_pass2_applied ? ('purple' as const) : undefined
+      }
+    })
+})
+
+const tabRows = computed<AuditRow[]>(() => {
+  if (auditTab.value === 'sanitize') return sanitizeRowsAsAuditRows.value
+  if (auditTab.value === 'llm') return llmRowsAsAuditRows.value
+  return []
+})
+const tabCounts = computed(() => ({
+  sanitize: sanitizeAudit.value?.entries.value.length ?? 0,
+  llm: llmAudit.value?.entries.value.length ?? 0
+}))
+
+const currentSanitizeRow = computed<SanitizeAuditEntry | null>(() => {
+  if (sanitizeAudit.value === null || sanitizeInspectorIndex.value === null) {
+    return null
+  }
+  return sanitizeAudit.value.entries.value[sanitizeInspectorIndex.value] ?? null
+})
+
+function selectAuditTab(tab: AuditTab): void {
+  auditTab.value = tab
+  if (tab !== 'llm') llmInspectorIndex.value = null
+  if (tab !== 'sanitize') sanitizeInspectorIndex.value = null
+}
+
+function onAuditRowSelect(displayIndex: number): void {
+  if (auditTab.value === 'sanitize' && sanitizeAudit.value) {
+    const total = sanitizeAudit.value.entries.value.length
+    sanitizeInspectorIndex.value = total - 1 - displayIndex
+    return
+  }
+  if (auditTab.value === 'llm' && llmAudit.value) {
+    const total = llmAudit.value.entries.value.length
+    llmInspectorIndex.value = total - 1 - displayIndex
+    return
+  }
+}
+
 watch(
   [workspaceId, stationId, workspaceRoot, queryTask],
   () => {
@@ -205,7 +324,7 @@ watch(
 </script>
 
 <template>
-  <div class="grid grid-cols-[260px_1fr] h-full">
+  <div class="grid grid-cols-[260px_1fr_360px] h-full">
     <StationNav
       v-if="routeJson"
       :route="routeJson"
@@ -341,5 +460,27 @@ watch(
         </StationLayout>
       </template>
     </section>
+
+    <aside class="border-l border-border-base flex flex-col bg-surface-1 min-h-0">
+      <AuditPanel
+        :active-tab="auditTab"
+        :rows="tabRows"
+        :counts="tabCounts"
+        @select-tab="selectAuditTab"
+        @select-row="onAuditRowSelect"
+      />
+    </aside>
   </div>
+
+  <SanitizerAuditInspector
+    v-if="currentSanitizeRow !== null"
+    :row="currentSanitizeRow"
+    @close="sanitizeInspectorIndex = null"
+  />
+  <LlmCallInspector
+    :rows="llmAudit?.entries.value ?? []"
+    :active-index="llmInspectorIndex"
+    @close="llmInspectorIndex = null"
+    @select-index="llmInspectorIndex = $event"
+  />
 </template>

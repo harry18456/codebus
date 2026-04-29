@@ -52,6 +52,7 @@ from codebus_agent.api.explore import router as explore_router
 from codebus_agent.api.generate import router as generate_router
 from codebus_agent.api.kb import router as kb_router
 from codebus_agent.api.qa import router as qa_router
+from codebus_agent.api.sanitizer_rules import router as sanitizer_rules_router
 from codebus_agent.api.scan import router as scan_router
 from codebus_agent.api.tasks import TaskRegistry, router as tasks_router
 from codebus_agent.auth.audit_logger import AuthorizationAuditLogger
@@ -568,6 +569,10 @@ def create_app(
     # use TaskRegistry / SSE / task_id regex; the ``Authorization
     # endpoints registration`` Requirement explicitly forbids that.
     app.include_router(auth_router)
+    # `sanitizer-audit-inspector-p0`: GET /sanitizer/rules — read-only
+    # registry snapshot consumed by the SanitizerAuditInspector overlay
+    # rule explainer. Also subject to the bearer middleware.
+    app.include_router(sanitizer_rules_router)
 
     return app
 

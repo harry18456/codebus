@@ -377,6 +377,7 @@ D-011 定了「要做 sanitizer」沒定「怎麼做」。AI 層所有 LLM call 
 - [ ] 實作按 sanitizer.md §九 工期排（P0 約 3d / P0+P1 約 7d）
 - [ ] `tests/fixtures/sanitizer/` 準備
 - [ ] 使用者 review 本版（有無需調整）
+- [x] O-05 Sanitizer Audit Inspector P0 落地（`sanitizer-audit-inspector-p0`，2026-04-29）— metadata-only inspector + `/audit/sanitizer` standalone page + sidecar `GET /sanitizer/rules` registry endpoint。`sanitize_audit.jsonl` 10 個 metadata 欄位人類可讀展示、D-015 banner sticky 在 inspector / page / AuditPanel 三處同字串、purple token 守 sanitizer 專屬色。3-pane raw diff / unlock-with-grant flow / auto-relock countdown / raw value retention / `audit_session_id` chain 整套 defer 至 P1+ `sanitizer-audit-unlock` capability — D-015 不變式未動。
 
 ---
 

@@ -48,11 +48,22 @@ export interface UseAuditJsonlApi<T = Record<string, unknown>> {
   reload: () => Promise<void>
 }
 
+// Cache the dynamic import promise so concurrent reload() calls share
+// one resolution. Without this, two parallel `await import(...)` against
+// the Vitest mock can race and yield `undefined` for the second caller.
+let _coreModulePromise: Promise<typeof import('@tauri-apps/api/core')> | null = null
+function loadCore(): Promise<typeof import('@tauri-apps/api/core')> {
+  if (_coreModulePromise === null) {
+    _coreModulePromise = import('@tauri-apps/api/core')
+  }
+  return _coreModulePromise
+}
+
 async function tauriInvoke<T>(
   cmd: string,
   args: Record<string, unknown>
 ): Promise<T> {
-  const { invoke } = await import('@tauri-apps/api/core')
+  const { invoke } = await loadCore()
   return invoke<T>(cmd, args)
 }
 

@@ -28,3 +28,45 @@ Flat JSON array of `LlmCallEntry` objects matching the schema written by the sid
 ### Regenerate
 
 If `LLMCallLogger._base_entry` schema changes (new field, renamed field), update each entry above to match. Add a row to the table when introducing new diversity (a new role, a new module).
+
+## `sanitizer-rules.json`
+
+> Bootstrap by change `sanitizer-audit-inspector-p0`.
+
+Snapshot of `GET /sanitizer/rules` response: 5 SanitizerRule entries covering 3 kinds (`email` / `secret` / `id` / `internal-domain` / `allowlist`) and 2 sources (`builtin` × 4 + `user_yaml` × 1). At least one entry uses the `<email RFC 5322>` summary form mandated by spec scenario `pattern_summary is not raw regex source`.
+
+### Spec scenario coverage
+
+| Scenario | Driven by |
+| --- | --- |
+| `Rules fetched once per session` | All 5 entries — composable resolves snapshot once, cache returns it on second call |
+| `lookup returns matching rule` | `lookup('detect_secrets_aws_v1')` returns the AWS row |
+| `lookup returns null for unknown rule_id` | Test calls `lookup('nonexistent_rule_xyz')` — fixture deliberately omits that id |
+| `Composable does not request full regex source` | Source-grep test on `useSanitizerRules.ts` — fixture is unrelated to that grep |
+
+## `sanitize-audit.jsonl`
+
+> Bootstrap by change `sanitizer-audit-inspector-p0`.
+
+Newline-delimited JSON of `sanitize_audit.jsonl` rows matching the schema written by `SanitizerAuditLogger.append` (see `sidecar/src/codebus_agent/sanitizer/audit.py`). 8 entries cover the spec's required diversity:
+
+| Row | `pass` | `kind` | `source` shape | `extra` | Special |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 1 | email | dict (`{pass: scanner, path}`) | `{}` | Pass 1 baseline scanner row |
+| 2 | 1 | secret | dict (`{pass: scanner, path}`) | `{allowlisted: true}` | allowlisted hit chip rendering |
+| 3 | 2 | email | string (`file:<path>`) | `{}` | Pass 2 provider pre-flight, legacy string source form |
+| 4 | 2 | secret | string (`message:<id>`) | `{}` | Pass 2 message-source form |
+| 5 | 2 | id | string (`file:<path>`) | `{}` | Pass 2 different kind for `kindSummary` reactivity |
+| 6 | 3 | internal-domain | string (`file:<path>`) | `{}` | Pass 3 add_to_kb path |
+| 7 | 3 | email | dict (`{pass: add_to_kb, path}`) | `{}` | Pass 3 dict-source form |
+| 8 | 1 | email | dict (`{pass: scanner, path}`) | `{}` | Second `session_id` for `sessionTimeline` grouping |
+
+### Spec scenario coverage
+
+| Scenario | Driven by |
+| --- | --- |
+| `Source dict form parsed into human-readable view` | Rows 1, 2, 7, 8 |
+| `Source string forms parsed into human-readable view` | Rows 3, 4, 5, 6 |
+| `kindSummary counts unique kinds reactively` | All 8 rows |
+| `sessionTimeline groups and sorts by ts` | Two distinct `session_id` values across the 8 rows |
+| `Composable does not call read_audit_jsonl directly` | Source-grep test on `useSanitizeAudit.ts` |

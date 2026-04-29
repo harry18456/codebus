@@ -6,6 +6,7 @@
 // component or anywhere else under `web/app/`.
 
 import { computed } from 'vue'
+import { PASS_LABELS } from '~/composables/useSanitizeAudit'
 
 const TAB_ORDER = [
   'sanitize',
@@ -36,6 +37,13 @@ export interface AuditRow {
   body: string
   badge?: string
   badgeKind?: AuditBadgeKind
+  // Sanitize-tab-only fields. Optional so other tabs may pass plain rows.
+  // The component renders the placeholder chip + pass chip only when these
+  // are present and `activeTab === 'sanitize'`.
+  rule_id?: string
+  kind?: string
+  placeholder_index?: number
+  pass?: number
 }
 
 interface Props {
@@ -75,6 +83,24 @@ const emptyMessage = computed(() => {
   const label = TAB_LABELS[props.activeTab]
   return `No ${label} events yet — they appear here as the sidecar streams them.`
 })
+
+function placeholderChipText(row: AuditRow): string | null {
+  if (typeof row.kind !== 'string' || typeof row.placeholder_index !== 'number') {
+    return null
+  }
+  return `<REDACTED:${row.kind}#${row.placeholder_index}>`
+}
+
+function passChipText(row: AuditRow): string | null {
+  if (typeof row.pass !== 'number') return null
+  // Reuse the canonical label map but show only the short prefix
+  // (`Pass 1` / `Pass 2` / `Pass 3`) so AuditPanel rows stay compact.
+  // PASS_LABELS values look like `Pass N · ...`; take the head before ` ·`.
+  const full = PASS_LABELS[row.pass as 1 | 2 | 3]
+  if (!full) return `Pass ${row.pass}`
+  const dotIdx = full.indexOf(' ·')
+  return dotIdx === -1 ? full : full.slice(0, dotIdx)
+}
 </script>
 
 <template>
@@ -136,7 +162,25 @@ const emptyMessage = computed(() => {
         @click="emit('select-row', idx)"
       >
         <div class="text-text-mute text-[10px] pt-px">{{ row.ts }}</div>
-        <div class="text-text-dim min-w-0 leading-[1.5]">{{ row.body }}</div>
+        <div class="text-text-dim min-w-0 leading-[1.5] flex flex-wrap items-center gap-1.5">
+          <template v-if="activeTab === 'sanitize' && placeholderChipText(row) !== null">
+            <span
+              data-testid="sanitize-placeholder-chip"
+              class="font-mono text-[10px] px-1.5 py-px rounded-sm border border-purple/40 bg-purple/12 text-purple"
+            >
+              {{ placeholderChipText(row) }}
+            </span>
+          </template>
+          <template v-if="activeTab === 'sanitize' && passChipText(row) !== null">
+            <span
+              data-testid="sanitize-pass-chip"
+              class="font-mono text-[10px] px-1.5 py-px rounded-sm border border-purple/40 text-purple"
+            >
+              {{ passChipText(row) }}
+            </span>
+          </template>
+          <span class="min-w-0">{{ row.body }}</span>
+        </div>
         <div
           v-if="row.badge"
           class="font-mono text-[9px] px-1.5 py-px rounded-sm tracking-[0.04em] uppercase border self-start"

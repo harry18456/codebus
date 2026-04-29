@@ -1,0 +1,40 @@
+{
+  "rules_version": "2026-04-20-1",
+  "rules": [
+    {
+      "rule_id": "pii_email_v1",
+      "kind": "email",
+      "description": "Email address (RFC 5322 form)",
+      "pattern_summary": "<email RFC 5322>",
+      "source": "builtin"
+    },
+    {
+      "rule_id": "detect_secrets_aws_v1",
+      "kind": "secret",
+      "description": "AWS access key (static credential)",
+      "pattern_summary": "AKIA[0-9A-Z]{16}",
+      "source": "builtin"
+    },
+    {
+      "rule_id": "pii_tw_national_id_v1",
+      "kind": "id",
+      "description": "Taiwan national ID",
+      "pattern_summary": "[A-Z][1-2] followed by 8 digits",
+      "source": "builtin"
+    },
+    {
+      "rule_id": "net_internal_tld_v1",
+      "kind": "internal-domain",
+      "description": "Internal-use TLD (.local / .internal / .corp / .lan)",
+      "pattern_summary": "*.local / *.internal / *.corp / *.lan",
+      "source": "builtin"
+    },
+    {
+      "rule_id": "user_allowlist_1",
+      "kind": "allowlist",
+      "description": "internal CI ip range exception",
+      "pattern_summary": "10.20.30.0/24",
+      "source": "user_yaml"
+    }
+  ]
+}
