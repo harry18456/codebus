@@ -24,7 +24,7 @@ const lastTurn = computed(() => {
 
 const sendDisabled = computed(() => {
   if (!composerInput.value.trim()) return true
-  if (lastTurn.value === null) return false
+  if (lastTurn.value == null) return false
   return (
     lastTurn.value.status === 'pending' || lastTurn.value.status === 'streaming'
   )

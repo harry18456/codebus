@@ -62,7 +62,12 @@ const currentRow = computed<SanitizeAuditEntry | null>(() => {
   return audit.entries.value[selectedIndex.value] ?? null
 })
 
-const showError = computed(() => audit?.error.value !== null && audit?.error.value !== undefined)
+// Renamed away from `showError` to avoid collision with Nuxt's auto-imported
+// `showError` composable (nuxt/dist/app/composables/error). Vue template type
+// inference resolves bare `showError` to the always-defined auto-import,
+// which yields TS2774 ("condition will always return true since this
+// function is always defined"). See change fix-phase7-typecheck-baseline.
+const hasError = computed(() => audit?.error.value !== null && audit?.error.value !== undefined)
 </script>
 
 <template>
@@ -110,7 +115,7 @@ const showError = computed(() => audit?.error.value !== null && audit?.error.val
           loading audit log…
         </div>
         <div
-          v-else-if="showError"
+          v-else-if="hasError"
           class="px-3 py-3 rounded border border-red/30 bg-red/10 font-mono text-[11.5px] text-red"
         >
           {{ audit?.error.value?.message }}

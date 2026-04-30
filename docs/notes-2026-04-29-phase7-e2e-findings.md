@@ -102,7 +102,7 @@ messages = _to_provider_messages(windowed) + [
 
 ---
 
-### A12（小）— `npm run typecheck` 3 個 pre-existing error（非 A8 範圍）
+### A12（小）— `npm run typecheck` 3 個 pre-existing error（非 A8 範圍）— [x] 已修（2026-04-30，fix-phase7-typecheck-baseline）
 
 跑 `fix-action-entry-import-collision` task 5.1 時順手發現 baseline 已存在的 type error（與 ActionEntry 無關，本 change 沒引入新 error，視為 baseline-neutral 通過）：
 
@@ -110,10 +110,16 @@ messages = _to_provider_messages(windowed) + [
    - 原因：`lastTurn` computed 回 `list[list.length - 1] ?? null`，但 TS `noUncheckedIndexedAccess` 把 `list[i]` 視作 `T | undefined`，整體成 `T | null | undefined`；`sendDisabled` 內 `=== null` 沒收掉 `undefined`。
    - 來源 archive：`qa-overlay-p0`（commit 0cbacac）。
 2. `web/app/pages/audit/sanitizer.vue:113` — `v-else-if="showError"` 觸發 TS2774「condition will always return true since this function is always defined」。
-   - 原因：template 對 `ComputedRef` 的 auto-unwrap 在 vue-tsc 視角沒展開，把 `showError` 當 function。
+   - 原因（修正後重新診斷）：本地 `const showError = computed(...)` 與 Nuxt auto-import `showError` 全域函式（`.nuxt/types/imports.d.ts:96`，來自 `nuxt/dist/app/composables/error`）撞名 — 不是 ComputedRef auto-unwrap 沒展開，是 vue-tsc template 解析優先採全域 always-defined 函式。
    - 來源 archive：`sanitizer-audit-inspector-p0`（commit a26024c）。
 
-**規模**：兩支各加 null-guard / 改寫 template 條件即可，~30min；應另開 change（如 `fix-phase7-typecheck-baseline`）以保持 fix-action-entry-import-collision scoped。
+**規模**：兩支各加 null-guard / 重命名一個 computed 即可，~30min；應另開 change（如 `fix-phase7-typecheck-baseline`）以保持 fix-action-entry-import-collision scoped。
+
+**已修（2026-04-30，fix-phase7-typecheck-baseline）**：
+
+1. `QAOverlay.vue::sendDisabled` 改 `=== null` → `== null`（同收 `null | undefined`）。
+2. `sanitizer.vue` 重命名本地 `showError` → `hasError` 避開 Nuxt auto-import 撞名。
+3. 新增 defensive 測 `web/tests/types/typecheck-baseline.spec.ts` — spec frontend-shell ADDED Requirement「Frontend typecheck baseline stays at zero errors」用 `npx vue-tsc --build --noEmit` spawn assert exit 0，鎖死 baseline 全綠。`--build` 旗標必要：`web/tsconfig.json` 是 project-references-only，無 `--build` 時 `vue-tsc -p .` 不會 traverse references、silently 檢查 0 檔案（apply 期間實測 2 秒退場 vs `--build` 13 秒實檢）。
 
 ---
 
