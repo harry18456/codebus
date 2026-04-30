@@ -56,9 +56,14 @@ const props = defineProps<{
           ⚠ 本站產出失敗，請重跑
         </span>
       </div>
-      <h1 class="text-[32px] font-bold tracking-tight leading-tight">
-        {{ props.frontmatter.title }}
-      </h1>
+      <div class="flex items-start gap-3 flex-wrap">
+        <h1 class="text-[32px] font-bold tracking-tight leading-tight flex-1 min-w-0">
+          {{ props.frontmatter.title }}
+        </h1>
+        <div class="flex items-center gap-2 mt-2">
+          <slot name="header-actions" />
+        </div>
+      </div>
     </header>
     <div class="text-[15px] leading-[1.75]">
       <slot />

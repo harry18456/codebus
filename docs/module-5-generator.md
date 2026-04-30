@@ -486,3 +486,29 @@ Timeline + Google Drive Adapter（D-004）跑完整 Explorer → Generator，人
 2. **檔名穩定**：`s{NN}-{slug}` 一經寫出不改名；後續 Q&A `add_to_kb`、cross-link、URL 路由均依賴此穩定性（改名會破壞所有 outstanding reference）
 3. **MOC 純索引**：`tutorial.md` 只有站列表、metadata、`<QAEntry>`；**不重複站內容**（避免雙真相源）
 4. **frontmatter schema 版本化**：擴充欄位為 additive；移除或改型別需 bump `schema_version` + 留 migration note
+
+---
+
+## 十七、Partial regen via `target_stations`（介入點 2）
+
+`POST /generate` 接受 optional `target_stations: list[str] | None`（default `None`）：
+
+- **`target_stations is None`**（default）：行為與既有 full path 等價 — iterate 全 `state.stations` + 寫 MOC + 寫 `route.json`
+- **`target_stations` 非空**：partial-regen path，只覆寫命中站的 `stations/s{NN}-{slug}.md`；**不**呼 MOC assembler、**不**寫 `route.json`、**不**動 unrelated stations 的檔案
+
+落點：
+
+- `sidecar/src/codebus_agent/api/generate.py` `GenerateRequest` 多 `target_stations` 欄；endpoint 用 `derive_station_ids(stations)` pre-flight：任何 id 不在派生集 → HTTP 400 `GENERATE_TARGET_STATION_INVALID`（帶 offending id）
+- `sidecar/src/codebus_agent/generator/runner.py` `run_generator(...)` 加 `target_stations` keyword-only 參數；非空時走 `_run_partial_regen` 分支
+
+關鍵不變式：
+
+1. **byte-identical 不變式**：`tutorial.md` / `route.json` / 不在 `target_stations` 內的 station markdown 檔，partial regen 前後 byte-identical（`generator_log.jsonl` 是唯一例外，會 append 新行）
+2. **station_id drift 拒絕**：runner 對命中站重新跑 `_generate_station` 後，若 stable_id 與 request 不符（例如 LLM 換了 slug）→ 拒絕該 id（log `event: station_id_drift` 雙錄 requested + observed），檔案保持原樣，**繼續**處理 `target_stations` 中的其餘 id（no short-circuit）
+3. **`mode` discriminator**：partial path 在 `generator_log.jsonl` 的 `run_started` / `run_completed` / `station_id_drift` 行加 `run_mode="partial"`；per-station 完成行 `event="station_partial_regenerated"` 加 `mode="partial"` + `station_id`，與 full-mode 行（`mode=options.mode`，例如 `"interactive"`）區分
+4. **無分散 short-circuit**：單一 target station LLM 失敗（validator 跑光 retry budget → degraded）不影響後續 target；`GeneratorResult.station_paths` 只列實際 regenerated 檔案 + `degraded_count` 反映 partial scope 內失敗數
+
+前端 wiring（`phase6-step29-intervention-points`）：
+
+- `<RegenStationButton>` 在 station page header chrome；click 開 `<InterventionConfirmModal>`「重生會覆蓋本站 markdown 與 frontmatter，其他站與 MOC 不變」
+- confirm onConfirm → page-level `startRegen(stationId)` → `useSidecar().fetch('/generate', { ..., target_stations: [stationId] })` → `useSseTask` 接 SSE → 完成後 `useTutorialFiles().readTutorialFile()` 重讀 station markdown 讓 `<StationContent>` 重新 render

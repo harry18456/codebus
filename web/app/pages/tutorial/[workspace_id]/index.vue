@@ -41,6 +41,7 @@ const queryTask = computed(() => {
 })
 
 const completedStationIds = computed(() => progress.state.value.completed_station_ids)
+const skippedStationIds = computed(() => progress.state.value.skipped_station_ids)
 const unlockedStationIds = computed(() =>
   routeJson.value
     ? progress.unlockedStationIds(routeJson.value).value
@@ -123,6 +124,7 @@ watch(
       :current-station-id="null"
       :unlocked-station-ids="unlockedStationIds"
       :completed-station-ids="completedStationIds"
+      :skipped-station-ids="skippedStationIds"
       :show-moc-link="false"
       @navigate="navigateToStation"
     />
@@ -185,6 +187,7 @@ watch(
         :route="routeJson"
         :unlocked-station-ids="unlockedStationIds"
         :completed-station-ids="completedStationIds"
+        :skipped-station-ids="skippedStationIds"
         @navigate="navigateToStation"
       />
     </section>

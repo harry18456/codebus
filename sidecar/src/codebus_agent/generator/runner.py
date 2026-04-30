@@ -44,7 +44,25 @@ from .types import (
     StationSummary,
 )
 
-__all__ = ["run_generator"]
+__all__ = ["derive_station_ids", "run_generator"]
+
+
+def derive_station_ids(stations: list[Station]) -> list[str]:
+    """Re-implement the runner's stable_id allocation as a pure function.
+
+    Used by ``POST /generate`` to pre-flight ``target_stations`` against
+    the ids the runner would derive from ``state.stations`` (without
+    spawning a background task). Mirrors the loop in ``run_generator``
+    that calls ``generate_station_id(idx, title, existing_ids)``.
+    """
+    existing: set[str] = set()
+    out: list[str] = []
+    for idx, station in enumerate(stations, start=1):
+        title = _derive_station_title(station)
+        sid = generate_station_id(idx, title, existing)
+        existing.add(sid)
+        out.append(sid)
+    return out
 
 
 # Module-level constant per spec Requirement
@@ -76,6 +94,7 @@ async def run_generator(
     duration_minutes_per_station: int = _DEFAULT_DURATION_MINUTES,
     title: str | None = None,
     emitter: Any | None = None,
+    target_stations: list[str] | None = None,
 ) -> GeneratorResult:
     """Orchestrate the full per-station pipeline + MOC + route.json.
 
@@ -135,6 +154,31 @@ async def run_generator(
         station_id = generate_station_id(idx, station_title, existing_ids)
         existing_ids.add(station_id)
         station_assignments.append((station, idx, station_id, station_title))
+
+    # Partial-regen branch (per spec ADDED Requirement
+    # `Partial regen via target_stations preserves unrelated stations`).
+    # Diverges from the full path before any MOC / route writes happen.
+    if target_stations is not None and len(target_stations) > 0:
+        return await _run_partial_regen(
+            target_stations=target_stations,
+            station_assignments=station_assignments,
+            workspace_root=workspace_root,
+            task_id=task_id,
+            tutorial_dir=tutorial_dir,
+            stations_dir=stations_dir,
+            provider=provider,
+            sanitizer=sanitizer,
+            sanitizer_audit=sanitizer_audit,
+            rules_version=rules_version,
+            log=log,
+            repo_name=repo_name,
+            workspace_type=workspace_type,
+            duration_minutes_per_station=duration_minutes_per_station,
+            generated_at=generated_at,
+            options=options,
+            state=state,
+            emitter=emitter,
+        )
 
     outcomes: list[StationOutcome] = []
     summaries: list[StationSummary] = []
@@ -279,6 +323,155 @@ async def run_generator(
         tutorial_path=tutorial_path,
         station_paths=[o.station_path for o in outcomes],
         route_path=route_path,
+        log_path=log.path,
+        degraded_count=degraded_count,
+    )
+
+
+async def _run_partial_regen(
+    *,
+    target_stations: list[str],
+    station_assignments: list[tuple[Station, int, str, str]],
+    workspace_root: Path,
+    task_id: str,
+    tutorial_dir: Path,
+    stations_dir: Path,
+    provider: Any,
+    sanitizer: SanitizerEngine,
+    sanitizer_audit: SanitizerAuditLogger,
+    rules_version: str,
+    log: GeneratorLogger,
+    repo_name: str,
+    workspace_type: str,
+    duration_minutes_per_station: int,
+    generated_at: datetime,
+    options: GeneratorOptions,
+    state: ExplorerState,
+    emitter: Any | None,
+) -> GeneratorResult:
+    """Execute the partial-regen path per spec ADDED Requirement.
+
+    Iterates ``target_stations`` in request order. For each requested
+    id:
+      1. Locate matching ``Station`` via the pre-allocated assignments;
+         on no match, treat as drift (LLM might want a new title), log
+         and continue.
+      2. Run ``_generate_station`` with normal context-building rules.
+      3. Verify the resulting stable id matches the request; on drift,
+         log + leave file untouched (continue with remaining ids).
+      4. Sanitizer Pass 1 already runs inside ``generate_station``;
+         no extra pass needed at runner level.
+      5. ``generate_station`` writes the file directly to
+         ``stations/{stable_id}.md`` so partial mode does not need a
+         separate write step.
+
+    MOC and ``route.json`` are NOT touched. ``GeneratorResult`` returns
+    paths pointing at the existing on-disk MOC / route locations.
+    """
+    # Build a lookup from derived stable id → assignment so we can
+    # resolve requested ids back to (station, idx, title). This is the
+    # canonical pre-allocation order from `run_generator`.
+    by_id: dict[str, tuple[Station, int, str, str]] = {
+        sid: tup for tup, sid in zip(station_assignments, [sa[2] for sa in station_assignments])
+    }
+
+    log.append(
+        event="run_started",
+        task_id=task_id,
+        task=state.task,
+        station_count=len(target_stations),
+        run_mode="partial",
+    )
+
+    regenerated_paths: list[Path] = []
+    degraded_count = 0
+    total_stations = len(target_stations)
+
+    for partial_idx, requested_id in enumerate(target_stations, start=1):
+        match = by_id.get(requested_id)
+        if match is None:
+            # Drift: requested id does not exist in the pre-allocated
+            # set. We still produce an "observed" id by deriving from
+            # the closest-matching station-by-prefix if any (best-effort
+            # for the audit row); otherwise observed is the empty string.
+            prefix = requested_id.split("-", 1)[0] if "-" in requested_id else ""
+            observed = next(
+                (sa[2] for sa in station_assignments if sa[2].startswith(prefix + "-")),
+                "",
+            )
+            log.append(
+                event="station_id_drift",
+                task_id=task_id,
+                requested_station_id=requested_id,
+                observed_station_id=observed,
+                run_mode="partial",
+            )
+            continue
+
+        station, idx, station_id, station_title = match
+        if emitter is not None:
+            emitter.emit(
+                {
+                    "type": "progress",
+                    "phase": "generating",
+                    "current_station": partial_idx,
+                    "total_stations": total_stations,
+                    "status": "generating",
+                    "station_id": station_id,
+                }
+            )
+        ctx = StationContext(
+            workspace_root=workspace_root,
+            output_path=stations_dir / f"{station_id}.md",
+            provider=provider,
+            sanitizer=sanitizer,
+            sanitizer_audit=sanitizer_audit,
+            rules_version=rules_version,
+            log=log,
+            station_index=idx,
+            station_id=station_id,
+            station_title=station_title,
+            task=state.task,
+            repo_name=repo_name,
+            workspace_type=workspace_type,  # type: ignore[arg-type]
+            generated_at=generated_at,
+            duration_minutes=duration_minutes_per_station,
+            related_files=[station.path] if station.path else [],
+            related_stations=[],
+            tags=[],
+            mode=options.mode,
+            target_persona=options.target_persona,
+            previous_stations_summary="",
+            related_files_excerpt="",
+            kb_hits_excerpt="",
+            max_retries=3,
+            emitter=emitter,
+            total_stations=total_stations,
+        )
+        outcome = await generate_station(station=station, ctx=ctx)
+        regenerated_paths.append(outcome.station_path)
+        if outcome.degraded:
+            degraded_count += 1
+        log.append(
+            event="station_partial_regenerated",
+            task_id=task_id,
+            station_id=station_id,
+            mode="partial",
+            degraded=outcome.degraded,
+        )
+
+    log.append(
+        event="run_completed",
+        task_id=task_id,
+        station_count=len(regenerated_paths),
+        degraded_count=degraded_count,
+        run_mode="partial",
+    )
+
+    return GeneratorResult(
+        tutorial_path=tutorial_dir / "tutorial.md",
+        station_paths=regenerated_paths,
+        route_path=tutorial_dir / "route.json",
         log_path=log.path,
         degraded_count=degraded_count,
     )

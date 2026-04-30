@@ -14,9 +14,10 @@ const props = withDefaults(
     currentStationId: string | null
     unlockedStationIds: Set<string>
     completedStationIds: string[]
+    skippedStationIds?: string[]
     showMocLink?: boolean
   }>(),
-  { showMocLink: true }
+  { showMocLink: true, skippedStationIds: () => [] }
 )
 
 const emit = defineEmits<{
@@ -29,19 +30,21 @@ interface StationViewModel {
   index: number
   title: string
   duration: number
-  state: 'completed' | 'current' | 'unlocked' | 'locked' | 'degraded'
+  state: 'completed' | 'current' | 'unlocked' | 'locked' | 'degraded' | 'skipped'
   reachable: boolean
 }
 
 const viewModel = computed<StationViewModel[]>(() =>
   props.route.stations.map((s) => {
     const completed = props.completedStationIds.includes(s.station_id)
+    const skipped = props.skippedStationIds.includes(s.station_id)
     const unlocked = props.unlockedStationIds.has(s.station_id)
     const current = props.currentStationId === s.station_id
     let state: StationViewModel['state']
     if (s.degraded) state = 'degraded'
     else if (current) state = 'current'
     else if (completed) state = 'completed'
+    else if (skipped) state = 'skipped'
     else if (unlocked) state = 'unlocked'
     else state = 'locked'
     return {
@@ -50,7 +53,7 @@ const viewModel = computed<StationViewModel[]>(() =>
       title: s.title,
       duration: s.duration,
       state,
-      reachable: completed || unlocked || current
+      reachable: completed || skipped || unlocked || current
     }
   })
 )
@@ -73,6 +76,8 @@ function badgeClass(state: StationViewModel['state']): string {
       return 'bg-surface-3 text-text-dim'
     case 'degraded':
       return 'bg-orange/25 text-orange'
+    case 'skipped':
+      return 'bg-surface-2 text-text-mute'
     case 'locked':
     default:
       return 'bg-surface-2 text-text-mute'
@@ -114,7 +119,8 @@ function badgeClass(state: StationViewModel['state']): string {
           vm.reachable
             ? 'cursor-pointer hover:bg-surface-2 transition-colors'
             : 'cursor-not-allowed opacity-60',
-          vm.state === 'current' ? 'bg-surface-2' : ''
+          vm.state === 'current' ? 'bg-surface-2' : '',
+          vm.state === 'skipped' ? 'opacity-70' : ''
         ]"
         :data-station-state="vm.state"
         @click="handleClick(vm)"
@@ -126,6 +132,7 @@ function badgeClass(state: StationViewModel['state']): string {
           <template v-if="vm.state === 'completed'">✓</template>
           <template v-else-if="vm.state === 'locked'">🔒</template>
           <template v-else-if="vm.state === 'degraded'">⚠</template>
+          <template v-else-if="vm.state === 'skipped'">↷</template>
           <template v-else>{{ vm.index }}</template>
         </span>
         <span class="min-w-0">

@@ -13,6 +13,7 @@ import { onBeforeUnmount, onMounted } from 'vue'
 import TopBar from '~/components/layout/TopBar.vue'
 import AuditPanel from '~/components/audit/AuditPanel.vue'
 import QAOverlay from '~/components/qa/QAOverlay.vue'
+import InterventionConfirmModal from '~/components/intervention/InterventionConfirmModal.vue'
 import { useQaSession } from '~/composables/useQaSession'
 
 // `qa-overlay-p0`: layout owns the global keyboard shortcut for the Q&A
@@ -58,5 +59,6 @@ onBeforeUnmount(() => {
       </aside>
     </div>
     <QAOverlay />
+    <InterventionConfirmModal />
   </div>
 </template>

@@ -10,13 +10,17 @@ import { computed, ref } from 'vue'
 import { useTutorialProgress } from '~/composables/useTutorialProgress'
 import type { RouteJson, RouteStation } from '~/composables/useStationRoute'
 
-const props = defineProps<{
-  mocMarkdown: string
-  workspaceId: string
-  route: RouteJson
-  unlockedStationIds: Set<string>
-  completedStationIds: string[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    mocMarkdown: string
+    workspaceId: string
+    route: RouteJson
+    unlockedStationIds: Set<string>
+    completedStationIds: string[]
+    skippedStationIds?: string[]
+  }>(),
+  { skippedStationIds: () => [] }
+)
 
 const emit = defineEmits<{
   (e: 'navigate', stationId: string): void
@@ -24,7 +28,7 @@ const emit = defineEmits<{
 
 interface MOCEntry {
   station: RouteStation
-  state: 'completed' | 'current' | 'unlocked' | 'locked' | 'degraded'
+  state: 'completed' | 'current' | 'unlocked' | 'locked' | 'degraded' | 'skipped'
   reachable: boolean
   href: string
 }
@@ -32,16 +36,18 @@ interface MOCEntry {
 const entries = computed<MOCEntry[]>(() =>
   props.route.stations.map((s) => {
     const completed = props.completedStationIds.includes(s.station_id)
+    const skipped = props.skippedStationIds.includes(s.station_id)
     const unlocked = props.unlockedStationIds.has(s.station_id)
     let state: MOCEntry['state']
     if (s.degraded) state = 'degraded'
     else if (completed) state = 'completed'
+    else if (skipped) state = 'skipped'
     else if (unlocked) state = 'unlocked'
     else state = 'locked'
     return {
       station: s,
       state,
-      reachable: completed || unlocked,
+      reachable: completed || skipped || unlocked,
       // URL uses stable station id only (D-T11: task_id stays out of
       // the URL hierarchy; the index page resolves it implicitly).
       href: `/tutorial/${props.workspaceId}/${s.station_id}`
@@ -57,6 +63,8 @@ function badgeClass(state: MOCEntry['state']): string {
       return 'bg-accent/20 text-accent'
     case 'degraded':
       return 'bg-orange/25 text-orange'
+    case 'skipped':
+      return 'bg-surface-3 text-text-mute'
     case 'locked':
     default:
       return 'bg-surface-2 text-text-mute'
@@ -71,6 +79,8 @@ function badgeLabel(state: MOCEntry['state']): string {
       return '可開始'
     case 'degraded':
       return '產出失敗'
+    case 'skipped':
+      return '已跳過'
     case 'locked':
     default:
       return '未解鎖'

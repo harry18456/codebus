@@ -34,6 +34,12 @@ export interface QuizProgress {
 export interface TutorialProgress {
   current_station_id: string | null
   completed_station_ids: string[]
+  // `skipped_station_ids` (additive). Mutually exclusive with
+  // `completed_station_ids`; the watch below removes any entry from
+  // `skipped_station_ids` on the same write that adds it to
+  // `completed_station_ids`. Legacy progress.json without this field
+  // reads as [] (no migration step required).
+  skipped_station_ids: string[]
   checkpoints: Record<string, CheckpointProgress>
   quizzes: Record<string, QuizProgress>
 }
@@ -42,6 +48,7 @@ function emptyProgress(): TutorialProgress {
   return {
     current_station_id: null,
     completed_station_ids: [],
+    skipped_station_ids: [],
     checkpoints: {},
     quizzes: {}
   }
@@ -178,6 +185,7 @@ async function loadProgress(ws: string, tid: string): Promise<void> {
             ? parsed.current_station_id
             : null,
         completed_station_ids: sanitizeStringArray(parsed.completed_station_ids),
+        skipped_station_ids: sanitizeStringArray(parsed.skipped_station_ids),
         checkpoints: sanitizeStringRecord(parsed.checkpoints, isCheckpointEntry),
         quizzes: sanitizeStringRecord(parsed.quizzes, isQuizEntry)
       }
@@ -225,6 +233,27 @@ function setCurrentStation(stationId: string): void {
   scheduleFlush()
 }
 
+function markStationSkipped(stationId: string): void {
+  // Idempotent: re-adding an already-skipped station is a no-op so
+  // the leaf SkipStationButton can safely call this without checking
+  // existing state. A station already in completed_station_ids never
+  // moves into skipped — completion takes priority (mutual-exclusion
+  // direction is one-way: skipped → completed only).
+  if (state.value.completed_station_ids.includes(stationId)) return
+  if (state.value.skipped_station_ids.includes(stationId)) return
+  state.value.skipped_station_ids = [
+    ...state.value.skipped_station_ids,
+    stationId
+  ]
+  // Clear current_station_id if it was pointing at the just-skipped
+  // station — caller (useIntervention.requestSkip onConfirm) will
+  // navigate away after this.
+  if (state.value.current_station_id === stationId) {
+    state.value.current_station_id = null
+  }
+  scheduleFlush()
+}
+
 async function resetProgress(): Promise<void> {
   // Wipe in-memory state and immediately flush an empty progress.json
   // so the unlock-chain computeds re-derive an empty unlocked set on
@@ -248,6 +277,17 @@ function isStationComplete(station: RouteStation): boolean {
   })
 }
 
+// `is_done(S, progress) = S.station_id ∈ completed ∪ skipped`. Skipping
+// counts as "done enough" for unlocking the next station per spec
+// scenario "Station skip unlocks the next station". Note this is the
+// unlock predicate; `isStationComplete` keeps the stricter checks-passed
+// semantics for promoting a station into completed_station_ids.
+function isStationDone(station: RouteStation): boolean {
+  if (state.value.completed_station_ids.includes(station.station_id)) return true
+  if (state.value.skipped_station_ids.includes(station.station_id)) return true
+  return isStationComplete(station)
+}
+
 function computeUnlockedSet(route: RouteJson): Set<string> {
   const set = new Set<string>()
   if (route.stations.length === 0) return set
@@ -255,7 +295,7 @@ function computeUnlockedSet(route: RouteJson): Set<string> {
   for (let i = 0; i < route.stations.length - 1; i++) {
     const station = route.stations[i]!
     if (!set.has(station.station_id)) break
-    if (isStationComplete(station)) {
+    if (isStationDone(station)) {
       set.add(route.stations[i + 1]!.station_id)
     } else {
       break
@@ -290,13 +330,23 @@ watch(
     if (!route) return
     const next = computeCompletedList(route)
     const cur = state.value.completed_station_ids
-    if (
-      next.length === cur.length &&
-      next.every((id, i) => id === cur[i])
-    ) {
-      return
-    }
-    state.value.completed_station_ids = next
+    const completedChanged =
+      next.length !== cur.length || next.some((id, i) => id !== cur[i])
+
+    // Mutual exclusion: any id newly entering completed_station_ids
+    // MUST leave skipped_station_ids in the same write. We compute
+    // the new skipped list against the new completed list — that way
+    // the persisted payload never has an id in both lists.
+    const completedSet = new Set(next)
+    const filteredSkipped = state.value.skipped_station_ids.filter(
+      (id) => !completedSet.has(id)
+    )
+    const skippedChanged =
+      filteredSkipped.length !== state.value.skipped_station_ids.length
+
+    if (!completedChanged && !skippedChanged) return
+    if (completedChanged) state.value.completed_station_ids = next
+    if (skippedChanged) state.value.skipped_station_ids = filteredSkipped
     scheduleFlush()
   },
   { deep: true, flush: 'post' }
@@ -310,7 +360,12 @@ function canVisitStation(stationId: string, route: RouteJson): ComputedRef<boole
   return computed(() => {
     const unlocked = computeUnlockedSet(route)
     if (unlocked.has(stationId)) return true
-    return state.value.completed_station_ids.includes(stationId)
+    if (state.value.completed_station_ids.includes(stationId)) return true
+    // Skipped stations remain reachable via direct URL paste so the
+    // user can choose to learn them later; completing them on revisit
+    // triggers the schema mutual-exclusion transition.
+    if (state.value.skipped_station_ids.includes(stationId)) return true
+    return false
   })
 }
 
@@ -321,6 +376,7 @@ interface TutorialProgressApi {
   setCheckpoint: typeof setCheckpoint
   setQuizAnswer: typeof setQuizAnswer
   setCurrentStation: typeof setCurrentStation
+  markStationSkipped: typeof markStationSkipped
   isStationComplete: typeof isStationComplete
   unlockedStationIds: typeof unlockedStationIds
   canVisitStation: typeof canVisitStation
@@ -336,6 +392,7 @@ export function useTutorialProgress(): TutorialProgressApi {
     setCheckpoint,
     setQuizAnswer,
     setCurrentStation,
+    markStationSkipped,
     isStationComplete,
     unlockedStationIds,
     canVisitStation,

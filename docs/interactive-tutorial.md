@@ -154,6 +154,7 @@ frontmatter schema 詳見 `module-5-generator.md` §7.3；前端解析 frontmatt
 {
   "current_station_id": "s02-mqtt-client",
   "completed_station_ids": ["s01-repo-overview"],
+  "skipped_station_ids": [],
   "checkpoints": {
     "station-1-check": { "done": true, "ts": "..." }
   },
@@ -164,14 +165,22 @@ frontmatter schema 詳見 `module-5-generator.md` §7.3；前端解析 frontmatt
 ```
 
 - **progress key 用 stable station id**（D-029）：不用整數 index，因 stations 重排（未來 regenerate）時 index 會漂移、stable id 不會
-- `current_station_id` / `completed_station_ids` 都對應 route.json 的 `stations[*].station_id`
+- `current_station_id` / `completed_station_ids` / `skipped_station_ids` 都對應 route.json 的 `stations[*].station_id`
+- `skipped_station_ids` 為 additive schema（`phase6-step29-intervention-points`）；舊 progress.json 無此欄位讀為 `[]`，不需顯式 migration
+- `completed_station_ids` 與 `skipped_station_ids` 互斥；從 skipped 完成 → atomic 寫入移出 + 加進 completed
 
 ### 解鎖邏輯（Phase 1）
 
-一站「完成」 = Checkpoint 全勾 + 所有 `<Quiz>` 答對 → 解鎖 route.json 順序上的下一個 station_id
+一站「完成或跳過」 = Checkpoint 全勾 + 所有 `<Quiz>` 答對 **OR** 在 `skipped_station_ids` 內 → 解鎖 route.json 順序上的下一個 station_id（per `phase6-step29-intervention-points`）
+
+### Skip 流程（介入點 1）
+
+- 站牌頁 header 有「↷ 跳過此站」按鈕；click → `<InterventionConfirmModal>` 「跳過此站會解鎖下一站，但本站不會記為完成」→ confirm → `useTutorialProgress().markStationSkipped(stationId)` 寫入 `skipped_station_ids` + 跳到下一站（最後一站則回 MOC）
+- 已 completed 的站不渲染 skip 按鈕；已 skipped 的站渲染但 click 為 no-op（tooltip「本站已跳過」）
+- 解鎖規則：`is_done(S) = S.station_id ∈ completed_station_ids ∪ skipped_station_ids`
 
 ### 已完成站可回看
-狀態顯示已通過，QA 保留答題紀錄；URL 直接跳對應 station_id 不會被解鎖邏輯擋（回看模式）。
+狀態顯示已通過，QA 保留答題紀錄；URL 直接跳對應 station_id 不會被解鎖邏輯擋（回看模式）。已 skipped 的站可回看且渲染為「normal mode」（不顯示 review badge），完成 required_checks 後會 atomic 從 skipped → completed。
 
 ---
 

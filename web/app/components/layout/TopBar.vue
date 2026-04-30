@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+
+import SwitchWorkspaceMenu from '~/components/intervention/SwitchWorkspaceMenu.vue'
+
 type Tab = 'learn' | 'reasoning' | 'audit'
 type KillState = 'READY' | 'ARMED' | 'OFF'
 
@@ -10,22 +15,35 @@ interface Props {
   model?: string
   tokens?: string
   cost?: string
+  // Optional explicit workspace root override; when omitted the chip
+  // derives from `route.query.ws_path` (the convention every tutorial /
+  // explorer / audit page already uses).
+  workspaceRoot?: string
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   task: '',
   tab: undefined,
   model: '',
   tokens: '',
-  cost: ''
+  cost: '',
+  workspaceRoot: ''
 })
 
 defineEmits<{
-  (e: 'switch-workspace'): void
   (e: 'select-tab', tab: Tab): void
   (e: 'open-settings'): void
   (e: 'kill'): void
 }>()
+
+const route = useRoute()
+
+const resolvedWorkspaceRoot = computed<string>(() => {
+  if (props.workspaceRoot) return props.workspaceRoot
+  const raw = route.query?.ws_path
+  if (typeof raw === 'string' && raw.length > 0) return raw
+  return ''
+})
 
 const dash = '—'
 </script>
@@ -43,18 +61,11 @@ const dash = '—'
       <span class="text-[13.5px]">CodeBus</span>
     </div>
 
-    <button
-      type="button"
-      class="flex items-center gap-1.5 px-2.5 py-1 rounded-md font-mono text-[11.5px] text-text-dim bg-surface-2 border border-border-base ml-1.5 hover:border-surface-4 hover:text-text-base"
-      :title="`Switch workspace (current: ${workspace})`"
-      @click="$emit('switch-workspace')"
-    >
-      <svg class="w-[1em] h-[1em] inline-block align-middle" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M2 4a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z" />
-      </svg>
-      <span>{{ workspace }}</span>
-      <span class="text-text-mute">▾</span>
-    </button>
+    <SwitchWorkspaceMenu
+      v-if="resolvedWorkspaceRoot"
+      :workspace-root="resolvedWorkspaceRoot"
+      class="ml-1.5"
+    />
 
     <div v-if="tab" class="flex gap-0.5 ml-2">
       <button

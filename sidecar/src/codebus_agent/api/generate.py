@@ -27,7 +27,10 @@ from codebus_agent.api.tasks import (
     _classify_exception,
     _run_background_task,
 )
-from codebus_agent.generator.runner import run_generator
+from codebus_agent.generator.runner import (
+    derive_station_ids,
+    run_generator,
+)
 from codebus_agent.generator.types import GeneratorOptions
 
 logger = logging.getLogger(__name__)
@@ -45,6 +48,12 @@ class GenerateRequest(BaseModel):
     task: str = Field(min_length=1)
     stations: list[Station] = Field(default_factory=list)
     options: GeneratorOptions = Field(default_factory=GeneratorOptions)
+    # Partial-regen entry point. ``None`` (default) preserves existing
+    # full-tutorial behavior. When non-empty, every id MUST resolve to
+    # one of the deterministic station ids derivable from ``stations``;
+    # otherwise the endpoint rejects with HTTP 400
+    # ``GENERATE_TARGET_STATION_INVALID``.
+    target_stations: list[str] | None = None
 
 
 def _validate_workspace_root(raw: str) -> Path:
@@ -118,6 +127,26 @@ async def generate_endpoint(
     workspace_root = _validate_workspace_root(request.workspace_root)
     factory = _require_generate_factory(http_request)
 
+    # Pre-flight `target_stations` against the deterministic station ids
+    # the runner would derive. Any id outside that set is rejected with
+    # 400 before a background task is spawned (per spec ADDED Requirement
+    # `Partial regen via target_stations preserves unrelated stations`).
+    if request.target_stations is not None:
+        derived = set(derive_station_ids(request.stations))
+        for sid in request.target_stations:
+            if sid not in derived:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "GENERATE_TARGET_STATION_INVALID",
+                        "message": (
+                            f"target_stations id {sid!r} does not match any "
+                            "station id derivable from request.stations"
+                        ),
+                        "station_id": sid,
+                    },
+                )
+
     registry: TaskRegistry = http_request.app.state.tasks
     handle = registry.create("generate")
     if handle is None:
@@ -146,6 +175,7 @@ async def generate_endpoint(
             llm_chat_provider=factory,
             options=request.options,
             emitter=emitter,
+            target_stations=request.target_stations,
         )
         return result.model_dump(mode="json")
 

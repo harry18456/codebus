@@ -544,8 +544,9 @@ README §四 MVP 明列三個介入點：
 4. 避免 over-engineering：MVP 介入點前端自己用 Pinia state + 既有 API 組合即可
 
 **後續**
-- [ ] 前端實作階段建立 `docs/module-6-intervention.md`（若有新 endpoint 需求才寫）
+- [x] 前端實作階段建立 `docs/module-6-intervention.md`（若有新 endpoint 需求才寫）
 - [x] `docs/README.md` §四「Module 6」狀態維持「待補」，已加註 D-020 連結
+- [x] 2026-04-30 `phase6-step29-intervention-points` archive — 已決定不另開 Module 6 capability，介入點以 3 個 MODIFIED capability（`interactive-tutorial` skip schema/unlock、`module-5-generator` `target_stations` partial regen、`frontend-shell` workspace switcher）+ 1 個 `useIntervention` composable 落地；無新 endpoint，僅擴 `POST /generate` optional `target_stations` arg
 
 ---
 

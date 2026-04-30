@@ -14,6 +14,8 @@ import AuditPanel, {
 } from '~/components/audit/AuditPanel.vue'
 import LlmCallInspector from '~/components/audit/LlmCallInspector.vue'
 import SanitizerAuditInspector from '~/components/audit/SanitizerAuditInspector.vue'
+import RegenStationButton from '~/components/intervention/RegenStationButton.vue'
+import SkipStationButton from '~/components/intervention/SkipStationButton.vue'
 import StationContent from '~/components/tutorial/StationContent.vue'
 import StationLayout, {
   type StationFrontmatter
@@ -30,6 +32,8 @@ import {
   type SanitizeAuditEntry,
   type UseSanitizeAuditApi
 } from '~/composables/useSanitizeAudit'
+import { useSidecar } from '~/composables/useSidecar'
+import { useSseTask } from '~/composables/useSseTask'
 import { useStationRoute, type RouteJson } from '~/composables/useStationRoute'
 import { useTutorialFiles } from '~/composables/useTutorialFiles'
 import { useTutorialProgress } from '~/composables/useTutorialProgress'
@@ -71,6 +75,7 @@ const stationIdValid = computed(() => STATION_ID_RE.test(stationId.value))
 provide('currentStationId', stationId)
 
 const completedStationIds = computed(() => progress.state.value.completed_station_ids)
+const skippedStationIds = computed(() => progress.state.value.skipped_station_ids)
 const unlockedStationIds = computed(() =>
   routeJson.value
     ? progress.unlockedStationIds(routeJson.value).value
@@ -218,6 +223,127 @@ function navigateToMoc(): void {
   })
 }
 
+// ---- Per-station regen wiring (intervention point 2) ----
+//
+// When the user confirms the regen modal, the page issues
+// `POST /generate` with `target_stations=[stationId]`, attaches
+// useSseTask to the returned task_id, and on `done` re-reads the
+// station markdown so `<StationContent>` re-renders the fresh body.
+const regenStatus = ref<'idle' | 'pending' | 'running' | 'done' | 'error'>(
+  'idle'
+)
+const regenError = ref<string | null>(null)
+const regenSseStop = ref<(() => void) | null>(null)
+
+async function startRegen(stationIdToRegen: string): Promise<void> {
+  if (!workspaceRoot.value || !taskId.value || !routeJson.value) return
+  regenStatus.value = 'pending'
+  regenError.value = null
+  if (regenSseStop.value) regenSseStop.value()
+
+  const sidecar = useSidecar()
+  let res: Response
+  try {
+    res = await sidecar.fetch('/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_root: workspaceRoot.value,
+        task: frontmatter.value?.task ?? '',
+        stations: [],
+        target_stations: [stationIdToRegen]
+      })
+    })
+  } catch (err) {
+    regenStatus.value = 'error'
+    regenError.value = err instanceof Error ? err.message : String(err)
+    return
+  }
+  if (!res.ok) {
+    regenStatus.value = 'error'
+    regenError.value = `POST /generate failed (${res.status})`
+    return
+  }
+  const body = (await res.json()) as { task_id?: string }
+  if (typeof body.task_id !== 'string') {
+    regenStatus.value = 'error'
+    regenError.value = 'POST /generate response missing task_id'
+    return
+  }
+  regenStatus.value = 'running'
+  const sse = useSseTask(body.task_id)
+
+  const stopWatch = watch(
+    () => sse.events.value.length,
+    () => {
+      const last = sse.events.value[sse.events.value.length - 1]
+      if (!last) return
+      if (last.type === 'done') {
+        regenStatus.value = 'done'
+        // Re-read station markdown so <StationContent> picks up new body.
+        void reloadStationMarkdown(stationIdToRegen)
+        sse.close()
+        stopWatch()
+      } else if (last.type === 'error') {
+        regenStatus.value = 'error'
+        const data = last.data as { code?: string; message?: string }
+        regenError.value = data?.message ?? 'regen error'
+        sse.close()
+        stopWatch()
+      }
+    },
+    { immediate: false }
+  )
+  regenSseStop.value = () => {
+    sse.close()
+    stopWatch()
+  }
+}
+
+async function reloadStationMarkdown(stationIdToRegen: string): Promise<void> {
+  if (!workspaceRoot.value || !taskId.value || !routeJson.value) return
+  const station = stationRoute.findStation(routeJson.value, stationIdToRegen)
+  if (!station) return
+  try {
+    const stationRaw = await files.readTutorialFile(
+      workspaceRoot.value,
+      `codebus-tutorials/${taskId.value}/${station.file_path}`
+    )
+    const parsed = parseFrontmatter(stationRaw)
+    if (!parsed.data || !parsed.data.station_id || !parsed.data.title) return
+    frontmatter.value = {
+      station_id: String(parsed.data.station_id),
+      station_index: Number(parsed.data.station_index ?? station.index),
+      title: String(parsed.data.title),
+      duration_minutes: parsed.data.duration_minutes
+        ? Number(parsed.data.duration_minutes)
+        : station.duration,
+      workspace_type: parsed.data.workspace_type as string | undefined,
+      repo_name: parsed.data.repo_name as string | undefined,
+      task: parsed.data.task as string | undefined,
+      generated_at: parsed.data.generated_at as string | undefined,
+      related_stations:
+        (parsed.data.related_stations as string[] | undefined) ??
+        station.related_stations,
+      required_checks:
+        (parsed.data.required_checks as string[] | undefined) ??
+        station.required_checks,
+      degraded: Boolean(parsed.data.degraded ?? station.degraded ?? false),
+      schema_version: parsed.data.schema_version as number | undefined
+    }
+    body.value = parsed.content
+  } catch {
+    // Best-effort: if read fails after regen, leave old content visible.
+  }
+}
+
+function onRegenRequested(stationIdToRegen: string): void {
+  // RegenStationButton's `requested-regen` emit fires from the
+  // intervention modal's onConfirm closure; the page handles the
+  // sidecar-side wiring (POST /generate + SSE + re-read).
+  void startRegen(stationIdToRegen)
+}
+
 // ---- Audit panel + per-tab inspector overlays (R-01 station chrome) ----
 //
 // The station page hosts the audit rail via the layout's `audit` slot
@@ -338,6 +464,7 @@ watch(
       :current-station-id="stationId"
       :unlocked-station-ids="unlockedStationIds"
       :completed-station-ids="completedStationIds"
+      :skipped-station-ids="skippedStationIds"
       @navigate="navigateToStation"
       @navigate-to-moc="navigateToMoc"
     />
@@ -417,6 +544,25 @@ watch(
           :frontmatter="frontmatter"
           :total-stations="routeJson.stations.length"
         >
+          <template #header-actions>
+            <SkipStationButton
+              :station-id="stationId"
+              :station-title="frontmatter.title"
+              :route="routeJson"
+              :workspace-id="workspaceId"
+              :workspace-root="workspaceRoot"
+              :task-id="taskId"
+            />
+            <RegenStationButton
+              v-if="taskId && workspaceRoot"
+              :station-id="stationId"
+              :station-title="frontmatter.title"
+              :task-id="taskId"
+              :workspace-root="workspaceRoot"
+              :degraded="frontmatter.degraded"
+              @requested-regen="onRegenRequested"
+            />
+          </template>
           <StationContent :markdown="body" />
           <footer
             class="mt-10 pt-6 border-t border-border-soft grid grid-cols-2 gap-4"
