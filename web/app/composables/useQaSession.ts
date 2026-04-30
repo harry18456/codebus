@@ -1,6 +1,7 @@
 import { ref, watch, type Ref } from 'vue'
 import { useSidecar } from './useSidecar'
 import { useSseTask, type SseTaskApi, type SseEvent } from './useSseTask'
+import type { ActionEntry } from '~/types/agent-action'
 
 // useQaSession — module-level singleton driving the Q&A drawer overlay.
 //
@@ -21,13 +22,6 @@ export interface RagHit {
   line_end: number
   snippet: string
   related_stations: string[]
-}
-
-export interface ActionEntry {
-  tool: string
-  observation: string
-  tokens_used: number
-  isError: boolean
 }
 
 export interface ReactStep {

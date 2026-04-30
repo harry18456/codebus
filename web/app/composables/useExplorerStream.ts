@@ -1,6 +1,7 @@
 import { ref, watch, type Ref } from 'vue'
 import { useSseTask, type SseEvent, type SseStatus } from './useSseTask'
 import type { AuditRow } from '~/components/audit/AuditPanel.vue'
+import type { ActionEntry } from '~/types/agent-action'
 
 // useExplorerStream — single SSE dispatch entry for the Module 4 Explorer
 // console (change agent-console-p0). Wraps exactly one useSseTask instance
@@ -11,13 +12,6 @@ import type { AuditRow } from '~/components/audit/AuditPanel.vue'
 export interface ToolCall {
   tool: string
   args: Record<string, unknown>
-}
-
-export interface ActionEntry {
-  tool: string
-  observation: string
-  tokens_used: number
-  isError: boolean
 }
 
 export interface StepBucket {

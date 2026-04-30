@@ -21,9 +21,13 @@
 
 ## 一.5、跑 e2e 過程中發現的真實 bug / finding（**首要產出**）
 
-### A8 — Duplicated TypeScript import "ActionEntry"
+### A8 — Duplicated TypeScript import "ActionEntry" — ✅ 已修（2026-04-30，`fix-action-entry-import-collision`）
 
-**症狀**：`cargo tauri dev` 啟動時 Nuxt 印 warn：
+**修法**：兩 type 結構同（`{ tool, observation, tokens_used, isError }`，grep 確認），原 notes 寫「兩 type 的欄位不同」是觀察期誤判。real fix 是 DRY 化抽 `web/app/types/agent-action.ts` 為單一 source，`useExplorerStream.ts` / `useQaSession.ts` 兩支移除自身 `export interface ActionEntry` 後 `import type { ActionEntry } from '~/types/agent-action'`。`openspec/specs/qa-overlay/spec.md` §55 cross-reference 同步改寫成「imported from canonical type module」並加上 scenario「ActionEntry is imported from canonical type module — no duplicate export warning」。`web/tests/types/agent-action.spec.ts` 兩 RED→GREEN 測（source-grep single-source + shape-invariant via `expectTypeOf`）守鎖死。
+
+**驗證**（2026-04-30）：`npm run dev` 啟動 stdout 不再印 `Duplicated imports "ActionEntry"`；`npm run test` 全套 27 files / 139 tests 全綠；root + tutorial route HTTP 200。
+
+**症狀**（修前）：`cargo tauri dev` 啟動時 Nuxt 印 warn：
 
 ```
 WARN  Duplicated imports "ActionEntry", the one from
@@ -31,11 +35,7 @@ WARN  Duplicated imports "ActionEntry", the one from
 "web/app/composables/useQaSession.ts" is used
 ```
 
-**原因**：qa-overlay-p0 在 `useQaSession.ts` 加了 `ActionEntry` type，但 `useExplorerStream.ts`（agent-console-p0 archive）已經先 export 過同名 type。Nuxt auto-import 撞名，後者壓掉前者，**運行期可能拿到不期望的 shape**（兩 type 的欄位不同）。
-
-**fix 方向**：兩處 type 改不同名（如 `QaActionEntry` / `ExplorerActionEntry`），或把 ActionEntry 提升到共用 module 然後兩邊 import。
-
-**規模**：純前端 TS rename + 對應 component 修引用，~1h；不破 spec。
+**原因**：qa-overlay-p0 在 `useQaSession.ts` 加了 `ActionEntry` type，但 `useExplorerStream.ts`（agent-console-p0 archive）已經先 export 過同名 type。Nuxt auto-import 撞名，後者壓掉前者。儘管兩 type 結構同 → 今天無 runtime bug，但若任一支獨立演進 schema 會 silent collapse 成 production bug。
 
 ---
 
@@ -99,6 +99,21 @@ messages = _to_provider_messages(windowed) + [
 該目錄 README 描述要有 TS / Python / YAML / Markdown / .env 多語言植入 PII 的豐富 fixture，**實際只有 3 個 docstring-only Python stub 檔**。Demo / 錄影前要補完。
 
 **規模**：純內容工，1-2h 寫 fixture 檔案 + 規則命中校準。
+
+---
+
+### A12（小）— `npm run typecheck` 3 個 pre-existing error（非 A8 範圍）
+
+跑 `fix-action-entry-import-collision` task 5.1 時順手發現 baseline 已存在的 type error（與 ActionEntry 無關，本 change 沒引入新 error，視為 baseline-neutral 通過）：
+
+1. `web/app/components/qa/QAOverlay.vue:29`（× 2）— `lastTurn.value` possibly `undefined`（TS18048）。
+   - 原因：`lastTurn` computed 回 `list[list.length - 1] ?? null`，但 TS `noUncheckedIndexedAccess` 把 `list[i]` 視作 `T | undefined`，整體成 `T | null | undefined`；`sendDisabled` 內 `=== null` 沒收掉 `undefined`。
+   - 來源 archive：`qa-overlay-p0`（commit 0cbacac）。
+2. `web/app/pages/audit/sanitizer.vue:113` — `v-else-if="showError"` 觸發 TS2774「condition will always return true since this function is always defined」。
+   - 原因：template 對 `ComputedRef` 的 auto-unwrap 在 vue-tsc 視角沒展開，把 `showError` 當 function。
+   - 來源 archive：`sanitizer-audit-inspector-p0`（commit a26024c）。
+
+**規模**：兩支各加 null-guard / 改寫 template 條件即可，~30min；應另開 change（如 `fix-phase7-typecheck-baseline`）以保持 fix-action-entry-import-collision scoped。
 
 ---
 
