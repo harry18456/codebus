@@ -23,6 +23,7 @@ log = "0.4"
 thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dunce = "1.0"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 [dev-dependencies]
 tempfile = "3"

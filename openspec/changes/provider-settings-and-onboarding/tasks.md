@@ -1,10 +1,10 @@
 ## 1. Tauri keyring PoC（Decision 1: Tauri keyring plugin 選型 — `tauri-plugin-keyring`（OS 直連））
 
-- [ ] 1.1 PoC: 在 `tauri/src-tauri/Cargo.toml` 加 `tauri-plugin-keyring`（或直接 `keyring-rs` crate，視 ecosystem 成熟度），三平台 happy path（macOS Keychain / Windows Credential Manager / GNOME Keyring）寫 + 讀 + 刪一輪 sentinel 值；PoC 結果寫進 `docs/decisions.md` D-033 追記決定的選型
-- [ ] 1.2 RED test：`tauri/src-tauri/tests/keyring_redteam.rs` — 紅隊 14 case：`provider_id` 含 `..` / 換行 / 空字串 / null byte / 超長 / unicode 控制字元 / shell metachar `$( )` / path separator `/` `\` / windows reserved name `CON` / 等；每案斷言 `keyring_set` 拒回 `KEYRING_INVALID_PROVIDER_ID` 不寫 OS keychain（兌現 spec Requirement「Tauri keyring plugin commands」`provider_id` regex `^[a-z][a-z0-9-]{2,40}$`）
-- [ ] 1.3 GREEN：`tauri/src-tauri/src/keyring.rs` 實作三 IPC commands `keyring_set` / `keyring_get` / `keyring_delete`；`provider_id` 通過 regex 後 host-side 拼 `codebus.<provider_id>.api_key` 命名空間；`keyring.rs` 註冊到 `lib.rs` 的 builder。1.2 全綠
-- [ ] 1.4 RED test：`tauri/src-tauri/tests/keyring_redteam.rs` 補 happy path 4 case — set→get 回讀同值、set 後 delete 後 get 回 `KEYRING_ENTRY_MISSING`、delete 從未 set 的 id 回 success、set 多個 id 互不干擾（兌現 spec Requirement「Tauri keyring plugin commands」四 scenario）
-- [ ] 1.5 GREEN：補完 `keyring.rs` 處理 `KEYRING_ENTRY_MISSING` 與成功 case；三平台 CI 全綠
+- [x] 1.1 PoC: 在 `tauri/src-tauri/Cargo.toml` 加 `tauri-plugin-keyring`（或直接 `keyring-rs` crate，視 ecosystem 成熟度），三平台 happy path（macOS Keychain / Windows Credential Manager / GNOME Keyring）寫 + 讀 + 刪一輪 sentinel 值；PoC 結果寫進 `docs/decisions.md` D-033 追記決定的選型
+- [x] 1.2 RED test：`tauri/src-tauri/tests/keyring_redteam.rs` — 紅隊 14 case：`provider_id` 含 `..` / 換行 / 空字串 / null byte / 超長 / unicode 控制字元 / shell metachar `$( )` / path separator `/` `\` / windows reserved name `CON` / 等；每案斷言 `keyring_set` 拒回 `KEYRING_INVALID_PROVIDER_ID` 不寫 OS keychain（兌現 spec Requirement「Tauri keyring plugin commands」`provider_id` regex `^[a-z][a-z0-9-]{2,40}$`）
+- [x] 1.3 GREEN：`tauri/src-tauri/src/keyring.rs` 實作三 IPC commands `keyring_set` / `keyring_get` / `keyring_delete`；`provider_id` 通過 regex 後 host-side 拼 `codebus.<provider_id>.api_key` 命名空間；`keyring.rs` 註冊到 `lib.rs` 的 builder。1.2 全綠
+- [x] 1.4 RED test：`tauri/src-tauri/tests/keyring_redteam.rs` 補 happy path 4 case — set→get 回讀同值、set 後 delete 後 get 回 `KEYRING_ENTRY_MISSING`、delete 從未 set 的 id 回 success、set 多個 id 互不干擾（兌現 spec Requirement「Tauri keyring plugin commands」四 scenario）
+- [x] 1.5 GREEN：補完 `keyring.rs` 處理 `KEYRING_ENTRY_MISSING` 與成功 case；三平台 CI 全綠
 
 ## 2. Sidecar startup config IPC（Decision 2: Sidecar key 注入機制 — startup config IPC（不打 stdin handshake））
 

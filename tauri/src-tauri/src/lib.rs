@@ -1,4 +1,5 @@
 pub mod audit_files;
+pub mod keyring;
 pub mod sidecar;
 pub mod tutorial;
 
@@ -106,7 +107,10 @@ pub fn run() {
       tutorial::read_tutorial_file,
       tutorial::write_progress_file,
       tutorial::list_tutorial_tasks,
-      audit_files::read_audit_jsonl
+      audit_files::read_audit_jsonl,
+      keyring::keyring_set,
+      keyring::keyring_get,
+      keyring::keyring_delete
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

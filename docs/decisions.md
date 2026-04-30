@@ -1364,6 +1364,12 @@ D-003 + llm-role-routing 期間敲定的 Provider 抽象用單一 `LLMProvider` 
 - **A**：純後端 spec + 實作 + 測試，估 **2~3d**（與 llm-role-routing 規模相近）
 - **B**：跨 Tauri / web / sidecar，加 mockup 設計 + keyring PoC + onboarding wizard + setting page，估 **5~7d**
 
+### B apply 期追記
+
+**Keyring crate 選型（2026-04-30）**：採用 `keyring` crate 3.x 直連 OS-native keychain，**不**用 `tauri-plugin-keyring`。社群 plugin 在 Tauri 2.0 ecosystem 下並無穩定發行（crates.io 查無），而 `keyring-rs`（crate name: `keyring`）3.6.x 是 Rust 業界 de-facto 跨平台 keychain 抽象，三平台覆蓋面 + 維護活躍度遠優。Cargo.toml feature flag 用 `["apple-native", "windows-native", "sync-secret-service"]` 啟用三平台原生 backend（不啟 SQLite-based 跨平台 mock）。
+
+**Windows PoC 通電（2026-04-30）**：`tauri/src-tauri/examples/keyring_poc.rs` 在 Windows Credential Manager 跑 set → get → delete → get-after-delete 全綠（sentinel value `sk-poc-sentinel-do-not-leak`）。macOS Keychain Services / GNOME Keyring 留 task 12.5 manual e2e。PoC 證明 keyring 3.6 + apple-native + windows-native + sync-secret-service feature combo 可成功 build 並 round-trip。
+
 ---
 
 ### 需要決策動作
