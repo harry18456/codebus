@@ -38,12 +38,14 @@ interface QaTurn {
 }
 ```
 
+The `ActionEntry` referenced above MUST be imported from `web/app/types/agent-action.ts` — the single canonical type module shared with `web/app/composables/useExplorerStream.ts`. The composable file MUST NOT declare its own `export interface ActionEntry`; both `useQaSession.ts` and `useExplorerStream.ts` MUST consume the same exported `ActionEntry` symbol from `web/app/types/agent-action.ts` so Nuxt auto-import sees one definition (the duplicate-export warning during `cargo tauri dev` MUST disappear).
+
 `start(prompt, originatingStationId)` MUST:
 
 1. Append a new `QaTurn` to `turns.value` with `status: 'pending'`, fresh `id` (`turn_<Date.now()>`), and the supplied prompt + station id.
 2. Issue `POST /qa` via `useSidecar().fetch('/qa', { ... })` with body `{ workspace_root, question, originating_station_id }`. The `workspace_root` MUST be obtained from a yet-to-be-established convention (P0 reads `?ws_path=` query param via the caller passing it through; if absent, `start()` MUST reject with `Error("missing ws_path")` and set the turn status to `'error'` without spawning).
 3. On 202 Accepted, set the turn's `taskId` to the returned `task_id`, transition status to `'streaming'`, instantiate `useSseTask(task_id)`, and watch its events.
-4. On 409 `TASK_IN_FLIGHT`, set the turn status to `'error'` with `{ code: 'TASK_IN_FLIGHT', message: ... }`. Do NOT retry.
+4. On 409 `TASK_IN_FLIGHT`, set the turn status to `'error'` with `{ code: 'TASK_IN_FLIGHT', message: ... }`. The composable MUST NOT retry.
 5. On other non-2xx, set turn status to `'error'` with the response code/message.
 
 The composable MUST NOT open more than one EventSource per concurrently in-flight turn; sequential turns are allowed but only after the previous turn's SSE has emitted `done` or `error`. Within a single turn, the inner `useSseTask` instance is the **only** SSE dispatch entry — components consuming `turns` MUST NOT instantiate their own EventSource for the same `task_id`.
@@ -52,7 +54,7 @@ SSE event dispatch rules (per active turn):
 
 1. `rag_hits` event MUST set `turn.ragHits = event.hits`.
 2. `agent_thought` event MUST upsert `turn.reactSteps[event.step].thought = { text: event.thought }`.
-3. `agent_action_result` event MUST append into `turn.reactSteps[event.step].actions[]` an entry shaped like `agent-console-p0`'s `ActionEntry` (`{ tool, observation, tokens_used, isError }` with the same `error:` / `traceback` heuristic for `isError`).
+3. `agent_action_result` event MUST append into `turn.reactSteps[event.step].actions[]` an `ActionEntry` value imported from `web/app/types/agent-action.ts` (`{ tool, observation, tokens_used, isError }` with `isError = observation.startsWith('error:') || observation.toLowerCase().includes('traceback')` — same heuristic the `useExplorerStream` dispatcher applies, both consuming the same canonical type).
 4. `kb_growth` event MUST append into `turn.kbGrowth[]`. Dedup by `entry_id` — if an entry with the same id already exists, the event MUST NOT push a duplicate.
 5. `qa_answer` event MUST set `turn.answer = { text: event.answer, citations: event.citations }`.
 6. `done` event MUST flip `turn.status` to `'done'` exactly once; subsequent `done` events on the same turn MUST NOT cause re-flip or re-dispatch.
@@ -101,13 +103,22 @@ The `turns.value` array MUST be capped at 50 entries (FIFO eviction) to bound me
 - **THEN** `turn.status` MUST become `'done'`
 - **AND** subsequent `done` events MUST NOT re-flip status or re-dispatch state
 
+#### Scenario: ActionEntry is imported from canonical type module — no duplicate export warning
+
+- **WHEN** the frontend dev server (`cargo tauri dev` or `npm run dev`) starts and Nuxt auto-import scan completes
+- **THEN** the auto-importer MUST NOT log `Duplicated imports "ActionEntry"` warning
+- **AND** `web/app/composables/useQaSession.ts` MUST NOT contain `export interface ActionEntry`
+- **AND** `web/app/composables/useQaSession.ts` MUST contain `import type { ActionEntry } from '~/types/agent-action'` (or an equivalent path resolving to the same module)
+- **AND** `web/app/types/agent-action.ts` MUST be the only source file declaring `export interface ActionEntry`
+
 
 <!-- @trace
-source: qa-overlay-p0
-updated: 2026-04-29
+source: qa-overlay-p0, fix-action-entry-import-collision
+updated: 2026-04-30
 code:
   - web/app/components/content/QAEntry.vue
   - web/app/composables/useQaSession.ts
+  - web/app/types/agent-action.ts
   - docs/decisions.md
   - web/app/pages/explorer/[task_id].vue
   - web/app/layouts/default.vue
@@ -116,6 +127,7 @@ code:
   - web/app/components/qa/QaCitations.vue
   - web/app/components/qa/QAOverlay.vue
   - web/app/pages/tutorial/[workspace_id]/[station_id].vue
+  - web/app/composables/useExplorerStream.ts
   - CLAUDE.md
   - docs/qa-agent.md
   - docs/implementation-plan.md
@@ -130,6 +142,7 @@ tests:
   - web/tests/qa/qa-overlay-page-integration.spec.ts
   - web/tests/qa/useAuditJsonl-kb-growth.spec.ts
   - web/tests/qa/useQaSession.spec.ts
+  - web/tests/types/agent-action.spec.ts
 -->
 
 ---
