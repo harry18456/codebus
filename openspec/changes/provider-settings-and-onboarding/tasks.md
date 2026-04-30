@@ -8,11 +8,11 @@
 
 ## 2. Sidecar startup config IPC（Decision 2: Sidecar key 注入機制 — startup config IPC（不打 stdin handshake））
 
-- [ ] 2.1 RED test：`sidecar/tests/api/test_startup_config.py` — pytest 測 `POST /internal/startup-config` 在 valid bearer + 正確 body schema 下回 204 並寫進 `app.state.provider_keys`；第二次叫拒回 409 `STARTUP_ALREADY_CONFIGURED`；無 bearer 401；endpoint 不在 `/openapi.json` paths 列表（兌現 spec Requirement「Tauri-to-sidecar startup key injection」四 scenario）
-- [ ] 2.2 GREEN sidecar：在 `sidecar/src/codebus_agent/api/__init__.py` 加 `internal_router`；`internal/startup-config.py` 處理 endpoint，`include_in_schema=False`，setattr `app.state.provider_keys` dict，已配置 flag 防第二次。2.1 全綠
-- [ ] 2.3 RED test：`sidecar/tests/api/test_startup_config.py` 補 secret-leak 測 — 用 sentinel api_key 經 startup-config 灌入 → 跑一次 LLM call → grep `<workspace>/.codebus/*.jsonl` 與 sidecar stdout / stderr / FastAPI access log，sentinel 值零匹配（兌現 spec Requirement「API keys never written to disk or audit logs」三 scenario）
-- [ ] 2.4 GREEN sidecar：稽核 LLM call 路徑（`TrackedProvider` / `LLMCallLogger` / `UsageTracker` / SSE error dispatch），確認沒任何 path 把 api_key 寫出；2.3 全綠
-- [ ] 2.5 改 `tauri/src-tauri/src/sidecar.rs`：sidecar handshake 之後，host 從 keyring 撈所有 `llm.providers[].id` 對應的 api_key，用 bearer 打 `POST /internal/startup-config` 推進 sidecar；失敗就 retry 一次後給使用者明顯 error banner
+- [x] 2.1 RED test：`sidecar/tests/api/test_startup_config.py` — pytest 測 `POST /internal/startup-config` 在 valid bearer + 正確 body schema 下回 204 並寫進 `app.state.provider_keys`；第二次叫拒回 409 `STARTUP_ALREADY_CONFIGURED`；無 bearer 401；endpoint 不在 `/openapi.json` paths 列表（兌現 spec Requirement「Tauri-to-sidecar startup key injection」四 scenario）
+- [x] 2.2 GREEN sidecar：在 `sidecar/src/codebus_agent/api/__init__.py` 加 `internal_router`；`internal/startup-config.py` 處理 endpoint，`include_in_schema=False`，setattr `app.state.provider_keys` dict，已配置 flag 防第二次。2.1 全綠
+- [x] 2.3 RED test：`sidecar/tests/api/test_startup_config.py` 補 secret-leak 測 — 用 sentinel api_key 經 startup-config 灌入 → 跑一次 LLM call → grep `<workspace>/.codebus/*.jsonl` 與 sidecar stdout / stderr / FastAPI access log，sentinel 值零匹配（兌現 spec Requirement「API keys never written to disk or audit logs」三 scenario）
+- [x] 2.4 GREEN sidecar：稽核 LLM call 路徑（`TrackedProvider` / `LLMCallLogger` / `UsageTracker` / SSE error dispatch），確認沒任何 path 把 api_key 寫出；2.3 全綠
+- [x] 2.5 改 `tauri/src-tauri/src/sidecar.rs`：sidecar handshake 之後，host 從 keyring 撈所有 `llm.providers[].id` 對應的 api_key，用 bearer 打 `POST /internal/startup-config` 推進 sidecar；失敗就 retry 一次後給使用者明顯 error banner
 
 ## 3. RegistryHolder hot-swap（Decision 3: Registry hot-swap — `RegistryHolder` 雙層引用 + SSE 推送）
 

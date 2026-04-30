@@ -54,6 +54,7 @@ from codebus_agent.api.kb import router as kb_router
 from codebus_agent.api.qa import router as qa_router
 from codebus_agent.api.sanitizer_rules import router as sanitizer_rules_router
 from codebus_agent.api.scan import router as scan_router
+from codebus_agent.api.startup_config import router as startup_config_router
 from codebus_agent.api.tasks import TaskRegistry, router as tasks_router
 from codebus_agent.auth.audit_logger import AuthorizationAuditLogger
 from codebus_agent.health import DependencyCheck, DependencyStatus, collect
@@ -444,6 +445,12 @@ def create_app(
     # `sse-progress-skeleton/sidecar-runtime` Requirement
     # `Single-slot in-memory task registry`.
     app.state.tasks = TaskRegistry()
+    # `provider-settings-and-onboarding` (D-033 B §2): keys injected
+    # by Tauri host via `POST /internal/startup-config`. Empty dict +
+    # flag=False at boot means LLM lanes report `not-configured` until
+    # Tauri pushes the keys.
+    app.state.provider_keys = {}
+    app.state.startup_config_applied = False
 
     checks: dict[str, DependencyCheck] = dict(dependency_checks or {})
 
@@ -573,6 +580,12 @@ def create_app(
     # registry snapshot consumed by the SanitizerAuditInspector overlay
     # rule explainer. Also subject to the bearer middleware.
     app.include_router(sanitizer_rules_router)
+    # `provider-settings-and-onboarding` (D-033 B §2): internal-only
+    # POST /internal/startup-config that Tauri calls once after
+    # handshake to push API keys collected from the OS keychain.
+    # Bearer-guarded (no exemption); `include_in_schema=False` keeps
+    # the endpoint off `/openapi.json` per spec invariant.
+    app.include_router(startup_config_router)
 
     return app
 
