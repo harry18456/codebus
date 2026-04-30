@@ -56,9 +56,13 @@ WARN  Duplicated imports "ActionEntry", the one from
 
 ---
 
-### A10 — ReAct message ordering bug（**Production blocker**）
+### A10 — ReAct message ordering bug（**Production blocker**）— ✅ 已修（2026-04-30，`react-message-ordering-fix`）
 
-**症狀**：Explorer + Q&A 第一輪呼 OpenAI 就會在第二步以後拋：
+**修法**：spec / code / docs 已同步落地。Wire format 鎖死 `[system, *normalized_history, user]`；orphan `role="tool"` 訊息（current state.messages 從不含 `assistant tool_calls`，所以每筆 tool 都是 orphan）由 `_normalize_orphan_tools(windowed)` 改寫成 `role="user"` 的觀察 note，保留 LLM 跨 iteration 觀察視野同時讓 OpenAI Chat Completions 不再 400。`agent.qa._qa_think` 直接 import 重用同 helper。
+
+**E2E rerun 驗證**（2026-04-30）：對 `tests/golden/timeline-storage-adapter-synthetic/workspace/` 跑 scan → kb_build → explore（task: trace storage adapter implementation, budget_steps=6, budget_tokens=50_000），SSE 流跑滿 6 輪 + 1 round coverage gap 後 `terminal type=done`，無任何 400 / `BadRequestError`。多輪 `llm_call` / `agent_thought` / `agent_action_result` / `judge_verdict` 真 OpenAI roundtrip 全綠。
+
+**症狀**（修前）：Explorer + Q&A 第一輪呼 OpenAI 就會在第二步以後拋：
 
 ```
 openai.BadRequestError: Error code: 400

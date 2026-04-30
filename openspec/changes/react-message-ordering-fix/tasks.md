@@ -49,8 +49,8 @@
 > 5. POST /explore {task: "trace through the storage adapter…", ...} → 確認 SSE 跑到 `done` 不再 400
 > 6. 補回填 `docs/notes-2026-04-29-phase7-e2e-findings.md` A10 為 `[x] 已修（react-message-ordering-fix）`
 
-- [ ] 7.1 (deferred) Phase 7 e2e 重跑：起獨立 sidecar + Qdrant，對 `tests/golden/timeline-storage-adapter-synthetic/workspace/` 跑 scan → kb_build → explore，assert /explore 跑到 `done` 不再 400
-- [ ] 7.2 (deferred) 把 e2e 結果回填 `docs/notes-2026-04-29-phase7-e2e-findings.md`：A10 標記為 `[x] 已修（react-message-ordering-fix）`，並繼續走 Stage 3.5 (Generator) 之後的觀察
+- [x] 7.1 Phase 7 e2e 重跑（2026-04-30）：起獨立 sidecar + Qdrant，對 `tests/golden/timeline-storage-adapter-synthetic/workspace/` 跑 scan → kb_build → explore（budget_steps=6 / budget_tokens=50_000）；SSE 流 6 輪 + 1 coverage round 後 `terminal type=done`，無 400 / `BadRequestError`，多輪 OpenAI roundtrip 全綠
+- [x] 7.2 把 e2e 結果回填 `docs/notes-2026-04-29-phase7-e2e-findings.md`：A10 已標記為 `✅ 已修（2026-04-30，react-message-ordering-fix）` + 加上 e2e rerun 驗證段落（Stage 3.5 Generator 之後的觀察留待之後另開 follow-up，非本 change scope）
 
 ## 8. 文件同步
 
