@@ -440,7 +440,8 @@ LLM context window 有限（Claude 200k、GPT-4 128k），長探索會超過。
 
 **✅ landed 形狀**（`context-compression-token-budget`）：
 
-- **`messages` rolling window**：`_MESSAGE_ROLLING_WINDOW = 16` 硬 code 常數。`_think` 把 `_to_provider_messages(state.messages[-16:])` 塞給 provider wire prompt；`state.messages` 本尊保持無損累積（`reasoning_log.jsonl` 完整記錄 Step 的 `tool_results`，不被 window 切）。跨輪記憶 context 由 `render_explorer_prompt(state, tool_specs)` 另行產生（visited / stations / pending_queue 摘要塞進 user prompt 每輪 re-render）。
+- **`messages` rolling window**：`_MESSAGE_ROLLING_WINDOW = 16` 硬 code 常數。`_think` 把 `state.messages[-16:]` 經 `_normalize_orphan_tools` 規整後塞給 provider wire prompt；`state.messages` 本尊保持無損累積（`reasoning_log.jsonl` 完整記錄 Step 的 `tool_results`，不被 window 切）。跨輪記憶 context 由 `render_explorer_prompt(state, tool_specs)` 另行產生（visited / stations / pending_queue 摘要塞進 user prompt 每輪 re-render）。
+- **`_think` wire-format 順序**（`react-message-ordering-fix`，2026-04-30）：messages array 嚴格 `[system, *normalized_history, user]`，`system` 必為首位、user prompt 必為末位。`normalized_history` 是 `state.messages[-16:]` 經 `_normalize_orphan_tools(windowed)` 改寫——目前架構 `state.messages` 從不含 `assistant tool_calls`（Instructor 直接消費 LLM 回應，只有 `_append_observations` 把 `ToolResult` append 成 `role="tool"`），所以每個 `tool` 都是 orphan；helper 把它們改寫成 `role="user"` 的觀察 note（content 內嵌 `tool_name` + 原 observation），保留 LLM 的觀察視野同時讓 OpenAI Chat Completions 不被 `messages with role 'tool' must be a response to a preceding message with 'tool_calls'` 400 拒絕。Paired 形 `[assistant tool_calls, tool, ...]`（未來架構若加入）會被 helper 透傳保留。
 - **State snapshot**：已在 `render_explorer_prompt` 內 fold 進 user prompt（既有行為，本 change 不變），不用再去動 system prompt。
 - **Tool result 截斷**（既有多層）：SSE `agent_action_result.observation` 截 500 字、`render_judge_prompt` 對每條 ToolResult output 截 800 字、`render_explorer_prompt` 對 visited 塞 window 20 entries。三段 truncation 已覆蓋 provider wire 實況。
 

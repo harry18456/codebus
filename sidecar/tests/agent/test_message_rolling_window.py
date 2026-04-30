@@ -145,15 +145,27 @@ async def test_think_receives_at_most_window_size_messages_when_state_grew_large
 
     assert len(captured) == 1, "single iteration → one chat call"
     wire = captured[0]["messages"]
-    # Wire payload = window + system + user = WINDOW + 2
+    # Wire payload = system + window + user = WINDOW + 2 (orphan-tool
+    # rewrite preserves length; only role / content change).
+    # `react-message-ordering-fix` locks the layout to
+    # `[system, *normalized_history, user]`.
     assert len(wire) == _MESSAGE_ROLLING_WINDOW + 2, (
         f"wire prompt length MUST equal WINDOW({_MESSAGE_ROLLING_WINDOW}) + 2, "
         f"got {len(wire)}"
     )
-    # The first WINDOW entries match the tail of state.messages.
-    wire_tool_contents = [m.content for m in wire[:_MESSAGE_ROLLING_WINDOW]]
+    assert wire[0].role == "system"
+    assert wire[-1].role == "user"
+    # The middle WINDOW entries derive from the tail of state.messages —
+    # tool roles get rewritten to user notes embedding the original
+    # observation content, so the substring check covers both forms.
+    history_slice = wire[1:-1]
     expected_tail = [m.content for m in pre_messages[-_MESSAGE_ROLLING_WINDOW:]]
-    assert wire_tool_contents == expected_tail
+    for wire_msg, source_content in zip(history_slice, expected_tail):
+        assert source_content in wire_msg.content, (
+            f"each history entry MUST surface in wire (tool→user-note rewrite "
+            f"keeps the original content as substring); missing {source_content!r} "
+            f"in {wire_msg.content!r}"
+        )
 
 
 async def test_think_preserves_all_state_messages_when_below_window(

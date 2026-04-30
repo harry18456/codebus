@@ -26,6 +26,7 @@ from codebus_agent.agent.emitter import NullEmitter, SSEEmitter
 from codebus_agent.agent.explorer import (
     _append_observations,
     _execute_tools,
+    _normalize_orphan_tools,
     _to_provider_messages,
 )
 from codebus_agent.agent.prompts.qa import (
@@ -185,9 +186,16 @@ async def _qa_think(
     Mirrors `explorer._think`'s shape but with QA prompts and the
     `QAAction` response model.
     """
-    windowed = state.messages[-_MESSAGE_ROLLING_WINDOW:]
-    messages = _to_provider_messages(windowed) + [
+    windowed = list(state.messages[-_MESSAGE_ROLLING_WINDOW:])
+    # Mirror `agent.explorer._think` ordering rules — see the agent-core
+    # capability spec "Explorer applies rolling message window before
+    # each Think call". Orphan `tool` entries are rewritten to user
+    # notes so OpenAI Chat Completions accepts the payload while the
+    # LLM still sees prior observations. Locked by
+    # `openspec/changes/react-message-ordering-fix`.
+    messages = [
         ProviderMessage(role="system", content=QA_SYSTEM),
+        *_normalize_orphan_tools(windowed),
         ProviderMessage(role="user", content=user_prompt),
     ]
     action = await provider.chat(messages, response_model=QAAction)

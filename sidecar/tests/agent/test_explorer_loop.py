@@ -263,16 +263,20 @@ async def test_observations_feed_forward_into_next_think(
 
     assert len(captured) >= 2
     second_messages = captured[1]["messages"]
-    # Role `tool` with content reflecting the echo output.
-    tool_contents = [
-        m.content for m in second_messages if getattr(m, "role", None) == "tool"
-    ]
-    assert tool_contents, (
-        f"iteration K+1 Think MUST see role='tool' messages; saw roles="
-        f"{[getattr(m, 'role', None) for m in second_messages]}"
+    # `react-message-ordering-fix` rewrites orphan `tool` entries
+    # (the only kind `_append_observations` produces — `state.messages`
+    # never carries an `assistant tool_calls`) into `role="user"`
+    # notes whose content embeds the original observation. So
+    # iteration K+1's wire payload still surfaces the prior tool
+    # output; we just look for it in the message content rather than
+    # gating on role == "tool".
+    observation_content = "\n".join(
+        m.content for m in second_messages if getattr(m, "role", None) != "system"
     )
-    assert any("hello" in c for c in tool_contents), (
-        f"tool message MUST reflect first iteration's output; saw {tool_contents}"
+    assert "hello" in observation_content, (
+        f"iteration K+1 Think MUST surface the prior tool observation in wire "
+        f"content (any role); roles="
+        f"{[getattr(m, 'role', None) for m in second_messages]}"
     )
 
 

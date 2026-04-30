@@ -50,23 +50,34 @@ messages = _to_provider_messages(windowed) + [
 
 **`qa-agent/spec.md`** — MODIFY 既有 Requirement 補一條 cross-reference：「`_qa_think` MUST follow the same message ordering rules as `_think` defined in agent-core capability」+ 校正 spec 文字「reusing `codebus_agent.agent.explorer._think`」（實作是 `_qa_think` clone，不是嚴格 reuse）。
 
-### 2. Code 修法
+### 2. Code 修法（ingest 後路線：convert 而非 strip）
+
+實作期發現：current Explorer 架構從不把 `assistant tool_calls` 寫進
+`state.messages`（Instructor 直接消費 LLM 回應，只有 `_append_observations`
+把 `ToolResult` append 成 `role="tool"`），所以 windowed 裡每個 tool 都是
+orphan。原 proposal 的 strip-leading 會把跨 iteration 的觀察整段丟掉，破壞
+ReAct quality。改採 **convert orphan tool → role="user" note**：保留觀察可
+見性 + wire 合法。spec 已 ingest 同步。
 
 sidecar/src/codebus_agent/agent/explorer.py 與 sidecar/src/codebus_agent/agent/qa.py 兩處 fix（同 pattern）：
 
 ```python
-windowed = state.messages[-_MESSAGE_ROLLING_WINDOW:]
-# Trim leading 'tool' messages — each 'tool' must follow an 'assistant'
-# with matching tool_calls; window slicing may strip the assistant and
-# leave orphan tool messages that OpenAI rejects with 400.
-while windowed and windowed[0].role == "tool":
-    windowed = windowed[1:]
+windowed = list(state.messages[-_MESSAGE_ROLLING_WINDOW:])
+# Convert orphan tool messages to user notes so OpenAI's
+# tool-must-follow-assistant rule is satisfied without losing the
+# previous iteration's observation content. Paired tool messages
+# (preceded by an assistant tool_calls or another paired tool) pass
+# through unchanged.
+normalized = _normalize_orphan_tools(windowed)
 messages = [
     ProviderMessage(role="system", content=EXPLORER_SYSTEM),
-    *_to_provider_messages(windowed),
+    *normalized,
     ProviderMessage(role="user", content=user_prompt),
 ]
 ```
+
+`_normalize_orphan_tools` 是 `agent.explorer` module-level helper（也被
+`agent.qa._qa_think` 直接 import 重用，避免 spec 漂移）。
 
 ### 3. Defensive 測試（鎖死規則）
 

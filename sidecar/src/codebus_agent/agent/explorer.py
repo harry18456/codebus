@@ -150,6 +150,64 @@ def _to_provider_messages(messages: list[Message]) -> list[ProviderMessage]:
     ]
 
 
+def _normalize_orphan_tools(windowed: list[Message]) -> list[ProviderMessage]:
+    """Rewrite orphan ``role="tool"`` entries as ``role="user"`` notes.
+
+    OpenAI Chat Completions requires every ``tool`` role message to
+    follow an ``assistant`` with matching ``tool_calls``. The current
+    Explorer / Q&A architecture never appends ``assistant tool_calls``
+    to ``state.messages`` (Instructor consumes the assistant response
+    and only ``_append_observations`` writes ``ToolResult`` rows back as
+    ``role="tool"``), so every ``tool`` entry in ``state.messages`` is
+    an orphan that triggers ``400 invalid_request_error`` ("messages
+    with role 'tool' must be a response to a preceding message with
+    'tool_calls'") when forwarded verbatim.
+
+    Rather than drop orphans (which would erase cross-iteration
+    observation visibility for the LLM), rewrite each one as a
+    ``role="user"`` note whose content embeds the original tool name
+    and observation text. Paired ``tool`` messages — preceded by an
+    ``assistant`` or another non-orphan ``tool`` chained from one —
+    pass through unchanged.
+
+    Locked by ``openspec/changes/react-message-ordering-fix``.
+    """
+    out: list[ProviderMessage] = []
+    for msg in windowed:
+        if msg.role != "tool":
+            out.append(
+                ProviderMessage(
+                    role=msg.role,
+                    content=msg.content,
+                    tool_call_id=msg.tool_call_id,
+                )
+            )
+            continue
+        prev = out[-1] if out else None
+        is_paired = prev is not None and prev.role in ("assistant", "tool")
+        if is_paired:
+            out.append(
+                ProviderMessage(
+                    role="tool",
+                    content=msg.content,
+                    tool_call_id=msg.tool_call_id,
+                )
+            )
+        else:
+            label = (
+                f"previous tool observation from {msg.tool_name}"
+                if msg.tool_name
+                else "previous tool observation"
+            )
+            out.append(
+                ProviderMessage(
+                    role="user",
+                    content=f"[{label}]\n{msg.content}",
+                )
+            )
+    return out
+
+
 async def _think(
     state: ExplorerState,
     provider: TrackedProvider,
@@ -164,9 +222,16 @@ async def _think(
     accumulated exploration context.
     """
     user_prompt = render_explorer_prompt(state, tool_specs)
-    windowed = state.messages[-_MESSAGE_ROLLING_WINDOW:]
-    messages = _to_provider_messages(windowed) + [
+    windowed = list(state.messages[-_MESSAGE_ROLLING_WINDOW:])
+    # Wire format: `[system, *normalized_history, user]` — system MUST
+    # be the first element passed to provider.chat. Orphan tool
+    # messages in the windowed slice are rewritten to user notes so
+    # OpenAI Chat Completions accepts the payload while preserving the
+    # LLM's view of prior iterations' observations. Locked by
+    # `openspec/changes/react-message-ordering-fix`.
+    messages = [
         ProviderMessage(role="system", content=EXPLORER_SYSTEM),
+        *_normalize_orphan_tools(windowed),
         ProviderMessage(role="user", content=user_prompt),
     ]
     action = await provider.chat(messages, response_model=ExplorerAction)

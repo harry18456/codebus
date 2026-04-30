@@ -181,6 +181,8 @@ async def run_qa(question: str, state: QAState, ...) -> QAAnswer:
 
 **Budget**：`max_steps=10`、`max_tokens=50_000`、`max_wall_seconds=60`（比 Explorer 緊很多，Q&A 不該走太長）。
 
+**`_qa_think` wire-format 順序**（`react-message-ordering-fix`，2026-04-30）：與 `agent-core` 的 `_think` 同契約 — `[QA_SYSTEM, *normalized_history, user_prompt]`，`QA_SYSTEM` 在首位、`user_prompt` 在末位；`normalized_history = _normalize_orphan_tools(state.messages[-_MESSAGE_ROLLING_WINDOW:])` 直接 import 自 `agent.explorer`，把 orphan `tool` 訊息（state.messages 裡每個 tool 都是 orphan）改寫成 `role="user"` 的觀察 note。違反順序會讓 OpenAI Chat Completions 拋 `400 invalid_request_error`（`messages with role 'tool' must be a response to a preceding message with 'tool_calls'`）。
+
 **什麼算 `_hits_confident`**
 - Top-1 相似度 > 0.75
 - Top-3 平均 > 0.65
