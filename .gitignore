@@ -49,6 +49,9 @@ Thumbs.db
 
 # CodeBus workspace artifacts
 codebus-workspace/
+# Per-workspace audit dir (七層 JSONL + downstream artefacts; CLAUDE.md §關鍵不變式 7)
+.codebus/
+# Legacy bare-filename audit logs (kept for back-compat; new layouts use .codebus/)
 reasoning_log.jsonl
 tool_audit.jsonl
 sanitize_audit.jsonl
