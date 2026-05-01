@@ -44,23 +44,45 @@ export interface AuditRow {
   kind?: string
   placeholder_index?: number
   pass?: number
+  // llm-tab role discriminator. The PII detection lane lives in
+  // `llm_calls.jsonl` per D-033 unfounded invariant 3 but the panel
+  // filters those rows out by default to keep the main stream
+  // legible — see `hidePiiDetection` prop.
+  role?: string
 }
 
 interface Props {
   activeTab: AuditTab
   counts?: Partial<Record<AuditTab, number>>
   rows?: AuditRow[]
+  hidePiiDetection?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   counts: () => ({}),
-  rows: () => []
+  rows: () => [],
+  hidePiiDetection: true
 })
 
 const emit = defineEmits<{
   (e: 'select-tab', tab: AuditTab): void
   (e: 'select-row', index: number): void
+  (e: 'toggle-pii-visible'): void
 }>()
+
+// Visible rows on the llm tab — PII detection role is filtered by
+// default per `provider-settings-and-onboarding` Decision 7.
+// Other six tabs ignore the prop entirely; the row shape there does
+// not even carry a `role` field.
+const visibleRows = computed(() => {
+  if (props.activeTab !== 'llm' || !props.hidePiiDetection) return props.rows
+  return props.rows.filter((r) => r.role !== 'pii_detection')
+})
+
+const hiddenPiiCount = computed(() => {
+  if (props.activeTab !== 'llm' || !props.hidePiiDetection) return 0
+  return props.rows.filter((r) => r.role === 'pii_detection').length
+})
 
 function badgeClass(kind?: AuditBadgeKind): string {
   switch (kind) {
@@ -145,15 +167,24 @@ function passChipText(row: AuditRow): string | null {
     </div>
 
     <div class="flex-1 overflow-y-auto py-1 min-h-0 font-mono text-[11px]">
+      <button
+        v-if="hiddenPiiCount > 0"
+        type="button"
+        data-testid="audit-panel-toggle-pii"
+        class="self-start mx-3.5 my-2 px-2 py-[2px] rounded border border-border-base text-[10.5px] font-mono text-text-mute hover:text-text-base hover:border-accent"
+        @click="emit('toggle-pii-visible')"
+      >
+        + {{ hiddenPiiCount }} PII detection call(s) hidden
+      </button>
       <div
-        v-if="rows.length === 0"
+        v-if="visibleRows.length === 0"
         data-empty="true"
         class="px-4 py-10 text-center text-text-mute text-[11.5px] leading-relaxed"
       >
         {{ emptyMessage }}
       </div>
       <div
-        v-for="(row, idx) in rows"
+        v-for="(row, idx) in visibleRows"
         v-else
         :key="`${row.ts}-${idx}`"
         data-testid="audit-row"

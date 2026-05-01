@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · Onboarding · Welcome</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); display: grid; place-items: center; min-height: 100vh; padding: 32px; }
+  main { max-width: 560px; text-align: center; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0; }
+  p { color: var(--text-dim); font-size: 14px; line-height: 1.6; }
+  .btn-primary { padding: 10px 24px; border-radius: 6px; background: var(--accent); color: #0b0d10; border: none; font-size: 14px; cursor: pointer; align-self: center; }
+  a { color: var(--accent); text-decoration: underline; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Welcome to CodeBus</h1>
+  <p>
+    CodeBus turns an unfamiliar codebase into a guided tutorial. It
+    needs an LLM provider to function — pick a chat model and an
+    embedding model in the next step. Your API keys are stored in
+    your operating system's native keychain (macOS Keychain, Windows
+    Credential Manager, or Linux Secret Service) and never touch
+    disk or audit logs.
+  </p>
+  <p style="font-size:12.5px; color: var(--text-mute);">
+    Read the <a href="https://openai.com/policies/terms-of-use/" target="_blank">OpenAI Terms of Service</a> before continuing.
+  </p>
+  <button class="btn-primary">Next</button>
+</main>
+</body>
+</html>

@@ -54,10 +54,18 @@ from codebus_agent.api.kb import router as kb_router
 from codebus_agent.api.qa import router as qa_router
 from codebus_agent.api.sanitizer_rules import router as sanitizer_rules_router
 from codebus_agent.api.scan import router as scan_router
+from codebus_agent.api.events_broker import AppEventBroker
+from codebus_agent.api.settings import router as settings_router
 from codebus_agent.api.startup_config import router as startup_config_router
 from codebus_agent.api.tasks import TaskRegistry, router as tasks_router
+from codebus_agent.config.provider_pool import ProviderPoolSnapshot
 from codebus_agent.auth.audit_logger import AuthorizationAuditLogger
-from codebus_agent.health import DependencyCheck, DependencyStatus, collect
+from codebus_agent.health import (
+    DependencyCheck,
+    DependencyStatus,
+    HealthReport,
+    collect,
+)
 from codebus_agent.kb import qdrant_client as _kb_qdrant
 from codebus_agent.kb.backend import QdrantHttpBackend
 from codebus_agent.providers import (
@@ -408,6 +416,93 @@ async def _probe_openai_embedding_not_configured() -> DependencyStatus:
     )
 
 
+def _compute_lane_dependency(
+    app: FastAPI, report: "HealthReport"
+) -> dict[str, str]:
+    """Compute the `dependency` map for `GET /healthz`.
+
+    Each lane resolves to one of `ready` / `not-configured` / `unreachable`
+    per spec rules:
+      - `not-configured`: bound provider has no API key in app.state
+      - `unreachable`: key is present but smoke check fails
+      - `ready`: key + smoke check both pass
+
+    Existing operational dependency keys (e.g. `qdrant`) pass through
+    with the same three-value vocabulary mapped from `DependencyStatus`.
+    """
+    lanes: dict[str, str] = {}
+    snapshot: ProviderPoolSnapshot | None = getattr(
+        app.state, "provider_pool_snapshot", None
+    )
+    keys: dict[str, str] = getattr(app.state, "provider_keys", {}) or {}
+    deps = report.dependencies
+
+    chat_provider_id: str | None = None
+    embed_provider_id: str | None = None
+    if snapshot is not None:
+        chat_provider_id = snapshot.bindings.get("chat")
+        embed_provider_id = snapshot.bindings.get("embed")
+
+    lanes["llm_chat"] = _resolve_llm_lane(
+        provider_id=chat_provider_id,
+        keys=keys,
+        smoke=deps.get("openai_chat"),
+    )
+    lanes["llm_embed"] = _resolve_llm_lane(
+        provider_id=embed_provider_id,
+        keys=keys,
+        smoke=deps.get("openai_embedding"),
+    )
+    lanes["pii"] = _resolve_pii_lane(snapshot, keys)
+
+    # Pass-through infra lanes — map DependencyStatus to the same
+    # three-value vocabulary so the field stays homogeneous.
+    for key, status_obj in deps.items():
+        if key in {"openai_chat", "openai_embedding"}:
+            continue
+        if status_obj.status == "not-configured":
+            lanes[key] = "not-configured"
+        elif status_obj.ok:
+            lanes[key] = "ready"
+        else:
+            lanes[key] = "unreachable"
+    return lanes
+
+
+def _resolve_llm_lane(
+    *,
+    provider_id: str | None,
+    keys: dict[str, str],
+    smoke: "DependencyStatus | None",
+) -> str:
+    if not provider_id or not keys.get(provider_id):
+        return "not-configured"
+    if smoke is None:
+        # Key is present but no smoke probe registered — treat as ready
+        # because the contract says "key + smoke pass = ready"; absent
+        # smoke means caller hasn't wired the probe (test path).
+        return "ready"
+    if smoke.status == "not-configured":
+        return "not-configured"
+    if smoke.ok:
+        return "ready"
+    return "unreachable"
+
+
+def _resolve_pii_lane(
+    snapshot: ProviderPoolSnapshot | None, keys: dict[str, str]
+) -> str:
+    if snapshot is None:
+        return "ready"
+    if snapshot.pii_mode == "rule":
+        return "ready"
+    # mode == "llm" — provider_id must resolve and have a key.
+    pid = snapshot.pii_provider_id
+    if not pid or not keys.get(pid):
+        return "not-configured"
+    return "ready"
+
+
 def create_app(
     bearer_token: str,
     dependency_checks: dict[str, DependencyCheck] | None = None,
@@ -451,6 +546,19 @@ def create_app(
     # Tauri pushes the keys.
     app.state.provider_keys = {}
     app.state.startup_config_applied = False
+    # `provider-settings-and-onboarding` (D-033 B §3): provider pool
+    # snapshot starts empty; loaded from disk in production wiring or
+    # injected by tests. RegistryHolder + registry_factory stay None
+    # until a real config + key set is available.
+    app.state.provider_pool_snapshot = ProviderPoolSnapshot(
+        providers=(), bindings={}, pii_mode="rule", pii_provider_id=None
+    )
+    app.state.providers = None
+    app.state.registry_factory = None
+    # App-level SSE broker — `provider_config_changed` and similar
+    # cross-task events fan out through here. Per-task events keep
+    # using `TaskRegistry` / `TaskHandle` (orthogonal channel).
+    app.state.app_event_broker = AppEventBroker()
 
     checks: dict[str, DependencyCheck] = dict(dependency_checks or {})
 
@@ -548,7 +656,14 @@ def create_app(
     @app.get("/healthz")
     async def healthz() -> dict[str, object]:
         report = await collect(app.state.dependency_checks)
-        return report.to_dict()
+        body = report.to_dict()
+        # `provider-settings-and-onboarding` (D-033 B §5.4): per-lane
+        # readiness keyed by semantic lane name. Distinct from the
+        # operational `dependencies` map (which keys by checker id):
+        # `dependency` answers "what is the user-visible service
+        # state?", scoped to lanes the settings page knows about.
+        body["dependency"] = _compute_lane_dependency(app, report)
+        return body
 
     # Scanner router — 註冊於 bearer middleware 下（install 先於 include_router）
     # 對齊 spec「Workspace scan endpoint」：endpoint MUST NOT bypass bearer middleware。
@@ -586,6 +701,11 @@ def create_app(
     # Bearer-guarded (no exemption); `include_in_schema=False` keeps
     # the endpoint off `/openapi.json` per spec invariant.
     app.include_router(startup_config_router)
+    # `provider-settings-and-onboarding` (D-033 B §5): settings mutation
+    # endpoints + `GET /events?channel=app` SSE channel. Bearer-guarded
+    # via the same middleware; routes stay off `/openapi.json` per
+    # `include_in_schema=False`.
+    app.include_router(settings_router)
 
     return app
 

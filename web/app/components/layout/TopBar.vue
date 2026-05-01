@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import SwitchWorkspaceMenu from '~/components/intervention/SwitchWorkspaceMenu.vue'
 
@@ -32,11 +32,15 @@ const props = withDefaults(defineProps<Props>(), {
 
 defineEmits<{
   (e: 'select-tab', tab: Tab): void
-  (e: 'open-settings'): void
   (e: 'kill'): void
 }>()
 
 const route = useRoute()
+const router = useRouter()
+
+function goToSettings(): void {
+  router.push('/settings')
+}
 
 const resolvedWorkspaceRoot = computed<string>(() => {
   if (props.workspaceRoot) return props.workspaceRoot
@@ -113,9 +117,10 @@ const dash = '—'
 
     <button
       type="button"
+      data-testid="topbar-settings"
       class="flex items-center px-2 py-[5px] rounded-md bg-surface-2 border border-border-base text-text-dim hover:border-surface-4 hover:text-text-base"
       title="Settings"
-      @click="$emit('open-settings')"
+      @click="goToSettings"
     >
       <svg class="w-[1em] h-[1em] inline-block align-middle" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
         <circle cx="8" cy="8" r="2.5" />

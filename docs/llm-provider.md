@@ -420,3 +420,56 @@ response = await provider.chat(clean_messages, ...)
 **現在不做的理由**：MVP model 沒這欄位、加了也永遠是 0；換 model 時順手加比現在預先 wire 維護成本低。但 schema 留 additive 餘地（步驟 1 的 default `= 0`）讓未來 migration 零阻力。
 
 **觸發條件**：選定 reasoning model 為 production 預設前；提案時引用本節 + 同時更新 `pricing.py` 加新 model entry。
+
+## 十、Provider pool schema + Registry hot-swap（D-033 B，change `provider-settings-and-onboarding`）
+
+D-033 B archive 後 sidecar config schema 從 M1-era 一對一（`llm.roles.<role>.provider_id`）升成兩層 pool + bindings：
+
+```toml
+[[llm.providers]]
+id = "openai-default"
+type = "openai_chat"
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1"
+# api_key 不在 config — 走 OS keychain 經 startup-config 注入記憶體
+
+[[llm.providers]]
+id = "openai-embed-3-small"
+type = "openai_embedding"
+model = "text-embedding-3-small"
+base_url = "https://api.openai.com/v1"
+
+[llm.bindings]
+reasoning = "openai-default"
+judge     = "openai-default"
+chat      = "openai-default"
+embed     = "openai-embed-3-small"
+
+[llm.pii]
+mode        = "rule"      # or "llm"
+provider_id = ""          # required when mode == "llm"
+```
+
+`config/provider_pool.py` loader 兼容兩種 schema — 偵測到 `[llm.roles]` 自動轉成新格式 + 1 deprecation warning。
+
+驗證規則（loader + settings endpoint 兩處共守）：
+
+| 失敗碼 | 觸發條件 |
+|---|---|
+| `INVALID_PROVIDER_BINDING` | `llm.bindings.<role>` 指向不存在的 provider id |
+| `INVALID_PROVIDER_TYPE` | `llm.bindings.embed` 指向 chat-typed provider（須 embedding-typed） |
+| `INVALID_PII_PROVIDER` | `llm.pii.mode == "llm"` 但 `provider_id` 缺或不在 PII allowlist |
+
+### Registry hot-swap
+
+`RegistryHolder` 雙層引用 — 內層仍是 immutable `ProviderRegistry`、外層 `holder.swap(new_registry)` 換 reference。`current()` / `swap()` 共用 `asyncio.Lock`：
+
+- 設定頁改 binding → sidecar 用 snapshot + provider_keys 建一個全新 immutable Registry → `holder.swap(new)` atomic
+- in-flight task 早就用 `holder.current()` 拿到當下 reference → 跑完現場、不受 swap 影響（Python ref 語意：local binding 是值快照）
+- mutation 後 emit `provider_config_changed` SSE event 走 app-level channel `GET /events?channel=app`，50ms 內多次 mutation 合併單 event
+
+`api/settings.py` 的 `PUT /settings/bindings` 需要 `app.state.registry_factory: (snapshot, keys) -> ProviderRegistry` 才能 swap；缺 factory（test cold path）時只更新 `provider_pool_snapshot`、跳過 swap。
+
+### Embedding 切換 destructive
+
+唯一例外：embed 切換綁 KB rebuild。前端 `<EmbeddingChangeConfirmModal>` 二次確認 + `<RoleBindingTable>` 順手觸發 `POST /kb/build`；rebuild 期間 `/qa` / `/explore` / `/scan?stream=true` 一律 503 + `code: KB_REBUILD_IN_PROGRESS`，前端對應元件顯示 banner。

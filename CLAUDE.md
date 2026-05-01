@@ -65,6 +65,16 @@ CodeBus 是「把陌生 codebase 一鍵變成可走訪的 tutorial」的桌面 A
 
 **Trust Layer 四站**（Phase 6，敘事核心）：R-01 Workspace（六層 audit 面板）/ O-04 LLM Call Inspector / O-05 Sanitizer Diff / O-01 Grant Modal。
 
+**Setting / Onboarding 啟動流程**（D-033 B archive 2026-05-01）：
+
+- **Keyring trust boundary**：API key 走 OS keychain（`keyring` crate 3.x 直連 macOS Keychain / Windows Credential Manager / GNOME Keyring），三 IPC commands `keyring_set` / `keyring_get` / `keyring_delete`；`provider_id` host-side regex `^[a-z][a-z0-9-]{2,40}$`。Tauri spawn sidecar 後從 keyring 撈 keys → `POST /internal/startup-config`（bearer 守、`include_in_schema=False`、idempotent 一次性、不寫磁碟、不入 audit）。
+- **`/healthz.dependency` 三 lane**：`llm_chat` / `llm_embed` / `pii` 各自報 `ready` / `not-configured` / `unreachable`；冷啟動沒 startup-config → `llm_chat` + `llm_embed` 都是 `not-configured`，`pii` 在 mode=`rule` 下永遠 `ready`。Pass-through infra lane（`qdrant`）也用同一三值字典寫進 `dependency`。
+- **Middleware redirect**：`web/app/middleware/onboarding-redirect.global.ts` Nuxt route middleware 對每次導航打 `/healthz`，任一 LLM lane `not-configured` → `navigateTo('/onboarding/welcome')`；exclude `/onboarding/*`。`pages/index.vue` 也 mount 時做同樣 check（`router.replace`）守雙保險。
+- **Onboarding wizard 三步**：`/onboarding/welcome`（純文案，Next 永遠 enabled）→ `/onboarding/providers`（chat + embed 兩表單，Next disabled until both filled）→ `/onboarding/done`（Start CTA → `/`）。Submit 順序：keyring_set chat → keyring_set embed → upsertProvider chat → upsertProvider embed → setBinding × 4。任一 keyring 失敗中斷不繼續。
+- **Setting page 三 section**：`/settings` 路由，`<ProviderPoolList>`（CRUD）+ `<RoleBindingTable>`（4 role dropdown，embed 改 binding 走 `<EmbeddingChangeConfirmModal>` destructive confirm）+ `<PiiModeToggle>`（rule / llm radio，llm 在 P0 disable）。Provider snapshot via `useProviderConfig()` module-level singleton；mutation endpoints 觸發後 sidecar emit `provider_config_changed` SSE event 走 `GET /events?channel=app`，composable 訂閱後 100ms debounce re-fetch。
+- **Hot-swap**：`RegistryHolder` 雙層引用（內層 immutable / 外層 atomic swap via `asyncio.Lock`）；`PUT /settings/bindings` → `holder.swap(new_registry)`；in-flight task 持 reference 跑完現場、下個 task 用新 binding。Embed 切換是唯一例外（destructive，綁 KB rebuild）。
+- **PII filter（O-04）**：`<LlmCallInspector>` + `<AuditPanel>` 加 `hidePiiDetection` prop（default `true`），llm tab + inspector prev/next 過濾 `role: "pii_detection"`；toggle banner emit `toggle-pii-visible` 讓 page 層 flip。「PII LLM call 仍要 audit」（D-033 不變式 3）落地在共用 `llm_calls.jsonl` + `role: "pii_detection"` 欄位。
+
 ## 七層 Audit JSONL
 
 Workspace-level 六層全在 `<ws>/.codebus/`；App-level 一層在 `~/.codebus/`。`.gitignore` 加 `.codebus/` 一行即可全排除。

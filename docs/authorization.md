@@ -276,6 +276,18 @@ Provider: Anthropic · Claude Haiku 4.5 · outbound HTTPS → api.anthropic.com
 
 > 原則不變：使用者 ack 的是「**我同意這些 kind 類別會被替換**」。不改 kind 語意的 rules 升級 = 沒有新信任決策。但此原則的**自動觸發**邏輯整段 P1 才落地——P0 階段使用者必須透過 `scope_upgrade_new_kind`（kind 變化）或 Settings 主動 revoke（trigger=`settings_revoke`）才會重授。
 
+### PII LLM 模式對 rules version 的影響（D-033 B）
+
+D-033 B archive 後 sanitizer 加入 PII mode toggle（`rule` / `llm`）— 由 `<PiiModeToggle>` 暴露在 `/settings`，預設 `rule`、`llm` 在 P0 disable（無 LLM PII provider 在 allowlist 內）。
+
+**rules version 不因 PII mode 切換 bump**。理由：
+
+1. **Pass 1 / Pass 3 規則不變** — `rule` 與 `llm` mode 都共用同一份 sanitizer rule set；mode 只決定「Pass 2 的 detection backend 用 rule-based 還是 LLM-based」
+2. **使用者同意的是 kind 類別**（§六 原則）— `rule` ↔ `llm` 切換不引入新 kind、不改 redaction 行為（placeholder format 不變、目標 kind 不變），所以使用者不需要重新 ack
+3. **D-015 不變式仍守** — Pass 2 對 LLM/Embedding inner 強制執行；`PIIProvider` inner（藉 `TrackedProvider.PII_ALLOWED_INNER_TYPES` marker）自動 bypass — 是 D-015 invariant 的唯一例外，外部無 flag 可開
+
+**未來引入新 PII rule 類別時仍須 bump rules version + 觸發 `scope_upgrade_new_kind`**（同 §三 規則）。例如：未來 `LocalLLMPIIProvider` 加入新 kind `MEDICAL_RECORD_NUMBER` → `RULES_VERSION` bump → 受影響 workspace 啟動時自動進 reconfirm。
+
 ---
 
 ## 七、Cancel / Deny 的 UX 規則

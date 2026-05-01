@@ -100,6 +100,18 @@ class FakeEventSource implements FakeEventSourceInstance {
   }
 }
 
+// Nuxt compile-time macros are auto-imported in production but absent
+// under vitest. Stub them at module load so files that reference them
+// at top-level (route middleware, pages with `definePageMeta`) can be
+// imported without a `ReferenceError`.
+;(globalThis as unknown as { definePageMeta: (meta: unknown) => void }).definePageMeta =
+  () => undefined
+;(globalThis as unknown as {
+  defineNuxtRouteMiddleware: <T>(fn: T) => T
+}).defineNuxtRouteMiddleware = (fn) => fn
+;(globalThis as unknown as { navigateTo: (target: string) => string }).navigateTo =
+  (target) => target
+
 beforeEach(() => {
   globalThis.__FAKE_ES_INSTANCES__ = []
   ;(globalThis as unknown as { EventSource: typeof FakeEventSource }).EventSource =

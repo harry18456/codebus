@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · Onboarding · Providers</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); display: grid; place-items: center; min-height: 100vh; padding: 32px; }
+  main { max-width: 920px; width: 100%; display: flex; flex-direction: column; gap: 24px; }
+  h1 { text-align: center; font-size: 20px; font-weight: 600; margin: 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 16px; background: var(--panel); }
+  legend { font-size: 14px; font-weight: 600; padding: 0 4px; }
+  input { width: 100%; padding: 8px 12px; margin: 8px 0; background: var(--panel-2); color: var(--text); border-radius: 6px; border: 1px solid var(--border); font-size: 13px; box-sizing: border-box; }
+  .btn-primary { padding: 10px 24px; border-radius: 6px; background: var(--accent); color: #0b0d10; border: none; font-size: 14px; cursor: pointer; align-self: center; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Configure providers</h1>
+  <div class="grid">
+    <fieldset>
+      <legend>Chat</legend>
+      <input placeholder="provider id" value="openai-default">
+      <input placeholder="model" value="gpt-4o-mini">
+      <input value="https://api.openai.com/v1">
+      <input type="password" placeholder="api key">
+    </fieldset>
+    <fieldset>
+      <legend>Embedding</legend>
+      <input placeholder="provider id" value="openai-embed-3">
+      <input placeholder="model" value="text-embedding-3-small">
+      <input value="https://api.openai.com/v1">
+      <input type="password" placeholder="api key">
+    </fieldset>
+  </div>
+  <button class="btn-primary" disabled>Next</button>
+</main>
+</body>
+</html>

@@ -22,15 +22,51 @@ const TAB_LABELS: Record<TabKey, string> = {
 }
 const EM_DASH = '—'
 
-const props = defineProps<{
-  rows: LlmCallEntry[]
-  activeIndex: number | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    rows: LlmCallEntry[]
+    activeIndex: number | null
+    hidePiiDetection?: boolean
+  }>(),
+  { hidePiiDetection: true }
+)
 
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'select-index', index: number): void
+  (e: 'toggle-pii-visible'): void
 }>()
+
+// Visible rows = all rows when PII visible, or chat-ish rows only when
+// `hidePiiDetection` is true. Provider-settings spec Decision 7
+// requires PII detection calls to be filtered out of the prev/next
+// chain by default while still being audited (D-033 unfounded
+// invariant 3 — they live in `llm_calls.jsonl` regardless).
+const visibleRows = computed(() =>
+  props.hidePiiDetection
+    ? props.rows.filter((r) => r.role !== 'pii_detection')
+    : props.rows
+)
+
+const hiddenPiiCount = computed(() =>
+  props.hidePiiDetection
+    ? props.rows.filter((r) => r.role === 'pii_detection').length
+    : 0
+)
+
+// Map the parent's index (against unfiltered rows) to the visible
+// list. When the parent points at a hidden PII row we clamp to the
+// nearest visible neighbour so the inspector never renders a row that
+// is simultaneously "hidden" by filter and "active" by index.
+const visibleActiveIndex = computed<number | null>(() => {
+  if (props.activeIndex === null) return null
+  const target = props.rows[props.activeIndex]
+  if (!target) return null
+  if (target.role === 'pii_detection' && props.hidePiiDetection) {
+    return Math.min(visibleRows.value.length - 1, props.activeIndex)
+  }
+  return visibleRows.value.indexOf(target)
+})
 
 const activeTab = ref<TabKey>('wire')
 
@@ -42,25 +78,34 @@ watch(
 )
 
 const currentEntry = computed<LlmCallEntry | null>(() => {
-  if (props.activeIndex === null) return null
-  return props.rows[props.activeIndex] ?? null
+  if (visibleActiveIndex.value === null) return null
+  return visibleRows.value[visibleActiveIndex.value] ?? null
 })
 
 const positionLabel = computed(() => {
-  if (props.activeIndex === null) return ''
-  return `${props.activeIndex + 1} / ${props.rows.length}`
+  if (visibleActiveIndex.value === null) return ''
+  return `${visibleActiveIndex.value + 1} / ${visibleRows.value.length}`
 })
 
 function selectPrev(): void {
-  if (props.activeIndex === null) return
-  const next = Math.max(0, props.activeIndex - 1)
-  emit('select-index', next)
+  if (visibleActiveIndex.value === null) return
+  const nextVisible = Math.max(0, visibleActiveIndex.value - 1)
+  const target = visibleRows.value[nextVisible]
+  if (!target) return
+  const realIndex = props.rows.indexOf(target)
+  if (realIndex >= 0) emit('select-index', realIndex)
 }
 
 function selectNext(): void {
-  if (props.activeIndex === null) return
-  const next = Math.min(props.rows.length - 1, props.activeIndex + 1)
-  emit('select-index', next)
+  if (visibleActiveIndex.value === null) return
+  const nextVisible = Math.min(
+    visibleRows.value.length - 1,
+    visibleActiveIndex.value + 1
+  )
+  const target = visibleRows.value[nextVisible]
+  if (!target) return
+  const realIndex = props.rows.indexOf(target)
+  if (realIndex >= 0) emit('select-index', realIndex)
 }
 
 function handleKeyDown(e: KeyboardEvent): void {
@@ -170,6 +215,14 @@ function totalTokens(entry: LlmCallEntry): number {
       <span class="px-2 py-[2px] rounded border border-border-base text-text-dim">
         {{ currentEntry.module ?? EM_DASH }}
       </span>
+      <span v-if="currentEntry.provider_id" class="text-text-mute">provider</span>
+      <span
+        v-if="currentEntry.provider_id"
+        data-testid="llm-inspector-provider-id"
+        class="px-2 py-[2px] rounded border border-border-base text-text-dim"
+      >
+        {{ currentEntry.provider_id }}
+      </span>
       <span class="text-text-mute">model</span>
       <span class="px-2 py-[2px] rounded border border-border-base text-text-dim">
         {{ currentEntry.model }}
@@ -187,6 +240,19 @@ function totalTokens(entry: LlmCallEntry): number {
         <span class="text-text-base">{{ costCellValue(currentEntry.cost_usd) }}</span>
       </span>
     </div>
+
+    <!-- PII filter banner — surfaces the count of hidden pii_detection
+         calls so the user can opt-in to seeing them via the toggle.
+         The actual filter happens upstream via `hidePiiDetection`. -->
+    <button
+      v-if="hidePiiDetection && hiddenPiiCount > 0"
+      type="button"
+      data-testid="llm-inspector-toggle-pii"
+      class="self-start mx-4 my-2 px-2 py-[2px] rounded border border-border-base text-[10.5px] font-mono text-text-mute hover:text-text-base hover:border-accent"
+      @click="emit('toggle-pii-visible')"
+    >
+      + {{ hiddenPiiCount }} PII detection call(s) hidden
+    </button>
 
     <!-- Tab switcher -->
     <div class="flex bg-surface-2 border-b border-border-soft">

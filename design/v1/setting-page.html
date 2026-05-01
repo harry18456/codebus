@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>CodeBus · Settings · D-033 B</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); padding: 24px; }
+  main { max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .deck { color: var(--text-dim); font-size: 13px; margin-bottom: 8px; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  section h2 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 12px; background: var(--panel-2); border-radius: 6px; margin-bottom: 8px; }
+  .row .meta { display: flex; flex-direction: column; gap: 2px; }
+  .row .meta .id { font-size: 13px; font-weight: 500; }
+  .row .meta .sub { font-size: 11.5px; color: var(--text-mute); }
+  .row .actions { display: flex; gap: 8px; }
+  .btn { padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; border: none; }
+  .btn-primary { background: var(--accent); color: #0b0d10; }
+  .btn-secondary { background: var(--panel-3); color: var(--text-dim); }
+  .btn-danger { background: var(--panel-3); color: var(--rose); }
+  table { width: 100%; font-size: 13px; }
+  th { text-align: left; color: var(--text-mute); font-weight: 500; padding: 6px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+  td { padding: 8px 6px; border-top: 1px solid var(--border); }
+  select { padding: 6px 12px; background: var(--panel-2); color: var(--text); border-radius: 6px; border: 1px solid var(--border); }
+  .pii-options { display: flex; flex-direction: column; gap: 8px; }
+  .pii-options label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .pii-options label.disabled { opacity: 0.5; pointer-events: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Settings</h1>
+    <div class="deck">Configure LLM providers, role bindings, and PII detection mode.</div>
+  </header>
+
+  <!-- Section 1: Provider pool — &lt;ProviderPoolList&gt; + &lt;ProviderEditModal&gt; -->
+  <section data-section="provider-pool">
+    <header style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h2 style="margin:0;">Provider pool</h2>
+      <button class="btn btn-primary">+ Add provider</button>
+    </header>
+    <div class="row">
+      <div class="meta">
+        <span class="id">openai-default</span>
+        <span class="sub">openai_chat · gpt-4o-mini</span>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary">edit</button>
+        <button class="btn btn-danger" disabled style="opacity:.4;cursor:not-allowed;" title="remove role binding first">delete</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="meta">
+        <span class="id">openai-embed-3</span>
+        <span class="sub">openai_embedding · text-embedding-3-small</span>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary">edit</button>
+        <button class="btn btn-danger" disabled style="opacity:.4;cursor:not-allowed;">delete</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 2: Role bindings — &lt;RoleBindingTable&gt; + &lt;EmbeddingChangeConfirmModal&gt; -->
+  <section data-section="role-bindings">
+    <h2>Role bindings</h2>
+    <table>
+      <thead><tr><th>role</th><th>provider</th></tr></thead>
+      <tbody>
+        <tr><td style="font-family: var(--mono); color: var(--text-dim);">reasoning</td><td><select><option>openai-default (gpt-4o-mini)</option></select></td></tr>
+        <tr><td style="font-family: var(--mono); color: var(--text-dim);">judge</td><td><select><option>openai-default (gpt-4o-mini)</option></select></td></tr>
+        <tr><td style="font-family: var(--mono); color: var(--text-dim);">chat</td><td><select><option>openai-default (gpt-4o-mini)</option></select></td></tr>
+        <tr><td style="font-family: var(--mono); color: var(--text-dim);">embed</td><td><select><option>openai-embed-3 (text-embedding-3-small)</option></select> <span style="color:var(--rose); font-size:11px; margin-left:8px;">⚠ destructive</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Section 3: PII mode — &lt;PiiModeToggle&gt; -->
+  <section data-section="pii-mode">
+    <h2>PII mode</h2>
+    <p style="font-size:12.5px; color: var(--text-mute); margin: 0 0 12px;">
+      Pass 1 / 2 / 3 sanitizer detection backend. Rule-based is the default.
+    </p>
+    <div class="pii-options">
+      <label><input type="radio" name="pii-mode" checked> rule (default)</label>
+      <label class="disabled"><input type="radio" name="pii-mode" disabled> llm (P1+)</label>
+    </div>
+  </section>
+</main>
+</body>
+</html>

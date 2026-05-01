@@ -33,6 +33,9 @@ const audit = wsPath.value
 const activeRoles = ref<Set<string>>(new Set())
 const activeModules = ref<Set<string>>(new Set())
 const selectedUnderlyingIndex = ref<number | null>(null)
+// `provider-settings-and-onboarding` Decision 7: PII detection rows
+// hidden by default in both the inspector overlay and (future) panel.
+const hidePiiDetection = ref(true)
 
 const ROLE_OPTIONS = [
   'reasoning',
@@ -230,8 +233,10 @@ const showOtherError = computed(
     <LlmCallInspector
       :rows="filteredEntries"
       :active-index="selectedUnderlyingIndex"
+      :hide-pii-detection="hidePiiDetection"
       @close="selectedUnderlyingIndex = null"
       @select-index="selectedUnderlyingIndex = $event"
+      @toggle-pii-visible="hidePiiDetection = !hidePiiDetection"
     />
   </div>
 </template>

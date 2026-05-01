@@ -32,6 +32,7 @@ from .protocol import (
     Usage,
 )
 from .registry import ProviderRegistry, ProviderRegistryError
+from .registry_holder import RegistryHolder
 from .tracked import TrackedProvider
 from .usage_tracker import UsageTracker
 
@@ -55,6 +56,7 @@ __all__ = [
     "PIIProvider",
     "PIISpan",
     "ProviderRegistry",
+    "RegistryHolder",
     "RuleBasedPIIProvider",
     "ProviderRegistryError",
     "ProviderRole",

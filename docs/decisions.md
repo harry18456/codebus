@@ -1370,6 +1370,31 @@ D-003 + llm-role-routing 期間敲定的 Provider 抽象用單一 `LLMProvider` 
 
 **Windows PoC 通電（2026-04-30）**：`tauri/src-tauri/examples/keyring_poc.rs` 在 Windows Credential Manager 跑 set → get → delete → get-after-delete 全綠（sentinel value `sk-poc-sentinel-do-not-leak`）。macOS Keychain Services / GNOME Keyring 留 task 12.5 manual e2e。PoC 證明 keyring 3.6 + apple-native + windows-native + sync-secret-service feature combo 可成功 build 並 round-trip。
 
+**B archive（2026-05-01）**：`provider-settings-and-onboarding` archive，落地清單：
+- Tauri keyring IPC commands（`keyring_set` / `keyring_get` / `keyring_delete`）+ 紅隊 14 case + happy path 4 case
+- Sidecar `POST /internal/startup-config` + bearer 守 + secret-leak grep 測試
+- Sidecar `RegistryHolder` 雙層引用（內層 immutable、外層 atomic swap via `asyncio.Lock`）
+- Sidecar `config/provider_pool.py` loader（兼容 legacy `[llm.roles]` + 新 `[[llm.providers]]` + `[llm.bindings]` schema）
+- Sidecar 五個 settings mutation endpoints（`GET/POST/DELETE /settings/providers`、`PUT /settings/bindings`、`PUT /settings/pii-mode`）+ app-level SSE channel `GET /events?channel=app` + 50ms 合併 emit
+- Sidecar `/healthz.dependency` 三 lane（`llm_chat` / `llm_embed` / `pii`）+ pass-through infra lane
+- Web `useProviderConfig()` module-level singleton + `attachEventStream` debounced re-fetch + defensive `api_key` source-grep 守
+- Web 三 settings 元件（`<ProviderPoolList>` / `<ProviderEditModal>` / `<RoleBindingTable>` / `<EmbeddingChangeConfirmModal>` / `<PiiModeToggle>`）+ `pages/settings.vue`
+- Web onboarding wizard 三 page（`welcome.vue` / `providers.vue` / `done.vue`）+ keyring → upsert × 2 → setBinding × 4 ordered submit
+- Web `middleware/onboarding-redirect.global.ts` Nuxt route middleware + index page healthz check
+- Web `<TopBar>` 加齒輪 `data-testid="topbar-settings"` 路由到 `/settings`
+- Web `<LlmCallInspector>` + `<AuditPanel>` 加 `hidePiiDetection` prop（default `true`）+ provider id chip + toggle banner
+
+收尾三開放問題：
+- (in-flight task 切 provider) 已落地行為「捕捉 reference 跑完現場、下個 task 用新 binding」— 透過 `RegistryHolder` 的 reference 語意自然落地，不需 explicit graceful drain
+- (setting 改要不要重啟) 大部分 binding 改動 hot-swap registry；唯 Embedding 切換綁 KB rebuild、PII LLM 切 mode 需 bump rules version 重取同意（`docs/authorization.md §六`）
+- (Linux Secret Service fallback) keyring 3.6 sync-secret-service feature 涵蓋 GNOME / KDE 桌面環境；無桌面環境 Linux 留 P1+（per Non-Goals）
+
+延 P1+ 的 follow-ups：
+- 進階 setting（temperature / max_tokens / system prompt / retry policy）
+- LLM PII provider 在 onboarding 內配置（D-033 決策 6 維持 PII rule-based 預設）
+- Multi-account profile（個人 / 公司多 OpenAI 帳號切換）
+- macOS iCloud Keychain 跨 device sync（Windows / Linux 沒對等機制）
+
 ---
 
 ### 需要決策動作
