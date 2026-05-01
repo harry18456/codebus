@@ -97,4 +97,4 @@
 - [x] 13.3 `docs/llm-provider.md` 加 Provider pool schema（`llm.providers[]` + `llm.bindings`）+ Registry hot-swap 段
 - [x] 13.4 `docs/authorization.md §六` 加 PII LLM 模式對 rules version 的影響段
 - [x] 13.5 `CLAUDE.md` 加 Setting / Onboarding 啟動流程段（`/healthz.dependency` 三 lane + middleware redirect + keyring trust boundary）
-- [ ] 13.6 `pre-commit run --all-files` 全綠後 commit
+- [x] 13.6 `pre-commit run --all-files` 全綠後 commit
