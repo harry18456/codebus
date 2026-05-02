@@ -1,20 +1,29 @@
 <script setup lang="ts">
-// `/` — entry route. Mounts AppShell once the sidecar reports both
-// LLM lanes ready; otherwise redirects to `/onboarding/welcome` so
-// the user finishes provider setup first.
-//
-// Backs SHALL clauses in
-// openspec/changes/provider-settings-and-onboarding/specs/provider-onboarding/spec.md
-//   Requirement: Index page redirects to onboarding when LLM dependencies are not configured
+// `/` — entry route. The page is two-staged:
+//   1. Mount-time `/healthz` poll redirects to `/onboarding/welcome`
+//      whenever an LLM dependency lane reports `not-configured`
+//      (preserved from the `provider-settings-and-onboarding` change —
+//      provider-onboarding spec Requirement: Index page redirects to
+//      onboarding when LLM dependencies are not configured).
+//   2. Once both LLM lanes are `ready`, the page renders the workspace
+//      onramp surface: `<FolderPickerButton>` (CTA) + `<WorkspaceOnrampCard>`
+//      (state-driven phase view). Clicking the picker funnels the
+//      selected absolute path into `useWorkspaceOnramp().start(path)`,
+//      which drives the 4-step sidecar pipeline (scan → kb-build →
+//      explore → generate) per the onramp spec.
 
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import AppShell from '~/components/AppShell.vue'
+import FolderPickerButton from '~/components/workspace-onramp/FolderPickerButton.vue'
+import WorkspaceOnrampCard from '~/components/workspace-onramp/WorkspaceOnrampCard.vue'
 import { useSidecar } from '~/composables/useSidecar'
+import { useWorkspaceOnramp } from '~/composables/useWorkspaceOnramp'
 
 const router = useRouter()
 const checked = ref(false)
+
+const onramp = useWorkspaceOnramp()
 
 async function checkAndRedirect(): Promise<void> {
   try {
@@ -40,10 +49,14 @@ async function checkAndRedirect(): Promise<void> {
       return
     }
   } catch {
-    // sidecar unreachable — let AppShell render so the user sees the
-    // existing degraded UI instead of being shoved into onboarding.
+    // sidecar unreachable — let the onramp surface render so the user
+    // sees a degraded UI instead of being shoved into onboarding.
   }
   checked.value = true
+}
+
+async function onPicked(path: string): Promise<void> {
+  await onramp.start(path)
 }
 
 onMounted(checkAndRedirect)
@@ -51,7 +64,19 @@ onMounted(checkAndRedirect)
 
 <template>
   <div data-testid="index-page-root">
-    <AppShell v-if="checked" />
+    <section
+      v-if="checked"
+      class="flex flex-col items-center justify-center gap-6 min-h-screen px-6 py-16 bg-surface-0 text-text-base"
+    >
+      <h1 class="text-3xl font-semibold tracking-tight">CodeBus</h1>
+      <p class="text-[13px] text-text-mute">
+        把陌生 codebase 一鍵變成可走訪的 tutorial。
+      </p>
+      <FolderPickerButton @picked="onPicked" />
+      <div class="w-full max-w-xl">
+        <WorkspaceOnrampCard />
+      </div>
+    </section>
     <div
       v-else
       data-testid="index-page-loading"

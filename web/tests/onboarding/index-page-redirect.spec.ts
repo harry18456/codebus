@@ -1,6 +1,10 @@
 // Backs SHALL clauses in
 // openspec/changes/provider-settings-and-onboarding/specs/provider-onboarding/spec.md
 //   Requirement: Index page redirects to onboarding when LLM dependencies are not configured
+// AND
+// openspec/changes/entry-workspace-onramp/specs/workspace-onramp/spec.md
+//   Requirement: Entry page exposes folder-picker workspace onramp
+//     Scenario: Entry page renders onramp UI when both LLM lanes are ready
 
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -21,14 +25,33 @@ vi.mock('~/composables/useSidecar', () => ({
   })
 }))
 
-// AppShell mounts useSidecar etc. — replace with a stub since we
-// only care about whether it renders or the redirect fires.
-vi.mock('~/components/AppShell.vue', () => ({
-  default: {
-    name: 'AppShell',
-    template: '<div data-testid="app-shell-stub" />'
+// Stub useWorkspaceOnramp so the entry page does not try to drive a
+// real chain; we only care about whether the onramp UI renders here.
+vi.mock('~/composables/useWorkspaceOnramp', async (importOriginal) => {
+  const original = (await importOriginal()) as Record<string, unknown>
+  const phase = ref<string>('idle')
+  const workspaceId = ref<string | null>(null)
+  const pickedPath = ref<string | null>(null)
+  const progressEvents = ref<unknown[]>([])
+  const errorMsg = ref<string | null>(null)
+  const errorCode = ref<string | null>(null)
+  const activeTaskId = ref<string | null>(null)
+  return {
+    ...original,
+    useWorkspaceOnramp: () => ({
+      phase,
+      workspaceId,
+      pickedPath,
+      progressEvents,
+      errorMsg,
+      errorCode,
+      activeTaskId,
+      start: vi.fn(),
+      triggerGenerate: vi.fn(),
+      retry: vi.fn()
+    })
   }
-}))
+})
 
 import IndexPage from '~/pages/index.vue'
 
@@ -44,8 +67,14 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+async function settle(): Promise<void> {
+  await nextTick()
+  await new Promise((r) => setTimeout(r, 10))
+  await nextTick()
+}
+
 describe('/ index page', () => {
-  it('redirects to /onboarding/welcome when llm lane is not-configured', async () => {
+  it('redirects to /onboarding/welcome when llm_chat is not-configured', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         status: 'ok',
@@ -53,13 +82,25 @@ describe('/ index page', () => {
       })
     )
     const wrapper = mount(IndexPage)
-    await nextTick()
-    await new Promise((r) => setTimeout(r, 10))
+    await settle()
     expect(replaceSpy).toHaveBeenCalledWith('/onboarding/welcome')
-    expect(wrapper.find('[data-testid="app-shell-stub"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="onramp-folder-picker"]').exists()).toBe(false)
   })
 
-  it('renders AppShell when both lanes are ready', async () => {
+  it('redirects to /onboarding/welcome when llm_embed is not-configured', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        status: 'ok',
+        dependency: { llm_chat: 'ready', llm_embed: 'not-configured' }
+      })
+    )
+    const wrapper = mount(IndexPage)
+    await settle()
+    expect(replaceSpy).toHaveBeenCalledWith('/onboarding/welcome')
+    expect(wrapper.find('[data-testid="onramp-folder-picker"]').exists()).toBe(false)
+  })
+
+  it('renders onramp surface (folder picker + onramp card) when both lanes are ready', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         status: 'ok',
@@ -67,9 +108,9 @@ describe('/ index page', () => {
       })
     )
     const wrapper = mount(IndexPage)
-    await nextTick()
-    await new Promise((r) => setTimeout(r, 10))
+    await settle()
     expect(replaceSpy).not.toHaveBeenCalled()
-    expect(wrapper.find('[data-testid="app-shell-stub"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="onramp-folder-picker"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="workspace-onramp-card"]').exists()).toBe(true)
   })
 })

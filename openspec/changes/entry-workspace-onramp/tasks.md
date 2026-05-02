@@ -30,21 +30,21 @@
 
 > Implements spec Requirement "Entry page exposes folder-picker workspace onramp"；對應 design Decision 2: SSE progress 用新元件 `<OnrampProgress>`，不重用 `<ProgressStrip>` 與 design Decision 4: generate 完成後顯示「進入 tutorial」按鈕，不自動 navigate。
 
-- [ ] 4.1 [P] [Entry page exposes folder-picker workspace onramp] 加 `web/app/components/workspace-onramp/FolderPickerButton.vue`：button click → `import('@tauri-apps/plugin-dialog').then(m => m.open({ directory: true, multiple: false }))`；non-Tauri 環境（vitest）走 inject mock；emit `picked(path)` event；button 文字「+ 開新 codebase」zh-TW
-- [ ] 4.2 [P] 加 `web/tests/onramp/FolderPickerButton.spec.ts`：mock dialog `open` 回 `'/some/path'` → emit `picked` 帶該 path；mock 回 `null`（user cancel）→ NOT emit；button label 包含「開新 codebase」
-- [ ] 4.3 [P] 加 `web/app/components/workspace-onramp/OnrampProgress.vue`：props `phase: string` + `events: ProgressEvent[]`；render phase label（zh-TW，覆蓋 `scanning` / `indexing` / `exploring` / `generating` 四種 in-flight phase）+ throughput counter（從 events 拆 `current` / `total` / `current_file` 等 sidecar 共通 progress 欄）+ elapsed timer（轉動秒數）
-- [ ] 4.4 [P] 加 `web/tests/onramp/OnrampProgress.spec.ts`：phase=`scanning` + event `{type:'progress', current:42, total:120, phase:'scanning'}` → DOM 含「掃描中」+ `42`；phase=`indexing` + event `{type:'progress', current:30, total:120, phase:'embedding'}` → DOM 含「建立索引中」+ `30`；phase=`exploring` + event `{type:'agent_thought', step:3}` → DOM 含「探索中」+ `step 3`；phase=`generating` + event `{type:'progress', current:2, total:5, phase:'generating'}` → DOM 含「產生教學中」+ `2`
-- [ ] 4.5 加 `web/app/components/workspace-onramp/WorkspaceOnrampCard.vue`：props 從 `useWorkspaceOnramp()` 取；按 phase 切 render 分支：(idle) 顯示 picker prompt；(scanning / indexing / exploring / generating) 顯示 `<OnrampProgress>`；(scan-complete) 顯示「+ 產生 tutorial」按鈕（`data-testid="onramp-generate-cta"`）；(ready) 顯示「進入 tutorial」`<NuxtLink>`（`data-testid="onramp-enter-tutorial"`，`to=/tutorial/<workspaceId>`）；(error) 顯示 errorMsg + 「重試」按鈕（`data-testid="onramp-retry"`）；workspaceId + path tail 在所有非 idle phase 都可見
-- [ ] 4.6 加 `web/tests/onramp/WorkspaceOnrampCard.spec.ts`：(a) phase=`scan-complete` → generate cta 渲染 + 點擊呼 `triggerGenerate`；(b) phase=`ready` workspaceId='ws_abc123def456' → enter-tutorial anchor href=`/tutorial/ws_abc123def456`；(c) phase=`error` errorMsg='oops' → DOM 含 'oops' 與 retry 按鈕；(d) error 階段 retry 點擊呼 `retry()`
+- [x] 4.1 [P] [Entry page exposes folder-picker workspace onramp] 加 `web/app/components/workspace-onramp/FolderPickerButton.vue`：button click → `import('@tauri-apps/plugin-dialog').then(m => m.open({ directory: true, multiple: false }))`；non-Tauri 環境（vitest）走 inject mock；emit `picked(path)` event；button 文字「+ 開新 codebase」zh-TW
+- [x] 4.2 [P] 加 `web/tests/onramp/FolderPickerButton.spec.ts`：mock dialog `open` 回 `'/some/path'` → emit `picked` 帶該 path；mock 回 `null`（user cancel）→ NOT emit；button label 包含「開新 codebase」
+- [x] 4.3 [P] 加 `web/app/components/workspace-onramp/OnrampProgress.vue`：props `phase: string` + `events: ProgressEvent[]`；render phase label（zh-TW，覆蓋 `scanning` / `indexing` / `exploring` / `generating` 四種 in-flight phase）+ throughput counter（從 events 拆 `current` / `total` / `current_file` 等 sidecar 共通 progress 欄）+ elapsed timer（轉動秒數）
+- [x] 4.4 [P] 加 `web/tests/onramp/OnrampProgress.spec.ts`：phase=`scanning` + event `{type:'progress', current:42, total:120, phase:'scanning'}` → DOM 含「掃描中」+ `42`；phase=`indexing` + event `{type:'progress', current:30, total:120, phase:'embedding'}` → DOM 含「建立索引中」+ `30`；phase=`exploring` + event `{type:'agent_thought', step:3}` → DOM 含「探索中」+ `step 3`；phase=`generating` + event `{type:'progress', current:2, total:5, phase:'generating'}` → DOM 含「產生教學中」+ `2`
+- [x] 4.5 加 `web/app/components/workspace-onramp/WorkspaceOnrampCard.vue`：props 從 `useWorkspaceOnramp()` 取；按 phase 切 render 分支：(idle) 顯示 picker prompt；(scanning / indexing / exploring / generating) 顯示 `<OnrampProgress>`；(scan-complete) 顯示「+ 產生 tutorial」按鈕（`data-testid="onramp-generate-cta"`）；(ready) 顯示「進入 tutorial」`<NuxtLink>`（`data-testid="onramp-enter-tutorial"`，`to=/tutorial/<workspaceId>`）；(error) 顯示 errorMsg + 「重試」按鈕（`data-testid="onramp-retry"`）；workspaceId + path tail 在所有非 idle phase 都可見
+- [x] 4.6 加 `web/tests/onramp/WorkspaceOnrampCard.spec.ts`：(a) phase=`scan-complete` → generate cta 渲染 + 點擊呼 `triggerGenerate`；(b) phase=`ready` workspaceId='ws_abc123def456' → enter-tutorial anchor href=`/tutorial/ws_abc123def456`；(c) phase=`error` errorMsg='oops' → DOM 含 'oops' 與 retry 按鈕；(d) error 階段 retry 點擊呼 `retry()`
 
 ## 5. Entry page 重寫
 
 > Implements spec Requirement "AppShell ping-smoke placeholder is removed"。
 
-- [ ] 5.1 改 `web/app/pages/index.vue`：保留 onMounted 的 `/healthz` 導 `/onboarding/welcome` 邏輯；checked=true 後 mount `<WorkspaceOnrampCard />` 與 `<FolderPickerButton @picked="onramp.start($event)" />` 取代 `<AppShell />`；layout 與既有 onboarding 頁一致（flex 容器、置中、padding）
-- [ ] 5.2 改 `web/tests/onboarding/index-page-redirect.spec.ts`（既有 file）：所有 assertion 仍跑（onboarding redirect 邏輯不改）；新增一條 case：兩 lane ready → render `[data-testid="onramp-folder-picker"]` 而非 `<AppShell>`
-- [ ] 5.3 [AppShell ping-smoke placeholder is removed] 刪除 `web/app/components/AppShell.vue`；repo-wide grep 確認沒有其他 import / 引用
-- [ ] 5.4 跑 `cd web && npm run test --silent --run` 全綠（既有 242 + 本 change 新增 ~25 case）
+- [x] 5.1 改 `web/app/pages/index.vue`：保留 onMounted 的 `/healthz` 導 `/onboarding/welcome` 邏輯；checked=true 後 mount `<WorkspaceOnrampCard />` 與 `<FolderPickerButton @picked="onramp.start($event)" />` 取代 `<AppShell />`；layout 與既有 onboarding 頁一致（flex 容器、置中、padding）
+- [x] 5.2 改 `web/tests/onboarding/index-page-redirect.spec.ts`（既有 file）：所有 assertion 仍跑（onboarding redirect 邏輯不改）；新增一條 case：兩 lane ready → render `[data-testid="onramp-folder-picker"]` 而非 `<AppShell>`
+- [x] 5.3 [AppShell ping-smoke placeholder is removed] 刪除 `web/app/components/AppShell.vue`；repo-wide grep 確認沒有其他 import / 引用
+- [x] 5.4 跑 `cd web && npm run test --silent --run` 全綠（既有 242 + 本 change 新增 ~25 case）
 
 ## 6. End-to-end smoke + 文件 + baseline
 
