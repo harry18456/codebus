@@ -1,0 +1,35 @@
+## 1. Sidecar wire format（TDD red → green）— Decision 1: sidecar 在 `_event_generator` yield 時補 `event` field（單點改動）+ Decision 3: defensive test 從 wire 與 native event 兩層鎖死
+
+> Implements Requirement "SSE event stream endpoint" 新 Scenario「Wire format includes both event and data lines per emission」。
+
+- [ ] 1.1 [SSE event stream endpoint] [Wire format includes both event and data lines per emission] 加 `sidecar/tests/api/test_tasks_sse_wire_format.py` 紅測：用 `fastapi.testclient.TestClient` + `EventSourceResponse` 端到端起 app；建一個 `TaskHandle`，emit 三種典型 event：`{"type":"progress","phase":"scanning","current":1,"total":3}` / `{"type":"done"}` / `{"type":"error","code":"X","message":"y"}`；用 `client.stream("GET", "/tasks/<id>/events", headers={"Authorization":"Bearer ..."})` + `resp.iter_raw()` 拼出 raw bytes；斷言 (a) `b"event: progress\r\n"` 在 body 內、(b) `b"event: done\r\n"` 在 body 內、(c) `b"event: error\r\n"` 在 body 內、(d) 對應 `data:` 行 JSON 內 `"type"` 欄與 `event:` 行值完全一致；額外斷言 (e) emit 一個沒帶 `type` key 的 dict（`{"phase":"x"}`）→ wire 出現 `event: message\r\n`（fallback path）。
+- [ ] 1.2 跑 `cd sidecar && uv run pytest tests/api/test_tasks_sse_wire_format.py -v` 確認**全紅**（5 條 case 全失敗，因為當前 `tasks.py:380` 沒帶 `event:` field）。
+- [ ] 1.3 改 `sidecar/src/codebus_agent/api/tasks.py:380` 從 `yield {"data": _json_dump(event)}` 改成 `yield {"event": event.get("type", "message"), "data": _json_dump(event)}`。**單行 diff**，不動 `_json_dump`、不動 `TaskHandle.emit`、不動 `_event_generator` 其他邏輯。
+- [ ] 1.4 跑 task 1.1 case 確認**全綠**。
+- [ ] 1.5 跑 `cd sidecar && uv run pytest tests/api/ -q` 確認既有 SSE 相關測試（`test_tasks_sse.py` queue ordering / `test_task_error_containment.py` / `test_task_result.py` / `test_scan_stream.py` / `test_explore_sse_integration.py` / `test_qa_sse_events.py` / `test_kb_build.py`）全綠。
+- [ ] 1.6 跑 `cd sidecar && uv run pytest -q` 全測 baseline；對照 `entry-workspace-onramp` task 6.2 baseline 紀錄（1023 passed / 17 skipped / 1 pre-existing failure）；新增 5 條 wire-format case 後 baseline 應是 1028 passed / 17 skipped / 1 pre-existing failure（同一條 `test_startup_remains_available_when_qdrant_unreachable` 預期仍 fail，與本 change 無關）。
+
+## 2. Frontend `useSseTask` listener 拆分（TDD red → green）— Decision 2: frontend `useSseTask` 把 `'error'` 從 `NAMED_EVENT_TYPES` 拿掉、改用獨立 gated listener
+
+> Implements Requirement "useSseTask consumes bearer through useSidecar" 新 Scenario「Named error listener ignores connection-level errors」。
+
+- [ ] 2.1 [P] [useSseTask consumes bearer through useSidecar] [Named error listener ignores connection-level errors] 加 `web/tests/composables/useSseTask.connection-error.spec.ts` 紅測：(a) 用 `vi.stubGlobal('EventSource', vi.fn(() => mockEs))` 把 EventSource 換成可 dispatch 的 mock（`EventTarget` 子類）；(b) `useSidecar` mock 回 `{ ready: ref(true), bearer: ref('test-bearer'), baseUrl: ref('http://127.0.0.1:9999'), fetch: ... }`；(c) case 1：呼 `useSseTask('scan_deadbeef')`、`mockEs.dispatchEvent(new Event('error'))`（generic Event 模擬 connection-level）→ 斷言 `events.value.filter(e => e.type === 'error').length === 0`；(d) case 2：dispatch `new MessageEvent('error', { data: '{"code":"OOPS","message":"server"}' })` → 斷言 `events.value` 內含一筆 `{type: 'error', data: {code:'OOPS', message:'server'}}`；(e) case 3：dispatch generic Event 後不影響 onerror reconnect 行為（mock 上的 `close()` 應被呼一次）。
+- [ ] 2.2 [P] 跑 `cd web && npm run test --silent --run -- tests/composables/useSseTask.connection-error.spec.ts` 確認**全紅**（case 1 失敗 — 當前 `addEventListener('error')` 會把 generic Event 也 push 進 events，最終 `parseData(undefined)` 走 catch 回傳 `'undefined'`）。
+- [ ] 2.3 [P] 改 `web/app/composables/useSseTask.ts`：(a) `NAMED_EVENT_TYPES` 拿掉 `'error'`，剩 12 條；(b) `attachListeners` 在 NAMED_EVENT_TYPES `for` 迴圈之外、`onmessage` / `onerror` 旁邊新加 dedicated listener：`es.addEventListener('error', (event) => { if (!(event instanceof MessageEvent) || typeof event.data !== 'string') return; appendEvent({ type: 'error', data: parseData(event.data) }) })`；(c) 加 inline 註解說明「MUST be outside the loop because EventSource dispatches connection-level errors here too — gate by `MessageEvent instanceof + typeof data === 'string'` to filter out the connection-error native dispatch」。
+- [ ] 2.4 [P] 跑 task 2.1 case 確認**全綠**。
+- [ ] 2.5 [P] 跑 `cd web && npm run test --silent --run` 全綠（既有 ~242 + onramp ~25 + 本 change 新增 3 case，~270 case）；既有 `useSseTask` test（如有）必須仍綠。
+
+## 3. 驗證與重打 binary
+
+> 對應 design「Risks / Trade-offs」第二條（PyInstaller binary 必須重打才能讓 cargo tauri dev 看到 sidecar fix）。
+
+- [ ] 3.1 跑 `cd web && npm run typecheck` zero error baseline 守住。
+- [ ] 3.2 跑 `cd D:/side_project/codebus/.spectra/worktrees/entry-workspace-onramp/sidecar && uv run pyinstaller codebus-sidecar.spec --noconfirm`（在 entry-workspace-onramp worktree 內）；rebase 該 worktree 到本 change archive 後的 main HEAD；確認 `entry-workspace-onramp/sidecar/dist/codebus-sidecar-x86_64-pc-windows-msvc.exe` mtime 比本 change archive commit 新。**留 manual TODO**：本 session 沒走到 entry-workspace-onramp worktree，archive 後手動跑 rebase + rebuild。
+- [ ] 3.3 [Wire format includes both event and data lines per emission] [Named error listener ignores connection-level errors] 在 `D:/side_project/codebus` main repo 跑 `pre-commit run --all-files` 全綠。
+
+## 4. Manual smoke（後續歸 entry-workspace-onramp）— Decision 4: spec delta 兩條都用 MODIFIED 不用 ADDED 鎖在 archive 後 base spec 自動合併
+
+> 本 change 不負責 onramp 端到端 smoke；driving 在 `entry-workspace-onramp` task 6.4 / 6.5。
+
+- [ ] 4.1 archive 本 change 後執行 `spectra unpark entry-workspace-onramp`，跑 entry-workspace-onramp task 6.4：(a) 完成 onboarding → entry page → 點「+ 開新 codebase」→ native picker 選一個小 codebase → scan progress 跑完 → composable phase 由 `scanning` 推進到 `scan-complete`（**而非卡 `scanning` 或誤跳 `error`**）→ 點「+ 產生 tutorial」→ explore + generate progress 跑完 → 點「進入 tutorial」→ 進到 R-01 station board。
+- [ ] 4.2 跑 entry-workspace-onramp task 6.5：D-033 B 12.4 (b)(c) chat / embed hot-swap manual 驗證。
