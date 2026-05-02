@@ -52,6 +52,10 @@ async def _serve(app, sock, port: int, bearer: str, parent_pid: int | None) -> N
         host="127.0.0.1",
         port=port,
         log_config=None,
+        # MUST stay False: the SSE events endpoint accepts the bearer via
+        # `?bearer=<token>` query parameter (browser EventSource cannot set
+        # headers), and uvicorn's access log records the full query string.
+        # Locked by `sidecar-sse-bearer-query-param-fallback` change.
         access_log=False,
     )
     server = uvicorn.Server(config)

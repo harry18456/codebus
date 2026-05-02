@@ -19,6 +19,7 @@ canonical filename constant.
 """
 from __future__ import annotations
 
+import re
 import secrets
 
 from fastapi import FastAPI, Request
@@ -27,6 +28,20 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
 _BEARER_PREFIX = "Bearer "
+
+# Path scope for the SSE query-param bearer fallback (Decision 1 of
+# `sidecar-sse-bearer-query-param-fallback`). The query-param transport is
+# accepted ONLY on `GET /tasks/<task_id>/events` because browser-native
+# `EventSource` cannot set the `Authorization` header. Anchored start/end
+# prevent suffix tricks like `/tasks/foo/events/leak`.
+_SSE_EVENTS_PATH_RE = re.compile(r"^/tasks/[^/]+/events$")
+
+
+def _is_sse_events_path(path: str | None) -> bool:
+    """Return True iff *path* matches the narrow SSE-events fallback scope."""
+    if not path:
+        return False
+    return _SSE_EVENTS_PATH_RE.match(path) is not None
 
 
 def generate_token() -> str:
@@ -52,10 +67,20 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
         header = request.headers.get("Authorization", "")
-        if not header.startswith(_BEARER_PREFIX):
-            return JSONResponse({"detail": "unauthorized"}, status_code=401)
-        presented = header[len(_BEARER_PREFIX):]
-        if not secrets.compare_digest(presented, self._expected):
+        presented: str | None
+        if header.startswith(_BEARER_PREFIX):
+            presented = header[len(_BEARER_PREFIX):]
+        elif _is_sse_events_path(request.url.path):
+            # Browser-native EventSource cannot set custom headers, so the
+            # SSE events path accepts the bearer via `?bearer=<token>`.
+            # Path-scoped fallback only — Decision 1 of
+            # `sidecar-sse-bearer-query-param-fallback`.
+            presented = request.query_params.get("bearer")
+        else:
+            presented = None
+        if presented is None or not secrets.compare_digest(
+            presented, self._expected
+        ):
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)
 
@@ -69,4 +94,5 @@ __all__ = [
     "BearerAuthMiddleware",
     "generate_token",
     "install",
+    "_is_sse_events_path",
 ]
