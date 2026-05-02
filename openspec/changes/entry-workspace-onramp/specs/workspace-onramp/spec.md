@@ -46,20 +46,46 @@ The selected absolute path MUST be passed to the onramp composable, which derive
 - **AND** if a second invocation passes the same path with different case (e.g. `C:/Foo` vs `c:/foo` on Windows) the derived id MUST be identical
 
 ---
-### Requirement: Workspace onramp drives scan then generate via SSE
+### Requirement: Workspace onramp drives scan, kb-build, explore, then generate via SSE
 
-After `deriveWorkspaceId` produces an id, the onramp composable SHALL POST to the sidecar's `/scan` endpoint with body shape `{ workspace_root: <path>, workspace_type: "folder" }` and subscribe to the returned task's SSE event stream. While the scan task is in flight `<OnrampProgress>` MUST surface phase + counters from the SSE events.
+After `deriveWorkspaceId` produces an id, the onramp composable SHALL drive a four-step sidecar pipeline behind two user clicks. The first click (`<FolderPickerButton>` `picked` event) chains `/scan?stream=true` then `/kb/build`; the second click ("+ 產生 tutorial") chains `/explore` then `/generate`. Each sidecar task uses its own SSE subscription via `useSseTask`; `<OnrampProgress>` MUST surface the active task's phase + counters in real time.
 
-When the scan task emits its terminal `done` event, the onramp composable SHALL transition to phase `scan-complete` and render a "+ 產生 tutorial" button inside `<WorkspaceOnrampCard>`. Clicking the button SHALL POST to `/generate` with body `{ workspace_id: <derived_id> }` and again drive `<OnrampProgress>` from that task's SSE stream.
+The internal pipeline phase set is `idle | scanning | indexing | scan-complete | exploring | generating | ready | error`. Phase transitions:
 
-When `/generate` emits `done`, the onramp transitions to phase `ready` and renders a "進入 tutorial" CTA whose target is `/tutorial/<workspace_id>`. The CTA MUST NOT auto-navigate; the user MUST click it.
+1. Pre-click 1 → `idle`.
+2. Click 1 (`onramp.start(path)`):
+   - POST `/scan?stream=true` with `{ workspace_root: <path>, workspace_type: "folder" }` → phase `scanning`.
+   - On scan SSE `done`: GET `/tasks/<scan_task_id>/result` to retrieve the full `ScanResult`. POST `/kb/build` with `{ workspace_root: <path>, scan_result: <ScanResult> }` → phase `indexing`.
+   - On kb-build SSE `done`: phase `scan-complete`.
+3. Click 2 (`onramp.triggerGenerate()`):
+   - POST `/explore` with `{ workspace_root: <path>, task: <ONRAMP_DEFAULT_TASK> }` → phase `exploring`. `ONRAMP_DEFAULT_TASK` is the constant `"認識整個 codebase"` exported from `web/app/composables/useWorkspaceOnramp.ts` (Decision 6); it satisfies the sidecar `task: str = Field(min_length=1)` constraint without prompting the user.
+   - On explore SSE `done`: GET `/tasks/<explore_task_id>/result` to retrieve the `ExplorerState`. POST `/generate` with `{ workspace_root: <path>, task: <ONRAMP_DEFAULT_TASK>, stations: <ExplorerState.stations> }` → phase `generating`.
+   - On generate SSE `done`: phase `ready`. Render an anchor whose target is `/tutorial/<workspace_id>`. The CTA MUST NOT auto-navigate.
 
-#### Scenario: Scan terminal event unlocks generate CTA
+Any SSE `error` event from any of the four tasks transitions the onramp to phase `error` with the error code/message preserved in state. `retry()` re-issues the POST that owned the failed task — never restarts from an earlier phase.
 
-- **WHEN** the SSE stream of the in-flight `/scan` task emits a `done` event
+#### Scenario: Scan terminal event chains kb-build automatically
+
+- **WHEN** the SSE stream of the in-flight `/scan?stream=true` task emits a `done` event
+- **THEN** the composable MUST GET `/tasks/<scan_task_id>/result` to fetch the `ScanResult` payload
+- **AND** the composable MUST POST `/kb/build` with body `{ workspace_root: <path>, scan_result: <ScanResult> }`
+- **AND** the onramp phase MUST transition to `indexing`
+- **AND** the user MUST NOT see an intermediate CTA between scan and kb-build
+
+#### Scenario: kb-build terminal event unlocks generate CTA
+
+- **WHEN** the SSE stream of the in-flight `/kb/build` task emits a `done` event
 - **THEN** the onramp phase MUST transition to `scan-complete`
 - **AND** `<WorkspaceOnrampCard>` MUST render a button with `data-testid="onramp-generate-cta"`
-- **AND** clicking that button MUST issue a `POST /generate` with `workspace_id` matching the derived id
+- **AND** clicking that button MUST start the explore task by issuing `POST /explore` with `workspace_root` matching the picked path
+
+#### Scenario: Explore terminal event chains generate automatically
+
+- **WHEN** the SSE stream of the in-flight `/explore` task emits a `done` event
+- **THEN** the composable MUST GET `/tasks/<explore_task_id>/result` to fetch the `ExplorerState` payload
+- **AND** the composable MUST POST `/generate` with body `{ workspace_root: <path>, task: <ONRAMP_DEFAULT_TASK>, stations: <ExplorerState.stations> }`
+- **AND** the onramp phase MUST transition to `generating`
+- **AND** the user MUST NOT see an intermediate CTA between explore and generate
 
 #### Scenario: Generate terminal event renders enter-tutorial CTA
 
@@ -70,23 +96,23 @@ When `/generate` emits `done`, the onramp transitions to phase `ready` and rende
 
 #### Scenario: SSE error pauses onramp with retry affordance
 
-- **WHEN** an SSE event of the in-flight scan or generate task carries an `error` field
+- **WHEN** an SSE event of any in-flight pipeline task (`scan` / `kb` / `explore` / `generate`) carries an `error` field
 - **THEN** the onramp phase MUST transition to `error`
 - **AND** the error message MUST be displayed inside `<WorkspaceOnrampCard>` (no silent log-only failure)
-- **AND** a button with `data-testid="onramp-retry"` MUST render that re-issues the same POST when clicked
+- **AND** a button with `data-testid="onramp-retry"` MUST render that re-issues the POST that owned the failed task when clicked (NOT an earlier phase)
 - **AND** the user's selected path / derived id MUST remain visible (the user MUST NOT have to re-pick the folder)
 
 ---
 ### Requirement: Onramp state survives navigation away from entry page
 
-The `useWorkspaceOnramp` composable SHALL be a module-level singleton (matching the pattern used by `useQaSession` and `useIntervention`) so that scan / generate state is preserved when the user navigates to `/settings` or `/audit/*` and back to `/`. The active SSE subscription MUST NOT be torn down on `/` unmount.
+The `useWorkspaceOnramp` composable SHALL be a module-level singleton (matching the pattern used by `useQaSession` and `useIntervention`) so that pipeline state is preserved when the user navigates to `/settings` or `/audit/*` and back to `/`. The active SSE subscription (whichever of the four pipeline tasks is currently running) MUST NOT be torn down on `/` unmount.
 
 #### Scenario: User leaves entry mid-scan and returns
 
-- **WHEN** the onramp is in phase `scanning` and the user navigates to `/settings`
-- **THEN** the SSE subscription to the scan task MUST remain active
+- **WHEN** the onramp is in any in-flight phase (`scanning` / `indexing` / `exploring` / `generating`) and the user navigates to `/settings`
+- **THEN** the SSE subscription to the active task MUST remain active
 - **AND** when the user navigates back to `/`, `<OnrampProgress>` MUST resume rendering with the latest counter values
-- **AND** the onramp phase MUST reflect any progression that happened during the absence (e.g. `scan-complete` if scan finished while away)
+- **AND** the onramp phase MUST reflect any progression that happened during the absence (e.g. `scan-complete` if scan + kb-build finished while away, or `ready` if the entire pipeline completed)
 
 ---
 ### Requirement: AppShell ping-smoke placeholder is removed

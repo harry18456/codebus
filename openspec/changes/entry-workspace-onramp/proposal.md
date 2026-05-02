@@ -12,7 +12,7 @@ Phase 6 30 step 全是「assumed 已有 `workspace_id`」的 view-level UX（Tru
 
 - **新加 `tauri-plugin-dialog`** — Tauri 2 官方 plugin，提供 native folder picker（沿用 phase7 加 `tauri-plugin-opener` 的同一條路：Cargo dep + capabilities + npm package）。
 - **重寫 `web/app/pages/index.vue`** — 從現有 ping smoke `<AppShell>` 改成 entry shell：顯示「+ 開新 codebase」按鈕（觸發 folder picker）+ scan/generate 進度 + 進 tutorial 入口。保留既有 onboarding redirect 邏輯（`onMounted` 打 `/healthz`），不破 phase7 修好的 redirect flow。
-- **新加 onramp composable + 元件** — `useWorkspaceOnramp.ts` 封裝「pick folder → POST /scan → SSE → POST /generate → SSE → navigate」狀態機；`<WorkspaceOnrampCard>` 顯示 phase / progress / cta；`<FolderPickerButton>` wrap dialog plugin。
+- **新加 onramp composable + 元件** — `useWorkspaceOnramp.ts` 封裝「pick folder → 4-step sidecar pipeline (scan → kb-build → explore → generate) → navigate」狀態機（兩 click：pick + 「+ 產生 tutorial」；composable 內部自動 chain 相鄰 step，見 design Decision 5）；`<WorkspaceOnrampCard>` 顯示 phase / progress / cta；`<FolderPickerButton>` wrap dialog plugin。
 - **完成 onramp 後 navigate `/tutorial/<workspace_id>`** — Phase 6 step 27 R-01 station board 已實作（archive `2026-04-29` 之 `r-01-station-board`），onramp 串好就能直接通到 station 開跑 Q&A。
 
 **P1+ defer（不在此 change，明確排除）：**

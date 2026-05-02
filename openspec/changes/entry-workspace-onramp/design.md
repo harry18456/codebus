@@ -55,6 +55,33 @@ Onramp 的 SSE task 由後端 task registry 管，前端 `useWorkspaceOnramp` co
 
 **Why：** UX 自主性 — 使用者可能想再跑一次 / 換資料夾 / 直接離開 app。自動跳會跨越 onramp 與 station 兩個 UX context，使用者失去掌控感。按鈕只是一個 click 的成本。
 
+### Decision 5: 4-step sidecar pipeline behind 2 user clicks
+
+實際 sidecar API 是 4 個獨立 endpoints（每個都 spawn 自己的 task + SSE）：
+
+1. `POST /scan?stream=true` → SSE → `done` → `GET /tasks/<id>/result` 拿 `ScanResult` JSON
+2. `POST /kb/build`（body 帶上面 `ScanResult`）→ SSE → `done`（KB embedded into Qdrant）
+3. `POST /explore`（body 帶 `task: str` + `workspace_root`）→ SSE → `done` → `GET /tasks/<id>/result` 拿 `ExplorerState`
+4. `POST /generate`（body 帶 `workspace_root` + `task` + `stations` from ExplorerState）→ SSE → `done`（tutorial files written）
+
+UX 不暴露 4 step 的事實：使用者只看到 2 個 CTA — 點「+ 開新 codebase」走 step 1+2、點「+ 產生 tutorial」走 step 3+4。`<OnrampProgress>` 仍區分 4 個內部 phase（`scanning` / `indexing` / `exploring` / `generating`）讓進度條反映真實工作量。
+
+**Why chain instead of expose all 4 buttons:** 強迫使用者點 4 次 CTA 是 UX dead weight — step 1→2 與 step 3→4 中間沒有任何使用者要做的決定。Composable 自動 chain 兩兩相鄰 step；只在語意斷點（scan-complete vs ready）暴露 CTA。
+
+**Why not single-click for all 4:** scan + kb-build 可能耗時數分鐘但結果是「workspace ready to query」這個中間態本身有價值（後續 P1 會加 Q&A entry 走 onramp `scan-complete` 狀態）；而 explore + generate 是「產 tutorial」一個整體動作，使用者明確選擇要產 tutorial 才花這個時間。把斷點放在這裡符合 UX 心智模型。
+
+**Trade-off:** Composable internal state machine 比 single-step 複雜（要記 `activeTaskId` 切換 / 兩次 result fetch / 兩次 chain trigger），但被 module-level singleton + `useSseTask` 模組吸收掉。Test 也對應細分（unit test cover 每個 chain transition）。
+
+### Decision 6: Onramp default `task` string 用單一 zh-tw constant
+
+`POST /explore` 與 `POST /generate` 都需要 `task: str = Field(min_length=1)` — 在 onramp 流程使用者沒被問到 task 描述。Composable export `ONRAMP_DEFAULT_TASK = "認識整個 codebase"` 一個 module-level constant，兩個 endpoint 都用同一個字串。
+
+**Why fixed string:** P0 onramp 的目標是「跑通整條 happy path 進到 station」— 不是讓使用者調 explore depth 或 tutorial 範圍。固定字串確保 explore + generate 的行為可預測且可在 test 中 assert（mock fetch 收到的 body 應該包含這個 exact string）。
+
+**Trade-off:** 使用者不能 customize 第一輪 tutorial 的 framing。**Accept:** Tutorial regen 是 Phase 6 step 29 介入點的功能（已實作），到 station 後仍能透過介入點重新指定 task；onramp 只是 first-run shortcut。
+
+**Note for P1+:** 加 entry-page text input 讓使用者選 tutorial focus 是合理 P1 follow-up；`ONRAMP_DEFAULT_TASK` 變 default value 而非唯一 value。本 change 不做。
+
 ## Risks / Trade-offs
 
 - **[Risk]** path canonicalization 在前端與 sidecar 行為 drift（例如 Windows path separator 或大小寫處理） → **Mitigation:** parity test 用一組覆蓋 Windows backslash / mixed case / posix slash 的 fixture path，前端 `workspace-id.ts` 與 sidecar `workspace_id_for_path` 各跑一次比對。
