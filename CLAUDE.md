@@ -163,16 +163,6 @@ bash tests/precommit_gate_test.sh            # 乾淨 repo 應全綠
 bash tests/precommit_violation_test.sh       # 負測：違規 commit 應被擋
 ```
 
-## Spectra worktree 慣例
-
-`/spectra-apply <change>` 會在 `.spectra/worktrees/<change>/` 開 git worktree。收尾後：
-```bash
-git merge --ff-only change/<name>
-git worktree remove .spectra/worktrees/<name>   # 殘留就加 --force
-git branch -d change/<name>
-```
-`.spectra/` 已在 `.gitignore`。
-
 ## 決策記憶
 
 所有非 trivial 取捨都在 `docs/decisions.md`，以 **D-XXX ADR**（脈絡 / 選項 / 理由 / 後續）形式維護。Spec 首行必引相關 D-XXX。改決策時**先改 `decisions.md`，再改引用它的 spec**。最常觸碰：D-001（混合架構）/ D-002（雙模 discriminator）/ D-012（自寫 ReAct）/ D-015（三段 Sanitizer）/ D-016（Q&A add_to_kb）/ D-017（ToolSandbox）/ D-021 D-022（token_usage / llm_calls 雙線）/ D-026（前端 npm）/ D-027（Qdrant local binary）/ D-029（Module 5 多檔輸出）/ D-032（KB build production wiring）。
