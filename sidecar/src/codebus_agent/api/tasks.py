@@ -377,7 +377,19 @@ async def stream_task_events(task_id: str, request: Request) -> EventSourceRespo
                 event = await queue.get()
                 if event is _STREAM_CLOSE_SENTINEL:
                     return
-                yield {"data": _json_dump(event)}
+                # Per `sidecar-sse-named-events-and-error-listener-fix`
+                # spec scenario "Wire format includes both event and data
+                # lines per emission": the `event:` line is REQUIRED so
+                # browser EventSource named listeners
+                # (`addEventListener("done", ...)` etc.) fire correctly.
+                # Without it, every event collapses into the default
+                # `message` channel and consumers that dispatch on
+                # `ev.type` see only `"message"` regardless of the
+                # inner JSON's `type` field.
+                yield {
+                    "event": event.get("type", "message"),
+                    "data": _json_dump(event),
+                }
         finally:
             handle.unsubscribe(queue)
 
