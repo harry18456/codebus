@@ -30,6 +30,17 @@ const EVENTS_CAP = 1000
 // Known sidecar SSE event types — registered as named listeners so pages can
 // observe them without each one wiring its own EventSource. The catch-all
 // `message` handler picks up any event delivered without an `event:` line.
+//
+// IMPORTANT: `'error'` is intentionally NOT in this array. The
+// `addEventListener('error', ...)` channel on EventSource receives BOTH
+// connection-level errors (generic `Event`, no `data`) AND server-emitted
+// `event: error` SSE messages (`MessageEvent` with JSON `data`). A shared
+// loop-registered handler cannot tell them apart and would push a phantom
+// `{type:'error', data:'undefined'}` event for every clean stream close.
+// `'error'` therefore gets a dedicated, gated listener registered below
+// (see `attachListeners`) — backs spec scenario
+// "Named error listener ignores connection-level errors" in
+// `openspec/specs/frontend-shell/spec.md`.
 const NAMED_EVENT_TYPES = [
   'agent_thought',
   'agent_action_result',
@@ -42,8 +53,7 @@ const NAMED_EVENT_TYPES = [
   'rag_hits',
   'kb_growth',
   'qa_answer',
-  'done',
-  'error'
+  'done'
 ] as const
 
 export function useSseTask(taskId: string): SseTaskApi {
@@ -127,6 +137,20 @@ export function useSseTask(taskId: string): SseTaskApi {
         appendEvent({ type: evType, data: parseData(me.data) })
       })
     }
+    // Dedicated `'error'` listener — MUST live OUTSIDE the loop because
+    // `addEventListener('error', ...)` fires for both connection-level
+    // errors (generic Event, dispatched alongside `onerror`) AND
+    // server-emitted `event: error` SSE messages (MessageEvent with JSON
+    // `data`). Gate by `MessageEvent instanceof + typeof data === 'string'`
+    // so connection-error events filter out and only server messages
+    // reach the events stream. The connection-level path is fully
+    // covered by `onerror` above (close + scheduleReconnect).
+    es.addEventListener('error', (event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== 'string') {
+        return
+      }
+      appendEvent({ type: 'error', data: parseData(event.data) })
+    })
   }
 
   function open(): void {

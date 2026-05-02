@@ -81,7 +81,22 @@ class FakeEventSource implements FakeEventSourceInstance {
   }
 
   _simulateError(): void {
-    this.onerror?.(new Event('error'))
+    // Real EventSource dispatches connection-level errors to BOTH the
+    // `.onerror` IDL attribute AND any `addEventListener('error', ...)`
+    // listeners. Mirroring that here so tests can assert the
+    // `useSseTask` listener correctly distinguishes connection errors
+    // (generic Event) from server-emitted `event: error` SSE messages
+    // (MessageEvent), per `sidecar-sse-named-events-and-error-listener-fix`
+    // spec scenario "Named error listener ignores connection-level errors".
+    const ev = new Event('error')
+    this.onerror?.(ev)
+    const listeners = this.namedListeners.get('error')
+    if (listeners) {
+      // Cast: the listener type accepts MessageEvent for typing
+      // convenience, but addEventListener('error') in the real DOM is
+      // invoked with whatever Event subclass the runtime dispatches.
+      for (const l of listeners) (l as unknown as (e: Event) => void)(ev)
+    }
   }
 
   _emit(type: string, data: unknown): void {
