@@ -35,9 +35,9 @@ onMounted(async () => {
     class="flex flex-col gap-4 p-6 max-w-[920px] mx-auto"
   >
     <header class="mb-2">
-      <h1 class="text-[20px] font-semibold text-text-base">Settings</h1>
+      <h1 class="text-[20px] font-semibold text-text-base">設定</h1>
       <p class="text-[13px] text-text-dim">
-        Configure LLM providers, role bindings, and PII detection mode.
+        管理 LLM 提供者、角色綁定，以及 PII 偵測模式。
       </p>
     </header>
 

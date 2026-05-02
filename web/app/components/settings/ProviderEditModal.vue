@@ -31,8 +31,8 @@ const props = withDefaults(defineProps<Props>(), { initial: null })
 const emit = defineEmits<{ close: []; saved: [provider: ProviderSpec] }>()
 
 const PROVIDER_TYPES = [
-  { value: 'openai_chat', label: 'Chat (OpenAI compatible)' },
-  { value: 'openai_embedding', label: 'Embedding (OpenAI compatible)' }
+  { value: 'openai_chat', label: 'Chat 對話模型（OpenAI 相容）' },
+  { value: 'openai_embedding', label: 'Embedding 向量模型（OpenAI 相容）' }
 ] as const
 
 const id = ref('')
@@ -135,7 +135,7 @@ async function onConfirm(): Promise<void> {
       @click.stop
     >
       <h3 class="text-[16px] font-semibold text-text-base mb-4">
-        {{ initial ? 'Edit provider' : 'Add provider' }}
+        {{ initial ? '編輯 provider' : '新增 provider' }}
       </h3>
 
       <label class="block text-[12px] uppercase tracking-wide text-text-mute mb-1">
@@ -198,7 +198,7 @@ async function onConfirm(): Promise<void> {
           class="px-3 py-1.5 rounded-md text-[12px] bg-surface-2 text-text-dim hover:text-text-base"
           @click="apiKeyVisible = !apiKeyVisible"
         >
-          {{ apiKeyVisible ? 'hide' : 'show' }}
+          {{ apiKeyVisible ? '隱藏' : '顯示' }}
         </button>
       </div>
 
@@ -217,7 +217,7 @@ async function onConfirm(): Promise<void> {
           class="px-3 py-1.5 rounded-md text-[13px] bg-surface-2 text-text-dim hover:bg-surface-3 hover:text-text-base"
           @click="emit('close')"
         >
-          Cancel
+          取消
         </button>
         <button
           type="button"
@@ -226,7 +226,7 @@ async function onConfirm(): Promise<void> {
           class="px-3 py-1.5 rounded-md text-[13px] bg-blue-500 text-white disabled:opacity-50 hover:bg-blue-600"
           @click="onConfirm"
         >
-          Confirm
+          確認
         </button>
       </div>
     </aside>

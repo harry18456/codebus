@@ -22,12 +22,21 @@ from pathlib import Path
 __all__ = [
     "_APP_AUDIT_HOME_SUBDIR",
     "_AUTHORIZATION_AUDIT_FILENAME",
+    "_LLM_CONFIG_FILENAME",
     "authorization_audit_path",
+    "llm_config_path",
 ]
 
 
 _APP_AUDIT_HOME_SUBDIR = ".codebus"
 _AUTHORIZATION_AUDIT_FILENAME = "authorization_audit.jsonl"
+
+# `phase7-onboarding-polish` task 14: D-033 B archive described
+# "persists the config (without api_key) to disk" but shipped only the
+# in-memory snapshot. The on-disk mirror lives at the App-level
+# (cross-workspace, same scope as keyring) so a single `llm-config.json`
+# survives sidecar restarts and re-installs.
+_LLM_CONFIG_FILENAME = "llm-config.json"
 
 
 def authorization_audit_path() -> Path:
@@ -40,3 +49,17 @@ def authorization_audit_path() -> Path:
     scenario "Logger constructor auto-creates parent directory").
     """
     return Path.home() / _APP_AUDIT_HOME_SUBDIR / _AUTHORIZATION_AUDIT_FILENAME
+
+
+def llm_config_path() -> Path:
+    """Resolve the App-level provider pool persistence path.
+
+    Returns ``<user_home>/.codebus/llm-config.json``. The parent
+    directory is created on demand by ``save_llm_config()`` (see
+    ``codebus_agent.config.llm_config_store``).
+
+    The file holds metadata only (id / type / model / base_url /
+    bindings / pii_mode) — API keys MUST NOT appear here per the D-033
+    B trust boundary; they live exclusively in the OS keyring.
+    """
+    return Path.home() / _APP_AUDIT_HOME_SUBDIR / _LLM_CONFIG_FILENAME

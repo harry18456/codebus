@@ -49,24 +49,23 @@ const estimatedMinutes = computed(() => {
         ⚠ destructive · embedding switch
       </div>
       <h3 class="text-[16px] font-semibold text-text-base mb-3">
-        Rebuild knowledge base?
+        確定要重建知識庫嗎？
       </h3>
       <p class="text-[13.5px] text-text-dim leading-relaxed mb-2">
-        Switching the embedding provider will rebuild the entire
-        knowledge base. Current state:
+        切換 embedding provider 會把整個知識庫重新建立。目前狀態：
       </p>
       <ul class="text-[13px] text-text-base mb-3 ml-4 list-disc">
         <li data-testid="embedding-confirm-chunks">
-          chunks: {{ currentChunkCount }}
+          chunk 數：{{ currentChunkCount }}
         </li>
         <li data-testid="embedding-confirm-eta">
-          estimated rebuild: ~{{ estimatedMinutes }} min
+          預估重建時間：約 {{ estimatedMinutes }} 分鐘
         </li>
-        <li>new provider: {{ newProviderId }}</li>
+        <li>新 provider：{{ newProviderId }}</li>
       </ul>
       <p class="text-[12.5px] text-amber-300 mb-4">
-        While the rebuild is in progress, Q&A / Generator / Scanner
-        will respond with <code>503 KB_REBUILD_IN_PROGRESS</code>.
+        重建期間 Q&A / Generator / Scanner 會回
+        <code>503 KB_REBUILD_IN_PROGRESS</code>，待重建完成後恢復。
       </p>
       <div class="flex justify-end gap-3">
         <button
@@ -75,7 +74,7 @@ const estimatedMinutes = computed(() => {
           class="px-3 py-1.5 rounded-md text-[13px] bg-surface-2 text-text-dim hover:bg-surface-3 hover:text-text-base"
           @click="emit('cancel')"
         >
-          Cancel
+          取消
         </button>
         <button
           type="button"
@@ -83,7 +82,7 @@ const estimatedMinutes = computed(() => {
           class="px-3 py-1.5 rounded-md text-[13px] bg-rose-500 text-white hover:bg-rose-600"
           @click="emit('confirm')"
         >
-          Rebuild and switch
+          重建並切換
         </button>
       </div>
     </aside>

@@ -66,14 +66,14 @@ async function onDelete(provider: ProviderSpec): Promise<void> {
     class="p-4 rounded-lg bg-surface-1 border border-border-base"
   >
     <header class="flex items-center justify-between mb-3">
-      <h2 class="text-[14px] font-semibold text-text-base">Provider pool</h2>
+      <h2 class="text-[14px] font-semibold text-text-base">Provider 池</h2>
       <button
         type="button"
         data-testid="provider-pool-add"
         class="px-3 py-1.5 rounded-md text-[12px] bg-blue-500 text-white hover:bg-blue-600"
         @click="openAdd"
       >
-        + Add provider
+        + 新增 provider
       </button>
     </header>
 
@@ -82,7 +82,7 @@ async function onDelete(provider: ProviderSpec): Promise<void> {
       data-testid="provider-pool-empty"
       class="text-[13px] text-text-dim"
     >
-      No providers configured.
+      尚未設定任何 provider。
     </p>
 
     <ul v-else class="flex flex-col gap-2">
@@ -106,12 +106,12 @@ async function onDelete(provider: ProviderSpec): Promise<void> {
             class="px-2 py-1 rounded-md text-[12px] bg-surface-3 text-text-dim hover:text-text-base"
             @click="openEdit(p)"
           >
-            edit
+            編輯
           </button>
           <button
             type="button"
             data-testid="provider-pool-delete"
-            :title="boundIds.has(p.id) ? 'remove role binding first' : ''"
+            :title="boundIds.has(p.id) ? '請先解除角色綁定' : ''"
             :class="[
               'px-2 py-1 rounded-md text-[12px] bg-surface-3',
               boundIds.has(p.id)
@@ -120,7 +120,7 @@ async function onDelete(provider: ProviderSpec): Promise<void> {
             ]"
             @click="onDelete(p)"
           >
-            delete
+            刪除
           </button>
         </div>
       </li>
@@ -131,8 +131,8 @@ async function onDelete(provider: ProviderSpec): Promise<void> {
       data-testid="provider-pool-delete-blocked"
       class="mt-3 text-[12.5px] text-amber-300"
     >
-      Provider <code>{{ blockedDelete.id }}</code> is bound to:
-      {{ blockedDelete.roles.join(', ') }}. Remove role binding first.
+      Provider <code>{{ blockedDelete.id }}</code> 已綁定到角色：
+      {{ blockedDelete.roles.join('、') }}。請先解除這些角色綁定再刪除。
     </p>
 
     <ProviderEditModal

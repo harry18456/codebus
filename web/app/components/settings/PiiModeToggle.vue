@@ -24,11 +24,10 @@ async function onSelect(mode: 'rule' | 'llm'): Promise<void> {
     data-testid="pii-mode-section"
     class="p-4 rounded-lg bg-surface-1 border border-border-base"
   >
-    <h2 class="text-[14px] font-semibold text-text-base mb-3">PII mode</h2>
+    <h2 class="text-[14px] font-semibold text-text-base mb-3">PII 偵測模式</h2>
     <p class="text-[12.5px] text-text-mute mb-3">
-      Pass 1 / 2 / 3 sanitizer detection backend. Rule-based is the
-      default and works without any LLM. LLM-based detection is
-      planned for a future release.
+      決定三段 Sanitizer（Pass 1 / 2 / 3）使用哪種 PII 偵測後端。Rule
+      模式是預設值，無需任何 LLM 即可運作；LLM 模式預計於後續版本支援。
     </p>
     <div class="flex flex-col gap-2">
       <label class="flex items-center gap-2 text-[13px] text-text-base">
@@ -40,7 +39,7 @@ async function onSelect(mode: 'rule' | 'llm'): Promise<void> {
           :checked="config.piiMode.value === 'rule'"
           @change="onSelect('rule')"
         />
-        rule (default)
+        rule（預設）
       </label>
       <label
         class="flex items-center gap-2 text-[13px] text-text-mute opacity-50 cursor-not-allowed"
@@ -54,7 +53,7 @@ async function onSelect(mode: 'rule' | 'llm'): Promise<void> {
           disabled
           :checked="config.piiMode.value === 'llm'"
         />
-        llm (P1+)
+        llm（P1+ 規劃中）
       </label>
     </div>
   </section>

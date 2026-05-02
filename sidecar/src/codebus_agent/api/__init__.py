@@ -57,6 +57,7 @@ from codebus_agent.api.scan import router as scan_router
 from codebus_agent.api.events_broker import AppEventBroker
 from codebus_agent.api.settings import router as settings_router
 from codebus_agent.api.startup_config import router as startup_config_router
+from codebus_agent.config.llm_config_store import load_llm_config_or_default
 from codebus_agent.api.tasks import TaskRegistry, router as tasks_router
 from codebus_agent.config.provider_pool import ProviderPoolSnapshot
 from codebus_agent.auth.audit_logger import AuthorizationAuditLogger
@@ -477,13 +478,20 @@ def _resolve_llm_lane(
 ) -> str:
     if not provider_id or not keys.get(provider_id):
         return "not-configured"
-    if smoke is None:
-        # Key is present but no smoke probe registered — treat as ready
-        # because the contract says "key + smoke pass = ready"; absent
-        # smoke means caller hasn't wired the probe (test path).
+    # `phase7-onboarding-polish` regression fix: D-033 B moved the API
+    # key source from `CODEBUS_OPENAI_API_KEY` env var to keyring +
+    # `POST /internal/startup-config`, but the boot-time smoke probe in
+    # `create_app` still branches on the env var: when it's absent
+    # (the new default after D-033 B) the registered probe always
+    # returns `status='not-configured'`. That stale signal MUST NOT
+    # propagate — the `keys.get(provider_id)` check above is the
+    # canonical D-033 B readiness signal. Treat both `smoke is None`
+    # (no probe wired, e.g. tests) and `smoke.status == 'not-configured'`
+    # (env-var-model probe stuck on stale signal) as `ready`. Only an
+    # actual probe failure (network down, OpenAI 5xx, etc.) should
+    # surface as `unreachable`.
+    if smoke is None or smoke.status == "not-configured":
         return "ready"
-    if smoke.status == "not-configured":
-        return "not-configured"
     if smoke.ok:
         return "ready"
     return "unreachable"
@@ -546,13 +554,14 @@ def create_app(
     # Tauri pushes the keys.
     app.state.provider_keys = {}
     app.state.startup_config_applied = False
-    # `provider-settings-and-onboarding` (D-033 B §3): provider pool
-    # snapshot starts empty; loaded from disk in production wiring or
-    # injected by tests. RegistryHolder + registry_factory stay None
-    # until a real config + key set is available.
-    app.state.provider_pool_snapshot = ProviderPoolSnapshot(
-        providers=(), bindings={}, pii_mode="rule", pii_provider_id=None
-    )
+    # `phase7-onboarding-polish` task 14: D-033 B archive shipped
+    # only the in-memory snapshot — sidecar restart wiped the pool and
+    # forced the user back through the onboarding wizard every time.
+    # We now mirror the metadata to `~/.codebus/llm-config.json` and
+    # rehydrate on boot so a configured user goes straight to the
+    # entry page on subsequent app launches. API keys remain in OS
+    # keyring; the on-disk file holds metadata only.
+    app.state.provider_pool_snapshot = load_llm_config_or_default()
     app.state.providers = None
     app.state.registry_factory = None
     # App-level SSE broker — `provider_config_changed` and similar
@@ -649,7 +658,13 @@ def create_app(
             "tauri://localhost",
         ],
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        # PUT / DELETE / PATCH cover the settings hot-swap mutation path
+        # (PUT /settings/bindings × 4 from onboarding submit), provider
+        # removal (DELETE /settings/providers/<id>), and any future
+        # partial-mutation endpoint. Without these the browser preflight
+        # 400s before bearer middleware can authenticate, which surfaces
+        # as a silent "Failed to fetch" on the WebView side.
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
 

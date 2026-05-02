@@ -1,14 +1,17 @@
-"""TDD red tests for ``POST /internal/startup-config`` — Tauri-to-sidecar
-key injection endpoint.
+"""Tests for ``POST /internal/startup-config`` — Tauri-to-sidecar key
+injection endpoint.
 
 Backs SHALL clauses in
-``openspec/changes/provider-settings-and-onboarding/specs/keyring-integration/spec.md``
-  Requirement: Tauri-to-sidecar startup key injection (4 scenarios)
-And ``specs/sidecar-runtime/spec.md`` (related — bearer middleware reuse).
+``openspec/changes/phase7-onboarding-polish/specs/keyring-integration/spec.md``
+  Requirement: Tauri-to-sidecar startup key injection (4 scenarios; idempotent
+  lock relaxed)
 
-Four spec scenarios:
+Spec scenarios:
   - valid bearer + well-formed body → 204 + ``app.state.provider_keys`` written
-  - second call within process lifetime → 409 ``STARTUP_ALREADY_CONFIGURED``
+  - second call within process lifetime → 204 + new body OVERWRITES first
+    (D-033 B's idempotent 409 lock relaxed in `phase7-onboarding-polish`
+    so onboarding can push keys after the user enters them; trust boundary
+    unchanged — bearer + loopback + Tauri-only caller)
   - missing bearer → 401 (existing bearer middleware behavior)
   - endpoint absent from ``/openapi.json`` document
 """
@@ -54,21 +57,52 @@ def test_valid_call_returns_204_and_writes_provider_keys() -> None:
     assert keys == {"openai-default": "sk-test-A", "openai-embed-3": "sk-test-B"}
 
 
-def test_second_call_rejected_with_409() -> None:
+def test_second_call_overwrites_provider_keys() -> None:
+    """Onboarding wizard submit happens after sidecar boot; the sidecar
+    must accept the post-onboarding ``provider_keys`` push or the user
+    is stuck redirecting back to ``/onboarding/welcome`` forever
+    (D-033 B `phase7-onboarding-polish` regression fix)."""
     client, token = _make_client()
     first = {"provider_keys": {"openai-default": "sk-first"}}
-    second = {"provider_keys": {"openai-default": "sk-second-attempt"}}
+    second = {
+        "provider_keys": {
+            "openai-default": "sk-second",
+            "openai-embed-3": "sk-embed-second",
+        }
+    }
 
     r1 = client.post("/internal/startup-config", json=first, headers=_auth(token))
     assert r1.status_code == 204
 
     r2 = client.post("/internal/startup-config", json=second, headers=_auth(token))
-    assert r2.status_code == 409
-    body = r2.json()
-    assert body == {"detail": {"code": "STARTUP_ALREADY_CONFIGURED"}}
+    assert r2.status_code == 204
+    assert r2.content == b""
 
-    # First-call state is preserved — second call did not overwrite.
-    assert client.app.state.provider_keys == {"openai-default": "sk-first"}
+    # The second body REPLACES the first wholesale (not merged) — the
+    # latest call always wins so onboarding's "two providers in one
+    # POST" semantics is preserved.
+    assert client.app.state.provider_keys == {
+        "openai-default": "sk-second",
+        "openai-embed-3": "sk-embed-second",
+    }
+
+
+def test_third_call_replaces_again() -> None:
+    """Repeat overwrite must work for an arbitrary number of calls
+    (settings page edits trigger another push)."""
+    client, token = _make_client()
+
+    for n, body in enumerate(
+        [
+            {"provider_keys": {"p1": "v1"}},
+            {"provider_keys": {"p1": "v1-edited"}},
+            {"provider_keys": {"p2": "v2-only"}},
+        ]
+    ):
+        resp = client.post("/internal/startup-config", json=body, headers=_auth(token))
+        assert resp.status_code == 204, f"call {n} returned {resp.status_code}"
+
+    assert client.app.state.provider_keys == {"p2": "v2-only"}
 
 
 def test_missing_bearer_returns_401() -> None:

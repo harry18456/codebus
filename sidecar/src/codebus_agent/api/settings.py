@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 
+from codebus_agent.config.llm_config_store import save_llm_config
 from codebus_agent.config.provider_pool import (
     INVALID_PII_PROVIDER,
     ProviderPoolSnapshot,
@@ -109,6 +110,25 @@ def _require_snapshot(request: Request) -> ProviderPoolSnapshot:
     return snapshot
 
 
+def _persist_snapshot(request: Request) -> None:
+    """Mirror the in-memory snapshot to ``~/.codebus/llm-config.json``.
+
+    Called from every mutation endpoint after the in-memory state has
+    been updated. Failure here is logged but does NOT 5xx the mutation —
+    the in-memory state already reflects the user's intent and the
+    next successful mutation will retry the disk write. This trades
+    durability for liveness: a transient ENOSPC won't strand the
+    user mid-onboarding.
+    """
+    snapshot = getattr(request.app.state, "provider_pool_snapshot", None)
+    if snapshot is None:
+        return
+    try:
+        save_llm_config(snapshot)
+    except OSError as e:
+        logger.error("save_llm_config failed: %s", e)
+
+
 def _require_broker(request: Request) -> AppEventBroker:
     broker = getattr(request.app.state, "app_event_broker", None)
     if broker is None:
@@ -156,6 +176,7 @@ async def upsert_provider(
         pii_mode=snapshot.pii_mode,
         pii_provider_id=snapshot.pii_provider_id,
     )
+    _persist_snapshot(request)
     broker = _require_broker(request)
     await broker.emit_provider_config_changed(
         changed_roles=[],
@@ -190,6 +211,7 @@ async def delete_provider(provider_id: str, request: Request) -> Response:
         pii_mode=snapshot.pii_mode,
         pii_provider_id=snapshot.pii_provider_id,
     )
+    _persist_snapshot(request)
     broker = _require_broker(request)
     await broker.emit_provider_config_changed(
         changed_roles=[],
@@ -247,6 +269,7 @@ async def put_bindings(body: _BindingsBody, request: Request) -> Response:
         pii_mode=snapshot.pii_mode,
         pii_provider_id=snapshot.pii_provider_id,
     )
+    _persist_snapshot(request)
 
     holder = getattr(request.app.state, "providers", None)
     factory = getattr(request.app.state, "registry_factory", None)
@@ -318,6 +341,7 @@ async def put_pii_mode(body: _PiiModeBody, request: Request) -> Response:
         pii_mode=body.mode,  # type: ignore[arg-type]
         pii_provider_id=body.provider_id,
     )
+    _persist_snapshot(request)
     broker = _require_broker(request)
     await broker.emit_provider_config_changed(
         changed_roles=[],

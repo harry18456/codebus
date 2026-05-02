@@ -83,7 +83,7 @@ function onCancelEmbed(): void {
     data-testid="role-bindings-section"
     class="p-4 rounded-lg bg-surface-1 border border-border-base"
   >
-    <h2 class="text-[14px] font-semibold text-text-base mb-3">Role bindings</h2>
+    <h2 class="text-[14px] font-semibold text-text-base mb-3">角色綁定</h2>
     <table class="w-full text-[13px]">
       <thead class="text-text-mute text-[11.5px] uppercase tracking-wide">
         <tr>
@@ -109,7 +109,7 @@ function onCancelEmbed(): void {
                 onSelect(role.name, ($event.target as HTMLSelectElement).value)
               "
             >
-              <option value="" disabled>— pick provider —</option>
+              <option value="" disabled>— 請選擇 provider —</option>
               <option
                 v-for="opt in optionsFor(role.name)"
                 :key="opt.id"

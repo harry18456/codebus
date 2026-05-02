@@ -80,6 +80,35 @@ def test_cold_start_lanes_are_not_configured() -> None:
     assert body["dependency"]["llm_embed"] == "not-configured"
 
 
+def test_keys_present_but_smoke_stale_not_configured_lanes_ready() -> None:
+    """`phase7-onboarding-polish` regression fix: D-033 B switched API
+    keys from env-var to keyring + startup-config, but the boot-time
+    smoke probe registration in `create_app` still reads the old env
+    var. When `openai_api_key` is None at boot (the new default in
+    D-033 B), the registered probe always returns
+    `status='not-configured'`. The lane resolver MUST treat that as a
+    stale signal and trust the `app.state.provider_keys` presence
+    check above it — otherwise no amount of `POST /internal/startup-config`
+    can ever flip the lane to `ready` and the user is stuck in the
+    onboarding redirect loop forever.
+    """
+    token = _bearer()
+    app = create_app(bearer_token=token)  # no openai_api_key kwarg
+    app.state.provider_pool_snapshot = _bound_snapshot()
+    app.state.provider_keys = {
+        "openai-default": "sk-test-A",
+        "openai-embed-3": "sk-test-B",
+    }
+    # IMPORTANT: do NOT inject smoke probes here — the whole point of
+    # this test is that the production boot-time `_probe_openai_chat_not_configured`
+    # MUST NOT block the lane when keys are present.
+
+    client = TestClient(app)
+    body = client.get("/healthz", headers=_auth(token)).json()
+    assert body["dependency"]["llm_chat"] == "ready"
+    assert body["dependency"]["llm_embed"] == "ready"
+
+
 def test_pii_rule_mode_is_ready() -> None:
     """`pii.mode == "rule"` MUST always report `ready` (no LLM key needed)."""
     token = _bearer()

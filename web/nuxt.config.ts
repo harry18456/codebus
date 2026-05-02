@@ -1,5 +1,9 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
+  // Lock Nitro to current behavior; without this Nitro emits a WARN at
+  // dev start and may flip default behavior on future minor upgrades.
+  // Bump this when intentionally adopting newer Nitro defaults.
+  compatibilityDate: '2026-05-02',
   modules: ['@nuxtjs/tailwindcss', '@nuxtjs/mdc'],
   devtools: { enabled: true },
   typescript: {

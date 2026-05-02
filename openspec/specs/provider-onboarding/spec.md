@@ -10,9 +10,9 @@ TBD - created by archiving change 'provider-settings-and-onboarding'. Update Pur
 
 The frontend SHALL ship three pages under `web/app/pages/onboarding/`:
 
-1. `welcome.vue` rendered at `/onboarding/welcome` — pure copy: codebus introduction + "needs an LLM to function" + a link out to the OpenAI Terms of Service
-2. `providers.vue` rendered at `/onboarding/providers` — two side-by-side forms (chat provider + embedding provider) each with type / model / base_url / api_key fields
-3. `done.vue` rendered at `/onboarding/done` — confirmation copy + a single CTA button "Start" that routes to `/`
+1. `welcome.vue` rendered at `/onboarding/welcome` — pure copy: codebus introduction + a generic statement that the app needs an LLM provider to function. The page MUST NOT include any provider-specific terms-of-service link; provider-specific ToS belongs on `/onboarding/providers` per the contextual rule below.
+2. `providers.vue` rendered at `/onboarding/providers` — two side-by-side forms (chat provider + embedding provider) each with type / model / base_url / api_key fields. Each form MUST display a provider-specific terms-of-service link adjacent to the form, derived from the form's selected `type` value. The mapping from `type` to ToS URL MUST be sourced from a single per-app constant (e.g., `PROVIDER_TYPE_TOS_URL`) so future provider types can be added without touching `welcome.vue` or `done.vue`. For the P0 types `openai_chat` and `openai_embedding`, both MUST resolve to OpenAI's terms-of-use URL.
+3. `done.vue` rendered at `/onboarding/done` — confirmation copy + a single CTA button "Start" that routes to `/`.
 
 Each page MUST contain a single "Next" button (or "Start" on the last page) that is disabled until the page's required fields are filled. The pages MUST NOT contain a "Skip" button or any escape hatch other than browser navigation.
 
@@ -22,6 +22,12 @@ Each page MUST contain a single "Next" button (or "Start" on the last page) that
 - **THEN** the "Next" button MUST be enabled (no fields to fill)
 - **AND** clicking it MUST route to `/onboarding/providers`
 
+#### Scenario: Welcome page contains no provider-specific ToS link
+
+- **WHEN** the user lands on `/onboarding/welcome`
+- **THEN** the rendered DOM MUST NOT contain any anchor whose `href` resolves to a provider's terms-of-service URL (e.g., `openai.com/policies/terms-of-use`, `anthropic.com/legal/...`)
+- **AND** any legal-acknowledgement copy MUST be phrased provider-agnostically (e.g., "review your provider's terms of service before continuing" without naming a specific provider)
+
 #### Scenario: Providers page next disabled until both forms valid
 
 - **WHEN** the user lands on `/onboarding/providers` without prior input
@@ -29,11 +35,58 @@ Each page MUST contain a single "Next" button (or "Start" on the last page) that
 - **AND** entering valid `id` / `type` / `model` / `base_url` / `api_key` for the chat form alone MUST keep the button disabled
 - **AND** entering valid values for both chat and embedding forms MUST enable the button
 
+#### Scenario: Providers page renders contextual ToS link per type
+
+- **WHEN** the user is on `/onboarding/providers` and the chat form's `type` is `openai_chat`
+- **THEN** the chat form MUST render a visible anchor element whose `href` resolves to the URL mapped from `openai_chat` in the per-app `PROVIDER_TYPE_TOS_URL` constant
+- **AND** the same MUST hold for the embedding form when its `type` is `openai_embedding`
+- **AND** if a future `type` is added to the app without a corresponding entry in `PROVIDER_TYPE_TOS_URL`, the form MUST either omit the ToS link entirely or render a generic "review your provider's terms" placeholder — it MUST NOT render a broken or default-OpenAI link
+
 #### Scenario: Done page Start button routes to entry page
 
 - **WHEN** the user reaches `/onboarding/done` and clicks "Start"
 - **THEN** the page MUST route to `/`
 - **AND** the route MUST NOT redirect back to `/onboarding/welcome` because `/healthz.dependency` MUST now report all required lanes ready
+
+
+<!-- @trace
+source: phase7-onboarding-polish
+updated: 2026-05-02
+code:
+  - sidecar/src/codebus_agent/api/__init__.py
+  - web/dist
+  - sidecar/src/codebus_agent/api/settings.py
+  - web/app/utils/provider-tos.ts
+  - tauri/src-tauri/src/lib.rs
+  - tauri/src-tauri/Cargo.toml
+  - web/app/components/settings/ProviderEditModal.vue
+  - web/app/pages/onboarding/providers.vue
+  - tauri/src-tauri/capabilities/default.json
+  - web/app/components/settings/EmbeddingChangeConfirmModal.vue
+  - web/app/pages/onboarding/welcome.vue
+  - sidecar/src/codebus_agent/api/startup_config.py
+  - web/app/plugins/sidecar-startup-config.client.ts
+  - web/app/pages/onboarding/done.vue
+  - web/app/utils/external-link.ts
+  - web/app/components/settings/RoleBindingTable.vue
+  - web/app/components/settings/ProviderPoolList.vue
+  - web/nuxt.config.ts
+  - web/package.json
+  - sidecar/src/codebus_agent/config/llm_config_store.py
+  - web/app/pages/settings.vue
+  - sidecar/src/codebus_agent/auth/paths.py
+  - web/app/components/settings/PiiModeToggle.vue
+tests:
+  - sidecar/tests/api/test_startup_config.py
+  - web/tests/utils/provider-tos.spec.ts
+  - web/tests/settings/EmbeddingChangeConfirmModal.spec.ts
+  - sidecar/tests/test_cors_preflight_smoke.py
+  - sidecar/tests/config/test_llm_config_store.py
+  - sidecar/tests/api/test_healthz_dependency.py
+  - sidecar/tests/api/test_settings_persistence.py
+  - web/tests/onboarding/welcome.spec.ts
+  - web/tests/onboarding/providers.spec.ts
+-->
 
 ---
 ### Requirement: Onboarding writes through keyring and provider config in correct order

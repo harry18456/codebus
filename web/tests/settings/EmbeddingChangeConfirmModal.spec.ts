@@ -24,7 +24,7 @@ describe('<EmbeddingChangeConfirmModal>', () => {
     ).toContain('1500')
     expect(
       wrapper.get('[data-testid="embedding-confirm-eta"]').text()
-    ).toMatch(/min/)
+    ).toMatch(/分鐘/)
   })
 
   it('Cancel emits cancel without confirm', async () => {

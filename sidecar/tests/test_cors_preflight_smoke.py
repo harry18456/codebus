@@ -100,3 +100,40 @@ def test_real_get_without_bearer_still_401_even_with_allowed_origin() -> None:
         headers={"Origin": "http://localhost:3000"},
     )
     assert response.status_code == 401
+
+
+def test_preflight_for_put_settings_bindings_is_allowed() -> None:
+    """`PUT /settings/bindings` is the canonical hot-swap mutation
+    endpoint per D-033 B; the onboarding wizard fans out four PUTs
+    (reasoning / judge / chat / embed) on submit. CORS allow_methods
+    MUST list PUT or the browser blocks fetch with "Failed to fetch"
+    before the request ever reaches the sidecar."""
+    client = _client()
+    response = client.options(
+        "/settings/bindings",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "Authorization, Content-Type",
+        },
+    )
+    assert response.status_code == 200
+    assert "PUT" in response.headers.get("access-control-allow-methods", "")
+
+
+def test_preflight_for_delete_settings_provider_is_allowed() -> None:
+    """`DELETE /settings/providers/<id>` removes a provider from the
+    pool (settings page delete affordance). CORS allow_methods MUST
+    list DELETE or the user gets a silent "Failed to fetch" on
+    delete."""
+    client = _client()
+    response = client.options(
+        "/settings/providers/openai-default",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "DELETE",
+            "Access-Control-Request-Headers": "Authorization",
+        },
+    )
+    assert response.status_code == 200
+    assert "DELETE" in response.headers.get("access-control-allow-methods", "")

@@ -23,10 +23,10 @@ function onStart(): void {
     class="grid place-items-center min-h-screen p-8"
   >
     <div class="max-w-[480px] flex flex-col gap-4 text-center">
-      <h1 class="text-[24px] font-semibold text-text-base">All set</h1>
+      <h1 class="text-[24px] font-semibold text-text-base">一切就緒</h1>
       <p class="text-[14px] text-text-dim">
-        Your providers are configured. CodeBus is ready to turn an
-        unfamiliar codebase into a guided tutorial.
+        你的 LLM 提供者已設定完成。CodeBus 隨時可以把陌生的 codebase
+        變成可走訪的教學。
       </p>
       <button
         type="button"
@@ -34,7 +34,7 @@ function onStart(): void {
         class="self-center px-4 py-2 rounded-md bg-blue-500 text-white text-[14px]"
         @click="onStart"
       >
-        Start
+        開始
       </button>
     </div>
   </main>
