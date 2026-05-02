@@ -48,8 +48,8 @@
 
 ## 6. End-to-end smoke + 文件 + baseline
 
-- [ ] 6.1 跑 `cd web && npm run typecheck` zero error baseline 守住
-- [ ] 6.2 跑 `cd sidecar && uv run pytest -q` baseline 全綠（sidecar 端只新增 task 2.5 一個 parity test）
-- [ ] 6.3 重打 PyInstaller binary：`cd sidecar && uv run pyinstaller codebus-sidecar.spec --noconfirm`（雖然 sidecar code 沒改，但保險起見統一 binary 來源 — 加 parity test 的測試 fixture 不影響打包，可選）
-- [ ] 6.4 重啟 cargo tauri dev → 走整條 onramp：(a) 完成 onboarding（如果還沒）→ entry page → 點「+ 開新 codebase」→ native picker 選一個小 codebase → scan progress 跑完 → 點「+ 產生 tutorial」→ generate progress 跑完 → 點「進入 tutorial」→ 進到 R-01 station board
-- [ ] 6.5 完成後手動驗：D-033 B task 12.4 (b) chat hot-swap — 在 settings 改 chat binding → 回 station 跑一次 Q&A → 開 `<workspace>/.codebus/llm_calls.jsonl` 看新 model 欄已切換；驗 (c) embed hot-swap — 在 settings 改 embed → confirm modal → KB rebuild → 期間 `/qa` 503 → 完成後 Q&A 恢復
+- [x] 6.1 跑 `cd web && npm run typecheck` zero error baseline 守住
+- [x] 6.2 跑 `cd sidecar && uv run pytest -q` baseline（1023 passed / 17 skipped / **1 pre-existing failure**：`test_startup_remains_available_when_qdrant_unreachable` budget 3s 但本機 handshake 跑 5s；同一個 test 在 main HEAD f76aa5f 也跑 9s，與本 change 無關。Task 2.5 新增的 parity test 全 5 條 pass。）
+- [ ] 6.3 重打 PyInstaller binary：`cd sidecar && uv run pyinstaller codebus-sidecar.spec --noconfirm`（**可選 / 跳過**：sidecar production code 0 行 diff，新增 fixture-only test 不影響 binary。worktree 沿用 main HEAD f76aa5f 編出的 `codebus-sidecar-x86_64-pc-windows-msvc.exe`。）
+- [ ] 6.4 重啟 cargo tauri dev → 走整條 onramp：(a) 完成 onboarding（如果還沒）→ entry page → 點「+ 開新 codebase」→ native picker 選一個小 codebase → scan progress 跑完 → 點「+ 產生 tutorial」→ generate progress 跑完 → 點「進入 tutorial」→ 進到 R-01 station board（**留 manual TODO**：本 session 在無 WebView2 runtime 的 cargo test 環境跑不起完整 Tauri runtime；archive 後手動實機驗）
+- [ ] 6.5 完成後手動驗：D-033 B task 12.4 (b) chat hot-swap — 在 settings 改 chat binding → 回 station 跑一次 Q&A → 開 `<workspace>/.codebus/llm_calls.jsonl` 看新 model 欄已切換；驗 (c) embed hot-swap — 在 settings 改 embed → confirm modal → KB rebuild → 期間 `/qa` 503 → 完成後 Q&A 恢復（**依賴 6.4 manual smoke 通電後一起跑**）
