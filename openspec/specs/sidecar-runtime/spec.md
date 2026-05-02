@@ -294,6 +294,8 @@ tests:
 
 The sidecar SHALL expose `GET /tasks/{id}/events` returning a `text/event-stream` response per `docs/sidecar-api.md §四`. The endpoint MUST require the bearer token via the existing authentication middleware and MUST NOT be exempt from loopback binding. The response stream MUST emit only events whose `type` is one of `"progress"`, `"done"`, or `"error"` for changes scoped to this capability; other event types defined in the spec are reserved for follow-on changes and SHALL NOT be emitted by Module 1 or Module 2 task code paths in this change. Each event payload MUST be a single line of JSON terminated by the standard SSE `\n\n` separator. When a subscriber connects, the registry SHALL append a fresh `asyncio.Queue` to the handle's subscriber list and stream every subsequent emit to that queue; when the connection closes the queue MUST be removed from the list.
 
+Each emitted event on the wire MUST include both an `event:` line and a `data:` line. The `event:` line value MUST equal the inner JSON's `type` field (e.g., `event: progress`, `event: done`, `event: error`). This enables HTML EventSource named listeners (`addEventListener("done", ...)`, etc.) on the client side to fire reliably; emitting only `data:` collapses every event into the browser's default `message` channel and silently breaks consumers that dispatch on `EventSource.addEventListener(<type>, ...)`.
+
 #### Scenario: Stream emits progress, done, and final close
 
 - **WHEN** a client subscribes to `GET /tasks/{id}/events` for a task that emits one progress event then completes
@@ -309,35 +311,44 @@ The sidecar SHALL expose `GET /tasks/{id}/events` returning a `text/event-stream
 - **WHEN** two clients subscribe to the same task simultaneously and the task emits a sequence of three progress events followed by `done`
 - **THEN** each client's stream MUST contain all four events in the same order, and one subscriber's disconnect MUST NOT affect the other
 
+#### Scenario: Wire format includes both event and data lines per emission
+
+- **WHEN** any task emits an event with `type` field set to `"progress"`, `"done"`, or `"error"` and a subscriber reads the raw HTTP response stream
+- **THEN** the wire bytes for that event MUST contain both an `event: <type>` line and a `data: <json>` line, separated by `\r\n`, followed by the standard `\r\n\r\n` event terminator
+- **AND** the `<type>` value on the `event:` line MUST exactly equal the `type` field inside the JSON on the `data:` line
+- **AND** an event whose dict lacks an explicit `type` key MUST default the `event:` line value to `message`
+
 
 <!-- @trace
-source: sse-progress-skeleton
-updated: 2026-04-22
+source: sidecar-sse-named-events-and-error-listener-fix
+updated: 2026-05-03
 code:
-  - sidecar/src/codebus_agent/scanner/models.py
-  - CLAUDE.md
-  - docs/implementation-plan.md
-  - sidecar/src/codebus_agent/api/__init__.py
+  - web/app/components/workspace-onramp/FolderPickerButton.vue
+  - web/app/components/workspace-onramp/OnrampProgress.vue
+  - web/app/components/workspace-onramp/WorkspaceOnrampCard.vue
+  - web/app/composables/useWorkspaceOnramp.ts
+  - web/dist
+  - web/app/utils/workspace-id.ts
+  - web/app/components/AppShell.vue
+  - tauri/src-tauri/src/lib.rs
+  - tauri/src-tauri/Cargo.toml
+  - web/package.json
+  - tauri/src-tauri/capabilities/default.json
+  - web/app/pages/index.vue
   - sidecar/src/codebus_agent/api/tasks.py
-  - sidecar/src/codebus_agent/scanner/service.py
-  - sidecar/pyproject.toml
-  - sidecar/src/codebus_agent/api/kb.py
-  - sidecar/uv.lock
-  - sidecar/src/codebus_agent/api/scan.py
-  - docs/module-1-scanner.md
-  - docs/module-2-kb-builder.md
-  - docs/sidecar-api.md
+  - web/app/composables/useSseTask.ts
 tests:
-  - sidecar/tests/api/test_scan_stream.py
-  - sidecar/tests/api/__init__.py
-  - sidecar/tests/scanner/test_fixtures_integration.py
-  - sidecar/tests/api/test_kb_build.py
-  - sidecar/tests/api/test_task_error_containment.py
-  - sidecar/tests/api/test_task_registry.py
-  - sidecar/tests/api/test_task_result.py
-  - sidecar/tests/scanner/test_service.py
-  - sidecar/tests/api/test_tasks_sse.py
-  - sidecar/tests/scanner/test_progress_callback.py
+  - web/tests/utils/workspace-id.spec.ts
+  - sidecar/tests/auth/test_workspace_id_parity.py
+  - web/tests/onramp/WorkspaceOnrampCard.spec.ts
+  - tauri/src-tauri/tests/dialog_plugin_smoke.rs
+  - web/tests/onramp/FolderPickerButton.spec.ts
+  - web/tests/onramp/useWorkspaceOnramp.spec.ts
+  - web/tests/onboarding/index-page-redirect.spec.ts
+  - web/tests/setup.ts
+  - sidecar/tests/api/test_tasks_sse_wire_format.py
+  - web/tests/onramp/OnrampProgress.spec.ts
+  - web/tests/composables/useSseTask.connection-error.spec.ts
 -->
 
 ---

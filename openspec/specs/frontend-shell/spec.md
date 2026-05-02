@@ -253,6 +253,13 @@ The `useSseTask` composable SHALL accept a `taskId: string` matching `^(scan|kb|
 
 The composable MUST implement automatic reconnection with exponential backoff (initial delay 1 s, doubling per attempt, capped at 30 s); the final delay MUST surface to the caller via a reactive `status` field with values drawn from the closed set `{"connecting", "open", "reconnecting", "closed", "error"}`. The reactive return surface MUST expose `events` (array of received SSE messages, capped at 1000 entries with FIFO eviction), `status`, `error`, and a `close()` function that disconnects the EventSource immediately.
 
+The composable MUST distinguish between two distinct error sources from the underlying `EventSource`:
+
+1. **Connection-level errors** — fired by the browser when the SSE connection drops, fails to open, or is closed by the server. These dispatch as a generic `Event` (NOT a `MessageEvent`) and MUST be handled exclusively by the `EventSource.onerror` reconnection path; they MUST NOT push any entry into the reactive `events` array.
+2. **Server-emitted `error` events** — fired when the sidecar transmits an SSE message with `event: error\ndata: <json>`. These dispatch as a `MessageEvent` whose `data` field is the JSON string. They MUST be appended to the `events` array as `{type: "error", data: <parsed json>}`.
+
+The composable MUST NOT register `'error'` inside the catch-all `addEventListener` loop alongside other named events (`progress`, `done`, etc.), because EventSource's connection-error event shares the `'error'` name with server-emitted `event: error` SSE messages and a single shared handler cannot tell them apart. Instead, the composable MUST register a dedicated `'error'` listener whose callback gates the push by checking `event instanceof MessageEvent && typeof event.data === 'string'` before treating it as a server message.
+
 #### Scenario: Bearer arrives via useSidecar, not parameters
 
 - **WHEN** `useSseTask`'s function signature is inspected
@@ -278,24 +285,44 @@ The composable MUST implement automatic reconnection with exponential backoff (i
 - **THEN** the `events` reactive array MUST drop the oldest entry and append the newest
 - **AND** the array length MUST remain exactly 1000 after the FIFO eviction
 
+#### Scenario: Named error listener ignores connection-level errors
+
+- **WHEN** the underlying `EventSource` dispatches a generic `Event` named `"error"` (e.g., the server closes the connection cleanly after a `done` event, or the network drops)
+- **THEN** the composable's dedicated `'error'` listener MUST NOT push any entry into the `events` reactive array
+- **AND** the `EventSource.onerror` reconnection path MUST still execute (close + scheduleReconnect)
+- **AND** when the same EventSource later dispatches a `MessageEvent` named `"error"` with a JSON `data` string (i.e., a server-emitted `event: error\ndata: {...}` SSE message), the composable MUST append exactly one entry `{type: "error", data: <parsed json>}` to the `events` array
+
+
 <!-- @trace
-source: phase6-shell
-updated: 2026-04-27
+source: sidecar-sse-named-events-and-error-listener-fix
+updated: 2026-05-03
 code:
-  - web/tailwind.config.ts
-  - CLAUDE.md
-  - tauri/src-tauri/src/lib.rs
-  - docs/implementation-plan.md
-  - web/app/pages/index.vue
-  - web/app/app.vue
-  - web/app/composables/useSidecar.ts
+  - web/app/components/workspace-onramp/FolderPickerButton.vue
+  - web/app/components/workspace-onramp/OnrampProgress.vue
+  - web/app/components/workspace-onramp/WorkspaceOnrampCard.vue
+  - web/app/composables/useWorkspaceOnramp.ts
+  - web/dist
+  - web/app/utils/workspace-id.ts
   - web/app/components/AppShell.vue
-  - web/app/components/audit/AuditPanel.vue
-  - tauri/src-tauri/src/sidecar.rs
-  - web/app/components/layout/TopBar.vue
-  - web/app/layouts/default.vue
-  - web/nuxt.config.ts
+  - tauri/src-tauri/src/lib.rs
+  - tauri/src-tauri/Cargo.toml
+  - web/package.json
+  - tauri/src-tauri/capabilities/default.json
+  - web/app/pages/index.vue
+  - sidecar/src/codebus_agent/api/tasks.py
   - web/app/composables/useSseTask.ts
+tests:
+  - web/tests/utils/workspace-id.spec.ts
+  - sidecar/tests/auth/test_workspace_id_parity.py
+  - web/tests/onramp/WorkspaceOnrampCard.spec.ts
+  - tauri/src-tauri/tests/dialog_plugin_smoke.rs
+  - web/tests/onramp/FolderPickerButton.spec.ts
+  - web/tests/onramp/useWorkspaceOnramp.spec.ts
+  - web/tests/onboarding/index-page-redirect.spec.ts
+  - web/tests/setup.ts
+  - sidecar/tests/api/test_tasks_sse_wire_format.py
+  - web/tests/onramp/OnrampProgress.spec.ts
+  - web/tests/composables/useSseTask.connection-error.spec.ts
 -->
 
 ---
