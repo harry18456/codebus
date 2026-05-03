@@ -89,14 +89,29 @@ describe('<WorkspaceOnrampCard>', () => {
     expect(onrampMock.triggerGenerate).toHaveBeenCalledTimes(1)
   })
 
-  it('renders enter-tutorial anchor with /tutorial/<workspaceId> when phase=ready', () => {
+  it('renders enter-tutorial anchor with /tutorial/<workspaceId>?ws_path=<encoded path> when phase=ready', () => {
     onrampMock.phase.value = 'ready'
     onrampMock.workspaceId.value = 'ws_abc123def456'
     onrampMock.pickedPath.value = '/home/alice/projects/foo'
     const wrapper = mount(WorkspaceOnrampCard, { global: { stubs } })
     const link = wrapper.find('[data-testid="onramp-enter-tutorial"]')
     expect(link.exists()).toBe(true)
-    expect(link.attributes('href')).toBe('/tutorial/ws_abc123def456')
+    // The MOC page requires `?ws_path=<absolute>` to read tutorial
+    // files via the Tauri command; the onramp has the absolute path
+    // in state, so propagate it.
+    expect(link.attributes('href')).toBe(
+      '/tutorial/ws_abc123def456?ws_path=%2Fhome%2Falice%2Fprojects%2Ffoo'
+    )
+  })
+
+  it('falls back to / when pickedPath is missing in ready phase (defensive)', () => {
+    onrampMock.phase.value = 'ready'
+    onrampMock.workspaceId.value = 'ws_abc123def456'
+    onrampMock.pickedPath.value = null
+    const wrapper = mount(WorkspaceOnrampCard, { global: { stubs } })
+    const link = wrapper.find('[data-testid="onramp-enter-tutorial"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href')).toBe('/')
   })
 
   it('renders errorMsg + retry button when phase=error', async () => {

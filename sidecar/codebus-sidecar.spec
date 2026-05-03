@@ -52,10 +52,17 @@ _BINARY_NAME = f"codebus-sidecar-{_TRIPLE}" if _TRIPLE else "codebus-sidecar"
 # - uvicorn.protocols.http.auto: picked by uvicorn based on installed deps
 # - instructor: pulls provider adapters via entry points
 # - qdrant_client: lazy-loads grpc/http transports
+# - tiktoken_ext.openai_public: tiktoken loads encodings (cl100k_base
+#   etc.) via dynamic `tiktoken_ext` plugin discovery; without this,
+#   `tiktoken.get_encoding('cl100k_base')` raises
+#   `ValueError: Unknown encoding cl100k_base. Plugins found: []`
+#   inside the packaged binary even though it works in `uv run`.
+#   See https://github.com/openai/tiktoken/issues/80
 _HIDDEN_IMPORTS = [
     "uvicorn.protocols.http.auto",
     *collect_submodules("instructor"),
     *collect_submodules("qdrant_client"),
+    *collect_submodules("tiktoken_ext"),
 ]
 
 

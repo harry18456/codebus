@@ -35,9 +35,16 @@ const pathTail = computed<string>(() => {
   return parts[parts.length - 1] ?? normalized
 })
 
-const tutorialHref = computed<string>(() =>
-  onramp.workspaceId.value ? `/tutorial/${onramp.workspaceId.value}` : '/'
-)
+const tutorialHref = computed<string>(() => {
+  const wid = onramp.workspaceId.value
+  const path = onramp.pickedPath.value
+  // The MOC page (pages/tutorial/[workspace_id]/index.vue) reads
+  // tutorial files via `?ws_path=<absolute>`; without it the page
+  // bails out and the user lands on an error UI. We have the path
+  // in onramp state so propagate it through.
+  if (!wid || !path) return '/'
+  return `/tutorial/${wid}?ws_path=${encodeURIComponent(path)}`
+})
 
 async function onGenerate(): Promise<void> {
   await onramp.triggerGenerate()
