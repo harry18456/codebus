@@ -122,12 +122,17 @@ uv run python -m codebus_agent.api.main --healthz  # 自檢模式，印 JSON 不
 uv run python scripts/smoke_chat_provider.py # 真實 chat call smoke（讀 repo-root .env）
 ```
 
-**Qdrant 本地 binary**（D-027）
+**Qdrant 本地 binary**（D-027；自 `qdrant-auto-spawn` 落地後 sidecar 自動 spawn）
 ```bash
 # 把 qdrant binary 放到 ~/.codebus/bin/qdrant(.exe) 或設 $CODEBUS_QDRANT_BIN
+# sidecar 啟動時 probe 6333；不通且 binary 在 → 自動 spawn child + 三層 cleanup
+# binary 找不到 → log warning + degraded（sidecar 仍啟動，但 KB 操作 503）
+# Qdrant 1.x 無 --storage-path flag，走 env：QDRANT__STORAGE__STORAGE_PATH / QDRANT__STORAGE__SNAPSHOTS_PATH
+# 預設 storage：~/.codebus/kb/，可設 $CODEBUS_QDRANT_STORAGE 覆寫
+
+# Dev tool / fallback / debug 用（手動跑）：
 bash sidecar/scripts/start-qdrant.sh         # POSIX
 pwsh sidecar/scripts/start-qdrant.ps1        # Windows
-# Qdrant 1.x 無 --storage-path flag，走 env：QDRANT__STORAGE__STORAGE_PATH / QDRANT__STORAGE__SNAPSHOTS_PATH
 # Fallback：docker compose -f sidecar/docker-compose.qdrant.yml up -d
 ```
 

@@ -3,6 +3,14 @@
 # Backs openspec/changes/m1-power-on/specs/qdrant-client/spec.md
 #   Requirement: Local Qdrant launch recipe
 #
+# Role since `qdrant-auto-spawn` (D-027 follow-up):
+#   * The sidecar auto-spawns Qdrant on startup, so end users running
+#     `cargo tauri dev` do NOT need to invoke this script directly.
+#   * This script is preserved as a dev tool and a degraded-mode
+#     fallback: run it manually when the auto-spawn path warns about a
+#     missing binary, or when debugging Qdrant in isolation from the
+#     sidecar process tree.
+#
 # Resolves the binary via, in order:
 #   1. $CODEBUS_QDRANT_BIN (absolute path to the qdrant binary)
 #   2. ~/.codebus/bin/qdrant

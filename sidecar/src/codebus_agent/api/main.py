@@ -23,7 +23,12 @@ from codebus_agent.api import create_app
 from codebus_agent.auth.audit_logger import AuthorizationAuditLogger
 from codebus_agent.auth.paths import authorization_audit_path
 from codebus_agent.kb import qdrant_client as _kb_qdrant
-from codebus_agent.watchdog import watch_parent
+from codebus_agent.qdrant_supervisor import (
+    install_signal_cleanup,
+    maybe_spawn_qdrant,
+    register_cleanup,
+)
+from codebus_agent.watchdog import supervise_parent
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -45,8 +50,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-async def _serve(app, sock, port: int, bearer: str, parent_pid: int | None) -> None:
-    handshake.emit(port=port, bearer=bearer)
+async def _serve(
+    app,
+    sock,
+    port: int,
+    bearer: str,
+    parent_pid: int | None,
+    on_parent_exit=None,
+) -> None:
     config = uvicorn.Config(
         app,
         host="127.0.0.1",
@@ -61,15 +72,17 @@ async def _serve(app, sock, port: int, bearer: str, parent_pid: int | None) -> N
     server = uvicorn.Server(config)
 
     if parent_pid is not None:
-        async def _supervise() -> None:
-            await watch_parent(parent_pid=parent_pid)
-            # Parent has vanished — force exit rather than rely on
-            # uvicorn's graceful shutdown (which can block on open
-            # connections and miss the 5-second SHALL budget).
-            os._exit(0)
+        # `qdrant-auto-spawn` Decision 3: the watchdog now runs the
+        # Qdrant cleanup hook (best-effort) BEFORE os._exit so the
+        # spawned child does not orphan when Tauri force-exits.
+        asyncio.create_task(
+            supervise_parent(parent_pid=parent_pid, on_exit=on_parent_exit)
+        )
 
-        asyncio.create_task(_supervise())
-
+    # Bearer / port are unused inside _serve now (handshake.emit moved
+    # to run() per qdrant-auto-spawn §4 ordering invariant); kept on
+    # the signature so external callers do not break.
+    del bearer
     await server.serve(sockets=[sock])
 
 
@@ -111,8 +124,23 @@ def run(argv: list[str] | None = None) -> None:
         openai_api_key=os.environ.get("CODEBUS_OPENAI_API_KEY"),
         auth_audit_logger_factory=lambda: AuthorizationAuditLogger(audit_path),
     )
+
+    # `qdrant-auto-spawn` §4 ordering invariant: handshake MUST emit
+    # first so the Tauri parent unblocks ASAP, then Qdrant spawn runs
+    # synchronously (0~10s budget) before asyncio.run starts uvicorn.
+    # The handshake → spawn → register_cleanup → install_signal_cleanup
+    # → asyncio.run order is locked by spec scenario "Spawn never
+    # blocks sidecar startup" + Requirement text "after handshake
+    # emit ... and BEFORE asyncio.run".
+    handshake.emit(port=port, bearer=bearer)
+    qdrant_proc = maybe_spawn_qdrant(parent_pid=args.parent_pid)
+    cleanup_hook = register_cleanup(qdrant_proc)
+    install_signal_cleanup(qdrant_proc)
+
     try:
-        asyncio.run(_serve(app, sock, port, bearer, args.parent_pid))
+        asyncio.run(
+            _serve(app, sock, port, bearer, args.parent_pid, on_parent_exit=cleanup_hook)
+        )
     finally:
         sock.close()
 

@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from codebus_agent.watchdog import watch_parent
+from codebus_agent.watchdog import supervise_parent, watch_parent
 
 WATCHDOG_LIMIT_S = 5.0
 
@@ -40,6 +40,73 @@ async def test_watch_parent_returns_when_pid_dies() -> None:
     )
     elapsed = time.monotonic() - start
     assert elapsed < 2.0
+
+
+async def test_supervise_parent_invokes_on_exit_before_os_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec scenario: Tauri parent exit triggers child termination via watchdog.
+
+    `supervise_parent` MUST call the on_exit hook before invoking
+    `os._exit(0)` so the Qdrant child is terminated before the
+    sidecar process disappears (Decision 3: 三層 cleanup).
+    """
+    helper = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(0.2)"],
+    )
+    helper_pid = helper.pid
+    helper.wait()
+
+    call_order: list[str] = []
+
+    def _on_exit() -> None:
+        call_order.append("on_exit")
+
+    fake_exit_called = []
+
+    def _fake_os_exit(code: int) -> None:
+        # Record AFTER any prior on_exit appended its marker so the
+        # ordering assertion below is meaningful.
+        call_order.append(f"os_exit({code})")
+        fake_exit_called.append(code)
+
+    monkeypatch.setattr("os._exit", _fake_os_exit)
+
+    await supervise_parent(
+        parent_pid=helper_pid,
+        on_exit=_on_exit,
+        poll_interval_s=0.05,
+    )
+
+    assert fake_exit_called == [0], "supervise_parent must call os._exit(0)"
+    assert call_order == ["on_exit", "os_exit(0)"], (
+        f"on_exit must run before os._exit; got {call_order}"
+    )
+
+
+async def test_supervise_parent_swallows_on_exit_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """on_exit raising MUST NOT block os._exit — best-effort cleanup."""
+    helper = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(0.2)"],
+    )
+    helper_pid = helper.pid
+    helper.wait()
+
+    def _on_exit_boom() -> None:
+        raise RuntimeError("cleanup failed")
+
+    fake_exit_called = []
+    monkeypatch.setattr("os._exit", lambda code: fake_exit_called.append(code))
+
+    await supervise_parent(
+        parent_pid=helper_pid,
+        on_exit=_on_exit_boom,
+        poll_interval_s=0.05,
+    )
+
+    assert fake_exit_called == [0], "os._exit must still fire even if on_exit raised"
 
 
 async def test_watch_parent_stays_running_while_parent_alive() -> None:

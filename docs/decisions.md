@@ -945,6 +945,14 @@ npm test                        # vitest
 - [ ] `.gitignore` 補 `*.qdrant-bin/` / `bin/qdrant*` 模板
 - [ ] README workspace 結構圖補 `~/.codebus/bin/` 目錄
 
+### Sidecar-managed auto-spawn（追記，change `qdrant-auto-spawn`）
+
+D-027 archive 落地後浮現：`start-qdrant.{ps1,sh}` dev tool 是手動啟動入口，但 desktop user 跑 `cargo tauri dev` 沒有先讀文件 → 不知道要先起 Qdrant → `/kb/build` 1~2s 內 raise → 「internal sidecar error」。違反「下載即可用」UX 標準。
+
+**追加決策**（2026-05-03 PoC 完成）：sidecar 啟動 sequence 在 handshake emit 之後、`asyncio.run(_serve(...))` 之前自動 spawn Qdrant child。binary 解析 `$CODEBUS_QDRANT_BIN` → `~/.codebus/bin/qdrant{.exe}`；reuse-first probe（已通就不 spawn）；poll 10s timeout / binary 找不到 → log warning + degraded（保留「degraded-but-alive」不變式）。三層 cleanup（atexit / parent_pid watchdog / SIGTERM）連動，先 `terminate()` 再 `wait(5)` 再 `kill()`。`start-qdrant.{ps1,sh}` 仍保留作 dev tool / 文件範例 / degraded fallback。
+
+**PoC 證據**（2026-05-03 Windows）：`subprocess.Popen` spawn `qdrant.exe` → 2.14s 內 `/healthz` 回 2xx → `terminate()` 5s 內 graceful 退出。子程序 lifecycle 由 Python sidecar 管理可行；不需要 Tauri Rust 層介入。詳細 spec / design / tasks 見 `openspec/changes/qdrant-auto-spawn/`。
+
 ---
 
 ## D-028: LLM Vision 能力延後至 Phase 2（MVP 不做、但介面保留 additive 擴充空間）

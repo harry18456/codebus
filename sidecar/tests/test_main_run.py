@@ -89,6 +89,131 @@ def _terminate(proc: subprocess.Popen[str]) -> None:
         proc.wait()
 
 
+# ───── qdrant-auto-spawn §4 run() integration ─────────────────────
+
+
+def test_run_spawns_qdrant_after_handshake_before_serve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec scenario: Spawn never blocks sidecar startup, plus ordering
+    invariant from spec Requirement text:
+      'after the sidecar's handshake JSON line has been emitted to
+       stdout and BEFORE asyncio.run(_serve(...)) opens the FastAPI
+       listener'
+
+    Asserts that in the run() flow:
+      1. handshake.emit() fires
+      2. maybe_spawn_qdrant() fires
+      3. register_cleanup() fires
+      4. install_signal_cleanup() fires
+      5. asyncio.run(_serve(...)) fires (last)
+    """
+    from unittest.mock import MagicMock, patch
+
+    from codebus_agent.api import main as main_module
+
+    call_order: list[str] = []
+
+    def _record(name: str, *, returns: object = None) -> object:
+        def _inner(*_args: object, **_kwargs: object) -> object:
+            call_order.append(name)
+            return returns
+
+        return _inner
+
+    fake_proc = MagicMock(name="qdrant_popen")
+
+    monkeypatch.setattr(
+        main_module.auth, "generate_token", _record("generate_token", returns="x" * 32)
+    )
+    fake_sock = MagicMock()
+    fake_sock.close = MagicMock()
+    monkeypatch.setattr(
+        main_module.net,
+        "bind_ephemeral_loopback",
+        _record("bind", returns=(fake_sock, 12345)),
+    )
+    monkeypatch.setattr(
+        main_module._kb_qdrant, "resolve_url", _record("resolve_url", returns=None)
+    )
+    monkeypatch.setattr(
+        main_module, "create_app", _record("create_app", returns=MagicMock())
+    )
+    monkeypatch.setattr(
+        main_module.handshake, "emit", _record("handshake_emit")
+    )
+    monkeypatch.setattr(
+        main_module, "maybe_spawn_qdrant", _record("spawn_qdrant", returns=fake_proc)
+    )
+    monkeypatch.setattr(
+        main_module, "register_cleanup", _record("register_cleanup", returns=lambda: None)
+    )
+    monkeypatch.setattr(
+        main_module, "install_signal_cleanup", _record("install_signal_cleanup")
+    )
+
+    # Stub asyncio.run so the test does not actually spin up uvicorn.
+    monkeypatch.setattr(
+        main_module.asyncio, "run", _record("asyncio_run")
+    )
+
+    main_module.run(argv=[])
+
+    handshake_idx = call_order.index("handshake_emit")
+    spawn_idx = call_order.index("spawn_qdrant")
+    register_idx = call_order.index("register_cleanup")
+    signal_idx = call_order.index("install_signal_cleanup")
+    serve_idx = call_order.index("asyncio_run")
+
+    assert handshake_idx < spawn_idx, (
+        f"handshake must emit before spawn; order={call_order}"
+    )
+    assert spawn_idx < serve_idx, (
+        f"spawn must happen before asyncio.run(_serve); order={call_order}"
+    )
+    assert register_idx > spawn_idx and register_idx < serve_idx
+    assert signal_idx > spawn_idx and signal_idx < serve_idx
+
+
+def test_run_continues_when_spawn_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec scenario: Spawn never blocks sidecar startup.
+
+    Even when maybe_spawn_qdrant returns None (binary missing /
+    timeout), asyncio.run(_serve(...)) MUST still fire.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from codebus_agent.api import main as main_module
+
+    serve_called = [False]
+
+    def _serve_marker(*_a: object, **_kw: object) -> None:
+        serve_called[0] = True
+
+    fake_sock = MagicMock()
+    monkeypatch.setattr(main_module.auth, "generate_token", lambda: "x" * 32)
+    monkeypatch.setattr(
+        main_module.net, "bind_ephemeral_loopback", lambda: (fake_sock, 12345)
+    )
+    monkeypatch.setattr(main_module._kb_qdrant, "resolve_url", lambda: None)
+    monkeypatch.setattr(main_module, "create_app", lambda **_: MagicMock())
+    monkeypatch.setattr(main_module.handshake, "emit", lambda **_: None)
+    monkeypatch.setattr(
+        main_module, "maybe_spawn_qdrant", lambda parent_pid=None: None
+    )
+    monkeypatch.setattr(
+        main_module, "register_cleanup", lambda proc: lambda: None
+    )
+    monkeypatch.setattr(main_module, "install_signal_cleanup", lambda proc: None)
+    monkeypatch.setattr(main_module.asyncio, "run", _serve_marker)
+
+    main_module.run(argv=[])
+
+    assert serve_called[0], "asyncio.run(_serve) must fire even when spawn returns None"
+
+
 @pytest.mark.slow
 def test_env_qdrant_url_threads_through_to_runtime_probe() -> None:
     """Scenario: CLI / runtime share the same resolver.
