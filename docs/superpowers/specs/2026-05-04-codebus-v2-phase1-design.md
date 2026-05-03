@@ -141,6 +141,72 @@ Karpathy 把 LLM 對 wiki 的操作分三類，phase 1 對應如下：
 - 開發：repo 內 `npm link` 本地連
 - 上線：`npm publish` 到 npm registry，user 跑 `npm install -g codebus`
 
+### 3.5 Module Architecture（為 phase 2/3 替換性留邊界）
+
+採 hexagonal / ports-and-adapters pattern — core domain 跟 side-effect 分離，phase 2/3 升級（加 PII / 多 provider / Tauri）時加新 adapter file 不動 core。
+
+**三層分離:**
+
+| 層 | 內容 | 對外界依賴 |
+|---|---|---|
+| **core/** | 純 domain：wiki 規則、frontmatter、page-merge、stale-detect、vault layout、lock | 無（無 LLM / 無 disk / 無 process）|
+| **infra/** | side-effect adapters：fs / git / llm provider | 有外界依賴（spawn / fs / network）|
+| **ui/** | rendering：stream-parser / terminal render | 有 process IO |
+| **commands/** | thin orchestration：init / goal / query | 拼上面三層 |
+| **schema/** | 內建 `.codebus/CLAUDE.md` 範本 | 無 |
+
+**LLMProvider interface（核心 port）:**
+
+```typescript
+// src/infra/llm/types.ts
+export type StreamEvent =
+  | { type: 'thought'; text: string }
+  | { type: 'tool_use'; name: string; args: unknown }
+  | { type: 'tool_result'; output: string; error?: string }
+  | { type: 'done' }
+
+export interface LLMProvider {
+  invoke(opts: {
+    systemPrompt: string
+    userMessage: string
+    mode: 'ingest' | 'query'
+  }): AsyncIterable<StreamEvent>
+  cancel(): void
+}
+```
+
+**Phase 1 唯一 adapter:**
+
+```typescript
+// src/infra/llm/claude-cli.ts
+export class ClaudeCliProvider implements LLMProvider { ... }
+```
+
+**Phase 2 加 adapter（不動 core）:**
+
+```typescript
+// src/infra/llm/anthropic-sdk.ts (phase 2)
+export class AnthropicSdkProvider implements LLMProvider { ... }
+
+// src/infra/llm/openai-sdk.ts (phase 2)
+export class OpenAiSdkProvider implements LLMProvider { ... }
+```
+
+**Phase 2/3 預期會被取代 / 擴展的 module:**
+
+| Module | Phase 1 | Phase 2/3 取代成 |
+|---|---|---|
+| `infra/llm/` | claude-cli only | + anthropic-sdk / openai-sdk / gemini / ... |
+| `ui/stream-parser.ts` | parse claude-cli stream-json only | dispatch by provider type（各 SSE format）|
+| `ui/render.ts` | terminal emoji | + emit events to Tauri webview (phase 3) |
+| `infra/fs/raw-sync.ts` | direct copy | + PII filter at copy boundary (phase 2) |
+
+**Phase 1 不抽象的（避免過度設計）:**
+
+- `core/wiki/page-merge.ts` 不抽象成 strategy pattern — phase 1 只一種策略 (append-merge)，phase 2 加 LLM body merge 時再 refactor
+- `infra/git/` 不抽象 — git CLI 不會換
+- Tool registry — phase 1 用 Claude Code 內建，無 tool 抽象需求
+
 ---
 
 ## 4. Disk Layout
@@ -503,24 +569,35 @@ codebus/                          ← v2 main branch
 ├── LICENSE                       ← 待定
 ├── src/
 │   ├── cli.ts                    ← entry，commander 設 args
-│   ├── commands/
+│   ├── commands/                 ← thin orchestration
 │   │   ├── init.ts
 │   │   ├── goal.ts               ← --goal (ingest)
 │   │   └── query.ts              ← --query (純問答)
-│   ├── codebus/
-│   │   ├── vault.ts              ← .codebus/ init / nested git
-│   │   ├── raw-sync.ts           ← copy src→raw + gitignore filter
-│   │   ├── source-version.ts     ← commit hash / uncommitted check
-│   │   ├── stale-detect.ts       ← sha256 比對
-│   │   ├── frontmatter-repair.ts ← wikilink YAML util（clean room 重寫）
-│   │   ├── page-merge.ts         ← append-merge dispatcher
-│   │   └── lock.ts               ← file-based mutex
-│   ├── claude/
-│   │   ├── spawn.ts              ← 組 claude -p args + cwd
-│   │   ├── stream-parser.ts      ← stream-json events
-│   │   └── render.ts             ← event → emoji terminal
+│   ├── core/                     ← 純 domain（無 LLM / disk / process dep）
+│   │   ├── wiki/
+│   │   │   ├── frontmatter.ts          ← parse / serialize
+│   │   │   ├── frontmatter-repair.ts   ← wikilink YAML repair util（clean room）
+│   │   │   ├── page-merge.ts           ← append-merge dispatcher
+│   │   │   ├── stale-detect.ts         ← sha256 比對
+│   │   │   └── types.ts
+│   │   └── vault/
+│   │       ├── layout.ts               ← .codebus/ structure constants
+│   │       └── lock.ts                 ← file-based mutex（純 path 邏輯）
+│   ├── infra/                    ← side-effect adapters
+│   │   ├── fs/
+│   │   │   ├── raw-sync.ts             ← copy repo → raw + gitignore filter
+│   │   │   └── file-ops.ts             ← read/write 包裝
+│   │   ├── git/
+│   │   │   ├── source-version.ts       ← commit hash / uncommitted check
+│   │   │   └── nested-repo.ts          ← .codebus/.git init / auto-commit
+│   │   └── llm/
+│   │       ├── types.ts                ← LLMProvider interface + StreamEvent schema
+│   │       └── claude-cli.ts           ← phase 1 唯一 impl（spawn + 解析）
+│   ├── ui/                       ← rendering
+│   │   ├── stream-parser.ts            ← parse claude-cli stream-json → StreamEvent
+│   │   └── render.ts                   ← StreamEvent → terminal emoji
 │   └── schema/
-│       └── claude-md.ts          ← 內建 .codebus/CLAUDE.md 範本
+│       └── claude-md.ts                ← 內建 .codebus/CLAUDE.md 範本
 ├── tests/
 │   └── (vitest)
 └── docs/
