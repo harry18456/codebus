@@ -49,6 +49,9 @@ Thumbs.db
 
 # CodeBus workspace artifacts
 codebus-workspace/
+# Module 5 Generator output (`<ws>/codebus-tutorials/<task_id>/...`, D-029);
+# may end up inside `tests/golden/<fixture>/` after a smoke run, but is never checked in.
+codebus-tutorials/
 # Per-workspace audit dir (七層 JSONL + downstream artefacts; CLAUDE.md §關鍵不變式 7)
 .codebus/
 # Legacy bare-filename audit logs (kept for back-compat; new layouts use .codebus/)

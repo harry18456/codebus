@@ -1,5 +1,8 @@
 # 🚌 CodeBus 產品規劃與 Spec
 
+> **狀態（2026-05-03）**：v1 暫停開發，準備以不同架構重做 v2，不直接延續本 repo 的 code path。
+> v1 凍結在 git branch `v1-archive`；剩下未竟事項見 §十四。
+
 > 「XX 哥哥，我們來接你了呦～來囉來囉～」
 > 新人工程師的 Agentic AI 學習夥伴
 
@@ -561,5 +564,38 @@ A：以中大型工程團隊規模，每年新進 RD 人力成本乘以 onboardi
 **CodeBus（程式碼巴士）**
 
 呼應 2025 年爆紅的「上車舞」迷因——「XX 哥哥，我們來接你了呦～來囉來囉～」。新人工程師是乘客，Agent 是司機，資料夾或 topic 是目的地，學習完成就「下車囉」。
+
+---
+
+## 十四、v1 暫停與未竟之事
+
+**凍結時點**：2026-05-03，git branch `v1-archive`。
+
+v1 走完資料層 + Modules 1/2/4/5/8 + Phase 6 Trust Layer 四站；接下來以不同架構重做 v2，不直接延續本 repo 的 code path。本節列 v1 已知缺口與 defer 工作，作為 v2 設計參考。
+
+### 已知 contract bug（v1 未修）
+
+- **Generator 對 0-station 仍 emit `done`**：explorer 跑完 `state.stations=[]` 時，`run_generator` 寫空 `route.json` + 靜默 done，使用者得到「ready 但目錄全空」。應改為 emit `error{code:"STATIONS_EMPTY"}`。檔案：`sidecar/src/codebus_agent/generator/runner.py`。
+- **Onramp 對既存 workspace 沒 fast-path**：`useWorkspaceOnramp.start(path)` 永遠重跑 scan → kb-build → explore → generate；同一資料夾第二次開仍從零跑。需 `GET /workspace/state` + onramp short-circuit。檔案：`web/app/composables/useWorkspaceOnramp.ts`。
+
+### Demo / fixture 適配缺口
+
+- **demo-synthetic vs onramp default task**：onramp 寫死 `task='認識整個 codebase'`，demo-synthetic README 自稱「示範用合成 repo」，judge relevance ≤ 0.5 全部拒絕加站 → 空教材。要嘛改 fixture 內容，要嘛調 explorer/judge prompt 門檻。
+
+### Phase 7 未跑完的打磨
+
+對應 `docs/implementation-plan.md §二第七階段`：
+
+- Prompt 品質迭代（reasoning / judge / generator）
+- 跨平台 manual e2e：Windows ✅、macOS / Linux 待實機
+- 打包 smoke：`uv run pyinstaller codebus-sidecar.spec` → `cargo tauri build` 端到端產出安裝包未驗
+- Demo 素材腳本與錄製
+
+### Defer 至 v2 的 follow-up
+
+- **`sanitizer-audit-unlock`**：3-pane raw diff、unlock-with-grant、auto-relock、raw retention 門檻、`audit_session_id` chain；落地前須 ADR 評估 raw retention threat model（守 D-015 不可逆性）。
+- **Q&A P1+**（per `docs/qa-agent.md §十`）：cross-session memory、citation file:line click → side panel、`add_to_kb` rollback button + KB ops UI、drawer resize 多 instance。
+- **`qdrant-auto-spawn`**：21/25 task 完成；§6.1–6.4 manual smoke 留尾巴未驗。
+- **D-033 B 跨平台**：12.4 (b)(c) chat/embed hot-swap manual + 12.5 macOS/Linux keyring 實機。
 
 既幽默又貼切，Demo 開場就能讓觀眾留下印象。
