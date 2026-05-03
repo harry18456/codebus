@@ -76,26 +76,40 @@ class OpenAIRateLimitError(Exception):
 class OpenAIEmbeddingProvider:
     """Thin async wrapper around `openai.AsyncOpenAI().embeddings.create`.
 
-    Construction fails fast if `CODEBUS_OPENAI_API_KEY` is absent so the
+    Construction fails fast when no API key is available so the
     sidecar's degraded-mode contract is unambiguous — the caller
     (`wire_kb_dependencies`) decides not to construct the provider when
-    the env var is missing, rather than constructing a broken one.
+    the key is missing, rather than constructing a broken one.
+
+    Resolution order (D-033 B integration):
+      1. Explicit ``api_key`` kwarg — used when the key flows from
+         ``app.state.provider_keys`` (populated by Tauri keyring via
+         ``POST /internal/startup-config``).
+      2. ``CODEBUS_OPENAI_API_KEY`` env var — preserved as a fallback
+         for tests, the standalone ``--healthz`` smoke probe, and the
+         legacy bootstrap path before D-033 B onboarding lands.
+
+    The two paths are mutually exclusive at any given construction call;
+    the kwarg simply preempts the env lookup when present.
     """
 
     name: str = "openai-embedding"
 
-    def __init__(self) -> None:
-        api_key = os.environ.get(_ENV_VAR)
-        if not api_key:
-            # D-032 decision 5: env var name is the only supported source.
-            # No fallback to OPENAI_API_KEY — mentioning the right var here
-            # is crucial so operators fix the right thing.
+    def __init__(self, *, api_key: str | None = None) -> None:
+        resolved = api_key if api_key else os.environ.get(_ENV_VAR)
+        if not resolved:
+            # D-032 decision 5: env var name is the only supported source
+            # for the legacy fallback. No fallback to OPENAI_API_KEY —
+            # mentioning the right var here is crucial so operators fix
+            # the right thing. The kwarg path supersedes this when
+            # /internal/startup-config has populated app.state.provider_keys.
             raise RuntimeError(
-                f"{_ENV_VAR} environment variable is required to construct "
-                f"OpenAIEmbeddingProvider; set it before starting the sidecar, "
-                f"or leave it unset to keep POST /kb/build in graceful 503 mode."
+                f"OpenAI API key not provided; pass api_key= explicitly or "
+                f"set {_ENV_VAR} env var before constructing "
+                f"OpenAIEmbeddingProvider, or leave both unset to keep "
+                f"POST /kb/build in graceful 503 mode."
             )
-        self._client = openai.AsyncOpenAI(api_key=api_key)
+        self._client = openai.AsyncOpenAI(api_key=resolved)
 
     async def embed(self, texts: list[str]) -> EmbedResponse:
         try:

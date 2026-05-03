@@ -261,3 +261,100 @@ def test_sentinel_api_key_does_not_appear_in_audit_jsonl(tmp_path) -> None:
         assert _SENTINEL_API_KEY not in text, (
             f"sentinel leaked into {jsonl.name}: {text[:200]!r}"
         )
+
+
+# ───── KB re-wire on startup-config (D-033 B integration) ───────────
+#
+# Spec ``Tauri-to-sidecar startup key injection``: after keys land in
+# ``app.state.provider_keys``, the legacy ``app.state.kb_*`` /
+# ``app.state.llm_*_provider`` factories MUST resolve their per-binding
+# key from the snapshot + provider_keys path. This was the integration
+# gap that caused ``POST /kb/build`` to return 503 KB_NOT_CONFIGURED
+# despite onboarding completing.
+
+
+def test_startup_config_rewires_kb_factories_from_provider_pool_snapshot() -> None:
+    """After /internal/startup-config, app.state.kb_provider becomes a
+    callable factory that resolves the embed key from the snapshot.
+
+    The bug this regresses: prior to the fix, kb_provider stayed None
+    because wire_kb_dependencies only ran at create_app time with the
+    env-var-derived key. Now it re-runs on startup-config push.
+    """
+    from codebus_agent.config.provider_pool import (
+        ProviderPoolSnapshot,
+        ProviderSpec,
+    )
+
+    client, token = _make_client()
+
+    # Simulate what the onboarding wizard's /settings/providers POST
+    # would have done before the user clicks "Done": populate the pool
+    # snapshot with the bindings the wizard wrote.
+    client.app.state.provider_pool_snapshot = ProviderPoolSnapshot(
+        providers=(
+            ProviderSpec(
+                id="openai-default",
+                type="openai_chat",
+                model="gpt-4o-mini",
+                base_url="https://api.openai.com/v1",
+            ),
+            ProviderSpec(
+                id="openai-embed",
+                type="openai_embedding",
+                model="text-embedding-3-small",
+                base_url="https://api.openai.com/v1",
+            ),
+        ),
+        bindings={
+            "reasoning": "openai-default",
+            "judge": "openai-default",
+            "chat": "openai-default",
+            "embed": "openai-embed",
+        },
+    )
+
+    # Pre-condition: factories should be None (no key has been pushed yet).
+    assert client.app.state.kb_provider is None
+    assert client.app.state.llm_chat_provider is None
+
+    body = {
+        "provider_keys": {
+            "openai-default": "sk-rewire-chat-key",
+            "openai-embed": "sk-rewire-embed-key",
+        }
+    }
+    resp = client.post(
+        "/internal/startup-config", json=body, headers=_auth(token)
+    )
+    assert resp.status_code == 204
+
+    # Post-condition: factories MUST be re-wired.
+    assert callable(client.app.state.kb_provider), (
+        "kb_provider should be a workspace factory after startup-config"
+    )
+    assert callable(client.app.state.kb_query_provider)
+    assert callable(client.app.state.llm_chat_provider)
+    assert callable(client.app.state.llm_judge_provider)
+    assert callable(client.app.state.llm_reasoning_provider)
+    assert callable(client.app.state.llm_qa_provider)
+    assert callable(client.app.state.llm_generate_provider)
+    assert callable(client.app.state.llm_coverage_provider)
+    assert client.app.state.kb_embedding_dim is not None
+
+
+def test_startup_config_without_snapshot_leaves_factories_none() -> None:
+    """Without a provider_pool_snapshot, the role→key resolution can't
+    happen. Factories remain None — the caller (onboarding wizard) MUST
+    establish the snapshot first via /settings/providers + /settings/bindings."""
+    client, token = _make_client()
+    # Clear any boot-time snapshot so the fallback path is the only signal.
+    client.app.state.provider_pool_snapshot = None
+
+    body = {"provider_keys": {"openai-default": "sk-no-snapshot"}}
+    resp = client.post(
+        "/internal/startup-config", json=body, headers=_auth(token)
+    )
+    assert resp.status_code == 204
+    assert client.app.state.kb_provider is None
+    assert client.app.state.llm_chat_provider is None

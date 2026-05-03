@@ -61,6 +61,14 @@ async def post_startup_config(body: _StartupConfigBody, request: Request) -> Res
     `phase7-onboarding-polish` so onboarding can push keys after the
     user enters them).
 
+    After storing keys, the handler re-runs ``wire_kb_dependencies`` so
+    the lazily-constructed factories on ``app.state.kb_*`` /
+    ``app.state.llm_*_provider`` pick up the freshly resolved
+    per-binding keys (D-033 B integration fix — without this, the
+    endpoint stored keys but production traffic still hit the legacy
+    env-var-only provider constructors and ``POST /kb/build`` returned
+    503 ``KB_NOT_CONFIGURED`` despite onboarding completing).
+
     The handler intentionally does NOT log the api_key values. Only
     the count is logged for operational visibility.
     """
@@ -70,6 +78,15 @@ async def post_startup_config(body: _StartupConfigBody, request: Request) -> Res
     logger.info(
         "startup-config applied: %d provider key(s) loaded",
         len(app.state.provider_keys),
+    )
+    # Late import avoids the circular dependency between this leaf
+    # router module and the FastAPI factory that imports it.
+    from codebus_agent.api import wire_kb_dependencies
+
+    wire_kb_dependencies(
+        app,
+        openai_api_key=None,  # legacy fallback unused — keys are in app.state.provider_keys
+        qdrant_url=getattr(app.state, "qdrant_url", None),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

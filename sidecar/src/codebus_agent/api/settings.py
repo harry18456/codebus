@@ -271,6 +271,20 @@ async def put_bindings(body: _BindingsBody, request: Request) -> Response:
     )
     _persist_snapshot(request)
 
+    # Re-wire the legacy ``app.state.kb_*`` / ``app.state.llm_*_provider``
+    # factories so production endpoints (`POST /kb/build`, `/qa`,
+    # `/explore`, `/generate`) pick up the new per-binding keys without
+    # restart. Without this, hot-swap only takes effect for the
+    # `RegistryHolder`-based settings path below — which `/qa` etc. do
+    # not yet consume — and chat / embed binding changes silently no-op.
+    from codebus_agent.api import wire_kb_dependencies
+
+    wire_kb_dependencies(
+        request.app,
+        openai_api_key=None,
+        qdrant_url=getattr(request.app.state, "qdrant_url", None),
+    )
+
     holder = getattr(request.app.state, "providers", None)
     factory = getattr(request.app.state, "registry_factory", None)
     if holder is not None and factory is not None:

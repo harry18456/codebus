@@ -62,10 +62,14 @@ class OpenAIContextLengthError(Exception):
 class OpenAIChatProvider:
     """Thin async wrapper around Instructor-wrapped `openai.AsyncOpenAI`.
 
-    Construction fails fast if `CODEBUS_OPENAI_API_KEY` is absent so the
+    Construction fails fast when no API key is available so the
     sidecar's degraded-mode contract is unambiguous — the caller
     (`wire_kb_dependencies`) decides not to construct the provider when
-    the env var is missing, rather than constructing a broken one.
+    the key is missing, rather than constructing a broken one.
+
+    Resolution order mirrors ``OpenAIEmbeddingProvider`` (D-033 B):
+      1. Explicit ``api_key`` kwarg (from ``app.state.provider_keys``)
+      2. ``CODEBUS_OPENAI_API_KEY`` env var (legacy / test fallback)
     """
 
     name: str = "openai-chat"
@@ -76,23 +80,25 @@ class OpenAIChatProvider:
         *,
         temperature: float = 0.2,
         max_tokens: int | None = None,
+        api_key: str | None = None,
     ) -> None:
-        api_key = os.environ.get(_ENV_VAR)
-        if not api_key:
-            # Mirrors `OpenAIEmbeddingProvider`: the env var name is the
-            # only supported source. No fallback to `OPENAI_API_KEY` — a
-            # stray shell export MUST NOT silently bypass the sidecar's
-            # degraded-mode contract.
+        resolved = api_key if api_key else os.environ.get(_ENV_VAR)
+        if not resolved:
+            # Mirrors `OpenAIEmbeddingProvider`: the kwarg path supersedes
+            # the env var when the sidecar has been provisioned via
+            # /internal/startup-config; otherwise we fall back to the env
+            # var. No fallback to `OPENAI_API_KEY` — a stray shell export
+            # MUST NOT silently bypass the sidecar's degraded-mode contract.
             raise RuntimeError(
-                f"{_ENV_VAR} environment variable is required to construct "
-                f"OpenAIChatProvider; set it before starting the sidecar, "
-                f"or leave it unset to keep chat-ish callers in graceful "
-                f"503 mode."
+                f"OpenAI API key not provided; pass api_key= explicitly or "
+                f"set {_ENV_VAR} env var before constructing "
+                f"OpenAIChatProvider, or leave both unset to keep chat-ish "
+                f"callers in graceful 503 mode."
             )
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
-        self._client = instructor.from_openai(openai.AsyncOpenAI(api_key=api_key))
+        self._client = instructor.from_openai(openai.AsyncOpenAI(api_key=resolved))
 
     async def chat(
         self,

@@ -100,13 +100,39 @@ from codebus_agent.kb.growth_logger import KBGrowthLogger
 from codebus_agent.sanitizer import RULES_VERSION as _RULES_VERSION
 
 
+def _resolve_role_key(
+    app: FastAPI, role_name: str, fallback: str | None
+) -> str | None:
+    """Look up the API key bound to ``role_name`` in the provider pool.
+
+    Resolution order (D-033 B integration):
+      1. ``app.state.provider_pool_snapshot.bindings[role_name]`` →
+         ``app.state.provider_keys[<provider_id>]`` — the keyring-driven
+         path populated by ``POST /internal/startup-config`` and the
+         ``/settings/*`` mutation endpoints.
+      2. ``fallback`` — the legacy single-key path (env var derived) used
+         by tests and the cold-boot bootstrap before onboarding lands.
+
+    Returns ``None`` only when both paths come up empty; the caller
+    treats that as "this lane is not configured" and skips the factory.
+    """
+    snapshot = getattr(app.state, "provider_pool_snapshot", None)
+    keys: dict[str, str] = getattr(app.state, "provider_keys", {}) or {}
+    if snapshot is not None and keys:
+        provider_id = snapshot.bindings.get(role_name)
+        if provider_id and provider_id in keys:
+            return keys[provider_id]
+    return fallback
+
+
 def wire_kb_dependencies(
     app: FastAPI,
     *,
     openai_api_key: str | None,
     qdrant_url: str | None,
 ) -> None:
-    """Populate the four ``app.state.kb_*`` slots.
+    """Populate the four ``app.state.kb_*`` slots and the
+    ``app.state.llm_*_provider`` factories used by production endpoints.
 
     Backs openspec/changes/kb-build-production-wiring/specs/sidecar-runtime/spec.md
       Requirement: KB dependency injection hook
@@ -115,13 +141,24 @@ def wire_kb_dependencies(
       * ``kb_backend``  — ``QdrantHttpBackend`` instance (app-level) when
         ``qdrant_url`` is set; else ``None``.
       * ``kb_provider`` — ``Callable[[Path], TrackedProvider]`` factory
-        when ``openai_api_key`` is set; else ``None``. Factory returns a
+        when an embed-role key resolves; else ``None``. Factory returns a
         ``TrackedProvider`` whose ``UsageTracker`` / ``LLMCallLogger`` /
         ``SanitizerAuditLogger`` resolve under the given workspace root.
-      * ``kb_usage_tracker`` — ``Callable[[Path], UsageTracker]`` factory
-        when ``openai_api_key`` is set; else ``None``.
+      * ``kb_usage_tracker`` — workspace-scoped ``UsageTracker`` factory
+        when an embed-role key resolves; else ``None``.
       * ``kb_embedding_dim`` — ``OPENAI_EMBEDDING_DIM`` constant when
-        ``openai_api_key`` is set; else ``None``.
+        an embed-role key resolves; else ``None``.
+
+    D-033 B integration: when ``app.state.provider_pool_snapshot`` and
+    ``app.state.provider_keys`` are populated (after onboarding pushes
+    keys via ``POST /internal/startup-config``), each role's factory
+    threads the per-binding key through to the OpenAI provider
+    constructor. ``openai_api_key`` is preserved as a fallback for the
+    legacy bootstrap path / tests.
+
+    Idempotent: callable multiple times. ``POST /internal/startup-config``
+    re-invokes this function after storing keys so the factories pick up
+    the freshly resolved per-role keys.
 
     Asymmetry (``kb_backend`` / ``kb_embedding_dim`` are not factories):
     the Qdrant client is a shared connection and the embedding dim is
@@ -133,42 +170,60 @@ def wire_kb_dependencies(
     else:
         app.state.kb_backend = None
 
-    if openai_api_key:
-        app.state.kb_provider = _make_provider_factory(default_module="kb_build")
+    embed_key = _resolve_role_key(app, "embed", openai_api_key)
+    chat_key = _resolve_role_key(app, "chat", openai_api_key)
+    reasoning_key = _resolve_role_key(app, "reasoning", openai_api_key)
+    judge_key = _resolve_role_key(app, "judge", openai_api_key)
+
+    if embed_key:
+        app.state.kb_provider = _make_provider_factory(
+            default_module="kb_build", api_key=embed_key
+        )
         # `kb-query-endpoint`: distinct factory for the query path so
         # `token_usage.jsonl` lines from `/kb/query` are tagged
         # `module="kb_query"` (vs `"kb_build"` from `/kb/build`),
         # letting cost accounting split build vs query without per-call
         # `module=` plumbing in the endpoint handlers.
         app.state.kb_query_provider = _make_provider_factory(
-            default_module="kb_query"
+            default_module="kb_query", api_key=embed_key
         )
         app.state.kb_usage_tracker = _make_tracker_factory()
         app.state.kb_embedding_dim = OPENAI_EMBEDDING_DIM
-        # `chat-provider-wiring`: three chat-ish role factories share the
-        # same OpenAI key + `gpt-4o-mini` default model, differing only in
-        # temperature (reasoning: 0.1 deterministic, judge: 0.0 strictly
-        # deterministic, chat: 0.2 slightly creative) and `default_module`
-        # tag so `token_usage.jsonl` can split cost by role without any
-        # per-call plumbing. All three MUST be wrapped in `TrackedProvider`
-        # (registry guard + ALLOWED_INNER_TYPES allowlist enforce this).
+        # Workspace-scoped factory for the Q&A `kb_growth.jsonl` writer.
+        # Mirrors `_make_tracker_factory` (workspace-scoped, fresh per
+        # call so cross-workspace state cannot leak). Path resolves
+        # under the audit subdir constant for single-source-of-truth.
+        app.state.kb_growth_logger_factory = _make_kb_growth_logger_factory()
+    else:
+        app.state.kb_provider = None
+        app.state.kb_query_provider = None
+        app.state.kb_usage_tracker = None
+        app.state.kb_embedding_dim = None
+        app.state.kb_growth_logger_factory = None
+
+    # `chat-provider-wiring`: each chat-ish role factory threads the
+    # binding-resolved key through to OpenAIChatProvider so the keyring →
+    # startup-config path actually reaches the OpenAI SDK. All three MUST
+    # be wrapped in `TrackedProvider` (registry guard + ALLOWED_INNER_TYPES
+    # allowlist enforce this).
+    if reasoning_key:
         app.state.llm_reasoning_provider = _make_chat_provider_factory(
             model="gpt-4o-mini",
             temperature=0.1,
             default_module="reasoning",
             role=ProviderRole.REASONING,
+            api_key=reasoning_key,
         )
+    else:
+        app.state.llm_reasoning_provider = None
+
+    if judge_key:
         app.state.llm_judge_provider = _make_chat_provider_factory(
             model="gpt-4o-mini",
             temperature=0.0,
             default_module="judge",
             role=ProviderRole.JUDGE,
-        )
-        app.state.llm_chat_provider = _make_chat_provider_factory(
-            model="gpt-4o-mini",
-            temperature=0.2,
-            default_module="chat",
-            role=ProviderRole.CHAT,
+            api_key=judge_key,
         )
         # `coverage-gap-recurse` (D-012 follow-up): Coverage rides the
         # JUDGE role (low-temp structured evaluator) but tags cost
@@ -179,6 +234,19 @@ def wire_kb_dependencies(
             temperature=0.0,
             default_module="coverage",
             role=ProviderRole.JUDGE,
+            api_key=judge_key,
+        )
+    else:
+        app.state.llm_judge_provider = None
+        app.state.llm_coverage_provider = None
+
+    if chat_key:
+        app.state.llm_chat_provider = _make_chat_provider_factory(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            default_module="chat",
+            role=ProviderRole.CHAT,
+            api_key=chat_key,
         )
         # `module-5-generator-p0`: Generator rides the CHAT role with
         # slightly higher temperature (prose generation) but tags cost
@@ -190,6 +258,7 @@ def wire_kb_dependencies(
             temperature=0.4,
             default_module="generate",
             role=ProviderRole.CHAT,
+            api_key=chat_key,
         )
         # `module-8-qa-p0`: Q&A rides the CHAT role for synthesis +
         # ReAct thinking; `default_module="qa_agent"` splits cost in
@@ -199,24 +268,12 @@ def wire_kb_dependencies(
             temperature=0.2,
             default_module="qa_agent",
             role=ProviderRole.CHAT,
+            api_key=chat_key,
         )
-        # Workspace-scoped factory for the Q&A `kb_growth.jsonl` writer.
-        # Mirrors `_make_tracker_factory` (workspace-scoped, fresh per
-        # call so cross-workspace state cannot leak). Path resolves
-        # under the audit subdir constant for single-source-of-truth.
-        app.state.kb_growth_logger_factory = _make_kb_growth_logger_factory()
     else:
-        app.state.kb_provider = None
-        app.state.kb_query_provider = None
-        app.state.kb_usage_tracker = None
-        app.state.kb_embedding_dim = None
-        app.state.llm_reasoning_provider = None
-        app.state.llm_judge_provider = None
         app.state.llm_chat_provider = None
-        app.state.llm_coverage_provider = None
         app.state.llm_generate_provider = None
         app.state.llm_qa_provider = None
-        app.state.kb_growth_logger_factory = None
 
 
 def _make_tracker_factory() -> Callable[[Path], UsageTracker]:
@@ -248,7 +305,7 @@ def _make_kb_growth_logger_factory() -> Callable[[Path], KBGrowthLogger]:
 
 
 def _make_provider_factory(
-    *, default_module: str
+    *, default_module: str, api_key: str | None = None
 ) -> Callable[[Path], TrackedProvider]:
     """Factory for workspace-scoped TrackedProvider wrapping OpenAIEmbeddingProvider.
 
@@ -267,6 +324,13 @@ def _make_provider_factory(
     same factory shape can produce ``kb_build``-tagged providers for the
     build path and ``kb_query``-tagged providers for the query path,
     splitting cost in ``token_usage.jsonl`` without per-call plumbing.
+
+    ``api_key`` is captured by closure and threaded into
+    ``OpenAIEmbeddingProvider(api_key=...)`` at factory invocation —
+    when ``None``, the provider falls back to ``CODEBUS_OPENAI_API_KEY``.
+    Re-running ``wire_kb_dependencies`` after onboarding (via
+    ``POST /internal/startup-config``) replaces this closure with the
+    keyring-backed key.
     """
 
     def _factory(workspace_root: Path) -> TrackedProvider:
@@ -276,7 +340,7 @@ def _make_provider_factory(
         sanitizer_audit_path = ws / _WORKSPACE_AUDIT_SUBDIR / _SANITIZE_AUDIT_FILENAME
         sanitizer_audit = SanitizerAuditLogger(sanitizer_audit_path)
         return TrackedProvider(
-            OpenAIEmbeddingProvider(),
+            OpenAIEmbeddingProvider(api_key=api_key),
             tracker=tracker,
             logger=call_logger,
             role=ProviderRole.EMBED,
@@ -299,6 +363,7 @@ def _make_chat_provider_factory(
     temperature: float,
     default_module: str,
     role: ProviderRole,
+    api_key: str | None = None,
 ) -> Callable[[Path], TrackedProvider]:
     """Factory for workspace-scoped TrackedProvider wrapping OpenAIChatProvider.
 
@@ -312,6 +377,10 @@ def _make_chat_provider_factory(
     `default_module` still flows straight into `TrackedProvider` so every
     `token_usage.jsonl` line written via this factory's returned wrapper
     gets tagged `module=<reasoning|judge|chat>`.
+
+    ``api_key`` mirrors the embedding factory: closure-captured per-role
+    key resolved by ``wire_kb_dependencies`` so the keyring-driven path
+    threads through to the OpenAI SDK.
     """
 
     def _factory(workspace_root: Path) -> TrackedProvider:
@@ -321,7 +390,7 @@ def _make_chat_provider_factory(
         sanitizer_audit_path = ws / _WORKSPACE_AUDIT_SUBDIR / _SANITIZE_AUDIT_FILENAME
         sanitizer_audit = SanitizerAuditLogger(sanitizer_audit_path)
         return TrackedProvider(
-            OpenAIChatProvider(model, temperature=temperature),
+            OpenAIChatProvider(model, temperature=temperature, api_key=api_key),
             tracker=tracker,
             logger=call_logger,
             role=role,
@@ -543,6 +612,11 @@ def create_app(
     app = FastAPI(title="codebus-sidecar", version="0.1.0")
     app.state.bearer_token = bearer_token
     app.state.qdrant_client = None
+    # `provider-settings-and-onboarding` (D-033 B integration fix): keep
+    # the qdrant URL on app.state so `POST /internal/startup-config` can
+    # re-call `wire_kb_dependencies` with the same value without the
+    # endpoint needing access to the create_app closure.
+    app.state.qdrant_url = qdrant_url
     # Single-slot task registry — survives the lifetime of the app, holds at
     # most one in-flight background task per spec
     # `sse-progress-skeleton/sidecar-runtime` Requirement
