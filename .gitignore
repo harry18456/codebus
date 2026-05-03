@@ -1,0 +1,8 @@
+# spectra
+.spectra/
+openspec/.vector-search.db*
+
+# superpowers
+.superpowers/
+
+# claude
