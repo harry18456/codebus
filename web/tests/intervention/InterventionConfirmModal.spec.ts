@@ -5,15 +5,15 @@ import { nextTick } from 'vue'
 import InterventionConfirmModal from '~/components/intervention/InterventionConfirmModal.vue'
 import {
   useIntervention,
-  _resetForTest
+  _resetUseInterventionForTest
 } from '~/composables/useIntervention'
 
 beforeEach(() => {
-  _resetForTest()
+  _resetUseInterventionForTest()
 })
 
 afterEach(() => {
-  _resetForTest()
+  _resetUseInterventionForTest()
 })
 
 describe('InterventionConfirmModal render & interaction', () => {

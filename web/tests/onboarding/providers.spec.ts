@@ -30,13 +30,13 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 import Providers from '~/pages/onboarding/providers.vue'
-import { _resetForTest } from '~/composables/useProviderConfig'
+import { _resetUseProviderConfigForTest } from '~/composables/useProviderConfig'
 
 beforeEach(() => {
   pushSpy.mockClear()
   fetchMock.mockReset()
   invokeMock.mockReset()
-  _resetForTest()
+  _resetUseProviderConfigForTest()
 })
 
 async function fillBoth(wrapper: ReturnType<typeof mount>): Promise<void> {

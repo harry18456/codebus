@@ -50,10 +50,10 @@ vi.mock('vue-router', () => ({
 
 import DefaultLayout from '~/layouts/default.vue'
 import ExplorerPage from '~/pages/explorer/[task_id].vue'
-import { useQaSession, _resetForTest } from '~/composables/useQaSession'
+import { useQaSession, _resetUseQaSessionForTest } from '~/composables/useQaSession'
 
 beforeEach(() => {
-  _resetForTest()
+  _resetUseQaSessionForTest()
   sseEventsRef.value = []
   invokeMock.mockReset()
   fakeRoute.params = {}

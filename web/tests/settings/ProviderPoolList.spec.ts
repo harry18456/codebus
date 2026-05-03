@@ -22,13 +22,13 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import ProviderPoolList from '~/components/settings/ProviderPoolList.vue'
 import {
-  _resetForTest,
+  _resetUseProviderConfigForTest,
   useProviderConfig
 } from '~/composables/useProviderConfig'
 
 beforeEach(() => {
   fetchMock.mockReset()
-  _resetForTest()
+  _resetUseProviderConfigForTest()
 })
 
 function seed() {

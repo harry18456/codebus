@@ -361,7 +361,7 @@ export function useQaSession(): UseQaSessionApi {
 
 // Test-only export. Wipes the module-level singleton so vitest tests can
 // run in isolation without leaked state. Production code MUST NOT call this.
-export function _resetForTest(): void {
+export function _resetUseQaSessionForTest(): void {
   disposeSse()
   _state.open.value = false
   _state.turns.value = []

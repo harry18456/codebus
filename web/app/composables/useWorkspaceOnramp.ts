@@ -395,7 +395,7 @@ export function useWorkspaceOnramp(): UseWorkspaceOnrampApi {
 
 // Test-only export. Wipes module-level singleton state so vitest tests
 // can run in isolation. Production code MUST NOT call this.
-export function _resetForTest(): void {
+export function _resetUseWorkspaceOnrampForTest(): void {
   disposeSse()
   _state.phase.value = 'idle'
   _state.workspaceId.value = null

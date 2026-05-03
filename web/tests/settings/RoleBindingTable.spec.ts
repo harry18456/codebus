@@ -19,13 +19,13 @@ vi.mock('~/composables/useSidecar', () => ({
 
 import RoleBindingTable from '~/components/settings/RoleBindingTable.vue'
 import {
-  _resetForTest,
+  _resetUseProviderConfigForTest,
   useProviderConfig
 } from '~/composables/useProviderConfig'
 
 beforeEach(() => {
   fetchMock.mockReset()
-  _resetForTest()
+  _resetUseProviderConfigForTest()
 })
 
 function seed() {

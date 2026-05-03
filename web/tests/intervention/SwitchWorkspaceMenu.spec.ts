@@ -17,7 +17,7 @@ vi.mock('vue-router', async () => {
 import SwitchWorkspaceMenu from '~/components/intervention/SwitchWorkspaceMenu.vue'
 import {
   useIntervention,
-  _resetForTest as resetIntervention
+  _resetUseInterventionForTest as resetIntervention
 } from '~/composables/useIntervention'
 
 function setRouteName(name: string, path: string = '/'): void {

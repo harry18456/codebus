@@ -25,12 +25,12 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 import ProviderEditModal from '~/components/settings/ProviderEditModal.vue'
-import { _resetForTest } from '~/composables/useProviderConfig'
+import { _resetUseProviderConfigForTest } from '~/composables/useProviderConfig'
 
 beforeEach(() => {
   fetchMock.mockReset()
   invokeMock.mockReset()
-  _resetForTest()
+  _resetUseProviderConfigForTest()
 })
 
 async function fillValidForm(wrapper: ReturnType<typeof mount>) {

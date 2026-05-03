@@ -31,7 +31,7 @@ useSseTaskMock.mockImplementation(() => ({
   close: sseCloseSpy
 }))
 
-import { useQaSession, _resetForTest } from '~/composables/useQaSession'
+import { useQaSession, _resetUseQaSessionForTest } from '~/composables/useQaSession'
 
 function jsonResponse(body: unknown, init: { status: number } = { status: 202 }): Response {
   return new Response(JSON.stringify(body), {
@@ -45,7 +45,7 @@ beforeEach(() => {
   sseCloseSpy.mockReset()
   useSseTaskMock.mockClear()
   sseEventsRef.value = []
-  _resetForTest()
+  _resetUseQaSessionForTest()
 })
 
 async function flush(): Promise<void> {
@@ -158,13 +158,13 @@ describe('useQaSession singleton + start() flow', () => {
     expect(api.turns.value[0]!.status).toBe('done')
   })
 
-  it('_resetForTest clears module-level state between tests', async () => {
+  it('_resetUseQaSessionForTest clears module-level state between tests', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ task_id: 'qa_resetxxx0' }))
     const api = useQaSession()
     await api.start('residual?', null)
     await flush()
     expect(api.turns.value.length).toBeGreaterThan(0)
-    _resetForTest()
+    _resetUseQaSessionForTest()
     expect(api.turns.value).toHaveLength(0)
     expect(api.open.value).toBe(false)
     expect(api.currentTaskId.value).toBeNull()

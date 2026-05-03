@@ -38,7 +38,7 @@ vi.mock('~/composables/useTutorialFiles', () => ({
 
 import {
   useIntervention,
-  _resetForTest as resetIntervention
+  _resetUseInterventionForTest as resetIntervention
 } from '~/composables/useIntervention'
 
 function jsonResponse(body: unknown, status = 202): Response {

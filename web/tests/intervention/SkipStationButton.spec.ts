@@ -13,7 +13,7 @@ vi.mock('~/composables/useTutorialFiles', () => ({
 }))
 
 import SkipStationButton from '~/components/intervention/SkipStationButton.vue'
-import { useIntervention, _resetForTest } from '~/composables/useIntervention'
+import { useIntervention, _resetUseInterventionForTest } from '~/composables/useIntervention'
 import { useTutorialProgress } from '~/composables/useTutorialProgress'
 
 const WS = 'D:/projects/demo'
@@ -23,11 +23,11 @@ beforeEach(() => {
   readSpy.mockReset()
   writeSpy.mockReset()
   writeSpy.mockResolvedValue(undefined)
-  _resetForTest()
+  _resetUseInterventionForTest()
 })
 
 afterEach(() => {
-  _resetForTest()
+  _resetUseInterventionForTest()
 })
 
 async function loadProgressFromJson(json: object): Promise<void> {

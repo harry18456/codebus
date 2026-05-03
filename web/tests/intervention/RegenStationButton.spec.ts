@@ -13,7 +13,7 @@ vi.mock('~/composables/useTutorialFiles', () => ({
 import RegenStationButton from '~/components/intervention/RegenStationButton.vue'
 import {
   useIntervention,
-  _resetForTest as resetIntervention
+  _resetUseInterventionForTest as resetIntervention
 } from '~/composables/useIntervention'
 
 beforeEach(() => {

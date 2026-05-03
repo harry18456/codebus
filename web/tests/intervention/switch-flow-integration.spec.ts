@@ -28,7 +28,7 @@ import InterventionConfirmModal from '~/components/intervention/InterventionConf
 import SwitchWorkspaceMenu from '~/components/intervention/SwitchWorkspaceMenu.vue'
 import {
   useIntervention,
-  _resetForTest as resetIntervention
+  _resetUseInterventionForTest as resetIntervention
 } from '~/composables/useIntervention'
 
 beforeEach(() => {

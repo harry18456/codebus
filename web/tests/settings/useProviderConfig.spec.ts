@@ -26,7 +26,7 @@ vi.mock('~/composables/useSidecar', () => ({
 
 import {
   useProviderConfig,
-  _resetForTest
+  _resetUseProviderConfigForTest
 } from '~/composables/useProviderConfig'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -42,7 +42,7 @@ function noBodyResponse(status = 204): Response {
 
 beforeEach(() => {
   fetchMock.mockReset()
-  _resetForTest()
+  _resetUseProviderConfigForTest()
 })
 
 const SAMPLE_SNAPSHOT = {

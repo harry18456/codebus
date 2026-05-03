@@ -33,7 +33,7 @@ vi.mock('~/composables/useSidecar', () => ({
 }))
 
 import QAOverlay from '~/components/qa/QAOverlay.vue'
-import { useQaSession, _resetForTest } from '~/composables/useQaSession'
+import { useQaSession, _resetUseQaSessionForTest } from '~/composables/useQaSession'
 
 // Layout-mirror keyboard handler. Spec says listeners MUST live in the
 // layout host, NOT in the component. Tests register the same handler inline
@@ -58,7 +58,7 @@ function installLayoutShortcuts(): () => void {
 let teardownShortcuts: (() => void) | null = null
 
 beforeEach(() => {
-  _resetForTest()
+  _resetUseQaSessionForTest()
   sseEventsRef.value = []
   teardownShortcuts = installLayoutShortcuts()
 })

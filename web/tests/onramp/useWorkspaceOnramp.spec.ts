@@ -52,7 +52,7 @@ useSseTaskMock.mockImplementation(() => {
 import {
   useWorkspaceOnramp,
   ONRAMP_DEFAULT_TASK,
-  _resetForTest
+  _resetUseWorkspaceOnrampForTest
 } from '~/composables/useWorkspaceOnramp'
 
 function jsonResponse(body: unknown, status = 202): Response {
@@ -73,7 +73,7 @@ beforeEach(() => {
   fetchMock.mockReset()
   useSseTaskMock.mockClear()
   sseInstances.length = 0
-  _resetForTest()
+  _resetUseWorkspaceOnrampForTest()
 })
 
 const FIXTURE_PATH = 'C:\\Users\\harry\\Code\\demo'

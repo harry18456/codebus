@@ -193,7 +193,7 @@ export function useProviderConfig(): UseProviderConfigApi {
 
 // Test-only reset hook. Lives in production source so the test suite
 // can call it from `beforeEach` without monkey-patching internal state.
-export function _resetForTest(): void {
+export function _resetUseProviderConfigForTest(): void {
   _providers.value = []
   _bindings.value = {}
   _piiMode.value = 'rule'

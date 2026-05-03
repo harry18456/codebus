@@ -2,15 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   useIntervention,
-  _resetForTest
+  _resetUseInterventionForTest
 } from '~/composables/useIntervention'
 
 beforeEach(() => {
-  _resetForTest()
+  _resetUseInterventionForTest()
 })
 
 afterEach(() => {
-  _resetForTest()
+  _resetUseInterventionForTest()
 })
 
 describe('useIntervention singleton state machine', () => {

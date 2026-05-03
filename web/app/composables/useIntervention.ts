@@ -106,6 +106,6 @@ export function useIntervention(): UseInterventionApi {
 }
 
 // Test-only export. Production code MUST NOT call this.
-export function _resetForTest(): void {
+export function _resetUseInterventionForTest(): void {
   _pendingAction.value = null
 }

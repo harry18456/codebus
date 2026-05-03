@@ -12,7 +12,7 @@ vi.mock('~/composables/useTutorialFiles', () => ({
 
 import {
   useIntervention,
-  _resetForTest as resetIntervention
+  _resetUseInterventionForTest as resetIntervention
 } from '~/composables/useIntervention'
 import { useTutorialProgress } from '~/composables/useTutorialProgress'
 import type { RouteJson } from '~/composables/useStationRoute'
