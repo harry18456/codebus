@@ -3,9 +3,10 @@
 # `cargo tauri dev` run picks up fresh code without manual cleanup.
 #
 # Usage (Windows PowerShell 5.1 or PowerShell 7):
-#   powershell tests/rebuild-sidecar.ps1               # default: keep Qdrant alive
+#   powershell tests/rebuild-sidecar.ps1               # default: rebuild + cargo tauri dev
 #   powershell tests/rebuild-sidecar.ps1 -KillQdrant   # also kill orphan qdrant.exe
 #   powershell tests/rebuild-sidecar.ps1 -SkipBuild    # only kill processes; reuse binary
+#   powershell tests/rebuild-sidecar.ps1 -NoRun        # rebuild + copy only; do NOT launch dev shell
 #
 # Why: cargo tauri dev caches the sidecar binary at
 #   tauri/src-tauri/target/debug/codebus-sidecar.exe
@@ -17,7 +18,8 @@
 [CmdletBinding()]
 param(
     [switch]$KillQdrant,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$NoRun
 )
 
 $ErrorActionPreference = 'Stop'
@@ -104,9 +106,27 @@ Write-Host "[rebuild] copied binary -> $dst" -ForegroundColor Green
 $mtime = (Get-Item $dst).LastWriteTime
 Write-Host "[rebuild] binary mtime: $mtime" -ForegroundColor Green
 
-# 5. Print next-step hint so the user does not need to remember the
-#    manual restart command.
+# 5. Launch cargo tauri dev unless the caller opted out. Running in
+#    foreground so Ctrl+C cleanly tears down Tauri + sidecar + Qdrant
+#    child via the three-layer cleanup path.
+if ($NoRun) {
+    Write-Host ""
+    Write-Host "[rebuild] DONE (rebuild only, -NoRun set). Next:" -ForegroundColor Green
+    Write-Host "  cd tauri/src-tauri" -ForegroundColor Green
+    Write-Host "  cargo tauri dev" -ForegroundColor Green
+    return
+}
+
 Write-Host ""
-Write-Host "[rebuild] DONE. Next:" -ForegroundColor Green
-Write-Host "  cd tauri/src-tauri" -ForegroundColor Green
-Write-Host "  cargo tauri dev" -ForegroundColor Green
+Write-Host "[rebuild] launching cargo tauri dev (Ctrl+C to stop)..." -ForegroundColor Cyan
+Push-Location (Join-Path $RepoRoot 'tauri/src-tauri')
+try {
+    & cargo tauri dev
+    $devExit = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+if ($devExit -ne 0) {
+    Write-Host "[rebuild] cargo tauri dev exited with code $devExit" -ForegroundColor Yellow
+}
+exit $devExit
