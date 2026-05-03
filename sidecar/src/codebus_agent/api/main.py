@@ -13,8 +13,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
+import logging.handlers
 import os
 import sys
+from pathlib import Path
 
 import uvicorn
 
@@ -29,6 +32,47 @@ from codebus_agent.qdrant_supervisor import (
     register_cleanup,
 )
 from codebus_agent.watchdog import supervise_parent
+
+
+def _install_file_logger() -> Path:
+    """Mirror all root-logger output to ~/.codebus/sidecar.log.
+
+    Tauri's sidecar spawn pipes stdout / stderr but drops the handles
+    after reading the handshake line, so Python's StreamHandler ends up
+    writing to a broken pipe and the traceback from ``logger.exception``
+    in ``_run_background_task`` silently disappears. Adding an explicit
+    file handler at boot guarantees those tracebacks survive in
+    ``~/.codebus/sidecar.log`` regardless of Tauri's pipe handling.
+
+    Rotation: 5 MiB per file, keep last 3 — bounded disk footprint that
+    still preserves enough history for a multi-iteration debug loop.
+    """
+    log_path = Path.home() / ".codebus" / "sidecar.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    handler = logging.handlers.RotatingFileHandler(
+        log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+
+    root = logging.getLogger()
+    if root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+    # Avoid duplicate file handlers if run() is called more than once
+    # in the same process (e.g. from tests).
+    has_file_handler = any(
+        isinstance(h, logging.handlers.RotatingFileHandler)
+        and Path(h.baseFilename).resolve() == log_path.resolve()
+        for h in root.handlers
+    )
+    if not has_file_handler:
+        root.addHandler(handler)
+    return log_path
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -104,6 +148,8 @@ def run(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
     if args.healthz:
         sys.exit(run_healthz())
+    log_path = _install_file_logger()
+    logging.getLogger(__name__).info("sidecar.log mirror installed at %s", log_path)
     bearer = auth.generate_token()
     sock, port = net.bind_ephemeral_loopback()
     # D-027 + design「Startup policy：degraded-but-alive」— thread the
