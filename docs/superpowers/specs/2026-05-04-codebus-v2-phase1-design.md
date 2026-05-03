@@ -284,6 +284,10 @@ codebus --version
 codebus --help
 ```
 
+**Global flags（任何 command 都適用）:**
+- `--debug` — verbose，多印 stream-json raw events
+- `--no-emoji` — 強制純文字 + unicode symbol（CI / log file / 企業環境用）；亦可設 `NO_EMOJI=1` env var；預設 `auto`：偵測 `process.stdout.isTTY` + `process.env.CI` + `process.env.TERM`，非 tty / CI 環境自動 fallback
+
 `--repo` 預設值：cwd（沒指定時用當前目錄）
 
 ---
@@ -456,19 +460,46 @@ pages: ["[[checkout-flow]]", "[[payment-gateway]]"]
 
 ## 8. Stream-json → Terminal 顯示對應
 
-| Stream Event | Terminal Render |
-|---|---|
-| `stream_event.content_block_delta` (text) | `🤔 [Agent 思考] {text}` |
-| `tool_use` (name=Read) | `🛠️ [呼叫工具] read_file({path})` |
-| `tool_use` (name=Grep) | `🛠️ [呼叫工具] search_keyword({pattern})` |
-| `tool_use` (name=Glob) | `🛠️ [呼叫工具] list_files({pattern})` |
-| `tool_use` (name=Write) | `✍️ [正在生成] {file_path}` |
-| `tool_result` (success) | `👀 [觀察結果] {summary}` |
-| `tool_result` (error) | `⚠️ [錯誤] {error}` |
-| `assistant.content` (fallback for old CLI) | `🤔 [Agent 思考] {text}` |
-| `session_init` / `result_summary` | （忽略）|
+採 **Hybrid emoji mode**：預設 emoji（friendly），`--no-emoji` flag / `NO_EMOJI=1` env / 非 tty / CI 環境自動 fallback 到 symbol mode。Emoji 量收斂到 **核心 4 + banner 4 = 8 種**。
 
-詳細 render 規則跟 emoji 表 phase 1 實作期 iterate。
+### 8.1 Per-event 4 種 emoji（stream events render）
+
+| Stream Event | Emoji mode (default) | Symbol mode (--no-emoji / CI auto) | chalk 染色 |
+|---|---|---|---|
+| `stream_event.content_block_delta` (text) | `🤔 [Agent 思考] {text}` | `◆ thought {text}` | dim |
+| `tool_use` (name=Read/Grep/Glob) | `🛠️ [呼叫工具] {name}({args})` | `→ tool {name}({args})` | cyan |
+| `tool_use` (name=Write) | `✍️ [正在生成] {file_path}` | `+ write {file_path}` | green |
+| `tool_result` (success) | `👀 [觀察結果] {summary}` | `← result {summary}` | dim |
+| `tool_result` (error) | `👀 [觀察結果] {error}` | `← result {error}` | **red**（用 chalk 染色區分 error，不另加 emoji）|
+| `assistant.content` (fallback for old CLI) | 同 thought | 同 thought | dim |
+| `session_init` / `result_summary` | （忽略）| （忽略）| — |
+
+### 8.2 Banner 4 種 emoji（lifecycle / hint，非 per-event）
+
+| 場景 | Emoji mode | Symbol mode |
+|---|---|---|
+| 啟動 | `🚌 CodeBus 啟動！正在駛入 {path} ...` | `▶ CodeBus 啟動 ...` |
+| 任務目標 | `🎯 任務目標：{goal}` | `◎ 任務目標：{goal}` |
+| 完成 | `🎉 抵達終點！wiki 已生成於 .codebus/wiki/` | `✓ 完成。wiki 已生成於 .codebus/wiki/` |
+| 提示 | `💡 請用 Obsidian 開 .codebus/` | `i 請用 Obsidian 開 .codebus/` |
+
+### 8.3 EmojiMode 偵測邏輯
+
+```typescript
+type EmojiMode = 'auto' | 'on' | 'off'
+
+function resolveEmojiMode(flag: EmojiMode): boolean {
+  if (flag === 'on') return true
+  if (flag === 'off') return false
+  // auto: enable emoji 條件全要滿足
+  return process.stdout.isTTY
+      && !process.env.CI
+      && !process.env.NO_EMOJI
+      && process.env.TERM !== 'dumb'
+}
+```
+
+詳細 chalk 配色微調（具體 hex / 是否粗體等）phase 1 實作期 iterate。
 
 ---
 
@@ -509,9 +540,31 @@ Phase 2 才加：auto re-explore + incremental sync + PII filter at copy boundar
 
 ## 11. License & Clean Room
 
-### 11.1 License
+### 11.1 License: MIT
 
-Codebus 自身 license **待定**（傾向 MIT / Apache，保留商業可能）。
+Codebus 自身採用 **MIT License**。理由：
+- Permissive — 保留 phase 3+ 商業化可能
+- npm 生態 99% deps 是 MIT，相容性零問題
+- 跟 GPL v3 LLM Wiki clean room 邊界清楚（不 copy code 即可）
+- 簡單一頁 LICENSE 文字
+
+#### 11.1.1 Phase 1 ship 前 LICENSE checklist
+
+| # | Action | Why |
+|---|---|---|
+| 1 | 建 codebus repo root `LICENSE` 檔（MIT 範本）| 使用者 fork / npm consumer 知道 terms |
+| 2 | `package.json` 設 `"license": "MIT"` | npm registry / `npm install` warning |
+| 3 | README 加 License section + badge | discoverability |
+| 4 | NOTICE 檔列 third-party deps（如有 Apache/BSD attribution 需求）| Apache/BSD 法律要求 |
+| 5 | 內建 `.codebus/CLAUDE.md` schema header 加 SPDX 標 | 寫到 user 機器，標清楚這段是 codebus owner 的、不是 user 的（避免後續 derivative 爭議）|
+
+#### 11.1.2 Dependencies license check
+
+§13 toolkit 列的 deps：`commander` / `clipanion` / `chalk` / `ora` / `gray-matter` / `simple-git` / `vitest` / `tsx` — **全 MIT**，相容無問題。實作期裝任何新 dep 前 check `npm view <pkg> license` 確認 permissive。
+
+#### 11.1.3 Anthropic CLI 的 nuance
+
+`@anthropic-ai/claude-code` 是 Anthropic 商業 license，但 codebus **不是 import 這 package** — 是 spawn `claude` subprocess（user 自己 `npm install -g @anthropic-ai/claude-code`）。codebus runtime 無 npm 依賴關係，subprocess fork-exec 不創 derivative work，**不算 license issue**。
 
 ### 11.2 Clean Room 守則
 
@@ -613,11 +666,10 @@ codebus/                          ← v2 main branch
 - `--repo` 路徑驗證 / 不是 git repo 時跳過 .gitignore 步驟
 - Test strategy 細節（unit / integration / e2e 範圍）
 - Demo repo for dev iteration（v1 用 Timeline，v2 還是嗎？）
-- Stream-json render 細部 emoji / color 對應表
+- Stream-json render chalk 配色微調（具體 hex / 是否粗體 / dim 強度）
 - `goals.jsonl` 完整 schema (extra metadata 欄位)
-- Phase 1 codebus 自身 license 最終決定
 - Query 連續多輪是否要 session memory（phase 1 暫定 stateless / 每次 query 獨立）
-- Query final answer terminal highlight 樣式（chalk 配色 / markdown 渲染程度）
+- Query final answer terminal markdown 渲染程度（純文字 vs 簡單 markdown bold/list parse）
 
 ---
 
