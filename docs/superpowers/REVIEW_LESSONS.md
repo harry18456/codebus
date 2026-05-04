@@ -48,6 +48,19 @@ cycle.
    and start implementing. Real-world feedback from animation > more
    thinking on the same artifact.
 
+8. **Spec convergence ≠ plan convergence.** Iter-1 through iter-7
+   stayed in spec namespace and reviewer + AI both declared "stable,
+   ready for execution" twice. Iter-8 dropped into plan code and found
+   3 critical bugs nobody had caught: parser schema fictional (would
+   produce empty terminal output), enrichSourceMetadata silently broke
+   stale-detect (compared same-hash-vs-same-hash), SIGINT handler TDZ
+   race. For multi-doc deliverables (spec + plan), the review cycle
+   isn't done until BOTH have been audited at their level of detail.
+   Add an explicit "now drop into plan code" iteration before any
+   "ready for execution" claim. The plan code review iteration ROI
+   was as high as round 5 (cwd spike) — finding bugs that would have
+   shown up day 1 of execution.
+
 ## How to add a lesson
 
 When a review iteration surfaces a process insight (not a content
