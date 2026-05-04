@@ -1,0 +1,60 @@
+# Spec / Plan Review Lessons
+
+Cross-phase persistent notes from review iterations. Should outlive any
+single phase plan/spec archival. Contributors and future reviewers
+should read this before starting a new spec → plan → implementation
+cycle.
+
+## Lessons from CodeBus v2 phase 1 review (2026-05-04)
+
+1. **Spike summaries must quote transcript lines, not just paraphrase.**
+   Iter-3 review caught spike #1 summary saying "permission_denials=[]"
+   without showing the `tool_use(Read)` / `tool_result` events that made
+   the conclusion meaningful. Future spike commits must include the
+   relevant transcript excerpts inline.
+
+2. **Don't conflate `-p` mode with permission mode.** Spike B
+   originally concluded "default mode + Write = baseline-deny";
+   actually it's "-p mode (no interactive user) + default permission
+   mode = no one to approve permission requests". Naming the layers
+   precisely matters when designing around them.
+
+3. **`--add-dir` is widen, not narrow.** This caused two iterations of
+   wrong sandbox claims. Always re-read CLI flag docs (or spike) before
+   asserting "X limits scope to Y".
+
+4. **Severity column in risk tables.** Iter-3 review noted §3.2.1 had
+   goals.jsonl (vault-killer) listed parallel to raw/code/ pollution
+   (1-page impact). Risk tables should mark blast radius explicitly so
+   readers can prioritize.
+
+5. **Phase 2 unblock items belong in §15 (Open Questions), not buried
+   in prose.** When deferring something "phase 2 will handle", put it
+   explicitly in the Open Questions list so future ingest pass doesn't
+   lose it.
+
+6. **Don't default-defer without measuring cost.** Iter-4 reviewer
+   caught "cwd = .codebus/" was deferred to phase 2 without ever
+   running the cost spike. Turned out cost is ~5 lines change + a 30-
+   minute spike, and benefit is system-level user-repo isolation.
+   Before defer/include calls, spike the cost when it's that cheap to
+   measure.
+
+7. **Convergence-rate as stopping signal.** Iter-4 reviewer's framing:
+   round 1 finds structural defects (high ROI), round 2 correctness
+   (high ROI), round 3 framing/precision (medium), round 4 edge cases
+   (medium-low). When defect rate per round drops + nature shifts from
+   "must fix" to "could improve", that's the signal to stop reviewing
+   and start implementing. Real-world feedback from animation > more
+   thinking on the same artifact.
+
+## How to add a lesson
+
+When a review iteration surfaces a process insight (not a content
+fix), add it here as a numbered item with:
+- short imperative title
+- 1-3 sentence explanation including which review iteration / commit
+  caused the lesson
+- (optional) example code snippet or counterexample
+
+Don't put content fixes here — those go in the spec/plan they belong to.

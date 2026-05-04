@@ -2144,6 +2144,12 @@ Conflict rules (§5) rather than wholesale rewrite — existing pages are
 the single source of truth for what's been covered, no need to consult
 goals.jsonl (codebus does not feed it into your context).
 
+**Caveat:** This signal can be defeated externally — different phrasings
+of the same intent (e.g. "了解購物車" vs "了解購物車流程") produce
+different slugs / different goal guides; user manually deleting
+\`wiki/goals/<slug>.md\` hides the re-run signal. Phase 1 accepts these
+as user-chosen behavior; do not second-guess by re-deriving slugs.
+
 ## 5. Page Conflict
 
 - Page does not exist → create with frontmatter + body.
@@ -2506,11 +2512,15 @@ export async function runGoal(opts: RunGoalOptions): Promise<void> {
     const systemPrompt = `${schema}\n\n# Current wiki index\n\n${indexMd}\n\n# Goal\n\n${opts.goal}`
 
     // Invoke LLM
+    // cwd = vault root (.codebus/) — system-level isolates user source
+    // repo per spec §3.2 + spike E. Agent reads via raw/code/<path>
+    // (cwd-relative). Cwd-external Writes get permission_denials in
+    // -p mode (acceptEdits only auto-accepts cwd-internal).
     for await (const event of opts.provider.invoke({
       systemPrompt,
       userMessage: `Build/update the wiki for this goal: ${opts.goal}`,
       mode: 'ingest',
-      cwd: opts.repoRoot,
+      cwd: p.root,
       vaultRoot: p.root
     })) {
       opts.onEvent?.(event)
@@ -2708,7 +2718,7 @@ export async function runQuery(opts: RunQueryOptions): Promise<void> {
     systemPrompt,
     userMessage: opts.query,
     mode: 'query',
-    cwd: opts.repoRoot,
+    cwd: p.root,                        // cwd = .codebus/ same as goal mode (§3.2)
     vaultRoot: p.root
   })) {
     opts.onEvent?.(event)
@@ -2741,7 +2751,7 @@ git commit -m "feat(commands): add query command (read-only wiki Q&A)"
 ```typescript
 #!/usr/bin/env node
 import { Command } from 'commander'
-import { existsSync, unlinkSync } from 'node:fs'
+import { unlinkSync } from 'node:fs'
 import { runInit } from './commands/init.js'
 import { runGoal } from './commands/goal.js'
 import { runQuery } from './commands/query.js'
@@ -2796,10 +2806,14 @@ async function main() {
   process.on('SIGINT', () => {
     console.error('\n中止 — wiki 可能半寫；可手動 git -C .codebus reset --hard 復原')
     if (activeProvider) activeProvider.cancel()
+    // Race-free unlink: try → catch ENOENT (no existsSync race window
+    // where another codebus init could create the lock between check
+    // and delete; ENOENT is fine, anything else we ignore for SIGINT).
     try {
-      const lockPath = vaultPaths(repo).lock
-      if (existsSync(lockPath)) unlinkSync(lockPath)
-    } catch { /* ignore — best effort */ }
+      unlinkSync(vaultPaths(repo).lock)
+    } catch (e: any) {
+      if (e?.code !== 'ENOENT') { /* swallow — best effort cleanup */ }
+    }
     process.exit(130)
   })
 
@@ -3067,37 +3081,9 @@ npm publish --access public          # only when v0.1.0 ready to ship
 
 No issues found.
 
----
-
-## Lessons from review iterations (process discipline notes)
-
-These are persistent notes for future review cycles or contributors —
-not part of phase 1 implementation but should survive across reviewers:
-
-1. **Spike summaries must quote transcript lines, not just paraphrase.**
-   Iter-3 review caught spike #1 summary saying "permission_denials=[]"
-   without showing the tool_use(Read) / tool_result events that made
-   the conclusion meaningful. Future spike commits must include the
-   relevant transcript excerpts inline.
-
-2. **Don't conflate `-p` mode with permission mode.** Spike B
-   originally concluded "default mode + Write = baseline-deny";
-   actually it's "-p mode (no interactive user) + default permission
-   mode = no one to approve permission requests". Naming the layers
-   precisely matters when you're trying to design around them.
-
-3. **`--add-dir` is widen, not narrow.** This caused two iterations of
-   wrong sandbox claims. Always re-read CLI flag docs (or spike) before
-   asserting "X limits scope to Y".
-
-4. **Severity column in risk tables.** Iter-3 review noted the §3.2.1
-   surface table had goals.jsonl (vault-killer) listed parallel to
-   raw/code/ pollution (1-page impact). Future risk tables should
-   mark blast radius explicitly so readers can prioritize.
-
-5. **Phase 2 unblock items belong in §15, not buried in prose.** When
-   deferring something "phase 2 will handle", put it explicitly in the
-   Open Questions list so future ingest pass doesn't lose it.
+> **Process notes from review iterations** moved to
+> `docs/superpowers/REVIEW_LESSONS.md` (cross-phase persistent location;
+> phase plan archives shouldn't bury cross-phase methodology notes).
 
 ---
 
