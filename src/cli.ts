@@ -72,8 +72,13 @@ async function main(): Promise<void> {
   if (!opts.goal && !opts.query) {
     console.log(renderBanner('start', { path: repo }, renderOpts))
     await runInit(repo)
-    console.log(renderBanner('done', { wikiPath: `${repo}/.codebus/wiki` }, renderOpts))
-    console.log(renderBanner('hint', { path: `${repo}/.codebus` }, renderOpts))
+    // Init creates an empty vault — do NOT reuse the goal-completion
+    // banners ("wiki 已生成" / "Obsidian 開") because no wiki content
+    // exists yet. Tell the user the actual next step.
+    const ok = useEmoji ? '✨' : '✓'
+    const tip = useEmoji ? '💡' : 'i'
+    console.log(`${ok} Vault 已初始化於 ${repo}/.codebus`)
+    console.log(`${tip} 下一步：codebus --goal "<你的探索目標>"`)
     return
   }
 
