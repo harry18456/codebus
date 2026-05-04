@@ -178,18 +178,29 @@ describe('renderEvent', () => {
 })
 
 describe('renderBanner', () => {
-  it('start banner with emoji + path normalized', () => {
+  it('start banner with emoji + path normalized + 上車舞 phrasing', () => {
     const out = renderBanner('start', { path: 'D:\\repo' }, { useEmoji: true, useColor: false })
     expect(out).toContain('🚌')
+    expect(out).toContain('來囉來囉~')
     expect(out).toContain('D:/repo')
     expect(out).not.toContain('\\')
   })
 
-  it('done banner with symbol fallback + path normalized', () => {
+  it('done banner with symbol fallback + path normalized + 下車囉 phrasing', () => {
     const out = renderBanner('done', { wikiPath: 'D:\\repo\\.codebus\\wiki' }, { useEmoji: false, useColor: false })
     expect(out).toContain('✓')
+    expect(out).toContain('下車囉')
     expect(out).not.toContain('🎉')
     expect(out).toContain('D:/repo/.codebus/wiki')
+  })
+
+  it('goal / hint banners stay neutral (no 上車舞 phrasing — meme only at boarding/disembarking)', () => {
+    const goalOut = renderBanner('goal', { goal: 'X' }, { useEmoji: true, useColor: false })
+    const hintOut = renderBanner('hint', { path: 'X' }, { useEmoji: true, useColor: false })
+    expect(goalOut).not.toContain('來囉')
+    expect(goalOut).not.toContain('下車')
+    expect(hintOut).not.toContain('來囉')
+    expect(hintOut).not.toContain('下車')
   })
 
   it('goal banner shows goal text', () => {

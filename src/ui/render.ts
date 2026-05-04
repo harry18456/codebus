@@ -160,9 +160,12 @@ export type BannerData = Record<string, string>
 export function renderBanner(kind: BannerKind, data: BannerData, opts: RenderOptions): string {
   const sym = lead(kind, opts.useEmoji)
   switch (kind) {
-    case 'start': return `${sym} CodeBus 啟動！正在駛入 ${normalizePath(data.path)} ...`
+    // start / done banners borrow the「上車舞」chant — codebus is the bus,
+    // user is the passenger. Phrasing chosen to fire only at boarding /
+    // disembarking moments so the meme stays light, not noisy.
+    case 'start': return `${sym} 來囉來囉~ CodeBus 駛入 ${normalizePath(data.path)} ...`
     case 'goal': return `${sym} 任務目標：${data.goal}`
-    case 'done': return `${sym} 完成。wiki 已生成於 ${normalizePath(data.wikiPath)}`
+    case 'done': return `${sym} 掰掰~下車囉！wiki 已生成於 ${normalizePath(data.wikiPath)}`
     case 'hint': return `${sym} 請用 Obsidian 開 ${normalizePath(data.path)}`
   }
 }
