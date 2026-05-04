@@ -6,3 +6,10 @@ openspec/.vector-search.db*
 .superpowers/
 
 # claude
+
+# node project
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
