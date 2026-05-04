@@ -97,11 +97,36 @@ function indent(text: string): string {
   return text.split('\n').map((l) => `${INDENT}${l}`).join('\n')
 }
 
+// Light markdown styling for thought text. Phase 1 covers the most common
+// noise sources only: bold / inline code / wikilinks. Italic and headings
+// skipped — italic risks colliding with literal `*` in code, headings are
+// rare in agent thought stream. Phase 2 will extend (see spec §16 Terminal
+// output 升級) to add OSC 8 hyperlink for wikilinks (clickable in modern
+// terminals) once vault root context is propagated to the render layer.
+//
+// When useColor is false (CI / NO_COLOR / non-TTY), markdown stays literal
+// so log files / CI capture see exactly what the agent wrote.
+function styleMarkdown(text: string, useColor: boolean): string {
+  if (!useColor) return text
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, (_, body: string) => chalk.bold(body))
+    .replace(/`([^`]+)`/g, (_, body: string) => chalk.cyan(body))
+    .replace(/(\[\[[^\]]+\]\])/g, (_, body: string) => chalk.cyan.underline(body))
+}
+
 export function renderEvent(event: StreamEvent, opts: RenderOptions): string {
   switch (event.kind) {
-    case 'thought':
-      // One-line: thought text IS the content, no value in splitting.
-      return `${lead('thought', opts.useEmoji)} ${colored('[Agent 思考]', 'dim', opts.useColor)} ${event.text}`
+    case 'thought': {
+      // Multi-line thought (e.g. final summary with bullets / markdown) →
+      // two-line with indented body so the structure aligns with the rest
+      // of the output. Single-line thought stays inline (text IS content).
+      const styled = styleMarkdown(event.text, opts.useColor)
+      const label = `${lead('thought', opts.useEmoji)} ${colored('[Agent 思考]', 'dim', opts.useColor)}`
+      if (event.text.includes('\n')) {
+        return `${label}\n${indent(styled)}`
+      }
+      return `${label} ${styled}`
+    }
 
     case 'tool_use': {
       // Special-case Write/Edit to use the write glyph.

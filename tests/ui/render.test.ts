@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
+import chalk from 'chalk'
 import { renderEvent, renderBanner } from '../../src/ui/render.js'
+
+// Force chalk to emit ANSI codes even when vitest's stdout is not a TTY,
+// otherwise color-mode behavior tests would check identical plain-text
+// output for both useColor=true and useColor=false.
+chalk.level = 3
 
 describe('renderEvent', () => {
   it('renders thought with emoji (one-line)', () => {
@@ -13,6 +19,55 @@ describe('renderEvent', () => {
     const out = renderEvent({ kind: 'thought', text: 'thinking' }, { useEmoji: false, useColor: false })
     expect(out).toContain('◆')
     expect(out).not.toContain('🤔')
+  })
+
+  it('renders multi-line thought as two-line with indented body', () => {
+    const text = 'Summary:\n- item one\n- item two'
+    const out = renderEvent({ kind: 'thought', text }, { useEmoji: true, useColor: false })
+    const lines = out.split('\n')
+    expect(lines[0]).toContain('🤔')
+    expect(lines[0]).toContain('[Agent 思考]')
+    expect(lines[0]).not.toContain('Summary')   // body NOT on label line
+    expect(lines[1]).toBe('    Summary:')
+    expect(lines[2]).toBe('    - item one')
+    expect(lines[3]).toBe('    - item two')
+  })
+
+  it('strips markdown bold to ANSI bold when color enabled', () => {
+    const out = renderEvent(
+      { kind: 'thought', text: '**important** message' },
+      { useEmoji: true, useColor: true }
+    )
+    // ANSI bold opener ESC[1m wrapping "important"
+    expect(out).toMatch(/\x1b\[1mimportant\x1b\[22m/)
+    expect(out).not.toContain('**important**')
+  })
+
+  it('keeps literal markdown when color disabled (CI-friendly)', () => {
+    const out = renderEvent(
+      { kind: 'thought', text: '**important** message' },
+      { useEmoji: true, useColor: false }
+    )
+    expect(out).toContain('**important**')
+  })
+
+  it('styles inline `code` as cyan when color enabled', () => {
+    const out = renderEvent(
+      { kind: 'thought', text: '使用 `Bun.hash` 而非 Node.js' },
+      { useEmoji: true, useColor: true }
+    )
+    expect(out).toMatch(/\x1b\[36m.*Bun\.hash.*\x1b\[39m/)
+    expect(out).not.toContain('`Bun.hash`')
+  })
+
+  it('styles [[wikilink]] as cyan + underline when color enabled', () => {
+    const out = renderEvent(
+      { kind: 'thought', text: '見 [[project-purpose]] 補背景' },
+      { useEmoji: true, useColor: true }
+    )
+    // Underline ESC[4m, cyan ESC[36m. chalk applies both — order can vary.
+    expect(out).toMatch(/\x1b\[/)  // some ANSI present
+    expect(out).toContain('[[project-purpose]]')  // brackets preserved
   })
 
   it('renders tool_use Write with ✍️ + indented file path (two-line)', () => {
