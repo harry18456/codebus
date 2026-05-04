@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +11,24 @@ class FakeProvider implements LLMProvider {
   async *invoke(opts: InvokeOptions): AsyncIterable<StreamEvent> {
     this.receivedCwd = opts.cwd
     yield { kind: 'thought', text: 'analyzing...' }
+    yield { kind: 'done' }
+  }
+  cancel(): void {}
+}
+
+// Simulates an agent that ACTUALLY writes a wiki page (real Claude would
+// emit Write tool_use events whose effect is files on disk; FakeProvider
+// can't trigger Claude tools, so we write directly to mimic the side
+// effect for the wikiChanged=true case).
+class WritingFakeProvider implements LLMProvider {
+  async *invoke(opts: InvokeOptions): AsyncIterable<StreamEvent> {
+    const pagesDir = join(opts.cwd, 'wiki', 'pages')
+    mkdirSync(pagesDir, { recursive: true })
+    writeFileSync(
+      join(pagesDir, 'fake.md'),
+      `---\ntitle: Fake\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-04'\nupdated: '2026-05-04'\nrelated: []\nstale: false\n---\nbody`
+    )
+    yield { kind: 'thought', text: 'wrote a page' }
     yield { kind: 'done' }
   }
   cancel(): void {}
@@ -57,5 +75,24 @@ describe('runGoal', () => {
     await runGoal({ repoRoot: dir, goal: 'g', provider: new FakeProvider() })
     const goalsJsonl = readFileSync(join(dir, '.codebus', 'goals.jsonl'), 'utf8')
     expect(goalsJsonl).toContain('"uncommitted":true')
+  })
+
+  it('returns wikiChanged=false when agent does not write any wiki content', async () => {
+    const result = await runGoal({
+      repoRoot: dir,
+      goal: 'agent will refuse this',
+      provider: new FakeProvider()
+    })
+    expect(result.wikiChanged).toBe(false)
+  })
+
+  it('returns wikiChanged=true when agent writes a wiki page', async () => {
+    const result = await runGoal({
+      repoRoot: dir,
+      goal: '建立 fake page',
+      provider: new WritingFakeProvider()
+    })
+    expect(result.wikiChanged).toBe(true)
+    expect(existsSync(join(dir, '.codebus', 'wiki', 'pages', 'fake.md'))).toBe(true)
   })
 })

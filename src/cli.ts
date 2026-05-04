@@ -93,12 +93,22 @@ async function main(): Promise<void> {
   if (opts.goal) {
     console.log(renderBanner('start', { path: repo }, renderOpts))
     console.log(renderBanner('goal', { goal: String(opts.goal) }, renderOpts))
-    await runGoal({ repoRoot: repo, goal: String(opts.goal), provider, onEvent })
-    console.log(renderBanner('done', { wikiPath: `${repo}/.codebus/wiki` }, renderOpts))
-    // Point Obsidian at the wiki/ subdir, not .codebus/ root — vault opens
-    // clean (no .git / raw / output / goals.jsonl / CLAUDE.md clutter to
-    // hide). Wikilinks still resolve since all pages live under wiki/.
-    console.log(renderBanner('hint', { path: `${repo}/.codebus/wiki` }, renderOpts))
+    const result = await runGoal({ repoRoot: repo, goal: String(opts.goal), provider, onEvent })
+    if (result.wikiChanged) {
+      console.log(renderBanner('done', { wikiPath: `${repo}/.codebus/wiki` }, renderOpts))
+      // Point Obsidian at the wiki/ subdir, not .codebus/ root — vault opens
+      // clean (no .git / raw / output / goals.jsonl / CLAUDE.md clutter to
+      // hide). Wikilinks still resolve since all pages live under wiki/.
+      console.log(renderBanner('hint', { path: `${repo}/.codebus/wiki` }, renderOpts))
+    } else {
+      // Agent ran but didn't write anything — typically self-judged the
+      // goal as not wiki-shaped (e.g. "create test.md" violates schema)
+      // or refused for other reasons. Do NOT show the goal-completion
+      // banner ("wiki 已生成") which would be misleading.
+      const shrug = useEmoji ? '🤷' : '~'
+      console.log(`${shrug} Agent 跑完但沒動 wiki — 可能此 goal 不適合（agent 自我判斷拒絕）`)
+      console.log(`   raw 已 sync、goals.jsonl 已記錄；wiki 內容無變化`)
+    }
   } else if (opts.query) {
     console.log(renderBanner('start', { path: repo }, renderOpts))
     await runQuery({ repoRoot: repo, query: String(opts.query), provider, onEvent })

@@ -7,6 +7,7 @@ import { syncRepoToRaw } from '../infra/fs/raw-sync.js'
 import { sha256File } from '../infra/fs/file-ops.js'
 import { getSourceVersion } from '../infra/git/source-version.js'
 import { autoCommit } from '../infra/git/nested-repo.js'
+import { simpleGit } from 'simple-git'
 import { parsePage, serializePage } from '../core/wiki/frontmatter.js'
 import { detectStaleSources } from '../core/wiki/stale-detect.js'
 import { utcTodayISO } from '../core/wiki/date.js'
@@ -20,12 +21,34 @@ export interface RunGoalOptions {
   onEvent?: (e: StreamEvent) => void
 }
 
-export async function runGoal(opts: RunGoalOptions): Promise<void> {
+export interface RunGoalResult {
+  // True if the run produced new wiki content (nested-git HEAD advanced).
+  // False when agent ran successfully but didn't write/edit anything —
+  // typically when agent self-judged the goal as not wiki-shaped (e.g.
+  // "create test.md") or refused for schema reasons. Caller uses this
+  // to show an honest completion banner instead of the misleading
+  // "wiki 已生成" / "Obsidian 開" hint.
+  wikiChanged: boolean
+}
+
+// Check whether the wiki/ subtree has any uncommitted changes (new pages,
+// edited pages, deleted pages). Used to distinguish "agent produced wiki
+// content" from "agent ran but only goals.jsonl / raw sync changed".
+// Comparing nested-git HEAD SHAs would be wrong: autoCommit also picks up
+// the goals.jsonl append (always happens) and would falsely report change
+// even when wiki/ is untouched.
+async function hasWikiChanges(vaultRoot: string): Promise<boolean> {
+  const out = await simpleGit(vaultRoot).raw(['status', '--porcelain', 'wiki/'])
+  return out.trim().length > 0
+}
+
+export async function runGoal(opts: RunGoalOptions): Promise<RunGoalResult> {
   const p = vaultPaths(opts.repoRoot)
 
   if (!existsSync(p.root)) await runInit(opts.repoRoot)
 
   const lock = await acquireLock(p.lock)
+  let wikiChanged = false
   try {
     await syncRepoToRaw(opts.repoRoot, p.rawCode)
 
@@ -58,10 +81,12 @@ export async function runGoal(opts: RunGoalOptions): Promise<void> {
 
     await enrichSourceMetadata(p.wikiPages, p.rawCode, ver.commit)
     await flagStalePages(p.wikiPages, p.rawCode)
+    wikiChanged = await hasWikiChanges(p.root)
     await autoCommit(p.root, `wiki: ${opts.goal}`)
   } finally {
     await releaseLock(lock)
   }
+  return { wikiChanged }
 }
 
 // CRITICAL (review iter-8): only enrich pages where AT LEAST ONE source
