@@ -85,6 +85,17 @@ describe('renderEvent', () => {
     )).toBe('')
   })
 
+  it('suppresses Edit tool_result success echo (different phrasing)', () => {
+    expect(renderEvent(
+      { kind: 'tool_result', output: 'The file D:\\side_project\\app\\.codebus\\wiki\\index.md has been updated successfully.', isError: false },
+      { useEmoji: true, useColor: false }
+    )).toBe('')
+    expect(renderEvent(
+      { kind: 'tool_result', output: 'The file wiki/log.md has been edited successfully', isError: false },
+      { useEmoji: true, useColor: false }
+    )).toBe('')
+  })
+
   it('condenses Read tool_result (cat -n style) to line count', () => {
     const fileContent = '   1  line one\n   2  line two\n   3  line three\n   4  line four'
     const out = renderEvent(

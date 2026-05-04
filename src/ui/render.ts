@@ -73,8 +73,12 @@ function formatToolArgs(name: string, input: unknown): string {
 
 // Suppress redundant Write/Edit success echo (the Write event already
 // displayed the path one line above; the result is duplicate noise).
+// Two known formats from Claude CLI tools:
+//   Write (new file):      "File created successfully at: PATH"
+//   Edit (existing file):  "The file PATH has been updated successfully."
 function isWriteSuccessEcho(text: string): boolean {
   return /^File (created|updated|edited) successfully at:/.test(text)
+      || /^The file .+ has been (updated|edited|created|written) successfully\.?$/.test(text)
 }
 
 // Condense Read tool output (cat -n style line-numbered file contents)
