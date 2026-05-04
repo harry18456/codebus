@@ -1952,6 +1952,19 @@ describe('parseClaudeStreamLine', () => {
     expect(parseClaudeStreamLine(JSON.stringify({ type: 'result_summary' }))).toBe(null)
   })
 
+  it('forward-compat: returns null for unknown event types (e.g. acceptEdits permission events)', () => {
+    // acceptEdits mode may emit permission_decision / tool_permission_granted
+    // events not yet observed in spike. Parser must skip silently.
+    expect(parseClaudeStreamLine(JSON.stringify({ type: 'permission_decision', decision: 'auto-allow' }))).toBe(null)
+    expect(parseClaudeStreamLine(JSON.stringify({ type: 'tool_permission_granted', tool: 'Write' }))).toBe(null)
+    expect(parseClaudeStreamLine(JSON.stringify({ type: 'totally_unknown_future_event' }))).toBe(null)
+  })
+
+  it('forward-compat: returns null for malformed JSON instead of throwing', () => {
+    expect(parseClaudeStreamLine('{{{not valid json')).toBe(null)
+    expect(parseClaudeStreamLine('')).toBe(null)
+  })
+
   it('returns null for empty content_block_delta', () => {
     const line = JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { text: '' } } })
     expect(parseClaudeStreamLine(line)).toBe(null)
@@ -2111,12 +2124,21 @@ Plus:
 
 1. **Discover**: grep wiki/pages/*.md frontmatter \`sources:\` to see what
    raw files are already indexed. Read wiki/index.md for the catalog.
-2. **Plan**: list pages to update vs new pages to create.
-3. **Explore**: use Read/Grep/Glob on raw/code/ for source files not yet covered.
+2. **Plan**: list pages to update vs new pages to create. **If a source
+   file is already in some page's frontmatter sources[], DO NOT re-Read
+   it** -- prefer linking that page via [[wikilink]]. Re-Read only when
+   the existing page is marked \`stale: true\` or the prior coverage
+   genuinely missed an angle relevant to this goal.
+3. **Explore**: use Read/Grep/Glob on raw/code/ for source files not yet
+   covered.
 4. **Write**: create or update wiki/pages/<slug>.md with frontmatter (§6).
 5. **Index**: rewrite wiki/index.md catalog.
 6. **Log**: append a line to wiki/log.md.
 7. **Guide**: write wiki/goals/<slug>.md as the reading guide for this goal.
+
+**Re-run discipline:** When the SAME goal is re-run (you'll see it in
+goals.jsonl history hint), prefer incremental update via Page Conflict
+rules (§5) rather than wholesale rewrite. Existing reader state matters.
 
 ## 5. Page Conflict
 
