@@ -110,12 +110,13 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 │    --output-format stream-json                      │
 │    --input-format stream-json                       │
 │    --verbose                                        │
-│    --add-dir .codebus/wiki  (precise scope)         │
 │    --disallowedTools Bash,WebFetch,WebSearch        │
+│    (no --add-dir — phase 1 best-effort sandbox     │
+│     per §3.2; phase 2 will add cwd+settings.json)  │
 │  Flags（query mode, --query）:                     │
 │    同上 + Write,Edit 也 disallow                   │
 │  Tools available（ingest）:                         │
-│    Read, Grep, Glob, Write（限 .codebus/wiki/ 內） │
+│    Read, Grep, Glob, Write                         │
 │  Tools available（query）:                          │
 │    Read, Grep, Glob（讀 wiki 不寫）                │
 │  讀 .codebus/CLAUDE.md schema 學 wiki 規則         │
@@ -124,16 +125,22 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 └────────────────────────────────────────────────────┘
 ```
 
-### 3.2 codebus 不自定 tool
+### 3.2 codebus 不自定 tool（Phase 1 sandbox = best-effort）
 
-完全用 Claude Code 內建 tools。Phase 1 safety 靠：
+完全用 Claude Code 內建 tools。**Phase 1 sandbox 是 best-effort，不是真 enforcement** — `--add-dir` 是 widen 不是 narrow（spike 證實，見 §3.2.1），無法用它把 cwd 範圍縮小。Phase 1 safety 靠：
 
-- Prompt + schema 約束
-- **`--add-dir .codebus/wiki`** 精準到 wiki/ 子目錄（不是整個 .codebus/）— 防 agent 誤寫 CLAUDE.md / raw/code/ / .git/
-- `--disallowedTools Bash,WebFetch,WebSearch`（query mode 再加 Write,Edit）
-- `goals.jsonl` 由 codebus 自己 append（不在 add-dir 範圍，agent 寫不到）
-- `output/` phase 2+ 才用，phase 1 不在 add-dir
-- 不加程式 hook（phase 2 才補 sandbox + path-traversal helper）
+- **Prompt + schema 約束** — 教 agent 只寫 wiki/，不碰 raw/code / CLAUDE.md / .git
+- **Claude Code agent self-judgment** — agent 對 cwd 外路徑會自我拒絕（spike Exp 2b/4 顯示頑強但非 system guarantee）
+- **`--disallowedTools Bash,WebFetch,WebSearch`** — 危險工具 hard disable（query mode 加 Write,Edit）
+- **Nested git rollback 兜底** — agent 誤寫時 user 可 `git -C .codebus reset --hard` 復原（reset 到上次 successful commit）
+- **goals.jsonl 由 codebus 自寫** — 不依賴 agent 行為
+- **不加程式 hook** — phase 2 才補真 sandbox
+
+### 3.2.1 Phase 2 升級方向（已知 sandbox primitive）
+
+- **cwd 改 `.codebus/`** — 用 cwd-default 範圍把 agent 隔離出 user source repo（依平台保證；待 default permission mode spike）
+- **`--settings <file>` + permissions.deny rules** — declarative 黑名單（path glob syntax 待 spike 確認）
+- 兩者組合可達 declarative enforcement，phase 1 不做（避免在不確定 primitive 行為下落地）
 
 ### 3.3 Stack
 
@@ -424,7 +431,8 @@ pages: ["[[checkout-flow]]", "[[payment-gateway]]"]
 6. Spawn claude -p:
    - cwd = repo_root
    - args: --output-format stream-json --input-format stream-json --verbose
-           --add-dir .codebus/wiki --disallowedTools Bash,WebFetch,WebSearch
+           --disallowedTools Bash,WebFetch,WebSearch
+   - **(no --add-dir; phase 1 sandbox = best-effort per §3.2)**
    - stdin: stream-json messages（含 system prompt）
    - **OAuth detect**: 若 subprocess exit non-0 且 stderr 含 `unauthenticated` / `auth` / `token` keyword → throw 帶 hint「請跑 `claude` 完成 OAuth」並 abort goal flow
 
@@ -477,8 +485,8 @@ codebus 啟動時註冊 SIGINT — 收到 ctrl+c 時：
 
 3. Spawn claude -p:
    - cwd = repo_root
-   - args 同 §7 step 6（含 `--add-dir .codebus/wiki` + OAuth detect），但 disallowedTools 加 Write,Edit
-     （query mode 不讓 agent 寫檔；filing-back 留 phase 1.5）
+   - args 同 §7 step 6（OAuth detect 一樣），但 disallowedTools 加 Write,Edit
+     （query mode 不讓 agent 寫檔；filing-back 留 phase 1.5；agent 真的不該寫所以 hard deny 最直接）
    - stdin: stream-json messages（含 system prompt + query）
 
 4. Parse stream events，render emoji output（§8 一樣）

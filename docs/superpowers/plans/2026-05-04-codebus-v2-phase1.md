@@ -1347,7 +1347,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { ClaudeCliProvider } from '../../../src/infra/llm/claude-cli.js'
 
 describe('ClaudeCliProvider', () => {
-  it('builds correct argv for ingest mode (--add-dir scoped to wiki/)', () => {
+  it('builds correct argv for ingest mode (no --add-dir, phase 1 best-effort)', () => {
     const p = new ClaudeCliProvider({ binary: 'claude' })
     const argv = p.buildArgv({ mode: 'ingest', vaultRoot: '/tmp/.codebus' })
     expect(argv).toEqual([
@@ -1355,18 +1355,17 @@ describe('ClaudeCliProvider', () => {
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
       '--verbose',
-      '--add-dir', '/tmp/.codebus/wiki',
       '--disallowedTools', 'Bash,WebFetch,WebSearch'
     ])
+    expect(argv).not.toContain('--add-dir')
   })
 
-  it('builds correct argv for query mode (Write/Edit also disallowed)', () => {
+  it('builds correct argv for query mode (Write/Edit hard-disabled)', () => {
     const p = new ClaudeCliProvider({ binary: 'claude' })
     const argv = p.buildArgv({ mode: 'query', vaultRoot: '/tmp/.codebus' })
     const idx = argv.indexOf('--disallowedTools')
     expect(argv[idx + 1]).toBe('Bash,WebFetch,WebSearch,Write,Edit')
-    const dirIdx = argv.indexOf('--add-dir')
-    expect(argv[dirIdx + 1]).toBe('/tmp/.codebus/wiki')
+    expect(argv).not.toContain('--add-dir')
   })
 
   it('detects OAuth failure from non-zero exit + auth keyword in stderr', () => {
@@ -1412,15 +1411,16 @@ export class ClaudeCliProvider implements LLMProvider {
   buildArgv(opts: { mode: LLMMode; vaultRoot: string }): string[] {
     const disallowed = ['Bash', 'WebFetch', 'WebSearch']
     if (opts.mode === 'query') disallowed.push('Write', 'Edit')
-    // --add-dir scoped precisely to wiki/ (not whole .codebus/) — prevents
-    // agent from clobbering CLAUDE.md / raw/code/ / .git/ via Write tool.
-    const addDir = `${opts.vaultRoot}/wiki`
+    // No --add-dir: spike confirmed --add-dir is widen-only (cwd-relative
+    // restriction not possible). Phase 1 sandbox is best-effort per spec
+    // §3.2; phase 2 will add cwd=.codebus/ + --settings deny rules.
+    // vaultRoot kept in signature for phase 2 compatibility.
+    void opts.vaultRoot
     return [
       '-p',
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
       '--verbose',
-      '--add-dir', addDir,
       '--disallowedTools', disallowed.join(',')
     ]
   }
