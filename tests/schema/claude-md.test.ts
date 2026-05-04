@@ -31,4 +31,23 @@ describe('CODEBUS_SCHEMA_MARKDOWN', () => {
   it('specifies UTC date convention', () => {
     expect(CODEBUS_SCHEMA_MARKDOWN).toContain('UTC YYYY-MM-DD')
   })
+
+  it('contains §4.0 out-of-scope detection sub-section', () => {
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('Out-of-scope detection')
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('In-scope** if ANY of:')
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('Out-of-scope** otherwise')
+  })
+
+  it('contains §4.0.1 STOP rules forbidding no-op record creation', () => {
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('If out-of-scope: STOP')
+    // Must explicitly forbid creating goal-guide / log / index for noop
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('no "no-op record" goal-guide')
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('No `wiki/log.md` append')
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('No `wiki/index.md` modification')
+  })
+
+  it('explicitly references the wikiChanged=false / 🤷 banner contract', () => {
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('wikiChanged=false')
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('🤷')
+  })
 })

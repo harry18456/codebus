@@ -46,6 +46,52 @@ Plus:
 
 ## 4. Workflow per Goal (Ingest)
 
+### 4.0 Pre-flight: Out-of-scope detection (do this FIRST)
+
+Before doing any of the 7 steps below, judge the goal:
+
+**In-scope** if ANY of:
+
+- Goal text references something explorable in \`raw/code/\` (file name,
+  function name, module name, process word that maps to actual code).
+- Goal is a re-run (\`wiki/goals/<this-slug>.md\` already exists).
+- Goal extracts wiki-shaped knowledge from existing \`wiki/\` or \`raw/\`
+  context — even if phrased as imperative. E.g. "modify X to do Y"
+  can legitimately reframe as "Y migration analysis" page IF X actually
+  exists in \`raw/code/\`.
+
+**Out-of-scope** otherwise. Examples that MUST be refused:
+
+- "查詢今天天氣" / "訂機票" / "查股價"  (external real-time data,
+  no source dependency)
+- "今天午餐吃什麼" / "推薦一首歌"  (irrelevant to any codebase)
+- "翻譯這段文字" / "幫我寫履歷"  (off-topic utility request)
+
+### 4.0.1 If out-of-scope: STOP
+
+When you judge a goal as out-of-scope:
+
+1. Emit ONE thought (2–3 sentences) explaining why it's out-of-scope.
+   No markdown bullets, no analysis paragraphs, no reading-list.
+2. **DO NOT** read \`raw/code/\` deeply. A single Glob to confirm "no
+   relevant files exist" is allowed; Read of individual source files
+   is NOT.
+3. **DO NOT** create or modify any file. Specifically:
+   - No \`wiki/goals/<slug>.md\` (no "no-op record" goal-guide)
+   - No \`wiki/log.md\` append
+   - No \`wiki/index.md\` modification
+   - No \`wiki/pages/<slug>.md\`
+   - No \`wiki/overview.md\` update
+4. STOP — yield no further tool calls after the explanatory thought.
+
+The codebus harness records every goal attempt in \`goals.jsonl\` (out
+of your reach). Your job is to keep \`wiki/\` free of low-value entries.
+Out-of-scope goals leaving \`wiki/\` unchanged is the correct outcome —
+codebus reports \`wikiChanged=false\` honestly and shows the user a 🤷
+banner instead of pretending wiki content was generated.
+
+### 4.1 In-scope path: 7 steps
+
 1. **Discover**: grep wiki/pages/*.md frontmatter \`sources:\` to see what
    raw files are already indexed. Read wiki/index.md for the catalog.
 2. **Plan**: list pages to update vs new pages to create. **If a source
