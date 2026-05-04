@@ -65,4 +65,35 @@ describe('runInit', () => {
     const schema = readFileSync(join(dir, '.codebus', 'CLAUDE.md'), 'utf8')
     expect(schema).toBe('user customization')
   })
+
+  it('writes .codebus/.gitignore with .lock + raw/code/ + .obsidian/', async () => {
+    await runInit(dir)
+    const gi = readFileSync(join(dir, '.codebus', '.gitignore'), 'utf8')
+    expect(gi).toContain('.lock')
+    expect(gi).toContain('raw/code/')
+    expect(gi).toContain('**/.obsidian/')
+  })
+
+  it('appends missing required lines to existing .codebus/.gitignore', async () => {
+    // Simulate a vault initialized by an earlier codebus version that
+    // didn't include .obsidian/ in the ignore list.
+    const codebusDir = join(dir, '.codebus')
+    require('node:fs').mkdirSync(codebusDir)
+    writeFileSync(join(codebusDir, '.gitignore'), '.lock\nraw/code/\n')
+    await runInit(dir)
+    const gi = readFileSync(join(codebusDir, '.gitignore'), 'utf8')
+    expect(gi).toContain('.lock')
+    expect(gi).toContain('raw/code/')
+    expect(gi).toContain('**/.obsidian/')
+    // Should not duplicate existing entries
+    expect((gi.match(/^\.lock$/gm) ?? []).length).toBe(1)
+    expect((gi.match(/^raw\/code\/$/gm) ?? []).length).toBe(1)
+  })
+
+  it('merge is idempotent (re-init does not duplicate entries)', async () => {
+    await runInit(dir)
+    await runInit(dir)
+    const gi = readFileSync(join(dir, '.codebus', '.gitignore'), 'utf8')
+    expect((gi.match(/^\*\*\/\.obsidian\/$/gm) ?? []).length).toBe(1)
+  })
 })

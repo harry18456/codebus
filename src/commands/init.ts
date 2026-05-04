@@ -5,7 +5,14 @@ import { vaultPaths } from '../core/vault/layout.js'
 import { initNestedRepo, autoCommit } from '../infra/git/nested-repo.js'
 import { CODEBUS_SCHEMA_MARKDOWN } from '../schema/claude-md.js'
 
-const INTERNAL_GITIGNORE = '.lock\nraw/code/\n'
+// Required entries in .codebus/.gitignore. Init merges these into any
+// existing file (does not overwrite) so re-init or upgrades pick up new
+// entries added in later codebus versions.
+const REQUIRED_INTERNAL_GITIGNORE_LINES = [
+  '.lock',
+  'raw/code/',
+  '**/.obsidian/'  // Obsidian per-vault config (workspace state, plugin binaries, cache)
+]
 
 export async function runInit(repoRoot: string): Promise<void> {
   const p = vaultPaths(repoRoot)
@@ -26,9 +33,7 @@ export async function runInit(repoRoot: string): Promise<void> {
     await writeFile(p.goalsJsonl, '')
   }
 
-  if (!existsSync(p.gitignore)) {
-    await writeFile(p.gitignore, INTERNAL_GITIGNORE)
-  }
+  await mergeGitignoreLines(p.gitignore, REQUIRED_INTERNAL_GITIGNORE_LINES)
 
   await initNestedRepo(p.root)
 
@@ -45,4 +50,16 @@ export async function runInit(repoRoot: string): Promise<void> {
   }
 
   await autoCommit(p.root, 'init: codebus vault')
+}
+
+// Append any missing required lines to a .gitignore file. Creates the
+// file if absent. Idempotent — running twice produces the same result.
+async function mergeGitignoreLines(path: string, required: string[]): Promise<void> {
+  let existing = ''
+  if (existsSync(path)) existing = await readFile(path, 'utf8')
+  const present = new Set(existing.split('\n').map((l) => l.trim()))
+  const missing = required.filter((l) => !present.has(l))
+  if (missing.length === 0) return
+  const ensureNl = existing.length && !existing.endsWith('\n') ? '\n' : ''
+  await appendFile(path, `${ensureNl}${missing.join('\n')}\n`)
 }
