@@ -125,23 +125,44 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 └────────────────────────────────────────────────────┘
 ```
 
-### 3.2 codebus 不自定 tool（Phase 1 sandbox = best-effort）
+### 3.2 codebus 不自定 tool（Phase 1 sandbox = best-effort，明列 trade-off）
 
-完全用 Claude Code 內建 tools。**Phase 1 sandbox 是 best-effort，不是真 enforcement**。Spike 結果決定的策略：
+完全用 Claude Code 內建 tools。**Phase 1 sandbox 比原 spec rewrite 前更鬆**（誠實 disclosure）— 移除錯誤的 `--add-dir` 假象 + 加 `acceptEdits` 跳掉 default mode 的 prompt step。Phase 1 接受 sandbox = best-effort 換 functional + iterate 速度，phase 2 才補真 enforcement。
 
-- **`--permission-mode acceptEdits`** ← **MUST**：default mode 下 Write/Edit 全 deny（spike 證），無此 flag agent 寫不了任何 wiki page。`acceptEdits` 讓 Write/Edit 自動 accept、Bash 等仍 ask（已 disallow 不會撞）
-- **Prompt + schema 約束** — 教 agent 只寫 wiki/，不碰 raw/code / CLAUDE.md / .git
-- **Agent self-judgment** — agent 對 cwd 外路徑自我拒絕（spike A 在 default mode 下驗證頑強，但非 system guarantee；acceptEdits 模式 self-judgment 仍應運作 — 待 phase 2 再 verify）
+**Spike 確認的兩個 protection layers:**
+
+| Layer | 機制 | 守護範圍 | 強度 |
+|---|---|---|---|
+| **System permission** | `--permission-mode acceptEdits` 跳過 Write 的 ask-per-write | Write/Edit 能跑（baseline 解開）；不影響 Read/Grep/Glob（spike #1 證實它們在 default mode 也 work） | 系統層 hard |
+| **Agent self-judgment** | LLM 訓練的 path-traversal 警覺 + prompt injection detection | (a) cwd 外路徑（spike #5 acceptEdits 下仍頑強拒絕） (b) `.git/` 內檔（spike #4 detect injection + 拒絕） | LLM 行為，best-effort |
+
+**Phase 1 必設的 flags:**
+
+- **`--permission-mode acceptEdits`** ← MUST（spike B 證 -p default mode 下 Write 全 deny，沒這 flag 跑不起來）
 - **`--disallowedTools Bash,WebFetch,WebSearch`** — 危險工具 hard disable（query mode 加 Write,Edit）
-- **Nested git rollback 兜底** — agent 誤寫時 user 可 `git -C .codebus reset --hard` 復原
+- **Prompt + schema 約束** — 教 agent 只寫 wiki/、不碰 raw/code / CLAUDE.md / .git/
 - **goals.jsonl 由 codebus 自寫** — 不依賴 agent 行為
-- **不加程式 hook** — phase 2 才補真 sandbox
+- **不加程式 hook**（phase 2 才補）
 
-### 3.2.1 Phase 2 升級方向（spike 已確認 primitive，syntax 待補 spike）
+### 3.2.1 Phase 1 sandbox 守不到的 surfaces（明列風險）
 
-- **`--settings <file>` + `permissions.allow` 白名單**：限定 Write 只能寫 `wiki/**`（spike 試過 glob `Write(wiki/**)` 沒生效，syntax 需再 spike — 可能要絕對路徑或不同 pattern）
-- **cwd 改 `.codebus/`**：把 agent 隔離出 user source repo（spike A 顯示 default mode self-judgment 頑強，但 system 層級隔離仍值得做）
-- **真 enforcement** = allow whitelist + cwd 隔離兩層；phase 1 不做（避免落地未驗證的 syntax）
+兩個 layer 留下的 gap — phase 1 接受、phase 2 必補：
+
+| 風險 surface | 為何守不到 | Phase 1 兜底 |
+|---|---|---|
+| **Agent 寫 user source repo（cwd 內、`.codebus/` 外）** 例如 `src/foo.ts` / `package.json` / CI configs | cwd = repo_root，self-judgment 不認為是 escape；system 層 acceptEdits 也不擋 | 靠 prompt + user 跑前 review goal text 不要造成誤導；user 跑後 `git status` 在 source repo 看有沒被改 |
+| **Agent 自我變異 `.codebus/CLAUDE.md`** | cwd 內，self-judgment 不擋；schema 改了下次 run LLM 行為跟著變（cascade） | nested git auto-commit 後可比對 diff；user 看到 schema commit 異常 → revert |
+| **Agent 寫 `.codebus/.git/` 損 nested git** | 主要靠 self-judgment（spike #4 證頑強）；非 system enforcement | Self-judgment 是 best-effort；極端情況 user 需手動 `cd .codebus && git fsck` 修 |
+| **Agent 污染 `.codebus/raw/code/`** | cwd 內，self-judgment 不擋；下次 sync 會被覆蓋但本次跑可能用到污染後內容 | sync 在每跑 goal 開頭 `rm -rf raw/code/*` 重 copy → 跨 run 自動清 |
+
+**Phase 1 不做 enforcement 的 honest reasoning:** demo 期 risk 主要來自 wrong goal text，user iterate goal 過程能 detect；rollback turtle 不完美但夠日常用；上線前 phase 2 加真 sandbox。
+
+### 3.2.2 Phase 2 升級路徑（spike 已知 primitive 行為，syntax 待補 spike）
+
+- **`--settings <file>` + `permissions.allow` 白名單** — 限定 Write 只能寫 `wiki/**`（spike C 試 `Write(wiki/**)` 沒生效；syntax 需再 5 分鐘 spike 試 cwd-relative / abs-path / 看 claude code docs）
+- **cwd 改 `.codebus/`** — 把 agent system-level 隔離出 user source repo（不再依賴 self-judgment 的 cwd-外保護）
+- **`.codebus/.git/` 寫保護** — 用 settings.deny 規則 hard block（自我守 rollback turtle）
+- **真 declarative enforcement** = 上面三層；phase 1 不做（避免落地未驗證 syntax + 拖慢 iterate）
 
 ### 3.3 Stack
 
@@ -730,6 +751,8 @@ codebus/                          ← v2 main branch
 - Query 連續多輪是否要 session memory（phase 1 暫定 stateless / 每次 query 獨立）
 - Query final answer terminal markdown 渲染程度（純文字 vs 簡單 markdown bold/list parse）
 - Per-repo `.codebus/config.yaml`（phase 2 預留，phase 1 不做；雙層 config 過早複雜化）
+- `claude --settings` permissions.allow path glob syntax（spike 試 `Write(wiki/**)` 沒生效；待 5 分鐘 spike 試 cwd-relative / abs-path / 看 claude code docs；phase 2 unblock 真 declarative sandbox 必要）
+- Spike A self-judgment 是否在 `acceptEdits` 模式下完全等同 default mode（spike #5 抽樣 verified 仍頑強，但全 corpus 測試需 phase 2）
 
 ---
 
