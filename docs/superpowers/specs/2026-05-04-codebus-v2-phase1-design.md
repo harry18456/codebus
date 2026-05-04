@@ -153,7 +153,7 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 
 三個 layer 留下的 gap — phase 1 接受、phase 2 必補。**Severity** 標 blast radius（💥💥💥 = vault 失效 / rollback 也救不回；💥💥 = cascade；💥 = 局部）。
 
-> **為何 phase 1 只解第 3 條 surface（user source repo write）而不順便解 top 兩條？** Phase 1 用「已 spike-verified 的 OS-level primitive」(cwd 隔離)，這個 primitive 解第 3 條乾淨。Top 兩條（goals.jsonl / .git/）需要 `--settings` 的 `permissions.deny` syntax — spike C 試 `Write(wiki/**)` 沒生效，syntax 還沒搞清楚（cwd-relative? abs-path? 不同 glob 形式?），phase 1 不落地未驗證 primitive。Phase 2 補 syntax spike 後一次解 top 兩條。
+> **為何 phase 1 只解第 3 條 surface（user source repo write）而不順便解 top 兩條？** Phase 1 用「已 spike-verified 的 OS-level primitive」(cwd 隔離)，這個 primitive 解第 3 條乾淨。Top 兩條（goals.jsonl / .git/）需要 `--settings` 的 `permissions.deny` syntax — spike C 試 `Write(wiki/**)` 一種 form 沒生效就停了，**未窮盡**（5 分鐘 spike 試 cwd-relative / abs-path / 看 claude code docs 即可定論，見 §15）。Phase 1 不落地未驗證 primitive；phase 2 補 syntax spike 後一次解 top 兩條。
 
 | Sev | 風險 surface | 為何守不到 | Phase 1 兜底 |
 |---|---|---|---|
@@ -790,7 +790,7 @@ codebus/                          ← v2 main branch
 - Filing-back 寫入沿用 §9 page conflict 規則（append-merge / array union）
 - Filed 後 nested git auto-commit `query: <question>`
 
-### Phase 2 (PII / 多 model / token)
+### Phase 2 (PII / 多 model / token + cwd 內 sandbox 升級)
 
 - PII filter at copy boundary (src → raw/code)
 - Per-repo `.codebus/config.yaml`（覆蓋 ~/.codebus/config.yaml 全域設定）
@@ -802,6 +802,13 @@ codebus/                          ← v2 main branch
 - `isSafeIngestPath` 程式層 sandbox
 - Reasoning chars 監測（DeepSeek-R1 等推理 model）
 - LLM body merge with 70% length guard
+
+**Sandbox 升級（解 §3.2.1 top 兩條 💥💥💥 surface）:**
+- `--settings <file>` + `permissions.allow` cwd 內白名單（先 5 分鐘 spike 確認 glob syntax，見 §15）— 限定 Write 只能 `wiki/**` + `goals.jsonl`
+- `permissions.deny` rules 補強 — 至少 `Write(.git/**)` + `Edit(CLAUDE.md)` hard block
+- `--allowedTools` 白名單取代 `--disallowedTools`（forward-compat 新 tool 預設 deny）
+- File lock 加 stale-lock detection（PID alive check），SIGINT 中斷後 next run 能 reclaim
+- Init recovery from partial state（`.codebus/` 半完成自動 detect + repair）
 
 ### Phase 3 (GUI)
 
