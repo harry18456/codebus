@@ -151,7 +151,9 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 
 ### 3.2.1 Phase 1 sandbox 守不到的 surfaces（按 blast radius 排序）
 
-兩個 layer 留下的 gap — phase 1 接受、phase 2 必補。**Severity** 標 blast radius（💥💥💥 = vault 失效 / rollback 也救不回；💥💥 = cascade；💥 = 局部）：
+三個 layer 留下的 gap — phase 1 接受、phase 2 必補。**Severity** 標 blast radius（💥💥💥 = vault 失效 / rollback 也救不回；💥💥 = cascade；💥 = 局部）。
+
+> **為何 phase 1 只解第 3 條 surface（user source repo write）而不順便解 top 兩條？** Phase 1 用「已 spike-verified 的 OS-level primitive」(cwd 隔離)，這個 primitive 解第 3 條乾淨。Top 兩條（goals.jsonl / .git/）需要 `--settings` 的 `permissions.deny` syntax — spike C 試 `Write(wiki/**)` 沒生效，syntax 還沒搞清楚（cwd-relative? abs-path? 不同 glob 形式?），phase 1 不落地未驗證 primitive。Phase 2 補 syntax spike 後一次解 top 兩條。
 
 | Sev | 風險 surface | 為何守不到 | Phase 1 兜底 |
 |---|---|---|---|

@@ -1309,8 +1309,8 @@ export interface InvokeOptions {
   systemPrompt: string
   userMessage: string
   mode: LLMMode
-  cwd: string
-  vaultRoot: string                  // for --add-dir
+  cwd: string                        // spawn cwd; phase 1 = .codebus/ for sandbox isolation (spec §3.2)
+  vaultRoot: string                  // .codebus/ root; phase 2 will use for --settings allow whitelist
 }
 
 export interface LLMProvider {
@@ -2149,6 +2149,14 @@ of the same intent (e.g. "了解購物車" vs "了解購物車流程") produce
 different slugs / different goal guides; user manually deleting
 \`wiki/goals/<slug>.md\` hides the re-run signal. Phase 1 accepts these
 as user-chosen behavior; do not second-guess by re-deriving slugs.
+
+**The two dedup signals are INDEPENDENT** — even when the goal-guide
+signal says "new goal" (no existing wiki/goals/<this-slug>.md), the
+source-dedup signal (frontmatter \`sources[]\` containing X) still
+applies. So for slug-drifted re-runs, the correct behavior is: **create
+a new goal-guide, but reuse existing pages via [[wikilink]]** rather
+than re-Reading sources you've already covered. Don't conflate "new
+goal slug" with "explore everything fresh".
 
 ## 5. Page Conflict
 
