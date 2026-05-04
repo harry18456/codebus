@@ -1952,9 +1952,11 @@ describe('parseClaudeStreamLine', () => {
     expect(parseClaudeStreamLine(JSON.stringify({ type: 'result_summary' }))).toBe(null)
   })
 
-  it('forward-compat: returns null for unknown event types (e.g. acceptEdits permission events)', () => {
-    // acceptEdits mode may emit permission_decision / tool_permission_granted
-    // events not yet observed in spike. Parser must skip silently.
+  it('forward-compat: returns null for ANY unknown event type (parser robustness)', () => {
+    // This guards parser robustness, NOT verification of any specific schema.
+    // The imagined event names (permission_decision, etc.) reflect POSSIBLE
+    // acceptEdits-mode events but were not observed in spike. Real schema
+    // verification needs phase 2 instrumented spike — see spec §3.2.3.
     expect(parseClaudeStreamLine(JSON.stringify({ type: 'permission_decision', decision: 'auto-allow' }))).toBe(null)
     expect(parseClaudeStreamLine(JSON.stringify({ type: 'tool_permission_granted', tool: 'Write' }))).toBe(null)
     expect(parseClaudeStreamLine(JSON.stringify({ type: 'totally_unknown_future_event' }))).toBe(null)
@@ -2136,9 +2138,11 @@ Plus:
 6. **Log**: append a line to wiki/log.md.
 7. **Guide**: write wiki/goals/<slug>.md as the reading guide for this goal.
 
-**Re-run discipline:** When the SAME goal is re-run (you'll see it in
-goals.jsonl history hint), prefer incremental update via Page Conflict
-rules (§5) rather than wholesale rewrite. Existing reader state matters.
+**Re-run discipline:** If \`wiki/goals/<this-slug>.md\` already exists,
+this is a re-run of the SAME goal. Prefer incremental update via Page
+Conflict rules (§5) rather than wholesale rewrite — existing pages are
+the single source of truth for what's been covered, no need to consult
+goals.jsonl (codebus does not feed it into your context).
 
 ## 5. Page Conflict
 
@@ -2737,9 +2741,11 @@ git commit -m "feat(commands): add query command (read-only wiki Q&A)"
 ```typescript
 #!/usr/bin/env node
 import { Command } from 'commander'
+import { existsSync, unlinkSync } from 'node:fs'
 import { runInit } from './commands/init.js'
 import { runGoal } from './commands/goal.js'
 import { runQuery } from './commands/query.js'
+import { vaultPaths } from './core/vault/layout.js'
 import { ClaudeCliProvider } from './infra/llm/claude-cli.js'
 import { loadGlobalConfig } from './infra/global-config.js'
 import { resolveEmojiMode, detectRuntime, type EmojiMode } from './ui/emoji-mode.js'
@@ -2783,11 +2789,17 @@ async function main() {
   const useColor = process.stdout.isTTY && !process.env.NO_COLOR
   const renderOpts = { useEmoji, useColor }
 
-  // SIGINT (Ctrl+C): cancel provider; subprocess SIGTERM unwinds its
-  // for-await loop, runGoal's finally releases lock cleanly.
+  // SIGINT (Ctrl+C): cancel provider + best-effort unlink lock before
+  // exit. Without lock unlink, process.exit prevents runGoal's finally
+  // block from running -> next codebus run hits "already held". Phase 2
+  // adds stale-lock detection (PID alive check) for robust recovery.
   process.on('SIGINT', () => {
     console.error('\n中止 — wiki 可能半寫；可手動 git -C .codebus reset --hard 復原')
     if (activeProvider) activeProvider.cancel()
+    try {
+      const lockPath = vaultPaths(repo).lock
+      if (existsSync(lockPath)) unlinkSync(lockPath)
+    } catch { /* ignore — best effort */ }
     process.exit(130)
   })
 
@@ -3054,6 +3066,38 @@ npm publish --access public          # only when v0.1.0 ready to ship
 - `GlobalConfig.emoji` type matches `EmojiMode` ('auto' | 'on' | 'off') across Tasks 11 / 11.5 / 17
 
 No issues found.
+
+---
+
+## Lessons from review iterations (process discipline notes)
+
+These are persistent notes for future review cycles or contributors —
+not part of phase 1 implementation but should survive across reviewers:
+
+1. **Spike summaries must quote transcript lines, not just paraphrase.**
+   Iter-3 review caught spike #1 summary saying "permission_denials=[]"
+   without showing the tool_use(Read) / tool_result events that made
+   the conclusion meaningful. Future spike commits must include the
+   relevant transcript excerpts inline.
+
+2. **Don't conflate `-p` mode with permission mode.** Spike B
+   originally concluded "default mode + Write = baseline-deny";
+   actually it's "-p mode (no interactive user) + default permission
+   mode = no one to approve permission requests". Naming the layers
+   precisely matters when you're trying to design around them.
+
+3. **`--add-dir` is widen, not narrow.** This caused two iterations of
+   wrong sandbox claims. Always re-read CLI flag docs (or spike) before
+   asserting "X limits scope to Y".
+
+4. **Severity column in risk tables.** Iter-3 review noted the §3.2.1
+   surface table had goals.jsonl (vault-killer) listed parallel to
+   raw/code/ pollution (1-page impact). Future risk tables should
+   mark blast radius explicitly so readers can prioritize.
+
+5. **Phase 2 unblock items belong in §15, not buried in prose.** When
+   deferring something "phase 2 will handle", put it explicitly in the
+   Open Questions list so future ingest pass doesn't lose it.
 
 ---
 
