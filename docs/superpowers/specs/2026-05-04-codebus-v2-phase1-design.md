@@ -110,9 +110,9 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 │    --output-format stream-json                      │
 │    --input-format stream-json                       │
 │    --verbose                                        │
+│    --permission-mode acceptEdits  (Write auto-OK)  │
 │    --disallowedTools Bash,WebFetch,WebSearch        │
-│    (no --add-dir — phase 1 best-effort sandbox     │
-│     per §3.2; phase 2 will add cwd+settings.json)  │
+│    (no --add-dir — see §3.2)                       │
 │  Flags（query mode, --query）:                     │
 │    同上 + Write,Edit 也 disallow                   │
 │  Tools available（ingest）:                         │
@@ -127,20 +127,21 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 
 ### 3.2 codebus 不自定 tool（Phase 1 sandbox = best-effort）
 
-完全用 Claude Code 內建 tools。**Phase 1 sandbox 是 best-effort，不是真 enforcement** — `--add-dir` 是 widen 不是 narrow（spike 證實，見 §3.2.1），無法用它把 cwd 範圍縮小。Phase 1 safety 靠：
+完全用 Claude Code 內建 tools。**Phase 1 sandbox 是 best-effort，不是真 enforcement**。Spike 結果決定的策略：
 
+- **`--permission-mode acceptEdits`** ← **MUST**：default mode 下 Write/Edit 全 deny（spike 證），無此 flag agent 寫不了任何 wiki page。`acceptEdits` 讓 Write/Edit 自動 accept、Bash 等仍 ask（已 disallow 不會撞）
 - **Prompt + schema 約束** — 教 agent 只寫 wiki/，不碰 raw/code / CLAUDE.md / .git
-- **Claude Code agent self-judgment** — agent 對 cwd 外路徑會自我拒絕（spike Exp 2b/4 顯示頑強但非 system guarantee）
+- **Agent self-judgment** — agent 對 cwd 外路徑自我拒絕（spike A 在 default mode 下驗證頑強，但非 system guarantee；acceptEdits 模式 self-judgment 仍應運作 — 待 phase 2 再 verify）
 - **`--disallowedTools Bash,WebFetch,WebSearch`** — 危險工具 hard disable（query mode 加 Write,Edit）
-- **Nested git rollback 兜底** — agent 誤寫時 user 可 `git -C .codebus reset --hard` 復原（reset 到上次 successful commit）
+- **Nested git rollback 兜底** — agent 誤寫時 user 可 `git -C .codebus reset --hard` 復原
 - **goals.jsonl 由 codebus 自寫** — 不依賴 agent 行為
 - **不加程式 hook** — phase 2 才補真 sandbox
 
-### 3.2.1 Phase 2 升級方向（已知 sandbox primitive）
+### 3.2.1 Phase 2 升級方向（spike 已確認 primitive，syntax 待補 spike）
 
-- **cwd 改 `.codebus/`** — 用 cwd-default 範圍把 agent 隔離出 user source repo（依平台保證；待 default permission mode spike）
-- **`--settings <file>` + permissions.deny rules** — declarative 黑名單（path glob syntax 待 spike 確認）
-- 兩者組合可達 declarative enforcement，phase 1 不做（避免在不確定 primitive 行為下落地）
+- **`--settings <file>` + `permissions.allow` 白名單**：限定 Write 只能寫 `wiki/**`（spike 試過 glob `Write(wiki/**)` 沒生效，syntax 需再 spike — 可能要絕對路徑或不同 pattern）
+- **cwd 改 `.codebus/`**：把 agent 隔離出 user source repo（spike A 顯示 default mode self-judgment 頑強，但 system 層級隔離仍值得做）
+- **真 enforcement** = allow whitelist + cwd 隔離兩層；phase 1 不做（避免落地未驗證的 syntax）
 
 ### 3.3 Stack
 
@@ -431,6 +432,7 @@ pages: ["[[checkout-flow]]", "[[payment-gateway]]"]
 6. Spawn claude -p:
    - cwd = repo_root
    - args: --output-format stream-json --input-format stream-json --verbose
+           **--permission-mode acceptEdits**  (MUST: default mode blocks Write per §3.2 spike)
            --disallowedTools Bash,WebFetch,WebSearch
    - **(no --add-dir; phase 1 sandbox = best-effort per §3.2)**
    - stdin: stream-json messages（含 system prompt）

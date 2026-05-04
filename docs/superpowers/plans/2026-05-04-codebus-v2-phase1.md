@@ -1347,7 +1347,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { ClaudeCliProvider } from '../../../src/infra/llm/claude-cli.js'
 
 describe('ClaudeCliProvider', () => {
-  it('builds correct argv for ingest mode (no --add-dir, phase 1 best-effort)', () => {
+  it('builds correct argv for ingest mode (acceptEdits + no --add-dir)', () => {
     const p = new ClaudeCliProvider({ binary: 'claude' })
     const argv = p.buildArgv({ mode: 'ingest', vaultRoot: '/tmp/.codebus' })
     expect(argv).toEqual([
@@ -1355,16 +1355,18 @@ describe('ClaudeCliProvider', () => {
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
       '--verbose',
+      '--permission-mode', 'acceptEdits',
       '--disallowedTools', 'Bash,WebFetch,WebSearch'
     ])
     expect(argv).not.toContain('--add-dir')
   })
 
-  it('builds correct argv for query mode (Write/Edit hard-disabled)', () => {
+  it('builds correct argv for query mode (acceptEdits + Write/Edit hard-disabled)', () => {
     const p = new ClaudeCliProvider({ binary: 'claude' })
     const argv = p.buildArgv({ mode: 'query', vaultRoot: '/tmp/.codebus' })
-    const idx = argv.indexOf('--disallowedTools')
-    expect(argv[idx + 1]).toBe('Bash,WebFetch,WebSearch,Write,Edit')
+    const dIdx = argv.indexOf('--disallowedTools')
+    expect(argv[dIdx + 1]).toBe('Bash,WebFetch,WebSearch,Write,Edit')
+    expect(argv).toContain('--permission-mode')
     expect(argv).not.toContain('--add-dir')
   })
 
@@ -1411,9 +1413,14 @@ export class ClaudeCliProvider implements LLMProvider {
   buildArgv(opts: { mode: LLMMode; vaultRoot: string }): string[] {
     const disallowed = ['Bash', 'WebFetch', 'WebSearch']
     if (opts.mode === 'query') disallowed.push('Write', 'Edit')
-    // No --add-dir: spike confirmed --add-dir is widen-only (cwd-relative
-    // restriction not possible). Phase 1 sandbox is best-effort per spec
-    // §3.2; phase 2 will add cwd=.codebus/ + --settings deny rules.
+    // --permission-mode acceptEdits: REQUIRED. Spike confirmed default
+    // mode blocks ALL Write tool calls (returns "you haven't granted it
+    // yet" errors), so without this flag agent can't write any wiki page.
+    // acceptEdits auto-accepts Write/Edit/NotebookEdit; Bash etc still
+    // ask but they're already disallowed via --disallowedTools.
+    //
+    // No --add-dir: spike confirmed --add-dir is widen-only (cannot
+    // narrow cwd). Phase 1 sandbox = best-effort per spec §3.2.
     // vaultRoot kept in signature for phase 2 compatibility.
     void opts.vaultRoot
     return [
@@ -1421,6 +1428,7 @@ export class ClaudeCliProvider implements LLMProvider {
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
       '--verbose',
+      '--permission-mode', 'acceptEdits',
       '--disallowedTools', disallowed.join(',')
     ]
   }
