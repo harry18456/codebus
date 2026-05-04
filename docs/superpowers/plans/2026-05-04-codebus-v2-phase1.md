@@ -767,7 +767,14 @@ export function mergePage(
   today: string
 ): ParsedPage {
   const sources = uniqueSources(existing.frontmatter.sources, incoming.frontmatter.sources)
-  const goals = uniqueStrings(existing.frontmatter.goals, [goalText])
+  // Union ALL three sources of goals: existing + the goalText for this run
+  // + any goals already in incoming page's frontmatter (LLM might pre-fill).
+  // Earlier bug (caught review iter-8): impl ignored incoming.frontmatter.goals,
+  // test "does not duplicate goal" expected 退款處理 from incoming → would FAIL.
+  const goals = uniqueStrings(
+    [...existing.frontmatter.goals, goalText],
+    incoming.frontmatter.goals
+  )
   const related = uniqueStrings(existing.frontmatter.related, incoming.frontmatter.related)
 
   const sectionHeader = `## from goal: ${goalText} (${today})`
@@ -1379,6 +1386,37 @@ describe('ClaudeCliProvider', () => {
     expect(p.classifyExit(1, 'random failure')).toMatchObject({ kind: 'generic-error' })
     expect(p.classifyExit(0, '')).toMatchObject({ kind: 'success' })
   })
+
+  it('passes opts.cwd to spawn (sandbox isolation per spec §3.2)', async () => {
+    // Mock child_process.spawn — verify ClaudeCliProvider passes cwd correctly.
+    // Spec §3.2 + spike E require cwd = .codebus/ for system-level user-repo
+    // isolation. Without this assertion, iter-5 cwd change could regress
+    // silently if buildArgv test passes but invoke() forgets cwd.
+    const { EventEmitter } = await import('node:events')
+    const cp = await import('node:child_process')
+    const seen: { cwd?: string } = {}
+    const fakeChild: any = new EventEmitter()
+    fakeChild.stdout = new EventEmitter()
+    fakeChild.stderr = new EventEmitter()
+    fakeChild.stdin = { write: () => {}, end: () => {} }
+    fakeChild.killed = false
+    fakeChild.kill = () => {}
+    const spawnSpy = vi.spyOn(cp, 'spawn').mockImplementation((_bin: any, _args: any, opts: any) => {
+      seen.cwd = opts?.cwd
+      // immediately end stdout + emit exit
+      setImmediate(() => { fakeChild.stdout.emit('end'); fakeChild.emit('exit', 0) })
+      return fakeChild
+    })
+    const p = new ClaudeCliProvider({ binary: 'claude' })
+    const it = p.invoke({
+      systemPrompt: '', userMessage: '', mode: 'ingest',
+      cwd: '/tmp/myrepo/.codebus', vaultRoot: '/tmp/myrepo/.codebus'
+    })
+    // drain
+    for await (const _ev of it) { /* consume */ }
+    expect(seen.cwd).toBe('/tmp/myrepo/.codebus')
+    spawnSpy.mockRestore()
+  })
 })
 ```
 
@@ -1457,9 +1495,9 @@ export class ClaudeCliProvider implements LLMProvider {
     try {
       for await (const line of rl) {
         if (!line.trim()) continue
-        const parsed = JSON.parse(line)
-        const event = mapClaudeStreamLine(parsed)
-        if (event) yield event
+        // mapClaudeStreamLine returns StreamEvent[] (zero-or-more per
+        // line — assistant.content[] can have text + tool_use together).
+        for (const event of mapClaudeStreamLine(line)) yield event
       }
       // Wait for subprocess exit to inspect status
       const code: number = await new Promise((resolve) =>
@@ -1495,23 +1533,49 @@ export class ClaudeCliProvider implements LLMProvider {
   }
 }
 
-// Internal: claude -p stream-json line → unified StreamEvent
-function mapClaudeStreamLine(parsed: any): StreamEvent | null {
-  if (parsed.type === 'stream_event' && parsed.event?.type === 'content_block_delta') {
-    const text = parsed.event.delta?.text ?? ''
-    return text ? { kind: 'thought', text } : null
+// Internal: claude -p stream-json line → 0 or more StreamEvent
+// Schema verified by spike (claude CLI 2.1.126):
+//   {type:"system", subtype:...}            → skip
+//   {type:"assistant", message:{content:[{type:"text"|"tool_use"|"thinking",...}]}}
+//   {type:"user", message:{content:[{type:"tool_result",...}]}}
+//   {type:"rate_limit_event"}               → skip
+//   {type:"result", subtype:...}            → skip
+function mapClaudeStreamLine(rawLine: string): StreamEvent[] {
+  let parsed: any
+  try { parsed = JSON.parse(rawLine) } catch { return [] }
+
+  if (parsed.type === 'assistant') {
+    const items = parsed.message?.content
+    if (!Array.isArray(items)) return []
+    const events: StreamEvent[] = []
+    for (const item of items) {
+      if (item.type === 'text' && item.text) {
+        events.push({ kind: 'thought', text: String(item.text) })
+      } else if (item.type === 'tool_use') {
+        events.push({ kind: 'tool_use', name: String(item.name ?? ''), input: item.input })
+      }
+      // 'thinking' items skipped (internal reasoning, not user-facing)
+    }
+    return events
   }
-  if (parsed.type === 'stream_event' && parsed.event?.type === 'tool_use') {
-    return { kind: 'tool_use', name: parsed.event.name, input: parsed.event.input }
+
+  if (parsed.type === 'user') {
+    const items = parsed.message?.content
+    if (!Array.isArray(items)) return []
+    const events: StreamEvent[] = []
+    for (const item of items) {
+      if (item.type === 'tool_result') {
+        const content = Array.isArray(item.content)
+          ? item.content.map((c: any) => c.text ?? '').join('')
+          : String(item.content ?? '')
+        events.push({ kind: 'tool_result', output: content, isError: Boolean(item.is_error) })
+      }
+    }
+    return events
   }
-  if (parsed.type === 'stream_event' && parsed.event?.type === 'tool_result') {
-    const content = Array.isArray(parsed.event.content)
-      ? parsed.event.content.map((c: any) => c.text ?? '').join('')
-      : String(parsed.event.content ?? '')
-    return { kind: 'tool_result', output: content, isError: Boolean(parsed.event.is_error) }
-  }
-  // session_init / result_summary / assistant fallback / unknown → skip
-  return null
+
+  // system / result / rate_limit_event / unknown → skip
+  return []
 }
 ```
 
@@ -1927,49 +1991,69 @@ import { describe, it, expect } from 'vitest'
 import { parseClaudeStreamLine } from '../../src/ui/stream-parser.js'
 
 describe('parseClaudeStreamLine', () => {
-  it('parses content_block_delta as thought', () => {
-    const line = JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { text: 'hello' } } })
-    expect(parseClaudeStreamLine(line)).toEqual({ kind: 'thought', text: 'hello' })
+  it('parses assistant.text as thought', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'hello' }] }
+    })
+    expect(parseClaudeStreamLine(line)).toEqual([{ kind: 'thought', text: 'hello' }])
   })
 
-  it('parses tool_use', () => {
-    const line = JSON.stringify({ type: 'stream_event', event: { type: 'tool_use', name: 'Read', input: { path: 'a' } } })
-    expect(parseClaudeStreamLine(line)).toEqual({ kind: 'tool_use', name: 'Read', input: { path: 'a' } })
+  it('parses assistant.tool_use', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', name: 'Read', input: { path: 'a' } }] }
+    })
+    expect(parseClaudeStreamLine(line)).toEqual([
+      { kind: 'tool_use', name: 'Read', input: { path: 'a' } }
+    ])
   })
 
-  it('parses tool_result success', () => {
-    const line = JSON.stringify({ type: 'stream_event', event: { type: 'tool_result', content: [{ text: 'ok' }] } })
-    expect(parseClaudeStreamLine(line)).toEqual({ kind: 'tool_result', output: 'ok', isError: false })
+  it('parses user.tool_result success', () => {
+    const line = JSON.stringify({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', content: [{ text: 'ok' }] }] }
+    })
+    expect(parseClaudeStreamLine(line)).toEqual([
+      { kind: 'tool_result', output: 'ok', isError: false }
+    ])
   })
 
-  it('parses tool_result error', () => {
-    const line = JSON.stringify({ type: 'stream_event', event: { type: 'tool_result', content: 'fail', is_error: true } })
-    expect(parseClaudeStreamLine(line)).toEqual({ kind: 'tool_result', output: 'fail', isError: true })
+  it('parses user.tool_result error', () => {
+    const line = JSON.stringify({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', content: 'fail', is_error: true }] }
+    })
+    expect(parseClaudeStreamLine(line)).toEqual([
+      { kind: 'tool_result', output: 'fail', isError: true }
+    ])
   })
 
-  it('returns null for session_init / unknown types', () => {
-    expect(parseClaudeStreamLine(JSON.stringify({ type: 'session_init' }))).toBe(null)
-    expect(parseClaudeStreamLine(JSON.stringify({ type: 'result_summary' }))).toBe(null)
+  it('returns multiple events when assistant.content has multiple items + skips thinking', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { content: [
+        { type: 'thinking', thinking: 'internal' },        // skipped (internal reasoning)
+        { type: 'text', text: 'visible' },
+        { type: 'tool_use', name: 'Grep', input: { pattern: 'x' } }
+      ]}
+    })
+    expect(parseClaudeStreamLine(line)).toEqual([
+      { kind: 'thought', text: 'visible' },
+      { kind: 'tool_use', name: 'Grep', input: { pattern: 'x' } }
+    ])
   })
 
-  it('forward-compat: returns null for ANY unknown event type (parser robustness)', () => {
-    // This guards parser robustness, NOT verification of any specific schema.
-    // The imagined event names (permission_decision, etc.) reflect POSSIBLE
-    // acceptEdits-mode events but were not observed in spike. Real schema
-    // verification needs phase 2 instrumented spike — see spec §3.2.3.
-    expect(parseClaudeStreamLine(JSON.stringify({ type: 'permission_decision', decision: 'auto-allow' }))).toBe(null)
-    expect(parseClaudeStreamLine(JSON.stringify({ type: 'tool_permission_granted', tool: 'Write' }))).toBe(null)
-    expect(parseClaudeStreamLine(JSON.stringify({ type: 'totally_unknown_future_event' }))).toBe(null)
+  it('returns empty for system / result / rate_limit_event / unknown', () => {
+    expect(parseClaudeStreamLine(JSON.stringify({ type: 'system', subtype: 'init' }))).toEqual([])
+    expect(parseClaudeStreamLine(JSON.stringify({ type: 'result', subtype: 'success' }))).toEqual([])
+    expect(parseClaudeStreamLine(JSON.stringify({ type: 'rate_limit_event' }))).toEqual([])
+    expect(parseClaudeStreamLine(JSON.stringify({ type: 'totally_unknown_future' }))).toEqual([])
   })
 
-  it('forward-compat: returns null for malformed JSON instead of throwing', () => {
-    expect(parseClaudeStreamLine('{{{not valid json')).toBe(null)
-    expect(parseClaudeStreamLine('')).toBe(null)
-  })
-
-  it('returns null for empty content_block_delta', () => {
-    const line = JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { text: '' } } })
-    expect(parseClaudeStreamLine(line)).toBe(null)
+  it('forward-compat: returns empty for malformed JSON instead of throwing', () => {
+    expect(parseClaudeStreamLine('{{{not valid json')).toEqual([])
+    expect(parseClaudeStreamLine('')).toEqual([])
   })
 })
 ```
@@ -1984,34 +2068,64 @@ Expected: FAIL — module not found.
 ```typescript
 import type { StreamEvent } from '../infra/llm/types.js'
 
-export function parseClaudeStreamLine(rawLine: string): StreamEvent | null {
+// Verified against real claude -p --output-format stream-json output
+// (spike on claude CLI 2.1.126). Real top-level events are:
+//   system   (subtype: hook_started/hook_response/init)         → skip
+//   assistant.message.content[] of {type:"thinking"|"text"|"tool_use"}
+//   user.message.content[] of {type:"tool_result"}
+//   rate_limit_event                                              → skip
+//   result (subtype: success/error)                               → skip
+// NO {type:"stream_event"} wrapper observed. parser yields ONE
+// StreamEvent per content[] item (caller iterates).
+
+export function parseClaudeStreamLine(rawLine: string): StreamEvent[] {
   let parsed: any
-  try { parsed = JSON.parse(rawLine) } catch { return null }
-  if (parsed.type === 'stream_event' && parsed.event?.type === 'content_block_delta') {
-    const text = parsed.event.delta?.text ?? ''
-    return text ? { kind: 'thought', text } : null
+  try { parsed = JSON.parse(rawLine) } catch { return [] }
+
+  if (parsed.type === 'assistant') {
+    const items = parsed.message?.content
+    if (!Array.isArray(items)) return []
+    const events: StreamEvent[] = []
+    for (const item of items) {
+      if (item.type === 'text' && item.text) {
+        events.push({ kind: 'thought', text: String(item.text) })
+      } else if (item.type === 'tool_use') {
+        events.push({ kind: 'tool_use', name: String(item.name ?? ''), input: item.input })
+      }
+      // 'thinking' items skipped (internal reasoning, not user-facing)
+    }
+    return events
   }
-  if (parsed.type === 'stream_event' && parsed.event?.type === 'tool_use') {
-    return { kind: 'tool_use', name: parsed.event.name, input: parsed.event.input }
+
+  if (parsed.type === 'user') {
+    const items = parsed.message?.content
+    if (!Array.isArray(items)) return []
+    const events: StreamEvent[] = []
+    for (const item of items) {
+      if (item.type === 'tool_result') {
+        const content = Array.isArray(item.content)
+          ? item.content.map((c: any) => c.text ?? '').join('')
+          : String(item.content ?? '')
+        events.push({ kind: 'tool_result', output: content, isError: Boolean(item.is_error) })
+      }
+    }
+    return events
   }
-  if (parsed.type === 'stream_event' && parsed.event?.type === 'tool_result') {
-    const content = Array.isArray(parsed.event.content)
-      ? parsed.event.content.map((c: any) => c.text ?? '').join('')
-      : String(parsed.event.content ?? '')
-    return { kind: 'tool_result', output: content, isError: Boolean(parsed.event.is_error) }
-  }
-  return null
+
+  // system / result / rate_limit_event / unknown → skip
+  return []
 }
 ```
 
+> **Caller note**: returns `StreamEvent[]` (zero-or-more per line). Task 10 already iterates: `for (const event of mapClaudeStreamLine(line)) yield event`. After refactor, just rename `mapClaudeStreamLine` → `parseClaudeStreamLine`.
+
 - [ ] **Step 4: Refactor `src/infra/llm/claude-cli.ts` to import the parser**
 
-Replace inline `mapClaudeStreamLine` with import + delete the local copy:
+Delete the local `mapClaudeStreamLine` function from `claude-cli.ts` (it's now in `ui/stream-parser.ts` as `parseClaudeStreamLine`):
 ```typescript
 import { parseClaudeStreamLine } from '../../ui/stream-parser.js'
-// ... in the for-await loop, replace `mapClaudeStreamLine(parsed)` with:
-//   const event = parseClaudeStreamLine(line)
-// (and remove JSON.parse — parser handles it)
+// ... in the for-await loop, replace `mapClaudeStreamLine(line)` with `parseClaudeStreamLine(line)`:
+//   for (const event of parseClaudeStreamLine(line)) yield event
 ```
 
 - [ ] **Step 5: Run all tests → expect PASS**
@@ -2557,6 +2671,10 @@ async function enrichSourceMetadata(
   rawCodeDir: string,
   commitHash: string | null
 ): Promise<void> {
+  // CRITICAL: only fill MISSING sha256 (= newly written page in this run).
+  // Previous bug (caught review iter-8): unconditional overwrite reset
+  // every page's sha256 to current raw hash, then flagStalePages compared
+  // same-hash-vs-same-hash → never stale. Whole §10 stale mechanism dead.
   if (!existsSync(pagesDir)) return
   const files = await readdir(pagesDir)
   const { serializePage } = await import('../core/wiki/frontmatter.js')
@@ -2567,8 +2685,21 @@ async function enrichSourceMetadata(
     const content = await readFile(fullPath, 'utf8')
     let parsed
     try { parsed = parsePage(content) } catch { continue }
+
+    // Skip pages already enriched (every source has sha256+at_commit) —
+    // they're carry-over from prior runs, leave their fingerprints alone
+    // so flagStalePages can detect drift against current raw.
+    const allEnriched = parsed.frontmatter.sources.every(
+      (s) => Boolean(s.sha256) && Boolean(s.at_commit)
+    )
+    if (allEnriched || parsed.frontmatter.sources.length === 0) continue
+
+    // This page has at least one source missing sha256 → freshly written
+    // by agent in this run. Enrich missing fields, leave already-filled
+    // ones alone.
     const enrichedSources = await Promise.all(
       parsed.frontmatter.sources.map(async (src) => {
+        if (src.sha256 && src.at_commit) return src        // preserve
         const rawPath = join(rawCodeDir, src.path)
         const sha256 = existsSync(rawPath) ? await sha256File(rawPath) : ''
         return {
@@ -2787,6 +2918,13 @@ const opts = program.opts()
 let activeProvider: { cancel(): void } | null = null
 
 async function main() {
+  // CRITICAL: declare repo BEFORE registering SIGINT handler.
+  // SIGINT is async; if Ctrl+C fires (or buffered ^C) between handler
+  // registration and `const repo = opts.repo`, handler accesses repo
+  // in TDZ → ReferenceError. Caught review iter-8.
+  const repo = opts.repo
+
+
   // Settings priority for emoji mode (per spec §17.3):
   //   1. --emoji on/off (explicit enum wins)
   //   2. --no-emoji (sugar = off)
@@ -2824,8 +2962,6 @@ async function main() {
     }
     process.exit(130)
   })
-
-  const repo = opts.repo
 
   if (!opts.goal && !opts.query) {
     console.log(renderBanner('start', { path: repo }, renderOpts))
@@ -3072,7 +3208,7 @@ npm publish --access public          # only when v0.1.0 ready to ship
 
 - ✅ §2.5 Scale expected 10k–100k LoC → noted in spec; phase 1 plan accepts full-copy semantics
 - ✅ §3.1 Architecture (codebus thin wrapper + claude -p + load global config) → Task 10 (claude-cli.ts) + Task 11.5 (global-config) + Task 17 (cli.ts dispatch)
-- ✅ §3.2 add-dir scoped to .codebus/wiki (precise sandbox) → Task 10 buildArgv test asserts `/tmp/.codebus/wiki`
+- ✅ §3.2 sandbox model (cwd=.codebus/ + acceptEdits + disallowedTools, NO --add-dir) → Task 10 buildArgv test asserts `not.toContain('--add-dir')` + new test asserts `spawn` receives `cwd: '/tmp/myrepo/.codebus'`
 - ✅ §3.5 Module Architecture (core/infra/ui hexagonal) → Tasks 2-13
 - ✅ §4 Disk Layout (`.codebus/` vault with raw/code/) → Task 2 (rawCode field) + Task 14 (mkdir raw/code/)
 - ✅ §4.3 raw/code/ in .codebus/.gitignore → Task 14 init writes `.lock\nraw/code/\n`
