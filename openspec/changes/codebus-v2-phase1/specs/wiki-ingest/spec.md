@@ -47,7 +47,7 @@ After sync, the system SHALL append a JSON line to `.codebus/goals.jsonl` captur
 
 ### Requirement: Spawn LLM agent with sandbox flags and cwd isolation
 
-The system SHALL spawn the LLM provider with cwd set to `.codebus/` (system-level user-source-repo isolation) and SHALL pass the required permission and disallowedTools flags so that Write/Edit auto-accept inside cwd while Bash/WebFetch/WebSearch remain hard-disabled.
+The system SHALL spawn the LLM provider with cwd set to `.codebus/` (system-level user-source-repo isolation) and SHALL pass `--tools` (toolset whitelist gate) and `--allowedTools` (auto-approval safety net) with identical lists so that only `Read,Glob,Grep,Write,Edit` are visible to the agent — Bash/WebFetch/WebSearch/AskUserQuestion/Task/NotebookEdit/MCP and any future Claude Code tools are not in the agent's toolbox at all. (See §3.2.4 of the design spec for why `--tools` is the gate, not `--allowedTools`; `--allowedTools` was misused as a toolset filter in iter-1 ~ iter-8.)
 
 #### Scenario: Provider spawn receives required cwd
 
@@ -57,7 +57,7 @@ The system SHALL spawn the LLM provider with cwd set to `.codebus/` (system-leve
 #### Scenario: Required argv flags are present in ingest mode
 
 - **WHEN** the system builds argv for ingest mode
-- **THEN** argv contains `-p`, `--output-format stream-json`, `--input-format stream-json`, `--verbose`, `--permission-mode acceptEdits`, and `--disallowedTools Bash,WebFetch,WebSearch`
+- **THEN** argv contains `-p`, `--output-format stream-json`, `--input-format stream-json`, `--verbose`, `--permission-mode acceptEdits`, `--tools Read,Glob,Grep,Write,Edit`, and `--allowedTools Read,Glob,Grep,Write,Edit`
 
 ### Requirement: Stream agent events to terminal and emit them via callback
 

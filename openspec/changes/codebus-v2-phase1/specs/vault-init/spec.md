@@ -7,7 +7,7 @@ When invoked with `--repo <path>` and no `--goal` or `--query`, the system SHALL
 #### Scenario: Fresh init creates all expected paths
 
 - **WHEN** the user runs `codebus --repo /path/to/myrepo` and `/path/to/myrepo/.codebus/` does not yet exist
-- **THEN** the system creates `/path/to/myrepo/.codebus/` with subdirectories `raw/`, `raw/code/`, `wiki/`, `wiki/pages/`, `wiki/goals/`, `output/`, and files `CLAUDE.md`, `goals.jsonl`, `.gitignore`
+- **THEN** the system creates `/path/to/myrepo/.codebus/` with subdirectories `raw/`, `raw/code/`, `wiki/`, `wiki/concepts/`, `wiki/entities/`, `wiki/modules/`, `wiki/processes/`, `wiki/synthesis/`, `wiki/goals/`, `output/`, and files `CLAUDE.md`, `goals.jsonl`, `.gitignore` (Karpathy-style 5-folder knowledge structure; folder = page `type` enum)
 
 #### Scenario: Internal .gitignore excludes lock and raw code
 

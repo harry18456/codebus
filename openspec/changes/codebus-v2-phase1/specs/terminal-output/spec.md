@@ -16,8 +16,8 @@ The system SHALL render each StreamEvent (`thought`, `tool_use`, `tool_result`) 
 
 #### Scenario: tool_use Write rendered with write glyph and file path
 
-- **WHEN** the system renders a `tool_use` event with name `"Write"` and input `{file_path: "wiki/pages/a.md"}` with emoji enabled
-- **THEN** the output line begins with the write emoji glyph and contains the path `"wiki/pages/a.md"`
+- **WHEN** the system renders a `tool_use` event with name `"Write"` and input `{file_path: "wiki/concepts/a.md"}` with emoji enabled
+- **THEN** the output line begins with the write emoji glyph and contains the path `"wiki/concepts/a.md"`
 
 #### Scenario: tool_use Read rendered with tool glyph and tool name
 

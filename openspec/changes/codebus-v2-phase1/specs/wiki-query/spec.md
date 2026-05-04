@@ -6,31 +6,26 @@ When invoked with `--repo <path> --query "<text>"`, the system SHALL run a read-
 
 #### Scenario: Query with non-empty wiki succeeds
 
-- **WHEN** the user runs `codebus --repo X --query "how does checkout work?"` and `.codebus/wiki/pages/` contains at least one `.md` file
+- **WHEN** the user runs `codebus --repo X --query "how does checkout work?"` and at least one of `.codebus/wiki/{concepts,entities,modules,processes,synthesis}/` contains a `.md` file
 - **THEN** the system spawns the LLM agent in query mode and streams the agent's reasoning and answer to the terminal
 
 ### Requirement: Reject query when wiki is empty
 
-The system SHALL fail fast with a user-facing error pointing to `--goal` when `.codebus/wiki/pages/` is missing or contains no `.md` files.
+The system SHALL fail fast with a user-facing error pointing to `--goal` when none of the 5 type folders under `.codebus/wiki/` contain any `.md` file.
 
-#### Scenario: Missing pages directory aborts with hint
+#### Scenario: All type folders empty or missing aborts with hint
 
-- **WHEN** the user runs `codebus --repo X --query "..."` and `.codebus/wiki/pages/` does not exist
+- **WHEN** the user runs `codebus --repo X --query "..."` and none of `.codebus/wiki/{concepts,entities,modules,processes,synthesis}/` contains a `.md` file (folders may be missing or present-but-empty)
 - **THEN** the system throws an error whose message instructs the user to run `--goal` first
 
-#### Scenario: Empty pages directory aborts with hint
+### Requirement: Spawn agent in query mode with Write/Edit excluded from toolset
 
-- **WHEN** `.codebus/wiki/pages/` exists but contains no `.md` files
-- **THEN** the system throws an error whose message instructs the user to run `--goal` first
-
-### Requirement: Spawn agent in query mode with Write/Edit hard-disabled
-
-The system SHALL spawn the LLM provider with cwd = `.codebus/` (same isolation as ingest) and SHALL extend the disallowedTools list to include `Write` and `Edit` so the agent cannot write files even within the vault.
+The system SHALL spawn the LLM provider with cwd = `.codebus/` (same isolation as ingest) and SHALL omit `Write` and `Edit` from the `--tools` toolset whitelist so the agent cannot write files even within the vault. (See §3.2.4 of the design spec for why `--tools` is the toolset gate, not `--allowedTools`.)
 
 #### Scenario: Required argv flags are present in query mode
 
 - **WHEN** the system builds argv for query mode
-- **THEN** argv contains `-p`, `--output-format stream-json`, `--input-format stream-json`, `--verbose`, `--permission-mode acceptEdits`, and `--disallowedTools` whose value lists `Bash,WebFetch,WebSearch,Write,Edit`
+- **THEN** argv contains `-p`, `--output-format stream-json`, `--input-format stream-json`, `--verbose`, `--permission-mode acceptEdits`, `--tools Read,Glob,Grep`, and `--allowedTools Read,Glob,Grep` (auto-approval safety net mirroring `--tools`)
 
 #### Scenario: Provider spawn cwd matches vault root
 
