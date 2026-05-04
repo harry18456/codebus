@@ -78,6 +78,10 @@ Karpathy 把 LLM 對 wiki 的操作分三類，phase 1 對應如下：
 - Auto re-explore stale pages
 - LanceDB / vector RAG
 
+### 2.5 Scale 預期
+
+Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）。Monorepo（10w+ files）的 incremental sync / per-workspace ingest 留 phase 2+；phase 1 全 copy 到 raw/code/ 對 monorepo 會慢且 disk 佔用大。
+
 ---
 
 ## 3. 架構
@@ -106,12 +110,12 @@ Karpathy 把 LLM 對 wiki 的操作分三類，phase 1 對應如下：
 │    --output-format stream-json                      │
 │    --input-format stream-json                       │
 │    --verbose                                        │
-│    --add-dir .codebus/                              │
+│    --add-dir .codebus/wiki  (precise scope)         │
 │    --disallowedTools Bash,WebFetch,WebSearch        │
 │  Flags（query mode, --query）:                     │
 │    同上 + Write,Edit 也 disallow                   │
 │  Tools available（ingest）:                         │
-│    Read, Grep, Glob, Write（限 .codebus/ 內寫）    │
+│    Read, Grep, Glob, Write（限 .codebus/wiki/ 內） │
 │  Tools available（query）:                          │
 │    Read, Grep, Glob（讀 wiki 不寫）                │
 │  讀 .codebus/CLAUDE.md schema 學 wiki 規則         │
@@ -125,9 +129,11 @@ Karpathy 把 LLM 對 wiki 的操作分三類，phase 1 對應如下：
 完全用 Claude Code 內建 tools。Phase 1 safety 靠：
 
 - Prompt + schema 約束
-- `--add-dir .codebus/` 限制 Write 範圍
-- `--disallowedTools` 禁危險工具
-- 不加程式 hook（phase 2 才補 sandbox）
+- **`--add-dir .codebus/wiki`** 精準到 wiki/ 子目錄（不是整個 .codebus/）— 防 agent 誤寫 CLAUDE.md / raw/code/ / .git/
+- `--disallowedTools Bash,WebFetch,WebSearch`（query mode 再加 Write,Edit）
+- `goals.jsonl` 由 codebus 自己 append（不在 add-dir 範圍，agent 寫不到）
+- `output/` phase 2+ 才用，phase 1 不在 add-dir
+- 不加程式 hook（phase 2 才補 sandbox + path-traversal helper）
 
 ### 3.3 Stack
 
@@ -267,6 +273,8 @@ your-repo/                       ← user 的 source repo（任意 layout）
 - User 想跨機器同步可自己 push 到 private remote
 - Phase 2 想加 `codebus wiki publish` 把選定 page 複製到 source repo `docs/`
 
+**`.codebus/.gitignore` 必排除 `raw/code/`** — raw/code/ 是 codebase 完整 copy，每跑 goal 重 copy 會產生大量 churn；不入 nested git 確保 commit 歷史只反映 wiki/ 的演化。User 之後丟的 raw/docs/ 等子 folder **預設 in nested git**（讓 user 有版本控制），如果太大可 user 自己加 .gitignore。
+
 ---
 
 ## 5. CLI Command Surface (Phase 1)
@@ -296,15 +304,19 @@ codebus --help
 
 **Global flags（任何 command 都適用）:**
 - `--debug` — verbose，多印 stream-json raw events
-- `--no-emoji` — 強制純文字 + unicode symbol（CI / log file / 企業環境用）
+- `--emoji <auto|on|off>` — 完整三態控制
+- `--no-emoji` — sugar = `--emoji off`（保留為常用 CI flag style）
 
 **Settings 優先順序（emoji mode 為例，phase 1 唯一全域設定）:**
 
-1. CLI flag (`--no-emoji`)
-2. Env var (`NO_EMOJI=1`)
-3. `~/.codebus/config.yaml` 的 `emoji:` 欄位（§17 詳述）
-4. 自動偵測 (`process.stdout.isTTY` + `process.env.CI` + `process.env.TERM`)，非 tty / CI 環境 fallback 到 symbol mode
-5. 內建 default `auto`
+1. `--emoji on` / `--emoji off` (explicit CLI flag wins)
+2. `--no-emoji` (sugar, 等同 `--emoji off`)
+3. Env var (`NO_EMOJI=1`)
+4. `~/.codebus/config.yaml` 的 `emoji:` 欄位（§17 詳述）
+5. 自動偵測 (`process.stdout.isTTY` + `process.env.CI` + `process.env.TERM`)，非 tty / CI 環境 fallback
+6. 內建 default `auto`
+
+`--emoji on` 可在 config.yaml 設 off 的環境臨時 force on（這是為何要保留 enum flag 而非只 boolean）。
 
 `--repo` 預設值：cwd（沒指定時用當前目錄）
 
@@ -319,7 +331,7 @@ codebus --help
 | 1 | Your Role | 你是 codebus wiki maintainer / goals / non-goals |
 | 2 | Workspace Layout | 能讀 raw/code/ + wiki/ ; 能寫 wiki/ ; 不該碰 raw/ output/ goals.jsonl .git/ |
 | 3 | Wiki Structure | 4 special files (overview/index/log/goals) + pages/ + frontmatter |
-| 4 | Workflow per Goal (Ingest) | 7 步：Discover → Plan → Explore → Write → Index → Log → Guide |
+| 4 | Workflow per Goal (Ingest) | 7 步：Discover → Plan → Explore → Write → Index → Log → Guide。**Sources frontmatter 只填 path，codebus 自動補 sha256 + at_commit** |
 | 5 | Page Conflict | 新建 vs append-merge / array union / locked fields (title/type/created) |
 | 6 | Frontmatter Schema | title / type / sources (sha256+at_commit) / goals / wikilinks / stale |
 | 7 | WikiLinks 約定 | 用 slug / YAML 列表 quote 必加 / body 內可不 quote |
@@ -337,12 +349,12 @@ title: Payment Gateway
 type: concept                    # concept | module | process | entity
 sources:
   - path: src/services/payment.py    # source repo 內 logical path（不含 raw/code/ 前綴）
-    sha256: abc123...
-    at_commit: deadbeef
+    sha256: abc123...                # codebus 自動補（agent 不算）
+    at_commit: deadbeef              # codebus 自動補（git rev-parse HEAD）
 goals:
   - "了解購物車結帳流程"
-created: 2026-05-04
-updated: 2026-05-04
+created: '2026-05-04'             # UTC YYYY-MM-DD（避免跨時區混淆）
+updated: '2026-05-04'             # UTC YYYY-MM-DD
 related:
   - "[[checkout-flow]]"
 stale: false                     # phase 1 stale-detect flag
@@ -350,6 +362,10 @@ stale: false                     # phase 1 stale-detect flag
 ```
 
 > **Source path 約定:** `sources[].path` 是 source repo 內的 logical path（例如 `src/services/payment.py` 或平鋪 repo 的 `services/payment.py`）— **不含 `raw/code/` 前綴**。Agent 讀檔時自動 prepend：`<repo>/.codebus/raw/code/<path>`。Stale check 拼相同前綴算 sha256。
+
+> **Sha256 + at_commit 誰算:** Agent **只填 `path`**（其他欄位留空或省略）。Codebus 在 §7 step 8 (post-spawn enrich) 對每個 `path` 算 sha256（讀 raw/code/<path>）+ 拿當次 ingest 的 commit hash 補上。理由：Claude Code 內建 tool 沒有 hash function，Bash 已 disallow，agent 無法準確算 sha256。
+
+> **時區約定:** `created` / `updated` 採 **UTC YYYY-MM-DD**（不用 local date，避免跨時區協作 bug）。Page-merge 規則 `updated: today` 取 UTC 今日。
 
 ### 6.2 `goals/<slug>.md` per-goal reading guide
 
@@ -408,14 +424,16 @@ pages: ["[[checkout-flow]]", "[[payment-gateway]]"]
 6. Spawn claude -p:
    - cwd = repo_root
    - args: --output-format stream-json --input-format stream-json --verbose
-           --add-dir .codebus/ --disallowedTools Bash,WebFetch,WebSearch
+           --add-dir .codebus/wiki --disallowedTools Bash,WebFetch,WebSearch
    - stdin: stream-json messages（含 system prompt）
+   - **OAuth detect**: 若 subprocess exit non-0 且 stderr 含 `unauthenticated` / `auth` / `token` keyword → throw 帶 hint「請跑 `claude` 完成 OAuth」並 abort goal flow
 
 7. Parse stream events from stdout，render emoji output（§8 詳述）
 
-8. On agent done:
+8. On agent done — post-process:
    - Validate wiki pages 寫得對（frontmatter parse / wikilink syntax）
    - Repair YAML wikilink list 不合法（自寫 util）
+   - **Enrich frontmatter**：對每個 page 的 `sources[]`，若 `sha256` 缺或空，codebus 算 raw/code/<path> 的 sha256 + 從 §4 step 4 已記的 commit hash 補 `at_commit`
    - 確認 wiki/index.md / wiki/log.md / wiki/goals/<slug>.md 都更新
 
 9. Stale check (phase 1 detect-and-flag):
@@ -434,6 +452,16 @@ pages: ["[[checkout-flow]]", "[[payment-gateway]]"]
 
 30 分鐘 timeout backstop（reasoning model 真的可能跑很久）。
 
+**SIGINT (Ctrl+C) handler:**
+
+codebus 啟動時註冊 SIGINT — 收到 ctrl+c 時：
+1. Cancel 所有跑中 LLMProvider (kill subprocess)
+2. Release `.codebus/.lock`
+3. 印「中止 — wiki 可能半寫，下次跑會 overwrite」
+4. Process exit with code 130
+
+不做半寫 page rollback — 接受 working tree 髒，user 可 `git -C .codebus reset --hard` 自己回復（nested git 上次 commit 是上輪完整 state）。
+
 ---
 
 ## 7.5 `codebus --query` 完整 Sequence
@@ -449,7 +477,7 @@ pages: ["[[checkout-flow]]", "[[payment-gateway]]"]
 
 3. Spawn claude -p:
    - cwd = repo_root
-   - args 同 §7 step 6，但 disallowedTools 加 Write,Edit
+   - args 同 §7 step 6（含 `--add-dir .codebus/wiki` + OAuth detect），但 disallowedTools 加 Write,Edit
      （query mode 不讓 agent 寫檔；filing-back 留 phase 1.5）
    - stdin: stream-json messages（含 system prompt + query）
 
@@ -528,7 +556,7 @@ function resolveEmojiMode(flag: EmojiMode): boolean {
 | 情境 | 處理 |
 |---|---|
 | Page 不存在 | 新建（frontmatter + body） |
-| Page 已存在 | frontmatter `sources` / `goals` / `related` array union；body 加 `## from goal: <X> (YYYY-MM-DD)` section；`updated` 改今天 |
+| Page 已存在 | frontmatter `sources` / `goals` / `related` array union；body 加 `## from goal: <X> (UTC YYYY-MM-DD)` section；`updated` 改 UTC 今日 |
 | Locked fields | `title` / `type` / `created` 永不改 |
 
 特殊檔處理：
@@ -584,7 +612,7 @@ Codebus 自身採用 **MIT License**。理由：
 
 #### 11.1.3 Anthropic CLI 的 nuance
 
-`@anthropic-ai/claude-code` 是 Anthropic 商業 license，但 codebus **不是 import 這 package** — 是 spawn `claude` subprocess（user 自己 `npm install -g @anthropic-ai/claude-code`）。codebus runtime 無 npm 依賴關係，subprocess fork-exec 不創 derivative work，**不算 license issue**。
+`@anthropic-ai/claude-code` 是 Anthropic 商業 license。codebus **不 bundle 它，也不 import 它**——user 自己 `npm install -g @anthropic-ai/claude-code`，codebus 只 spawn 已裝好的 binary。**不算 license issue**。
 
 ### 11.2 Clean Room 守則
 
@@ -766,18 +794,16 @@ Phase 1 codebus 啟動時 try-load `~/.codebus/config.yaml`：
 
 ### 17.3 Settings 優先順序（emoji mode）
 
-1. CLI flag (`--no-emoji`)
-2. Env var (`NO_EMOJI=1`)
-3. `~/.codebus/config.yaml` 的 `emoji:` 欄位
-4. 自動偵測（`process.stdout.isTTY` + `process.env.CI` + `process.env.TERM`）
-5. 內建 default `auto`
+1. `--emoji on` / `--emoji off` (explicit CLI enum)
+2. `--no-emoji` (sugar = `--emoji off`)
+3. Env var (`NO_EMOJI=1`)
+4. `~/.codebus/config.yaml` 的 `emoji:` 欄位
+5. 自動偵測（`process.stdout.isTTY` + `process.env.CI` + `process.env.TERM`）
+6. 內建 default `auto`
 
 ### 17.4 為何 phase 1 只一個 setting
 
-- Phase 1 真實需求只 emoji（user 想永久 disable 不想每次 `--no-emoji`）
-- Default provider / api_keys 等屬於 phase 2 多 provider 範圍
-- Token tracking log path 等屬於 phase 2 token tracking 範圍
-- 結構（folder + yaml + load logic）建好，phase 2 加欄位只需 schema 擴充
+Phase 1 真實需求只 emoji；folder + yaml + load logic 先建好，phase 2 加欄位（default_provider / api_keys / token_usage_log）只需 schema 擴充。
 
 ### 17.5 為何不用 per-repo `.codebus/config.yaml` (phase 1)
 

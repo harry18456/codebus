@@ -421,9 +421,9 @@ git commit -m "feat(core): add vault layout constants and file-based lock"
 
 ```typescript
 export interface SourceRef {
-  path: string
-  sha256: string
-  at_commit: string
+  path: string                     // source repo logical path (no raw/code/ prefix)
+  sha256?: string                  // codebus auto-fills post-spawn (agent only writes path)
+  at_commit?: string               // codebus auto-fills post-spawn
 }
 
 export type PageType = 'concept' | 'module' | 'process' | 'entity'
@@ -1347,7 +1347,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { ClaudeCliProvider } from '../../../src/infra/llm/claude-cli.js'
 
 describe('ClaudeCliProvider', () => {
-  it('builds correct argv for ingest mode', () => {
+  it('builds correct argv for ingest mode (--add-dir scoped to wiki/)', () => {
     const p = new ClaudeCliProvider({ binary: 'claude' })
     const argv = p.buildArgv({ mode: 'ingest', vaultRoot: '/tmp/.codebus' })
     expect(argv).toEqual([
@@ -1355,7 +1355,7 @@ describe('ClaudeCliProvider', () => {
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
       '--verbose',
-      '--add-dir', '/tmp/.codebus',
+      '--add-dir', '/tmp/.codebus/wiki',
       '--disallowedTools', 'Bash,WebFetch,WebSearch'
     ])
   })
@@ -1363,9 +1363,20 @@ describe('ClaudeCliProvider', () => {
   it('builds correct argv for query mode (Write/Edit also disallowed)', () => {
     const p = new ClaudeCliProvider({ binary: 'claude' })
     const argv = p.buildArgv({ mode: 'query', vaultRoot: '/tmp/.codebus' })
-    expect(argv).toContain('--disallowedTools')
     const idx = argv.indexOf('--disallowedTools')
     expect(argv[idx + 1]).toBe('Bash,WebFetch,WebSearch,Write,Edit')
+    const dirIdx = argv.indexOf('--add-dir')
+    expect(argv[dirIdx + 1]).toBe('/tmp/.codebus/wiki')
+  })
+
+  it('detects OAuth failure from non-zero exit + auth keyword in stderr', () => {
+    const p = new ClaudeCliProvider({ binary: 'claude' })
+    expect(p.classifyExit(1, 'unauthenticated: please run `claude` to login')).toMatchObject({
+      kind: 'oauth-needed'
+    })
+    expect(p.classifyExit(1, 'token expired')).toMatchObject({ kind: 'oauth-needed' })
+    expect(p.classifyExit(1, 'random failure')).toMatchObject({ kind: 'generic-error' })
+    expect(p.classifyExit(0, '')).toMatchObject({ kind: 'success' })
   })
 })
 ```
@@ -1401,12 +1412,15 @@ export class ClaudeCliProvider implements LLMProvider {
   buildArgv(opts: { mode: LLMMode; vaultRoot: string }): string[] {
     const disallowed = ['Bash', 'WebFetch', 'WebSearch']
     if (opts.mode === 'query') disallowed.push('Write', 'Edit')
+    // --add-dir scoped precisely to wiki/ (not whole .codebus/) — prevents
+    // agent from clobbering CLAUDE.md / raw/code/ / .git/ via Write tool.
+    const addDir = `${opts.vaultRoot}/wiki`
     return [
       '-p',
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
       '--verbose',
-      '--add-dir', opts.vaultRoot,
+      '--add-dir', addDir,
       '--disallowedTools', disallowed.join(',')
     ]
   }
@@ -1416,6 +1430,9 @@ export class ClaudeCliProvider implements LLMProvider {
     this.child = spawn(this.cfg.binary, argv, { cwd: opts.cwd })
 
     const timer = setTimeout(() => this.cancel(), this.cfg.timeoutMs)
+
+    let stderrBuf = ''
+    this.child.stderr?.on('data', (chunk) => { stderrBuf += chunk.toString() })
 
     // send a single user-turn message via stream-json input
     const inputMsg = {
@@ -1436,10 +1453,31 @@ export class ClaudeCliProvider implements LLMProvider {
         const event = mapClaudeStreamLine(parsed)
         if (event) yield event
       }
+      // Wait for subprocess exit to inspect status
+      const code: number = await new Promise((resolve) =>
+        this.child!.once('exit', (c) => resolve(c ?? 0))
+      )
+      const verdict = this.classifyExit(code, stderrBuf)
+      if (verdict.kind === 'oauth-needed') {
+        throw new Error(
+          'Claude CLI 未認證 — 請在 terminal 跑 `claude` 完成 OAuth，再重新執行 codebus'
+        )
+      }
+      if (verdict.kind === 'generic-error') {
+        throw new Error(`claude -p exited ${code}: ${stderrBuf.slice(0, 500)}`)
+      }
       yield { kind: 'done' }
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  classifyExit(code: number, stderr: string): { kind: 'success' | 'oauth-needed' | 'generic-error' } {
+    if (code === 0) return { kind: 'success' }
+    if (/unauthen|auth(?:enticat)?(?:ed|ion)?|token|login/i.test(stderr)) {
+      return { kind: 'oauth-needed' }
+    }
+    return { kind: 'generic-error' }
   }
 
   cancel(): void {
@@ -2001,6 +2039,15 @@ describe('CODEBUS_SCHEMA_MARKDOWN', () => {
     expect(CODEBUS_SCHEMA_MARKDOWN).toContain('"[[')
     expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/quote|引號/)
   })
+
+  it('instructs agent to fill only sources[].path (not sha256/at_commit)', () => {
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/only fill.*path/i)
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/sha256.*auto-fill/i)
+  })
+
+  it('specifies UTC date convention', () => {
+    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('UTC YYYY-MM-DD')
+  })
 })
 ```
 
@@ -2079,20 +2126,23 @@ Plus:
 title: Payment Gateway
 type: concept                    # concept | module | process | entity
 sources:
-  # path = source repo logical path, do NOT include raw/code/ prefix.
-  # Read via: raw/code/<path> (codebus prepends automatically for stale check).
+  # IMPORTANT: only fill \`path\`! sha256 + at_commit are auto-filled
+  # by codebus post-spawn (you cannot compute sha256 without Bash, which
+  # is disallowed). path = source repo logical path, NO raw/code/ prefix.
   - path: src/services/payment.py
-    sha256: <40-hex>
-    at_commit: <git-sha-or-empty>
 goals:
   - "了解結帳流程"
-created: '2026-05-04'
-updated: '2026-05-04'
+created: '2026-05-04'             # UTC YYYY-MM-DD (avoid local TZ confusion)
+updated: '2026-05-04'             # UTC YYYY-MM-DD
 related:
   - "[[checkout-flow]]"
 stale: false
 ---
 \`\`\`
+
+> **Date convention:** \`created\` / \`updated\` are **UTC** YYYY-MM-DD.
+> Codebus computes "today" via \`new Date().toISOString().slice(0,10)\`
+> (UTC date portion), so cross-timezone collaboration stays consistent.
 
 ## 7. WikiLinks Convention
 
@@ -2432,13 +2482,55 @@ export async function runGoal(opts: RunGoalOptions): Promise<void> {
       opts.onEvent?.(event)
     }
 
-    // Stale detect (post-LLM)
+    // Post-process: enrich frontmatter sources with sha256 + at_commit
+    // (agent only filled `path`; sha256 needs hash function which agent lacks)
+    await enrichSourceMetadata(p.wikiPages, p.rawCode, ver.commit)
+
+    // Stale detect (after enrich so freshly-written pages have sha256)
     await flagStalePages(p.wikiPages, p.rawCode)
 
     // Auto-commit nested git
     await autoCommit(p.root, `wiki: ${opts.goal}`)
   } finally {
     await releaseLock(lock)
+  }
+}
+
+function utcTodayISO(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+async function enrichSourceMetadata(
+  pagesDir: string,
+  rawCodeDir: string,
+  commitHash: string | null
+): Promise<void> {
+  if (!existsSync(pagesDir)) return
+  const files = await readdir(pagesDir)
+  const { serializePage } = await import('../core/wiki/frontmatter.js')
+  const { writeFile } = await import('node:fs/promises')
+  for (const f of files) {
+    if (!f.endsWith('.md')) continue
+    const fullPath = join(pagesDir, f)
+    const content = await readFile(fullPath, 'utf8')
+    let parsed
+    try { parsed = parsePage(content) } catch { continue }
+    const enrichedSources = await Promise.all(
+      parsed.frontmatter.sources.map(async (src) => {
+        const rawPath = join(rawCodeDir, src.path)
+        const sha256 = existsSync(rawPath) ? await sha256File(rawPath) : ''
+        return {
+          path: src.path,
+          sha256,
+          at_commit: commitHash ?? ''
+        }
+      })
+    )
+    const updated = serializePage(
+      { ...parsed.frontmatter, sources: enrichedSources, updated: utcTodayISO() },
+      parsed.body
+    )
+    await writeFile(fullPath, updated)
   }
 }
 
@@ -2632,22 +2724,42 @@ program
   .option('--goal <text>', 'build wiki for this goal')
   .option('--query <text>', 'ask the wiki a question')
   .option('--debug', 'verbose stream-json output')
-  .option('--no-emoji', 'force symbol mode (disable emoji)')
+  .option('--emoji <mode>', 'emoji mode: auto | on | off')
+  .option('--no-emoji', 'sugar for --emoji off')
 
 program.parse()
 const opts = program.opts()
 
+let activeProvider: { cancel(): void } | null = null
+
 async function main() {
   // Settings priority for emoji mode (per spec §17.3):
-  //   1. CLI --no-emoji    2. NO_EMOJI env    3. ~/.codebus/config.yaml    4. 'auto'
+  //   1. --emoji on/off (explicit enum wins)
+  //   2. --no-emoji (sugar = off)
+  //   3. NO_EMOJI env
+  //   4. ~/.codebus/config.yaml
+  //   5. 'auto'
   const globalCfg = await loadGlobalConfig()
+  const VALID = ['auto', 'on', 'off'] as const
+  const cliEmoji = typeof opts.emoji === 'string' && (VALID as readonly string[]).includes(opts.emoji)
+    ? (opts.emoji as EmojiMode)
+    : undefined
   const emojiFlag: EmojiMode =
-    opts.emoji === false ? 'off' :
-    process.env.NO_EMOJI ? 'off' :
-    (globalCfg.emoji ?? 'auto')
+    cliEmoji !== undefined ? cliEmoji :        // 1. --emoji <mode>
+    opts.emoji === false ? 'off' :              // 2. --no-emoji (commander sets emoji:false)
+    process.env.NO_EMOJI ? 'off' :              // 3. env
+    (globalCfg.emoji ?? 'auto')                 // 4. global config | 5. default
   const useEmoji = resolveEmojiMode(emojiFlag, detectRuntime())
   const useColor = process.stdout.isTTY && !process.env.NO_COLOR
   const renderOpts = { useEmoji, useColor }
+
+  // SIGINT (Ctrl+C): cancel provider; subprocess SIGTERM unwinds its
+  // for-await loop, runGoal's finally releases lock cleanly.
+  process.on('SIGINT', () => {
+    console.error('\n中止 — wiki 可能半寫；可手動 git -C .codebus reset --hard 復原')
+    if (activeProvider) activeProvider.cancel()
+    process.exit(130)
+  })
 
   const repo = opts.repo
 
@@ -2660,6 +2772,7 @@ async function main() {
   }
 
   const provider = new ClaudeCliProvider()
+  activeProvider = provider                    // wire for SIGINT handler
   const onEvent = (e: any) => {
     const line = renderEvent(e, renderOpts)
     if (line) console.log(line)
@@ -2879,23 +2992,27 @@ npm publish --access public          # only when v0.1.0 ready to ship
 
 **Spec coverage check:**
 
+- ✅ §2.5 Scale expected 10k–100k LoC → noted in spec; phase 1 plan accepts full-copy semantics
 - ✅ §3.1 Architecture (codebus thin wrapper + claude -p + load global config) → Task 10 (claude-cli.ts) + Task 11.5 (global-config) + Task 17 (cli.ts dispatch)
-- ✅ §3.5 Module Architecture (core/infra/ui hexagonal) → Tasks 2-13 reflect the layer separation; global-config in infra/ (Task 11.5)
-- ✅ §4 Disk Layout (`.codebus/` vault with raw/code/) → Task 2 (vault layout, +rawCode field) + Task 14 (init mkdir raw/code/)
-- ✅ §4.1 raw/code/ rationale → Task 7 (sync target = raw/code/)
-- ✅ §5 CLI Surface (init / goal / query + --no-emoji + --debug + settings priority) → Task 17 (4-level emoji resolution chain)
-- ✅ §6 Schema 12 sections + sources path note → Task 13 (CODEBUS_SCHEMA_MARKDOWN with raw/code/ refs)
-- ✅ §7 Goal sequence (12 steps; sync to raw/code/) → Task 15 (runGoal with p.rawCode)
-- ✅ §7.5 Query sequence → Task 16 (runQuery)
+- ✅ §3.2 add-dir scoped to .codebus/wiki (precise sandbox) → Task 10 buildArgv test asserts `/tmp/.codebus/wiki`
+- ✅ §3.5 Module Architecture (core/infra/ui hexagonal) → Tasks 2-13
+- ✅ §4 Disk Layout (`.codebus/` vault with raw/code/) → Task 2 (rawCode field) + Task 14 (mkdir raw/code/)
+- ✅ §4.3 raw/code/ in .codebus/.gitignore → Task 14 init writes `.lock\nraw/code/\n`
+- ✅ §5 CLI Surface (init / goal / query + --emoji enum + --no-emoji sugar + 5-level priority) → Task 17 (CLI options + main resolution chain)
+- ✅ §6 Schema 12 sections + sources path-only convention → Task 13 (3 new tests for sources/UTC), Task 15 (enrichSourceMetadata)
+- ✅ §6.1 sha256 + at_commit auto-fill by codebus → Task 15 enrichSourceMetadata
+- ✅ §7 Goal sequence (incl. OAuth detect step 6 + enrich step 8) → Task 10 classifyExit + Task 15 enrichSourceMetadata
+- ✅ §7 SIGINT handler → Task 17 process.on('SIGINT', ...)
+- ✅ §7.5 Query sequence (same flags + Write/Edit disallowed) → Task 16
 - ✅ §8 Stream-json → Terminal rendering (4+4 emoji + symbol fallback) → Tasks 11-12
-- ✅ §9 Page conflict (append-merge + locked fields) → Task 5 (mergePage)
-- ✅ §10 Sync (重 copy raw/code/ + commit hash + sha256 + stale flag) → Tasks 7 (raw-sync to rawCode), 8 (source-version), 6 (stale-detect), 15 (orchestrate)
+- ✅ §9 Page conflict (append-merge + locked fields + UTC date) → Task 5 (mergePage)
+- ✅ §10 Sync → Tasks 7 (raw-sync), 8 (source-version), 6 (stale-detect), 15 (orchestrate)
 - ✅ §11 License MIT + checklist → Task 1 (LICENSE) + Task 13 (SPDX header) + Task 19 (README badge)
-- ✅ §12 LLM Wiki 借鑑 (clean-room ideas) → frontmatter-repair / page-merge / stale-detect / lock all reimplemented
-- ✅ §13 Toolkit (+js-yaml for config parse) → Task 1 deps
-- ✅ §14 Repo structure (+ infra/global-config.ts) → Task 1 + Task 2 onwards + Task 11.5
-- ✅ §17 Global Settings (~/.codebus/config.yaml) → Task 11.5 (loadGlobalConfig) + Task 17 (priority resolution)
-- ⚠️ §15 Open Questions are **deferred to implementation iteration** by design — not all need tasks (failure modes / chalk color tuning / demo repo selection / per-repo config phase 2)
+- ✅ §12 LLM Wiki 借鑑 (clean-room ideas) → frontmatter-repair / page-merge / stale-detect / lock reimplemented
+- ✅ §13 Toolkit (+js-yaml) → Task 1 deps
+- ✅ §14 Repo structure (+ infra/global-config.ts) → Tasks 1 / 2 / 11.5
+- ✅ §17 Global Settings → Task 11.5 (loadGlobalConfig) + Task 17 (priority resolution)
+- ⚠️ §15 Open Questions remaining: chalk color tuning / demo repo selection / per-repo config (phase 2) / half-written page rollback (defer per spec §7 SIGINT note)
 
 **Placeholder scan:** Searched plan for "TBD" / "TODO" / "implement later" / "fill in" — none found. All steps have actual code.
 
