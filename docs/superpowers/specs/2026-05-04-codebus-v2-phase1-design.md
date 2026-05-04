@@ -820,6 +820,28 @@ Phase 2 該加的：
 - **完整 markdown rendering**（marked-terminal 之類）— phase 2 評估：bundle size 增 ~200 KB；終端 markdown 對 codebus 的半結構化 thought 可能 over-render（heading / code block 跟 emoji prefix 打架）。傾向不採用，但留給 phase 2 重新評估
 - **Italic / heading 染色** — phase 1 跳過（italic 易跟 code 內 `*` 撞色；heading 在 thought 不常見）。phase 2 若 corpus 顯示常出現可加
 
+**Multi-provider schema split（manual test 2026-05-04 期間討論，尚未實作）:**
+
+Phase 1 用單一 `.codebus/CLAUDE.md` schema，內容混了 wiki domain 規則跟 Claude CLI specific bits（§11 Output Format 提到 stream-json、§1/§12 提到 Claude tool 名 Bash/WebFetch/WebSearch/Read）。Phase 2 加多 provider 時要拆兩層：
+
+- **WIKI_RULES (provider-neutral)** — §2-§10 + §12 的純 wiki domain 部分，獨立成 `src/schema/wiki-rules.ts`
+- **ProviderPrompt (per-adapter)** — tool 命名清單、output 格式說明、provider-specific framing（Claude 偏 XML tags、GPT 偏 markdown headers、Gemini 偏 plain text directives）由 `LLMProvider` interface 提供新 method `composeIngestPrompt(wikiRules, indexMd, goal)` 各 adapter 自己實作
+- **檔名爭議** — 傾向保留 `.codebus/CLAUDE.md`（Claude Code 自動讀此檔當 project context 是 ergonomics bonus；其他 provider 反正是 codebus spawn 的，讀啥檔我們控制）。改 `SCHEMA.md` 的 alternative 留給未來討論
+- **盤點結果** — 既有 12 sections 中 10 段純 wiki domain 可直接抽出；§11 全段 + §1/§12 內 Claude tool 名提及部分需移到 provider adapter
+- **觸發條件** — 第二個 provider adapter（AnthropicSdkProvider 或 OpenAiSdkProvider）動工時必須處理；早於那時做 = speculative design
+
+**`codebus migrate` subcommand（既有 vault 同步新 schema / .gitignore）:**
+
+Phase 1 init 設計「missing 才寫」preserve user customization — 但這也意味著既有 vault 不會自動拿到新版 codebus 的 schema 改動或 .gitignore 規則。例：
+
+- buddy-gacha vault 的 `.codebus/CLAUDE.md` 還是 init 當下版本，§4.0 out-of-scope detection 要 user 手動 patch
+- 既有 vault 的 `.codebus/.gitignore` 缺 `**/.obsidian/`（後加的規則）需要使用者跑一次 `codebus --repo X` 觸發 init 的 mergeGitignoreLines 才會補
+
+Phase 2 加：
+- `codebus migrate --repo <path>` subcommand：偵測 vault 版本（vault 內加 `.codebus/.codebus-version` 之類）→ 比對當前 codebus version 該套用哪些 migration → diff 顯示變更 → user opt-in `--apply`
+- 至少 cover：CLAUDE.md schema patches、`.gitignore` 新規則、新 vault 結構（如果有 Phase 2 加新檔/資料夾）
+- 不 cover：vault 內 user 真實的內容（wiki page、goals.jsonl）— 這些屬 user data，migrate 只動 codebus 自己的 metadata
+
 ### Phase 3 (GUI)
 
 - Tauri (Rust) + Nuxt 4 (TS / Vue)

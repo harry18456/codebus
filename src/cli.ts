@@ -5,6 +5,7 @@ import { runInit } from './commands/init.js'
 import { runGoal } from './commands/goal.js'
 import { runQuery } from './commands/query.js'
 import { vaultPaths } from './core/vault/layout.js'
+import { checkRepoIsNotVault } from './core/vault/sanity-check.js'
 import { ClaudeCliProvider } from './infra/llm/claude-cli.js'
 import { loadGlobalConfig } from './infra/global-config.js'
 import { resolveEmojiMode, detectRuntime, type EmojiMode } from './ui/emoji-mode.js'
@@ -34,6 +35,17 @@ async function main(): Promise<void> {
   // registration and `const repo = opts.repo`, handler accesses repo in
   // TDZ → ReferenceError.
   const repo: string = opts.repo
+
+  // Reject obvious mistakes (pointing --repo at a vault / inside a vault /
+  // at ~/.codebus/) before any disk mutation. Without this, codebus would
+  // gleefully create nested .codebus/.codebus/ vaults and the agent would
+  // try to wiki-ify its own wiki.
+  const sanity = checkRepoIsNotVault(repo)
+  if (!sanity.ok) {
+    console.error(`error: ${sanity.reason}`)
+    if (sanity.hint) console.error(`hint: ${sanity.hint}`)
+    process.exit(2)
+  }
 
   const globalCfg = await loadGlobalConfig()
   const VALID = ['auto', 'on', 'off'] as const
