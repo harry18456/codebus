@@ -61,6 +61,18 @@ cycle.
    was as high as round 5 (cwd spike) — finding bugs that would have
    shown up day 1 of execution.
 
+9. **Wrap-up 階段 reviewer 容易 diff misread.** Iter-7 跟 iter-9 兩次
+   都同類錯誤：盯著 unified diff 的 `-` 跟 `+` 行下結論，沒 verify
+   final file state。Iter-7 claim §3.2.1 blockquote 整段被刪除（實際
+   是 single-line replacement，blockquote 仍在）；iter-9 claim 5 個
+   stale tests 仍存在於 plan（實際整個 describe block 已被替換）。
+   Pattern: review 後期 reviewer 已熟悉文件，傾向看「what changed」
+   而非 re-read「what it now says」。Wrap-up 階段（轉折信號：「沒新
+   議題要追了」/ convergence verdict）reviewer 應 explicit re-read
+   final file state，特別對結構性改動（整段 block replace、test
+   rewrite、section move、re-order）。跟 lesson #1 同 family — 不要
+   trust paraphrase / partial signal，要 ground 到 source-of-truth。
+
 ## How to add a lesson
 
 When a review iteration surfaces a process insight (not a content
