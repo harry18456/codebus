@@ -3011,7 +3011,21 @@ Open `<repo>/.codebus/` in Obsidian to browse the generated wiki.
 - \`--goal <text>\` — build wiki for this goal
 - \`--query <text>\` — ask the wiki (read-only)
 - \`--debug\` — verbose stream-json output
-- \`--no-emoji\` — symbol fallback for CI / log files (also \`NO_EMOJI=1\`)
+- \`--emoji <auto|on|off>\` — emoji mode (default: auto-detect TTY/CI)
+- \`--no-emoji\` — sugar for \`--emoji off\` (CI / log files / 企業環境)
+
+Settings priority: CLI flag > \`NO_EMOJI\` env > \`~/.codebus/config.yaml emoji:\` > auto.
+
+## ⚠️ Security: goal text is fed directly to the LLM
+
+The text you pass to \`--goal\` and \`--query\` is fed directly to Claude
+Code as part of the system prompt. **Do not paste content from
+untrusted sources** (random GitHub issues, web pages, Slack messages
+from outside your team) into \`--goal\` / \`--query\` — that's a prompt
+injection vector. Phase 1 has best-effort sandbox (see design doc
+§3.2) but the agent could be coerced into writing where it shouldn't
+if you feed it adversarial instructions. Phase 2 will add goal text
+sanitization.
 
 ## License
 

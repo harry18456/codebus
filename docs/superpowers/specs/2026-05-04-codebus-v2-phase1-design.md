@@ -771,7 +771,6 @@ codebus/                          ← v2 main branch
 - Spike A self-judgment 是否在 `acceptEdits` 模式下完全等同 default mode（spike #5 抽樣 verified 仍頑強，但全 corpus 測試需 phase 2）
 - Self-judgment 對 long-session reasoning drift 的防護強度（spike #4 測 user-supplied destructive prompt → 頑強；agent 自己 N-step 後 decide 寫 .git/ 場景未測）
 - Re-run 同 goal 時 agent 重 explore 已 indexed source 的判斷準則（schema CLAUDE.md Section 4 有 source dedup 規則，但 LLM 是否真遵守需 phase 2 golden-sample 驗）
-- README 警告：goal text 直接餵 LLM，不該 paste 不信任 source
 - `--allowedTools` 白名單 vs `--disallowedTools` 黑名單 trade-off（phase 1 用黑名單；新 Claude Code tool 加入會自動進 agent 工具庫）— phase 2 評估改白名單
 - SIGINT handler 跟 file lock 互動：phase 1 cli.ts SIGINT handler 在 `process.exit(130)` 前 best-effort `unlinkSync(vaultPaths(repo).lock)`，但若 lock release 中斷 → next run 撞 stale lock；phase 2 加 stale lock detection (PID alive check)
 - Init recovery from partial state（`.codebus/` 存在但 `.codebus/.git/` 不完整）— phase 1 不 auto-recover；user 需 `rm -rf .codebus` 重 init；phase 2 加 init validate + repair
