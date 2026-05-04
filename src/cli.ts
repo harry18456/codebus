@@ -6,6 +6,7 @@ import { runGoal } from './commands/goal.js'
 import { runQuery } from './commands/query.js'
 import { vaultPaths } from './core/vault/layout.js'
 import { checkRepoIsNotVault } from './core/vault/sanity-check.js'
+import { checkClaudeCliAvailable } from './infra/cli-detect.js'
 import { ClaudeCliProvider } from './infra/llm/claude-cli.js'
 import { loadGlobalConfig } from './infra/global-config.js'
 import { resolveEmojiMode, detectRuntime, type EmojiMode } from './ui/emoji-mode.js'
@@ -44,6 +45,16 @@ async function main(): Promise<void> {
   if (!sanity.ok) {
     console.error(`error: ${sanity.reason}`)
     if (sanity.hint) console.error(`hint: ${sanity.hint}`)
+    process.exit(2)
+  }
+
+  // Prerequisite: claude CLI must be installed and on PATH. Even init-only
+  // flow benefits from this catching the problem early (user almost always
+  // follows init with --goal which would fail deep inside ClaudeCliProvider).
+  const cliCheck = checkClaudeCliAvailable()
+  if (!cliCheck.ok) {
+    console.error(`error: ${cliCheck.reason}`)
+    if (cliCheck.hint) console.error(`hint: ${cliCheck.hint}`)
     process.exit(2)
   }
 
