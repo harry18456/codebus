@@ -42,13 +42,14 @@ codebus/
 │   ├── infra/                           ← side-effect adapters
 │   │   ├── fs/
 │   │   │   ├── file-ops.ts              ← read/write/hash 包裝
-│   │   │   └── raw-sync.ts              ← copy repo → raw + gitignore filter
+│   │   │   └── raw-sync.ts              ← copy repo → raw/code/ + gitignore filter
 │   │   ├── git/
 │   │   │   ├── source-version.ts        ← git rev-parse / git status
 │   │   │   └── nested-repo.ts           ← .codebus/.git init / add / commit
-│   │   └── llm/
-│   │       ├── types.ts                 ← LLMProvider interface + StreamEvent
-│   │       └── claude-cli.ts            ← spawn `claude -p` 唯一 phase 1 adapter
+│   │   ├── llm/
+│   │   │   ├── types.ts                 ← LLMProvider interface + StreamEvent
+│   │   │   └── claude-cli.ts            ← spawn `claude -p` 唯一 phase 1 adapter
+│   │   └── global-config.ts             ← read ~/.codebus/config.yaml
 │   ├── ui/
 │   │   ├── stream-parser.ts             ← claude-cli stream-json → StreamEvent
 │   │   ├── render.ts                    ← StreamEvent → terminal (emoji/symbol)
@@ -100,13 +101,15 @@ codebus/
     "chalk": "^5.3.0",
     "ora": "^8.0.0",
     "gray-matter": "^4.0.3",
-    "simple-git": "^3.22.0"
+    "simple-git": "^3.22.0",
+    "js-yaml": "^4.1.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
     "tsx": "^4.7.0",
     "vitest": "^1.4.0",
-    "@types/node": "^20.11.0"
+    "@types/node": "^20.11.0",
+    "@types/js-yaml": "^4.0.9"
   }
 }
 ```
@@ -252,6 +255,7 @@ describe('vaultPaths', () => {
     expect(p.goalsJsonl).toBe('/tmp/myrepo/.codebus/goals.jsonl')
     expect(p.schemaMd).toBe('/tmp/myrepo/.codebus/CLAUDE.md')
     expect(p.raw).toBe('/tmp/myrepo/.codebus/raw')
+    expect(p.rawCode).toBe('/tmp/myrepo/.codebus/raw/code')
     expect(p.wiki).toBe('/tmp/myrepo/.codebus/wiki')
     expect(p.wikiOverview).toBe('/tmp/myrepo/.codebus/wiki/overview.md')
     expect(p.wikiIndex).toBe('/tmp/myrepo/.codebus/wiki/index.md')
@@ -280,7 +284,8 @@ export interface VaultPaths {
   gitignore: string
   goalsJsonl: string
   schemaMd: string
-  raw: string
+  raw: string                        // raw/ 父 folder（容納多種 source type）
+  rawCode: string                    // raw/code/ — codebase 落點
   wiki: string
   wikiOverview: string
   wikiIndex: string
@@ -294,13 +299,15 @@ export interface VaultPaths {
 export function vaultPaths(repoRoot: string): VaultPaths {
   const root = join(repoRoot, '.codebus')
   const wiki = join(root, 'wiki')
+  const raw = join(root, 'raw')
   return {
     root,
     git: join(root, '.git'),
     gitignore: join(root, '.gitignore'),
     goalsJsonl: join(root, 'goals.jsonl'),
     schemaMd: join(root, 'CLAUDE.md'),
-    raw: join(root, 'raw'),
+    raw,
+    rawCode: join(raw, 'code'),
     wiki,
     wikiOverview: join(wiki, 'overview.md'),
     wikiIndex: join(wiki, 'index.md'),
@@ -999,10 +1006,10 @@ import { join } from 'node:path'
 import { syncRepoToRaw } from '../../../src/infra/fs/raw-sync.js'
 
 describe('syncRepoToRaw', () => {
-  let repo: string, raw: string
+  let repo: string, rawCode: string
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), 'codebus-repo-'))
-    raw = join(repo, '.codebus', 'raw')
+    rawCode = join(repo, '.codebus', 'raw', 'code')
     mkdirSync(join(repo, 'src'), { recursive: true })
     writeFileSync(join(repo, 'src', 'app.ts'), 'console.log("hi")')
     mkdirSync(join(repo, 'node_modules', 'lodash'), { recursive: true })
@@ -1016,21 +1023,25 @@ describe('syncRepoToRaw', () => {
   })
   afterEach(() => { rmSync(repo, { recursive: true, force: true }) })
 
-  it('copies repo content into raw, excluding .codebus/, .git/, .env, and gitignored', async () => {
-    await syncRepoToRaw(repo, raw)
-    expect(existsSync(join(raw, 'src', 'app.ts'))).toBe(true)
-    expect(readFileSync(join(raw, 'src', 'app.ts'), 'utf8')).toBe('console.log("hi")')
-    expect(existsSync(join(raw, 'node_modules'))).toBe(false)
-    expect(existsSync(join(raw, '.git'))).toBe(false)
-    expect(existsSync(join(raw, '.codebus'))).toBe(false)
-    expect(existsSync(join(raw, '.env'))).toBe(false)
+  it('copies repo content into raw/code, excluding .codebus/, .git/, .env, and gitignored', async () => {
+    await syncRepoToRaw(repo, rawCode)
+    expect(existsSync(join(rawCode, 'src', 'app.ts'))).toBe(true)
+    expect(readFileSync(join(rawCode, 'src', 'app.ts'), 'utf8')).toBe('console.log("hi")')
+    expect(existsSync(join(rawCode, 'node_modules'))).toBe(false)
+    expect(existsSync(join(rawCode, '.git'))).toBe(false)
+    expect(existsSync(join(rawCode, '.codebus'))).toBe(false)
+    expect(existsSync(join(rawCode, '.env'))).toBe(false)
   })
 
-  it('clears existing raw before re-syncing', async () => {
-    mkdirSync(raw, { recursive: true })
-    writeFileSync(join(raw, 'stale.txt'), 'old')
-    await syncRepoToRaw(repo, raw)
-    expect(existsSync(join(raw, 'stale.txt'))).toBe(false)
+  it('clears existing raw/code before re-syncing (does not touch raw/ siblings)', async () => {
+    mkdirSync(rawCode, { recursive: true })
+    writeFileSync(join(rawCode, 'stale.txt'), 'old')
+    // Create a sibling raw/docs/ — must survive
+    mkdirSync(join(repo, '.codebus', 'raw', 'docs'), { recursive: true })
+    writeFileSync(join(repo, '.codebus', 'raw', 'docs', 'spec.md'), 'user-managed')
+    await syncRepoToRaw(repo, rawCode)
+    expect(existsSync(join(rawCode, 'stale.txt'))).toBe(false)
+    expect(existsSync(join(repo, '.codebus', 'raw', 'docs', 'spec.md'))).toBe(true)
   })
 })
 ```
@@ -1702,6 +1713,156 @@ git commit -m "feat(ui): add emoji-mode detection and event/banner renderers"
 
 ---
 
+## Task 11.5: infra/global-config (load ~/.codebus/config.yaml)
+
+**Files:**
+- Create: `src/infra/global-config.ts`
+- Create: `tests/infra/global-config.test.ts`
+
+- [ ] **Step 1: Write failing test**
+
+`tests/infra/global-config.test.ts`:
+```typescript
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { loadGlobalConfig } from '../../../src/infra/global-config.js'
+
+describe('loadGlobalConfig', () => {
+  let home: string
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'codebus-home-'))
+    vi.stubEnv('HOME', home)
+    vi.stubEnv('USERPROFILE', home)  // Windows
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('returns empty config when ~/.codebus/config.yaml does not exist', async () => {
+    const cfg = await loadGlobalConfig()
+    expect(cfg).toEqual({})
+  })
+
+  it('parses valid emoji setting', async () => {
+    mkdirSync(join(home, '.codebus'))
+    writeFileSync(join(home, '.codebus', 'config.yaml'), 'emoji: off\n')
+    const cfg = await loadGlobalConfig()
+    expect(cfg.emoji).toBe('off')
+  })
+
+  it('returns empty + warns on invalid yaml', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mkdirSync(join(home, '.codebus'))
+    writeFileSync(join(home, '.codebus', 'config.yaml'), '{{{ broken yaml')
+    const cfg = await loadGlobalConfig()
+    expect(cfg).toEqual({})
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('silently ignores unknown fields (forward-compat for phase 2)', async () => {
+    mkdirSync(join(home, '.codebus'))
+    writeFileSync(
+      join(home, '.codebus', 'config.yaml'),
+      'emoji: on\ndefault_provider: anthropic-sdk\napi_keys:\n  anthropic: sk-xxx\n'
+    )
+    const cfg = await loadGlobalConfig()
+    expect(cfg.emoji).toBe('on')
+    expect((cfg as any).default_provider).toBeUndefined()
+  })
+
+  it('rejects unknown emoji value with warning', async () => {
+    mkdirSync(join(home, '.codebus'))
+    writeFileSync(join(home, '.codebus', 'config.yaml'), 'emoji: maybe\n')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const cfg = await loadGlobalConfig()
+    expect(cfg.emoji).toBeUndefined()
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+})
+```
+
+- [ ] **Step 2: Run test → expect FAIL**
+
+Run: `npx vitest run tests/infra/global-config.test.ts`
+Expected: FAIL — module not found.
+
+- [ ] **Step 3: Implement `src/infra/global-config.ts`**
+
+```typescript
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import yaml from 'js-yaml'
+
+export interface GlobalConfig {
+  emoji?: 'auto' | 'on' | 'off'
+}
+
+const VALID_EMOJI = ['auto', 'on', 'off'] as const
+
+function pickKnownFields(parsed: unknown): GlobalConfig {
+  const out: GlobalConfig = {}
+  if (!parsed || typeof parsed !== 'object') return out
+  const data = parsed as Record<string, unknown>
+  if ('emoji' in data) {
+    const v = data.emoji
+    if (typeof v === 'string' && (VALID_EMOJI as readonly string[]).includes(v)) {
+      out.emoji = v as GlobalConfig['emoji']
+    } else {
+      console.warn(
+        `codebus: ignoring invalid emoji value '${String(v)}' in ~/.codebus/config.yaml ` +
+        `(must be auto|on|off)`
+      )
+    }
+  }
+  // Phase 2 fields (default_provider / api_keys / token_usage_log) are
+  // silently ignored here — forward-compat so user can pre-fill them.
+  return out
+}
+
+export async function loadGlobalConfig(): Promise<GlobalConfig> {
+  const path = join(homedir(), '.codebus', 'config.yaml')
+  if (!existsSync(path)) return {}
+  let raw: string
+  try {
+    raw = await readFile(path, 'utf8')
+  } catch {
+    return {}
+  }
+  let parsed: unknown
+  try {
+    parsed = yaml.load(raw)
+  } catch (err) {
+    console.warn(
+      `codebus: failed to parse ~/.codebus/config.yaml — using defaults ` +
+      `(${(err as Error).message})`
+    )
+    return {}
+  }
+  return pickKnownFields(parsed)
+}
+```
+
+- [ ] **Step 4: Run test → expect PASS**
+
+Run: `npx vitest run tests/infra/global-config.test.ts`
+Expected: PASS (5 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/infra/global-config.ts tests/infra/global-config.test.ts
+git commit -m "feat(infra): add global config loader (~/.codebus/config.yaml)"
+```
+
+---
+
 ## Task 12: ui/stream-parser (claude-cli stream-json → StreamEvent)
 
 **Files:** (note: actual parsing happens inside `claude-cli.ts` Task 10. This task extracts the line-by-line parser as a pure module so it's independently testable.)
@@ -1860,8 +2021,8 @@ This file teaches the LLM how to maintain the wiki under this folder.
 # CodeBus Wiki Schema
 
 You are codebus's wiki maintainer. Your job is to read the user's codebase
-(under \`raw/\`) and incrementally build a structured markdown wiki under
-\`wiki/\` that helps engineers ramp up on the codebase.
+(under \`raw/code/\`) and incrementally build a structured markdown wiki
+under \`wiki/\` that helps engineers ramp up on the codebase.
 
 ## 1. Your Role
 
@@ -1872,10 +2033,13 @@ You are codebus's wiki maintainer. Your job is to read the user's codebase
 
 ## 2. Workspace Layout
 
-- You can READ: \`raw/\` (codebase snapshot), \`wiki/\` (existing wiki).
+- You can READ: \`raw/code/\` (codebase snapshot), \`wiki/\` (existing wiki).
 - You can WRITE: \`wiki/**/*.md\` only.
 - You must NOT touch: \`raw/\` (read-only), \`output/\` (phase 1 unused),
   \`goals.jsonl\` (codebus internal), \`.git/\` (auto-managed).
+- Note: \`raw/\` may contain sibling folders (\`docs/\`, \`clips/\` etc.)
+  added by the user — those are also read-only references but phase 1
+  workflow focuses on \`raw/code/\`.
 
 ## 3. Wiki Structure
 
@@ -1893,7 +2057,7 @@ Plus:
 1. **Discover**: grep wiki/pages/*.md frontmatter \`sources:\` to see what
    raw files are already indexed. Read wiki/index.md for the catalog.
 2. **Plan**: list pages to update vs new pages to create.
-3. **Explore**: use Read/Grep/Glob on raw/ for source files not yet covered.
+3. **Explore**: use Read/Grep/Glob on raw/code/ for source files not yet covered.
 4. **Write**: create or update wiki/pages/<slug>.md with frontmatter (§6).
 5. **Index**: rewrite wiki/index.md catalog.
 6. **Log**: append a line to wiki/log.md.
@@ -1915,6 +2079,8 @@ Plus:
 title: Payment Gateway
 type: concept                    # concept | module | process | entity
 sources:
+  # path = source repo logical path, do NOT include raw/code/ prefix.
+  # Read via: raw/code/<path> (codebus prepends automatically for stale check).
   - path: src/services/payment.py
     sha256: <40-hex>
     at_commit: <git-sha-or-empty>
@@ -2027,6 +2193,7 @@ describe('runInit', () => {
     expect(existsSync(join(dir, '.codebus', 'wiki', 'pages'))).toBe(true)
     expect(existsSync(join(dir, '.codebus', 'wiki', 'goals'))).toBe(true)
     expect(existsSync(join(dir, '.codebus', 'raw'))).toBe(true)
+    expect(existsSync(join(dir, '.codebus', 'raw', 'code'))).toBe(true)
     expect(existsSync(join(dir, '.codebus', 'output'))).toBe(true)
   })
 
@@ -2081,6 +2248,7 @@ export async function runInit(repoRoot: string): Promise<void> {
   // Create folder structure
   await mkdir(p.root, { recursive: true })
   await mkdir(p.raw, { recursive: true })
+  await mkdir(p.rawCode, { recursive: true })
   await mkdir(p.wiki, { recursive: true })
   await mkdir(p.wikiPages, { recursive: true })
   await mkdir(p.wikiGoals, { recursive: true })
@@ -2098,7 +2266,7 @@ export async function runInit(repoRoot: string): Promise<void> {
 
   // Internal .gitignore inside .codebus/
   if (!existsSync(p.gitignore)) {
-    await writeFile(p.gitignore, '.lock\nraw/\n')
+    await writeFile(p.gitignore, '.lock\nraw/code/\n')
   }
 
   // Init nested git repo
@@ -2183,7 +2351,7 @@ describe('runGoal', () => {
     })
 
     expect(existsSync(join(dir, '.codebus'))).toBe(true)
-    expect(existsSync(join(dir, '.codebus', 'raw', 'app.ts'))).toBe(true)
+    expect(existsSync(join(dir, '.codebus', 'raw', 'code', 'app.ts'))).toBe(true)
     const goalsJsonl = readFileSync(join(dir, '.codebus', 'goals.jsonl'), 'utf8')
     expect(goalsJsonl).toContain('了解 app.ts')
     expect(goalsJsonl).toContain('"uncommitted":false')
@@ -2236,7 +2404,7 @@ export async function runGoal(opts: RunGoalOptions): Promise<void> {
   const lock = await acquireLock(p.lock)
   try {
     // Sync raw
-    await syncRepoToRaw(opts.repoRoot, p.raw)
+    await syncRepoToRaw(opts.repoRoot, p.rawCode)
 
     // Record source version
     const ver = await getSourceVersion(opts.repoRoot)
@@ -2265,7 +2433,7 @@ export async function runGoal(opts: RunGoalOptions): Promise<void> {
     }
 
     // Stale detect (post-LLM)
-    await flagStalePages(p.wikiPages, p.raw)
+    await flagStalePages(p.wikiPages, p.rawCode)
 
     // Auto-commit nested git
     await autoCommit(p.root, `wiki: ${opts.goal}`)
@@ -2274,7 +2442,7 @@ export async function runGoal(opts: RunGoalOptions): Promise<void> {
   }
 }
 
-async function flagStalePages(pagesDir: string, rawDir: string): Promise<void> {
+async function flagStalePages(pagesDir: string, rawCodeDir: string): Promise<void> {
   if (!existsSync(pagesDir)) return
   const files = await readdir(pagesDir)
   for (const f of files) {
@@ -2285,7 +2453,7 @@ async function flagStalePages(pagesDir: string, rawDir: string): Promise<void> {
     try { parsed = parsePage(content) } catch { continue }
     const currentHashes = new Map<string, string>()
     for (const src of parsed.frontmatter.sources) {
-      const rawPath = join(rawDir, src.path)
+      const rawPath = join(rawCodeDir, src.path)
       if (existsSync(rawPath)) {
         currentHashes.set(src.path, await sha256File(rawPath))
       }
@@ -2451,6 +2619,7 @@ import { runInit } from './commands/init.js'
 import { runGoal } from './commands/goal.js'
 import { runQuery } from './commands/query.js'
 import { ClaudeCliProvider } from './infra/llm/claude-cli.js'
+import { loadGlobalConfig } from './infra/global-config.js'
 import { resolveEmojiMode, detectRuntime, type EmojiMode } from './ui/emoji-mode.js'
 import { renderEvent, renderBanner } from './ui/render.js'
 
@@ -2466,14 +2635,20 @@ program
   .option('--no-emoji', 'force symbol mode (disable emoji)')
 
 program.parse()
-
 const opts = program.opts()
-const emojiFlag: EmojiMode = opts.emoji === false ? 'off' : 'auto'
-const useEmoji = resolveEmojiMode(emojiFlag, detectRuntime())
-const useColor = process.stdout.isTTY && !process.env.NO_COLOR
-const renderOpts = { useEmoji, useColor }
 
 async function main() {
+  // Settings priority for emoji mode (per spec §17.3):
+  //   1. CLI --no-emoji    2. NO_EMOJI env    3. ~/.codebus/config.yaml    4. 'auto'
+  const globalCfg = await loadGlobalConfig()
+  const emojiFlag: EmojiMode =
+    opts.emoji === false ? 'off' :
+    process.env.NO_EMOJI ? 'off' :
+    (globalCfg.emoji ?? 'auto')
+  const useEmoji = resolveEmojiMode(emojiFlag, detectRuntime())
+  const useColor = process.stdout.isTTY && !process.env.NO_COLOR
+  const renderOpts = { useEmoji, useColor }
+
   const repo = opts.repo
 
   if (!opts.goal && !opts.query) {
@@ -2704,21 +2879,23 @@ npm publish --access public          # only when v0.1.0 ready to ship
 
 **Spec coverage check:**
 
-- ✅ §3.1 Architecture (codebus thin wrapper + claude -p) → Task 10 (claude-cli.ts) + Task 17 (cli.ts dispatch)
-- ✅ §3.5 Module Architecture (core/infra/ui hexagonal) → Tasks 2-13 reflect the layer separation
-- ✅ §4 Disk Layout (`.codebus/` vault) → Task 2 (vault layout) + Task 14 (init)
-- ✅ §5 CLI Surface (init / goal / query + --no-emoji + --debug) → Task 17
-- ✅ §6 Schema 12 sections → Task 13 (CODEBUS_SCHEMA_MARKDOWN)
-- ✅ §7 Goal sequence (12 steps) → Task 15 (runGoal)
+- ✅ §3.1 Architecture (codebus thin wrapper + claude -p + load global config) → Task 10 (claude-cli.ts) + Task 11.5 (global-config) + Task 17 (cli.ts dispatch)
+- ✅ §3.5 Module Architecture (core/infra/ui hexagonal) → Tasks 2-13 reflect the layer separation; global-config in infra/ (Task 11.5)
+- ✅ §4 Disk Layout (`.codebus/` vault with raw/code/) → Task 2 (vault layout, +rawCode field) + Task 14 (init mkdir raw/code/)
+- ✅ §4.1 raw/code/ rationale → Task 7 (sync target = raw/code/)
+- ✅ §5 CLI Surface (init / goal / query + --no-emoji + --debug + settings priority) → Task 17 (4-level emoji resolution chain)
+- ✅ §6 Schema 12 sections + sources path note → Task 13 (CODEBUS_SCHEMA_MARKDOWN with raw/code/ refs)
+- ✅ §7 Goal sequence (12 steps; sync to raw/code/) → Task 15 (runGoal with p.rawCode)
 - ✅ §7.5 Query sequence → Task 16 (runQuery)
 - ✅ §8 Stream-json → Terminal rendering (4+4 emoji + symbol fallback) → Tasks 11-12
 - ✅ §9 Page conflict (append-merge + locked fields) → Task 5 (mergePage)
-- ✅ §10 Sync (重 copy + commit hash + sha256 + stale flag) → Tasks 7 (raw-sync), 8 (source-version), 6 (stale-detect), 15 (orchestrate)
+- ✅ §10 Sync (重 copy raw/code/ + commit hash + sha256 + stale flag) → Tasks 7 (raw-sync to rawCode), 8 (source-version), 6 (stale-detect), 15 (orchestrate)
 - ✅ §11 License MIT + checklist → Task 1 (LICENSE) + Task 13 (SPDX header) + Task 19 (README badge)
 - ✅ §12 LLM Wiki 借鑑 (clean-room ideas) → frontmatter-repair / page-merge / stale-detect / lock all reimplemented
-- ✅ §13 Toolkit (commander/chalk/ora/gray-matter/simple-git/vitest/tsx) → Task 1 deps
-- ✅ §14 Repo structure → Task 1 + Task 2 onwards
-- ⚠️ §15 Open Questions are **deferred to implementation iteration** by design — not all need tasks (failure modes / chalk color tuning / demo repo selection)
+- ✅ §13 Toolkit (+js-yaml for config parse) → Task 1 deps
+- ✅ §14 Repo structure (+ infra/global-config.ts) → Task 1 + Task 2 onwards + Task 11.5
+- ✅ §17 Global Settings (~/.codebus/config.yaml) → Task 11.5 (loadGlobalConfig) + Task 17 (priority resolution)
+- ⚠️ §15 Open Questions are **deferred to implementation iteration** by design — not all need tasks (failure modes / chalk color tuning / demo repo selection / per-repo config phase 2)
 
 **Placeholder scan:** Searched plan for "TBD" / "TODO" / "implement later" / "fill in" — none found. All steps have actual code.
 
@@ -2726,7 +2903,8 @@ npm publish --access public          # only when v0.1.0 ready to ship
 - `LLMProvider.invoke` signature consistent across Tasks 9 / 10 / 15 / 16 / 17 (all use `InvokeOptions`)
 - `StreamEvent` shape consistent: 4 kinds (`thought` / `tool_use` / `tool_result` / `done`)
 - `ParsedPage` / `PageFrontmatter` consistent across Tasks 3 / 5 / 6 / 15
-- `vaultPaths` keys consistent across Tasks 2 / 14 / 15 / 16
+- `vaultPaths` keys consistent across Tasks 2 / 14 / 15 / 16 (raw + new rawCode field both present)
+- `GlobalConfig.emoji` type matches `EmojiMode` ('auto' | 'on' | 'off') across Tasks 11 / 11.5 / 17
 
 No issues found.
 
