@@ -809,6 +809,18 @@ codebus/                          ← v2 main branch
 - File lock 加 stale-lock detection（PID alive check），SIGINT 中斷後 next run 能 reclaim
 - Init recovery from partial state（`.codebus/` 半完成自動 detect + repair）
 
+**Wiki lint / Obsidian 相容檢查（phase 1 已落地 soft mode + standalone `--check`，hard mode 跟 LLM correction 留 phase 2）:**
+
+Phase 1 落地的：
+- ✅ Soft auto-lint：`runGoal` 結尾跑 `lintWiki(vaultRoot)`，issue 在 done banner 旁顯示一行摘要，不阻擋 commit
+- ✅ Standalone `codebus --repo X --check`：呼叫同一個 `lintWiki` 純函式 print 完整報告 + exit 0/1
+- ✅ Lint 規則：frontmatter parse error / `related[]` 含未解析 wikilink / body 含未解析 wikilink (warn) / page 落在 `wiki/` 而非 `wiki/pages/` (warn) / 缺 special files (warn)
+
+Phase 2 該加：
+- **`--strict` hard mode** — 偵測 error 級 issue 直接阻擋 autoCommit，user 自己修。stepping-stone before LLM correction loop
+- **LLM error-correction loop** — issue 偵測到後 re-prompt agent 帶 issue list 跑第二輪 ingest 修正；失敗 N 次放棄 + report。需要 multi-turn LLM infrastructure（目前 ClaudeCliProvider 是 single-turn input），跟 multi-provider 重構自然同期做
+- **Lint trend analytics** — `goals.jsonl` schema 加 `lint_errors` / `lint_warns` 欄位累積跨 run 數據；phase 2 可繪「provider × goal 的 issue trend」做多 provider 品質比對。Phase 1 不入 schema 是因為 jsonl entry 在 LLM 跑前已 append（沒 lint result），需重設計為「先記 placeholder、跑完回填」或「append 第二行 result entry」
+
 **Terminal output 升級（manual test on 2026-05-04 caught，phase 1 已落地 B，C/D 留給 phase 2）:**
 
 Phase 1 落地的（commit `d7ce1a9`）：

@@ -4,6 +4,7 @@ import { unlinkSync } from 'node:fs'
 import { runInit } from './commands/init.js'
 import { runGoal } from './commands/goal.js'
 import { runQuery } from './commands/query.js'
+import { runCheck } from './commands/check.js'
 import { vaultPaths } from './core/vault/layout.js'
 import { checkRepoIsNotVault } from './core/vault/sanity-check.js'
 import { checkClaudeCliAvailable } from './infra/cli-detect.js'
@@ -11,6 +12,7 @@ import { ClaudeCliProvider } from './infra/llm/claude-cli.js'
 import { loadGlobalConfig } from './infra/global-config.js'
 import { resolveEmojiMode, detectRuntime, type EmojiMode } from './ui/emoji-mode.js'
 import { renderEvent, renderBanner } from './ui/render.js'
+import { printLintReport, formatLintSummary } from './ui/lint-report.js'
 import type { StreamEvent } from './infra/llm/types.js'
 
 const program = new Command()
@@ -22,6 +24,7 @@ program
   .option('--goal <text>', 'build wiki for this goal')
   .option('--query <text>', 'ask the wiki a question')
   .option('--debug', 'verbose stream-json output')
+  .option('--check', 'lint vault wiki/ for Obsidian compatibility + schema conformance (read-only)')
   .option('--emoji <mode>', 'emoji mode: auto | on | off')
   .option('--no-emoji', 'sugar for --emoji off')
 
@@ -92,6 +95,16 @@ async function main(): Promise<void> {
     process.exit(130)
   })
 
+  // --check: standalone lint mode. Read-only, no LLM, no init, no commit.
+  // Reuses lintWiki — same rules as the auto-lint that runs at end of
+  // every --goal flow. Useful for ad-hoc verification (manual edits)
+  // and for phase 2 multi-provider quality comparison.
+  if (opts.check) {
+    const result = await runCheck({ repoRoot: repo })
+    printLintReport(result, renderOpts)
+    process.exit(result.errorCount > 0 ? 1 : 0)
+  }
+
   if (!opts.goal && !opts.query) {
     console.log(renderBanner('start', { path: repo }, renderOpts))
     await runInit(repo)
@@ -119,6 +132,12 @@ async function main(): Promise<void> {
     const result = await runGoal({ repoRoot: repo, goal: String(opts.goal), provider, onEvent })
     if (result.wikiChanged) {
       console.log(renderBanner('done', { wikiPath: `${repo}/.codebus/wiki` }, renderOpts))
+      // Surface auto-lint result one-liner if any issues. Full report
+      // available via `codebus --repo X --check`.
+      if (result.lint) {
+        const summary = formatLintSummary(result.lint, renderOpts)
+        if (summary) console.log(summary)
+      }
       // Point Obsidian at the wiki/ subdir, not .codebus/ root — vault opens
       // clean (no .git / raw / output / goals.jsonl / CLAUDE.md clutter to
       // hide). Wikilinks still resolve since all pages live under wiki/.

@@ -11,6 +11,7 @@ import { simpleGit } from 'simple-git'
 import { parsePage, serializePage } from '../core/wiki/frontmatter.js'
 import { detectStaleSources } from '../core/wiki/stale-detect.js'
 import { utcTodayISO } from '../core/wiki/date.js'
+import { lintWiki, type LintResult } from '../core/wiki/lint.js'
 import { runInit } from './init.js'
 import type { LLMProvider, StreamEvent } from '../infra/llm/types.js'
 
@@ -29,6 +30,12 @@ export interface RunGoalResult {
   // to show an honest completion banner instead of the misleading
   // "wiki 已生成" / "Obsidian 開" hint.
   wikiChanged: boolean
+  // Lint result captured AFTER enrich/stale-detect, BEFORE autoCommit.
+  // Soft mode: lint never blocks commit; caller decides how to surface
+  // the result (banner one-liner / full report). null when lint failed
+  // hard (e.g. wiki/ doesn't exist); caller treats as "no issues to
+  // report".
+  lint: LintResult | null
 }
 
 // Check whether the wiki/ subtree has any uncommitted changes (new pages,
@@ -49,6 +56,7 @@ export async function runGoal(opts: RunGoalOptions): Promise<RunGoalResult> {
 
   const lock = await acquireLock(p.lock)
   let wikiChanged = false
+  let lint: LintResult | null = null
   try {
     await syncRepoToRaw(opts.repoRoot, p.rawCode)
 
@@ -81,12 +89,18 @@ export async function runGoal(opts: RunGoalOptions): Promise<RunGoalResult> {
 
     await enrichSourceMetadata(p.wikiPages, p.rawCode, ver.commit)
     await flagStalePages(p.wikiPages, p.rawCode)
+    // Soft auto-lint: never blocks commit, just captures result for caller
+    // to surface. Phase 2 may add hard mode (--strict) and LLM correction
+    // loop — both reuse this same lintWiki call; only the response differs.
+    try {
+      lint = await lintWiki(p.root)
+    } catch { /* lint failure must not break ingest — best effort */ }
     wikiChanged = await hasWikiChanges(p.root)
     await autoCommit(p.root, `wiki: ${opts.goal}`)
   } finally {
     await releaseLock(lock)
   }
-  return { wikiChanged }
+  return { wikiChanged, lint }
 }
 
 // CRITICAL (review iter-8): only enrich pages where AT LEAST ONE source
