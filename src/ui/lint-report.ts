@@ -6,9 +6,10 @@ import type { RenderOptions } from './render.js'
 // shorter `formatLintSummary` helper instead — full report is too noisy
 // during ingest where user already sees the agent's tool calls.
 export function printLintReport(result: LintResult, opts: RenderOptions): void {
+  const coverage = formatCoverage(result)
   if (result.issues.length === 0) {
     const lead = opts.useEmoji ? '✅' : 'ok'
-    console.log(`${lead} ${result.pagesScanned} pages scanned, no issues`)
+    console.log(`${lead} ${coverage}, no issues`)
     return
   }
 
@@ -23,7 +24,7 @@ export function printLintReport(result: LintResult, opts: RenderOptions): void {
   const errorMark = opts.useEmoji ? '✗' : 'x'
   const warnMark = opts.useEmoji ? '⚠' : '!'
   console.log(
-    `${headLead} ${result.pagesScanned} pages scanned, ` +
+    `${headLead} ${coverage}, ` +
     `${result.errorCount} error(s), ${result.warnCount} warning(s)`
   )
   console.log('')
@@ -42,6 +43,14 @@ export function printLintReport(result: LintResult, opts: RenderOptions): void {
       console.log(`   ${sevTag} ${issue.message}`)
     }
   }
+}
+
+// "{N} pages + {M} nav files scanned" — covers both knowledge-page and
+// nav-file lint coverage so a clean run doesn't claim "no issues" for files
+// it never opened.
+function formatCoverage(result: LintResult): string {
+  return `${result.pagesScanned} page${result.pagesScanned === 1 ? '' : 's'} + ` +
+    `${result.navFilesScanned} nav file${result.navFilesScanned === 1 ? '' : 's'} scanned`
 }
 
 // One-line summary suitable for goal flow's banner sequence.
