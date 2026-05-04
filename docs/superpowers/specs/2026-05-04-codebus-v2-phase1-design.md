@@ -809,6 +809,17 @@ codebus/                          ← v2 main branch
 - File lock 加 stale-lock detection（PID alive check），SIGINT 中斷後 next run 能 reclaim
 - Init recovery from partial state（`.codebus/` 半完成自動 detect + repair）
 
+**Terminal output 升級（manual test on 2026-05-04 caught，phase 1 已落地 B，C/D 留給 phase 2）:**
+
+Phase 1 落地的（commit `d7ce1a9`）：
+- 多行 thought two-line 縮排
+- 輕 markdown 染色（`**bold**` / `` `code` `` / `[[wikilink]]` 三種 marker，useColor 才生效）
+
+Phase 2 該加的：
+- **OSC 8 hyperlink for `[[wikilink]]`** — 現代終端（Windows Terminal / iTerm2 / VSCode integrated terminal / GNOME Terminal）支援，escape sequence 形如 `\x1b]8;;file:///<vault>/wiki/pages/<slug>.md\x1b\\[[X]]\x1b]8;;\x1b\\` 讓 Ctrl+Click 開檔。需要：(a) 把 vault root context 傳進 render layer（目前 render 不知道 vault path）、(b) 終端 capability detection（不支援的終端會印垃圾字元）、(c) 評估 `obsidian://` URI scheme vs `file://`（前者直接跳 Obsidian、後者依系統預設 .md handler）
+- **完整 markdown rendering**（marked-terminal 之類）— phase 2 評估：bundle size 增 ~200 KB；終端 markdown 對 codebus 的半結構化 thought 可能 over-render（heading / code block 跟 emoji prefix 打架）。傾向不採用，但留給 phase 2 重新評估
+- **Italic / heading 染色** — phase 1 跳過（italic 易跟 code 內 `*` 撞色；heading 在 thought 不常見）。phase 2 若 corpus 顯示常出現可加
+
 ### Phase 3 (GUI)
 
 - Tauri (Rust) + Nuxt 4 (TS / Vue)
