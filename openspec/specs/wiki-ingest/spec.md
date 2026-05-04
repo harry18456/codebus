@@ -21,8 +21,77 @@ When invoked with `--repo <path> --goal "<text>"`, the system SHALL run the full
 - **AND** the user runs `codebus --repo X --goal "understand checkout"`
 - **THEN** the system skips init and proceeds directly with sync + agent invocation
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Sync source repo to raw/code/ excluding ignored content
 
 Before agent invocation, the system SHALL clear `.codebus/raw/code/` and re-copy the source repo into it, excluding `.git/`, `.codebus/`, `.env`, gitignored entries from the source `.gitignore`, and files larger than a configured byte threshold.
@@ -39,8 +108,77 @@ Before agent invocation, the system SHALL clear `.codebus/raw/code/` and re-copy
 - **AND** sync runs
 - **THEN** `stale.txt` is removed, but `.codebus/raw/docs/spec.md` is preserved untouched
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Record source version per goal in goals.jsonl
 
 After sync, the system SHALL append a JSON line to `.codebus/goals.jsonl` capturing the goal text, source repo HEAD commit hash (or null if not a git repo), uncommitted-changes flag, and ISO timestamp.
@@ -55,8 +193,77 @@ After sync, the system SHALL append a JSON line to `.codebus/goals.jsonl` captur
 - **WHEN** ingest runs against a source repo with uncommitted modifications
 - **THEN** the new `goals.jsonl` entry has `uncommitted: true`
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Spawn LLM agent with sandbox flags and cwd isolation
 
 The system SHALL spawn the LLM provider with cwd set to `.codebus/` (system-level user-source-repo isolation) and SHALL pass `--tools` (toolset whitelist gate) and `--allowedTools` (auto-approval safety net) with identical lists so that only `Read,Glob,Grep,Write,Edit` are visible to the agent — Bash/WebFetch/WebSearch/AskUserQuestion/Task/NotebookEdit/MCP and any future Claude Code tools are not in the agent's toolbox at all. (See §3.2.4 of the design spec for why `--tools` is the gate, not `--allowedTools`; `--allowedTools` was misused as a toolset filter in iter-1 ~ iter-8.)
@@ -71,8 +278,77 @@ The system SHALL spawn the LLM provider with cwd set to `.codebus/` (system-leve
 - **WHEN** the system builds argv for ingest mode
 - **THEN** argv contains `-p`, `--output-format stream-json`, `--input-format stream-json`, `--verbose`, `--permission-mode acceptEdits`, `--tools Read,Glob,Grep,Write,Edit`, and `--allowedTools Read,Glob,Grep,Write,Edit`
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Stream agent events to terminal and emit them via callback
 
 The system SHALL parse the agent's stream-json output line-by-line into normalized StreamEvent values and SHALL emit each event through the caller-supplied event callback for rendering.
@@ -97,8 +373,77 @@ The system SHALL parse the agent's stream-json output line-by-line into normaliz
 - **WHEN** the agent emits `{type:"system",...}`, `{type:"result",...}`, `{type:"rate_limit_event"}`, or any unrecognized type
 - **THEN** the system yields no StreamEvent for those lines and continues parsing subsequent lines
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Detect OAuth failure from subprocess exit
 
 The system SHALL distinguish OAuth-needed exit failures (non-zero exit with auth-related stderr keywords) from generic errors and SHALL surface a user-facing hint pointing to running `claude` to complete OAuth.
@@ -113,8 +458,77 @@ The system SHALL distinguish OAuth-needed exit failures (non-zero exit with auth
 - **WHEN** the subprocess exits with code 1 and stderr contains no auth-related keyword
 - **THEN** the system throws an error containing the exit code and a truncated stderr excerpt
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Enrich newly-written page sources with sha256 and at_commit
 
 After the agent finishes, the system SHALL fill `sources[].sha256` and `sources[].at_commit` only on sources that lack those fields (newly written by the agent in this run), and SHALL preserve existing fingerprints on carry-over pages so stale-detect can compare against current raw.
@@ -131,8 +545,77 @@ After the agent finishes, the system SHALL fill `sources[].sha256` and `sources[
 - **AND** post-processing runs
 - **THEN** the page frontmatter is not rewritten, preserving the prior-run sha256 for stale comparison
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Stale-detect compares frontmatter sha256 to current raw and flags drift
 
 After enrichment, the system SHALL compute current sha256 for each page's source files and SHALL set `frontmatter.stale: true` when any source hash differs from the recorded value or the source is missing.
@@ -152,8 +635,77 @@ After enrichment, the system SHALL compute current sha256 for each page's source
 - **WHEN** at least one source path no longer exists under `.codebus/raw/code/`
 - **THEN** the system rewrites the page with `stale: true`
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Append-merge resolves page conflicts
 
 When agent rewrites an existing page, the system SHALL preserve locked fields (`title`, `type`, `created`), union the array fields (`sources`, `goals`, `related`), append a goal-section to the body, and update the `updated` field to today's UTC date.
@@ -175,8 +727,77 @@ When agent rewrites an existing page, the system SHALL preserve locked fields (`
 - **WHEN** merge runs with `goalText = "refund flow"` and `today = "2026-05-04"`
 - **THEN** the merged body ends with a `## from goal: refund flow (2026-05-04)` section followed by the incoming body content
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Auto-commit nested git on goal completion
 
 After post-processing, the system SHALL stage all changes in `.codebus/` and commit them to the nested git repo with a message identifying the goal.
@@ -191,8 +812,77 @@ After post-processing, the system SHALL stage all changes in `.codebus/` and com
 - **WHEN** the ingest flow completes but no files changed under `.codebus/`
 - **THEN** the system does not create an empty commit
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Date fields use UTC YYYY-MM-DD
 
 The system SHALL write `created` and `updated` frontmatter fields as the UTC date portion of the current timestamp (`YYYY-MM-DD`), not local time.
@@ -201,3 +891,72 @@ The system SHALL write `created` and `updated` frontmatter fields as the UTC dat
 
 - **WHEN** a page is written or updated
 - **THEN** `created` (if newly set) and `updated` use UTC date format `YYYY-MM-DD` regardless of host timezone
+
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->

@@ -35,8 +35,77 @@ The system SHALL render each StreamEvent (`thought`, `tool_use`, `tool_result`) 
 - **WHEN** the system renders a `tool_result` event with `isError: true` and color enabled
 - **THEN** the output line uses the same result emoji glyph as success but applies red color to the result text, and the output contains the error text
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Render lifecycle banners
 
 The system SHALL render four banner messages (`start`, `goal`, `done`, `hint`) at appropriate lifecycle moments, with emoji or symbol prefix matching the current emoji mode.
@@ -51,8 +120,77 @@ The system SHALL render four banner messages (`start`, `goal`, `done`, `hint`) a
 - **WHEN** the system renders the `done` banner with `wikiPath: ".codebus/wiki"` and emoji disabled
 - **THEN** the output begins with the done symbol `"✓"` and contains the wiki path, with no emoji glyph present
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Resolve emoji mode via 5-level priority
 
 The system SHALL resolve the effective emoji setting by checking, in order: explicit CLI enum (`--emoji on|off|auto`), `--no-emoji` sugar (equivalent to `--emoji off`), `NO_EMOJI` env var, `~/.codebus/config.yaml emoji:` field, and finally automatic detection. Auto-detection SHALL enable emoji only when stdout is a TTY, `CI` env is unset, `NO_EMOJI` env is unset, and `TERM` is not `"dumb"`.
@@ -79,8 +217,77 @@ The system SHALL resolve the effective emoji setting by checking, in order: expl
 - **WHEN** no flag, env, or config setting is present, and the resolved mode is `"auto"`
 - **THEN** emoji is enabled when `process.stdout.isTTY` is truthy AND `CI` is unset AND `TERM !== "dumb"`, and disabled otherwise
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Apply chalk color when stdout is a TTY
 
 The system SHALL apply ANSI color via chalk only when stdout is a TTY and `NO_COLOR` env is unset; otherwise output SHALL be plain text without escape codes.
@@ -95,8 +302,77 @@ The system SHALL apply ANSI color via chalk only when stdout is a TTY and `NO_CO
 - **WHEN** stdout is a TTY but `NO_COLOR` is set
 - **THEN** the output contains no ANSI color escape codes
 
----
 
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
+
+---
 ### Requirement: Load global config tolerantly
 
 The system SHALL load `~/.codebus/config.yaml` if present, ignore unknown fields silently (forward-compat for phase 2), warn but not abort on parse errors, and warn on unknown values for known fields.
@@ -120,3 +396,72 @@ The system SHALL load `~/.codebus/config.yaml` if present, ignore unknown fields
 
 - **WHEN** `~/.codebus/config.yaml` contains `default_provider: anthropic-sdk` alongside `emoji: on`
 - **THEN** the system honors `emoji: on` and silently ignores `default_provider` without warning
+
+<!-- @trace
+source: codebus-v2-phase1
+updated: 2026-05-04
+code:
+  - src/infra/fs/raw-sync.ts
+  - docs/superpowers/REVIEW_LESSONS.md
+  - src/infra/cli-detect.ts
+  - src/core/wiki/types.ts
+  - README.md
+  - src/core/wiki/frontmatter.ts
+  - package.json
+  - src/core/vault/lock.ts
+  - src/core/vault/sanity-check.ts
+  - src/core/wiki/stale-detect.ts
+  - src/schema/claude-md.ts
+  - src/commands/goal.ts
+  - src/core/wiki/date.ts
+  - LICENSE
+  - src/cli.ts
+  - tsconfig.json
+  - src/commands/query.ts
+  - src/infra/git/source-version.ts
+  - src/ui/lint-report.ts
+  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
+  - src/infra/llm/types.ts
+  - .spectra.yaml
+  - src/core/vault/layout.ts
+  - src/infra/git/nested-repo.ts
+  - src/commands/check.ts
+  - src/core/wiki/page-merge.ts
+  - vitest.config.ts
+  - src/commands/init.ts
+  - src/ui/stream-parser.ts
+  - src/core/wiki/lint.ts
+  - src/infra/llm/claude-cli.ts
+  - src/infra/fs/file-ops.ts
+  - src/ui/emoji-mode.ts
+  - src/infra/global-config.ts
+  - src/core/wiki/frontmatter-repair.ts
+  - src/ui/render.ts
+tests:
+  - tests/e2e/init-smoke.test.ts
+  - tests/infra/fs/file-ops.test.ts
+  - tests/commands/goal.test.ts
+  - tests/cli.test.ts
+  - tests/commands/query.test.ts
+  - tests/commands/check.test.ts
+  - tests/core/wiki/date.test.ts
+  - tests/core/wiki/page-merge.test.ts
+  - tests/core/wiki/stale-detect.test.ts
+  - tests/infra/cli-detect.test.ts
+  - tests/ui/emoji-mode.test.ts
+  - tests/core/wiki/frontmatter-repair.test.ts
+  - tests/infra/git/source-version.test.ts
+  - tests/commands/init.test.ts
+  - tests/infra/global-config.test.ts
+  - tests/ui/stream-parser.test.ts
+  - tests/core/vault/sanity-check.test.ts
+  - tests/core/wiki/lint.test.ts
+  - tests/infra/git/nested-repo.test.ts
+  - tests/infra/fs/raw-sync.test.ts
+  - tests/core/vault/layout.test.ts
+  - tests/core/vault/lock.test.ts
+  - tests/infra/llm/claude-cli.test.ts
+  - tests/schema/claude-md.test.ts
+  - tests/core/wiki/frontmatter.test.ts
+  - tests/ui/render.test.ts
+-->
