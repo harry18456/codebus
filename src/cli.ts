@@ -94,7 +94,10 @@ async function main(): Promise<void> {
     console.log(renderBanner('goal', { goal: String(opts.goal) }, renderOpts))
     await runGoal({ repoRoot: repo, goal: String(opts.goal), provider, onEvent })
     console.log(renderBanner('done', { wikiPath: `${repo}/.codebus/wiki` }, renderOpts))
-    console.log(renderBanner('hint', { path: `${repo}/.codebus` }, renderOpts))
+    // Point Obsidian at the wiki/ subdir, not .codebus/ root — vault opens
+    // clean (no .git / raw / output / goals.jsonl / CLAUDE.md clutter to
+    // hide). Wikilinks still resolve since all pages live under wiki/.
+    console.log(renderBanner('hint', { path: `${repo}/.codebus/wiki` }, renderOpts))
   } else if (opts.query) {
     console.log(renderBanner('start', { path: repo }, renderOpts))
     await runQuery({ repoRoot: repo, query: String(opts.query), provider, onEvent })
