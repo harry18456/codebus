@@ -77,7 +77,8 @@ async function main(): Promise<void> {
     // exists yet. Tell the user the actual next step.
     const ok = useEmoji ? '✨' : '✓'
     const tip = useEmoji ? '💡' : 'i'
-    console.log(`${ok} Vault 已初始化於 ${repo}/.codebus`)
+    const vaultPath = `${repo}/.codebus`.replace(/\\/g, '/')
+    console.log(`${ok} Vault 已初始化於 ${vaultPath}`)
     console.log(`${tip} 下一步：codebus --goal "<你的探索目標>"`)
     return
   }
