@@ -73,6 +73,18 @@ cycle.
    rewrite、section move、re-order）。跟 lesson #1 同 family — 不要
    trust paraphrase / partial signal，要 ground 到 source-of-truth。
 
+10. **Sandbox spike 必須測「不該跑的工具有沒有被擋」，不只測「需要的工具能不能跑」。**
+    Iter-9（implementation 後 live test 才發現）：spec §3.2 早期 spike B 測
+    「default mode + Write」確認 Write deny → 推出「acceptEdits 必設」結論
+    → spec 寫「`--allowedTools` whitelist 是 sandbox」。但只測了 baseline
+    layer（要的工具能不能跑），完全沒驗 acceptEdits 在 -p mode 下對
+    「未在 allowedTools」的工具實際 behavior。Live test against buddy-gacha
+    暴露 agent 用 Bash 跑 ls/wc 沒被擋。**根因**：`--allowedTools` 是
+    auto-approval 列表不是 toolset 限制；`--tools` 才是 toolset gate。
+    Sandbox spike 的成功標準必須對稱：(a) 要的工具 work，(b) 不要的工具
+    擋住。少了 (b) sandbox 可能根本沒成立。寫 spec 時若只能 cite (a)
+    的 spike 結果，就應該標明 sandbox 強度未驗證。
+
 ## How to add a lesson
 
 When a review iteration surfaces a process insight (not a content

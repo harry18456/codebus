@@ -112,12 +112,17 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 │    --output-format stream-json                      │
 │    --input-format stream-json                       │
 │    --verbose                                        │
-│    --permission-mode acceptEdits  (Write auto-OK   │
-│                    only inside cwd; cwd-外 Write   │
-│                    仍要 grant → -p mode deny)      │
-│    --disallowedTools Bash,WebFetch,WebSearch        │
+│    --permission-mode acceptEdits  (-p mode 下對   │
+│                    toolset 內所有工具 auto-approve │
+│                    — 不只 Edit；見 §3.2.4)         │
+│    --tools Read,Glob,Grep,Write,Edit  ← toolset    │
+│                    白名單，未列名工具不在 agent    │
+│                    可用工具庫（iter-9 fix）         │
+│    --allowedTools Read,Glob,Grep,Write,Edit  ← 對  │
+│                    toolset 內工具 auto-approve 的  │
+│                    冗餘保險網                       │
 │  Flags（query mode, --query）:                     │
-│    同上 + Write,Edit 也 disallow                   │
+│    同上 但 --tools / --allowedTools 不含 Write,Edit│
 │  Tools available（ingest）:                         │
 │    Read, Grep, Glob, Write                         │
 │  Tools available（query）:                          │
@@ -137,6 +142,7 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 | Layer | 機制 | 守護範圍 | 強度 |
 |---|---|---|---|
 | **System permission (cwd 隔離)** | spawn cwd = `.codebus/` + `--permission-mode acceptEdits` | acceptEdits **只 auto-accept cwd 內 Write**；cwd 外 Write 仍需 explicit grant（在 -p mode 下無 user 可 grant → fail）| 系統層 hard（spike E2 verified） |
+| **System permission (Toolset whitelist via `--tools`)** | `--tools Read,Glob,Grep,Write,Edit` 直接限制 agent 可見的 toolset | 未列名工具（Bash / WebFetch / AskUserQuestion / Task / NotebookEdit / 未來新增）**不在 agent 工具庫**，根本無法呼叫 | 系統層 hard（iter-9 spike verified；見 §3.2.4） |
 | **System permission (Write baseline)** | `--permission-mode acceptEdits` 跳過 Write 的 ask-per-write | Write/Edit 能跑（baseline 解開）；不影響 Read/Grep/Glob（spike #1 證實 default mode 也 work） | 系統層 hard |
 | **Agent self-judgment** | LLM 訓練的 path-traversal 警覺 + prompt injection detection | (a) cwd 外路徑（spike #5 acceptEdits 下仍頑強拒絕） (b) `.git/` 內檔（spike #4 detect injection + 拒絕；**注意**：spike 用 explicit destructive prompt 觸發 injection detection，**對 long-session reasoning drift 自己決定寫 .git/ 的場景未驗證**） | LLM 行為，best-effort（對外部 injection 頑強，對 self-drift 未驗）|
 
@@ -144,7 +150,8 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 
 - **spawn cwd = `.codebus/`** ← **MUST**（spike E 證 cwd 改 `.codebus/` 後，acceptEdits 對 cwd 外 Write 仍系統層拒絕；user source repo 自動隔離）
 - **`--permission-mode acceptEdits`** ← MUST（spike B 證 -p default mode 下 Write 全 deny，沒這 flag 跑不起來；組合 cwd 隔離後仍對 cwd 外 path 要 grant）
-- **`--disallowedTools Bash,WebFetch,WebSearch`** — 危險工具 hard disable（query mode 加 Write,Edit）。Phase 1 用黑名單；phase 2 評估改 `--allowedTools` 白名單（forward-compat：Claude Code 加新 tool 時白名單預設 deny 不會自動進 agent 工具庫）
+- **`--tools Read,Glob,Grep,Write,Edit`** ← **MUST**（iter-9 修補；toolset 白名單，未列名工具完全不在 agent 可用工具庫。是真正的 toolset gate；query mode 不含 Write,Edit）
+- **`--allowedTools` 同 `--tools`** — 冗餘保險網（auto-approve 設定，避免 future Claude Code 行為變化導致工具被列入 toolset 但 hang 在 permission prompt）
 - **Prompt + schema 約束** — 教 agent 只寫 wiki/、不碰 raw/code / CLAUDE.md / .git/
 - **goals.jsonl 由 codebus 自寫** — 不依賴 agent 行為
 - **不加程式 hook**（phase 2 才補 settings.allow whitelist）
@@ -178,6 +185,25 @@ Phase 1 設計目標 **10k–100k LoC repo**（典型 single-package codebase）
 `--permission-mode acceptEdits` 下，permission auto-grant 是否 emit 額外 stream events（`permission_decision` / `tool_permission_granted` 等）未驗證。Plan Task 12 stream-parser 對 unknown event type 預設 skip（forward-compat），所以不會 break — 但若新 event 攜帶有用 metadata（如 cost / duration），phase 1 會錯過。Phase 2 加 multi-provider 時順便 verify。
 
 > **Plan Task 12 forward-compat tests 守的是 parser robustness（不 crash on 任何 unknown type / malformed JSON），不是 acceptEdits 真實 schema 的 verification**。Test payload 用 imagined event names（`permission_decision` 等）只是反映**可能**的 schema；真實 verification 需 phase 2 跑 instrumented spike。
+
+### 3.2.4 `--allowedTools` ≠ toolset 白名單（iter-9 的踩雷紀錄）
+
+**踩到的雷（live test 暴露）：** Phase 1 iter-1 ~ iter-8 期間我們以為 `--allowedTools 'Read,Glob,Grep,Write,Edit'` + `--permission-mode acceptEdits` = toolset 白名單，未列名的 Bash / WebFetch / 等等會被 auto-deny。實測 buddy-gacha live run 發現 agent 順利呼叫 Bash 跑 `ls` / `wc -l`，sandbox 漏洞曝光。
+
+**Spike 結論（兩 flag 對照測試）：**
+
+| Flag | 實際語意 | 對未列名工具的效果 |
+|---|---|---|
+| `--allowedTools <list>` | **auto-approval 列表**：列名工具不會 prompt，直接執行 | **不擋未列名工具**；在 -p mode + acceptEdits 下，未列名工具仍被 silently auto-approve（因為 -p 沒 terminal 可 prompt，acceptEdits 等於 "沒 explicit prompt 就走" → 全 pass）|
+| `--tools <list>` | **toolset whitelist**：列名工具是 agent 可見的全部 toolset | 未列名工具**根本不在 agent 工具庫**，agent 連看到都看不到，無法呼叫 |
+
+`claude --help` 原文已經寫得清楚（事後諸葛）：
+- `--allowedTools` = "Comma or space-separated list of tool names to allow"（auto-approve 用詞）
+- `--tools` = "Specify the list of available tools from the built-in set"（toolset 限制）
+
+**修補（iter-9）：** `claude-cli.ts` `buildArgv` 同時下 `--tools` 與 `--allowedTools`，兩者列表一致。`--tools` 是真正的 gate；`--allowedTools` 是冗餘保險網（避免 future permission-mode 行為變動導致 toolset 內工具卡 prompt）。
+
+**為何之前沒被 spike 抓到？** Spike B 測「default mode + Write」發現 Write deny，得出 acceptEdits 必設的結論——但只測了 Write 的 baseline，沒回頭驗 acceptEdits 在 -p mode 對「未在 allowedTools」的工具實際 behavior。Spike 收斂太快：解決 Write 問題後當作 sandbox 完工。**教訓：sandbox spike 不能只測「需要的工具能不能跑」，還要測「不該跑的工具有沒有被擋」**——後者才是 sandbox 的成功標準。已寫進 `REVIEW_LESSONS.md` lesson #10。
 
 ### 3.3 Stack
 
@@ -471,7 +497,9 @@ pages: ["[[checkout-flow]]", "[[payment-gateway]]"]
            **--permission-mode acceptEdits**  (MUST: default mode blocks Write per §3.2 spike;
                                               acceptEdits only auto-accepts cwd-internal Writes,
                                               cwd-external still requires grant → -p mode deny)
-           --disallowedTools Bash,WebFetch,WebSearch
+           **--tools Read,Glob,Grep,Write,Edit**  (MUST: toolset whitelist — see §3.2.4;
+                                                  this is what actually blocks Bash/WebFetch/etc.)
+           **--allowedTools Read,Glob,Grep,Write,Edit**  (redundant safety net, same list)
    - stdin: stream-json messages（含 system prompt）
    - **OAuth detect**: 若 subprocess exit non-0 且 stderr 含 `unauthenticated` / `auth` / `token` keyword → throw 帶 hint「請跑 `claude` 完成 OAuth」並 abort goal flow
 
@@ -524,8 +552,8 @@ codebus 啟動時註冊 SIGINT — 收到 ctrl+c 時：
 
 3. Spawn claude -p:
    - cwd = `.codebus/` (同 §7 step 6 system-level isolation)
-   - args 同 §7 step 6（OAuth detect + acceptEdits 一樣），但 disallowedTools 加 Write,Edit
-     （query mode 不讓 agent 寫檔；filing-back 留 phase 1.5；agent 真的不該寫所以 hard deny 最直接）
+   - args 同 §7 step 6（OAuth detect + acceptEdits 一樣），但 `--tools` 與 `--allowedTools` 列表都拿掉 Write,Edit
+     （query mode 不讓 agent 寫檔；filing-back 留 phase 1.5；agent 真的不該寫所以從 toolset 拔掉最直接）
    - stdin: stream-json messages（含 system prompt + query）
 
 4. Parse stream events，render emoji output（§8 一樣）
@@ -544,7 +572,7 @@ codebus 啟動時註冊 SIGINT — 收到 ctrl+c 時：
 
 **Query mode 跟 Ingest mode 的差異:**
 - 不重 copy raw（query 對 wiki 不對 codebase；agent 只 Read wiki/* 不 Read raw/）
-- 不寫檔（disallowedTools 加 `Write,Edit`）
+- 不寫檔（`--tools` / `--allowedTools` 列表都不含 `Write,Edit`，從 toolset 直接拔掉）
 - 不 update `goals.jsonl`（沒 ingest event）
 - 不做 stale check（沒新 sources）
 - 不 auto-commit（沒寫檔）
@@ -685,7 +713,7 @@ Brainstorm 期間 Claude（協作 AI）讀過 LLM Wiki `frontmatter.ts` 約 200 
 | §9.4 frontmatter union + locked fields (idea) | Page 衝突合併規則 | sources/goals/related union；title/created lock |
 | §9.5 `withProjectLock` (idea) | Per-project mutex | 改 file-based lock `.codebus/.lock` 跨 process |
 | §13 (idea) | 30 分鐘 timeout backstop | claude -p 防無限等待 |
-| §11.5 補強做法 (idea) | claude CLI 該下的 flag | `--add-dir .codebus/` + `--disallowedTools Bash,WebFetch,WebSearch` + cwd repo_root |
+| §11.5 補強做法 (idea) | claude CLI 該下的 flag | `cwd = .codebus/` + `--tools Read,Glob,Grep,Write,Edit` + `--allowedTools Read,Glob,Grep,Write,Edit` + `--permission-mode acceptEdits`（iter-9 修：原本以為 --allowedTools 是 toolset 白名單，實際是 auto-approve；--tools 才是真 gate） |
 
 ---
 
@@ -771,7 +799,7 @@ codebus/                          ← v2 main branch
 - Spike A self-judgment 是否在 `acceptEdits` 模式下完全等同 default mode（spike #5 抽樣 verified 仍頑強，但全 corpus 測試需 phase 2）
 - Self-judgment 對 long-session reasoning drift 的防護強度（spike #4 測 user-supplied destructive prompt → 頑強；agent 自己 N-step 後 decide 寫 .git/ 場景未測）
 - Re-run 同 goal 時 agent 重 explore 已 indexed source 的判斷準則（schema CLAUDE.md Section 4 有 source dedup 規則，但 LLM 是否真遵守需 phase 2 golden-sample 驗）
-- `--allowedTools` 白名單 vs `--disallowedTools` 黑名單 trade-off（phase 1 用黑名單；新 Claude Code tool 加入會自動進 agent 工具庫）— phase 2 評估改白名單
+- ~~`--allowedTools` 白名單 vs `--disallowedTools` 黑名單 trade-off~~ ✅ **iter-9 解決**：`--tools` 才是真 toolset gate（不是 `--allowedTools`），phase 1 落地雙旗（`--tools` + `--allowedTools` 同列表）；見 §3.2.4
 - SIGINT handler 跟 file lock 互動：phase 1 cli.ts SIGINT handler 在 `process.exit(130)` 前 best-effort `unlinkSync(vaultPaths(repo).lock)`，但若 lock release 中斷 → next run 撞 stale lock；phase 2 加 stale lock detection (PID alive check)
 - Init recovery from partial state（`.codebus/` 存在但 `.codebus/.git/` 不完整）— phase 1 不 auto-recover；user 需 `rm -rf .codebus` 重 init；phase 2 加 init validate + repair
 - Stream-json mid-event 中斷：parser line-by-line 不會撞半行；render 已 console.log 的 partial output 接受（user 看到的是中止前真實 progress）
@@ -805,7 +833,7 @@ codebus/                          ← v2 main branch
 **Sandbox 升級（解 §3.2.1 top 兩條 💥💥💥 surface）:**
 - `--settings <file>` + `permissions.allow` cwd 內白名單（先 5 分鐘 spike 確認 glob syntax，見 §15）— 限定 Write 只能 `wiki/**` + `goals.jsonl`
 - `permissions.deny` rules 補強 — 至少 `Write(.git/**)` + `Edit(CLAUDE.md)` hard block
-- ~~`--allowedTools` 白名單取代 `--disallowedTools`~~ ✅ **已 phase 1 落地**（whitelist: Read/Glob/Grep + ingest mode 加 Write/Edit；擋 AskUserQuestion / Task / NotebookEdit / MCP / 未來 tool）
+- ~~`--allowedTools` 白名單取代 `--disallowedTools`~~ ✅ **iter-9 修正落地**（whitelist 用 `--tools` 不是 `--allowedTools`；list = Read/Glob/Grep + ingest 加 Write/Edit；擋 Bash / WebFetch / AskUserQuestion / Task / NotebookEdit / MCP / 未來 tool；見 §3.2.4 踩雷紀錄）
 - File lock 加 stale-lock detection（PID alive check），SIGINT 中斷後 next run 能 reclaim
 - Init recovery from partial state（`.codebus/` 半完成自動 detect + repair）
 

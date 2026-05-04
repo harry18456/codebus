@@ -28,18 +28,21 @@ export class ClaudeCliProvider implements LLMProvider {
     }
   }
 
-  // Three must-set sandbox flags (spike-verified):
-  //  - acceptEdits: default mode + -p blocks all Write tool calls (spike B);
-  //    acceptEdits auto-accepts Write/Edit while Bash etc still ask.
-  //  - allowedTools: WHITELIST instead of blacklist. Anything not in the
-  //    list is auto-denied. Forward-compat: new Claude Code tools
-  //    (NotebookEdit / Task / AskUserQuestion / MCP servers / future
-  //    additions) cannot silently enter the agent's toolbox without an
-  //    explicit codebus update. Specifically protects against
-  //    AskUserQuestion which would hang the -p flow waiting for input
-  //    that has no terminal to come from. Spec §16 listed this as a
-  //    phase 2 evaluation; landed in phase 1 after manual test surfaced
-  //    the leak.
+  // Sandbox flags (spike-verified, including iter-9 Bash-leak fix):
+  //  - acceptEdits: in -p mode where prompting is impossible, this mode
+  //    auto-accepts EVERYTHING in the toolset (not just edits — confirmed
+  //    by manual test where Bash calls succeeded under
+  //    --allowedTools='Read,Glob,Grep' + acceptEdits). So acceptEdits alone
+  //    cannot keep Bash out.
+  //  - --tools: WHITELIST that restricts the toolset itself. Tools not in
+  //    this list are not even visible to the agent. THIS is the lever
+  //    that keeps Bash / WebFetch / future tools out. \`--allowedTools\`
+  //    is purely for permission auto-approval and was misused as a
+  //    toolset filter in iter-1 through iter-8.
+  //  - --allowedTools: redundant safety net — explicitly auto-approves
+  //    every tool we DO want available, so even if a future Claude Code
+  //    permission-mode change tightens behavior, our whitelisted tools
+  //    keep flowing instead of hanging on a prompt with no terminal.
   //  - cwd is supplied via opts.cwd in invoke(): spike E confirmed cwd =
   //    .codebus/ gives system-level isolation from user source repo.
   // No --add-dir: spike confirmed it widens, not narrows; cannot scope cwd.
@@ -49,13 +52,15 @@ export class ClaudeCliProvider implements LLMProvider {
     const allowed = ['Read', 'Glob', 'Grep']
     if (opts.mode === 'ingest') allowed.push('Write', 'Edit')
     void opts.vaultRoot  // kept in signature for phase 2 settings whitelist
+    const list = allowed.join(',')
     return [
       '-p',
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'acceptEdits',
-      '--allowedTools', allowed.join(',')
+      '--tools', list,
+      '--allowedTools', list
     ]
   }
 

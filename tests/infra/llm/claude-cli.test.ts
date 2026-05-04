@@ -4,7 +4,7 @@ import { Readable } from 'node:stream'
 import { ClaudeCliProvider } from '../../../src/infra/llm/claude-cli.js'
 
 describe('ClaudeCliProvider', () => {
-  it('builds correct argv for ingest mode (acceptEdits + allowedTools whitelist with Write/Edit)', () => {
+  it('builds correct argv for ingest mode (--tools restricts toolset, --allowedTools auto-approves)', () => {
     const p = new ClaudeCliProvider({ binary: 'claude' })
     const argv = p.buildArgv({ mode: 'ingest', vaultRoot: '/tmp/.codebus' })
     expect(argv).toEqual([
@@ -13,31 +13,41 @@ describe('ClaudeCliProvider', () => {
       '--input-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'acceptEdits',
+      '--tools', 'Read,Glob,Grep,Write,Edit',
       '--allowedTools', 'Read,Glob,Grep,Write,Edit'
     ])
     expect(argv).not.toContain('--add-dir')
     expect(argv).not.toContain('--disallowedTools')
   })
 
-  it('builds correct argv for query mode (read-only — no Write/Edit in whitelist)', () => {
+  it('builds correct argv for query mode (read-only — no Write/Edit in either flag)', () => {
     const p = new ClaudeCliProvider({ binary: 'claude' })
     const argv = p.buildArgv({ mode: 'query', vaultRoot: '/tmp/.codebus' })
+    const tIdx = argv.indexOf('--tools')
     const aIdx = argv.indexOf('--allowedTools')
+    expect(argv[tIdx + 1]).toBe('Read,Glob,Grep')
     expect(argv[aIdx + 1]).toBe('Read,Glob,Grep')
     expect(argv).toContain('--permission-mode')
     expect(argv).not.toContain('--add-dir')
     expect(argv).not.toContain('--disallowedTools')
   })
 
-  it('whitelist excludes future-leak vectors by design (no Bash, no AskUserQuestion, no Task, no MCP)', () => {
+  it('toolset excludes future-leak vectors by design (no Bash, no AskUserQuestion, no Task, no MCP)', () => {
     const p = new ClaudeCliProvider({ binary: 'claude' })
     const argv = p.buildArgv({ mode: 'ingest', vaultRoot: '/tmp/.codebus' })
-    const aIdx = argv.indexOf('--allowedTools')
-    const tools = (argv[aIdx + 1] ?? '').split(',')
-    // Sanity: must NOT contain anything dangerous / hang-prone / unbounded
+    // --tools is the lever that actually restricts the toolset
+    // (--allowedTools is auto-approval only).
+    const tIdx = argv.indexOf('--tools')
+    const tools = (argv[tIdx + 1] ?? '').split(',')
     for (const banned of ['Bash', 'WebFetch', 'WebSearch', 'AskUserQuestion', 'Task', 'NotebookEdit', 'TodoWrite', 'SlashCommand', 'BashOutput', 'KillBash']) {
       expect(tools).not.toContain(banned)
     }
+  })
+
+  it('argv has --tools strictly before --allowedTools (--tools is the gate, --allowedTools the auto-approver)', () => {
+    const p = new ClaudeCliProvider({ binary: 'claude' })
+    const argv = p.buildArgv({ mode: 'ingest', vaultRoot: '/tmp/.codebus' })
+    expect(argv.indexOf('--tools')).toBeLessThan(argv.indexOf('--allowedTools'))
   })
 
   it('detects OAuth failure from non-zero exit + auth keyword in stderr', () => {
