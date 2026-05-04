@@ -30,16 +30,24 @@ export class ClaudeCliProvider implements LLMProvider {
 
   // Three must-set sandbox flags (spike-verified):
   //  - acceptEdits: default mode + -p blocks all Write tool calls (spike B);
-  //    acceptEdits auto-accepts Write/Edit while Bash etc still ask (and are
-  //    disallowed below).
-  //  - disallowedTools: hard-disable Bash/WebFetch/WebSearch (+ Write/Edit
-  //    in query mode for read-only enforcement).
+  //    acceptEdits auto-accepts Write/Edit while Bash etc still ask.
+  //  - allowedTools: WHITELIST instead of blacklist. Anything not in the
+  //    list is auto-denied. Forward-compat: new Claude Code tools
+  //    (NotebookEdit / Task / AskUserQuestion / MCP servers / future
+  //    additions) cannot silently enter the agent's toolbox without an
+  //    explicit codebus update. Specifically protects against
+  //    AskUserQuestion which would hang the -p flow waiting for input
+  //    that has no terminal to come from. Spec §16 listed this as a
+  //    phase 2 evaluation; landed in phase 1 after manual test surfaced
+  //    the leak.
   //  - cwd is supplied via opts.cwd in invoke(): spike E confirmed cwd =
   //    .codebus/ gives system-level isolation from user source repo.
   // No --add-dir: spike confirmed it widens, not narrows; cannot scope cwd.
   buildArgv(opts: { mode: LLMMode; vaultRoot: string }): string[] {
-    const disallowed = ['Bash', 'WebFetch', 'WebSearch']
-    if (opts.mode === 'query') disallowed.push('Write', 'Edit')
+    // Read/Glob/Grep are universal (both modes need to discover + read).
+    // Write/Edit only in ingest — query is hard read-only.
+    const allowed = ['Read', 'Glob', 'Grep']
+    if (opts.mode === 'ingest') allowed.push('Write', 'Edit')
     void opts.vaultRoot  // kept in signature for phase 2 settings whitelist
     return [
       '-p',
@@ -47,7 +55,7 @@ export class ClaudeCliProvider implements LLMProvider {
       '--input-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'acceptEdits',
-      '--disallowedTools', disallowed.join(',')
+      '--allowedTools', allowed.join(',')
     ]
   }
 

@@ -805,7 +805,7 @@ codebus/                          ← v2 main branch
 **Sandbox 升級（解 §3.2.1 top 兩條 💥💥💥 surface）:**
 - `--settings <file>` + `permissions.allow` cwd 內白名單（先 5 分鐘 spike 確認 glob syntax，見 §15）— 限定 Write 只能 `wiki/**` + `goals.jsonl`
 - `permissions.deny` rules 補強 — 至少 `Write(.git/**)` + `Edit(CLAUDE.md)` hard block
-- `--allowedTools` 白名單取代 `--disallowedTools`（forward-compat 新 tool 預設 deny）
+- ~~`--allowedTools` 白名單取代 `--disallowedTools`~~ ✅ **已 phase 1 落地**（whitelist: Read/Glob/Grep + ingest mode 加 Write/Edit；擋 AskUserQuestion / Task / NotebookEdit / MCP / 未來 tool）
 - File lock 加 stale-lock detection（PID alive check），SIGINT 中斷後 next run 能 reclaim
 - Init recovery from partial state（`.codebus/` 半完成自動 detect + repair）
 
