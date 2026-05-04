@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { PAGE_TYPE_FOLDERS, type PageType } from '../wiki/types.js'
 
 export interface VaultPaths {
   root: string
@@ -12,7 +13,16 @@ export interface VaultPaths {
   wikiOverview: string
   wikiIndex: string
   wikiLog: string
-  wikiPages: string
+  // Karpathy-style 5-bucket structure (concepts / entities / modules /
+  // processes / synthesis). Per-type absolute paths for callers that
+  // need a specific bucket; wikiPageFolders gives the iteration order.
+  wikiConcepts: string
+  wikiEntities: string
+  wikiModules: string
+  wikiProcesses: string
+  wikiSynthesis: string
+  wikiPageFolders: readonly string[]
+  wikiTypeFolderMap: Readonly<Record<PageType, string>>
   wikiGoals: string
   output: string
   lock: string
@@ -22,6 +32,11 @@ export function vaultPaths(repoRoot: string): VaultPaths {
   const root = join(repoRoot, '.codebus')
   const wiki = join(root, 'wiki')
   const raw = join(root, 'raw')
+  const wikiConcepts = join(wiki, PAGE_TYPE_FOLDERS.concept)
+  const wikiEntities = join(wiki, PAGE_TYPE_FOLDERS.entity)
+  const wikiModules = join(wiki, PAGE_TYPE_FOLDERS.module)
+  const wikiProcesses = join(wiki, PAGE_TYPE_FOLDERS.process)
+  const wikiSynthesis = join(wiki, PAGE_TYPE_FOLDERS.synthesis)
   return {
     root,
     git: join(root, '.git'),
@@ -34,7 +49,19 @@ export function vaultPaths(repoRoot: string): VaultPaths {
     wikiOverview: join(wiki, 'overview.md'),
     wikiIndex: join(wiki, 'index.md'),
     wikiLog: join(wiki, 'log.md'),
-    wikiPages: join(wiki, 'pages'),
+    wikiConcepts,
+    wikiEntities,
+    wikiModules,
+    wikiProcesses,
+    wikiSynthesis,
+    wikiPageFolders: [wikiConcepts, wikiEntities, wikiModules, wikiProcesses, wikiSynthesis],
+    wikiTypeFolderMap: {
+      concept: wikiConcepts,
+      entity: wikiEntities,
+      module: wikiModules,
+      process: wikiProcesses,
+      synthesis: wikiSynthesis
+    },
     wikiGoals: join(wiki, 'goals'),
     output: join(root, 'output'),
     lock: join(root, '.lock')

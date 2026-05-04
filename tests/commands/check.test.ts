@@ -15,7 +15,9 @@ describe('runCheck', () => {
 
   it('returns lintResult on a valid vault', async () => {
     const vault = join(dir, '.codebus')
-    mkdirSync(join(vault, 'wiki', 'pages'), { recursive: true })
+    for (const f of ['concepts', 'entities', 'modules', 'processes', 'synthesis']) {
+      mkdirSync(join(vault, 'wiki', f), { recursive: true })
+    }
     writeFileSync(join(vault, 'wiki', 'overview.md'), '# X')
     writeFileSync(join(vault, 'wiki', 'index.md'), '# X')
     writeFileSync(join(vault, 'wiki', 'log.md'), '# X')

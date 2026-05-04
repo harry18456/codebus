@@ -35,14 +35,38 @@ under \`wiki/\` that helps engineers ramp up on the codebase.
 
 ## 3. Wiki Structure
 
-Four special files:
+Four special files at \`wiki/\` root:
 - \`wiki/overview.md\` — repo-level overview, cross-goal, rewrite each run.
 - \`wiki/index.md\` — page catalog with summaries, rewrite each run.
 - \`wiki/log.md\` — chronological append: \`## [YYYY-MM-DD] goal: "X" → covers [[A]], [[B]]\`.
 - \`wiki/goals/<slug>.md\` — per-goal reading guide.
 
-Plus:
-- \`wiki/pages/<slug>.md\` — knowledge units (cross-goal assets).
+Knowledge pages live under **5 type folders** (Karpathy-style buckets) — pick
+the folder that matches the page's role:
+
+- \`wiki/concepts/<slug>.md\` — cross-cutting ideas, principles, mental models.
+  Describes WHAT something is or HOW it's organized at a static level
+  (e.g. "data flow", "auth model", "error-handling philosophy").
+- \`wiki/entities/<slug>.md\` — discrete data structures, records, schemas
+  (e.g. "User entity", "Order schema", "PaymentEvent shape").
+- \`wiki/modules/<slug>.md\` — code organization units, libraries, services
+  (e.g. "auth module", "payment-service", "shared/utils").
+- \`wiki/processes/<slug>.md\` — sequential workflows, state machines, lifecycles,
+  AND **algorithms with ordered steps** (e.g. "login flow", "checkout process",
+  "boot sequence", "PRNG: hash → SplitMix32 → 7-step generation"). If the
+  page describes things happening in a specific order, it's a process — not
+  a concept, even when the topic is abstract / mathematical.
+- \`wiki/synthesis/<slug>.md\` — cross-cutting summaries that integrate multiple
+  pages into one coherent view (e.g. "architecture overview",
+  "main themes", "how the modules fit together").
+
+The folder MUST match the page's frontmatter \`type\` (concept / entity / module
+/ process / synthesis). Wikilinks like \`[[slug]]\` resolve by filename
+regardless of folder, so cross-folder linking just works.
+
+**Concept vs process tiebreaker:** if you find yourself writing "Step 1, Step 2, ..."
+or "first ... then ... finally ...", it's a process. Concepts are
+statements of structure; processes are sequences of action.
 
 ## 4. Workflow per Goal (Ingest)
 
@@ -80,7 +104,7 @@ When you judge a goal as out-of-scope:
    - No \`wiki/goals/<slug>.md\` (no "no-op record" goal-guide)
    - No \`wiki/log.md\` append
    - No \`wiki/index.md\` modification
-   - No \`wiki/pages/<slug>.md\`
+   - No \`wiki/{concepts,entities,modules,processes,synthesis}/<slug>.md\`
    - No \`wiki/overview.md\` update
 4. STOP — yield no further tool calls after the explanatory thought.
 
@@ -92,16 +116,21 @@ banner instead of pretending wiki content was generated.
 
 ### 4.1 In-scope path: 7 steps
 
-1. **Discover**: grep wiki/pages/*.md frontmatter \`sources:\` to see what
-   raw files are already indexed. Read wiki/index.md for the catalog.
-2. **Plan**: list pages to update vs new pages to create. **If a source
-   file is already in some page's frontmatter sources[], DO NOT re-Read
-   it** — prefer linking that page via [[wikilink]]. Re-Read only when
-   the existing page is marked \`stale: true\` or the prior coverage
-   genuinely missed an angle relevant to this goal.
+1. **Discover**: grep \`wiki/{concepts,entities,modules,processes,synthesis}/*.md\`
+   frontmatter \`sources:\` to see what raw files are already indexed.
+   Read wiki/index.md for the catalog.
+2. **Plan**: list pages to update vs new pages to create, choosing the
+   correct type folder for each new page. **If a source file is already
+   in some page's frontmatter sources[], DO NOT re-Read it** — prefer
+   linking that page via [[wikilink]]. Re-Read only when the existing
+   page is marked \`stale: true\` or the prior coverage genuinely missed
+   an angle relevant to this goal.
 3. **Explore**: use Read/Grep/Glob on raw/code/ for source files not yet
    covered.
-4. **Write**: create or update wiki/pages/<slug>.md with frontmatter (§6).
+4. **Write**: create or update \`wiki/<type-folder>/<slug>.md\` with
+   frontmatter (§6). Folder MUST match frontmatter \`type\`:
+   concept→concepts/, entity→entities/, module→modules/, process→processes/,
+   synthesis→synthesis/.
 5. **Index**: rewrite wiki/index.md catalog.
 6. **Log**: append a line to wiki/log.md.
 7. **Guide**: write wiki/goals/<slug>.md as the reading guide for this goal.
@@ -126,11 +155,13 @@ than re-Reading sources you've already covered.
 
 ## 5. Page Conflict
 
-- Page does not exist → create with frontmatter + body.
+- Page does not exist → create with frontmatter + body in the right type folder.
 - Page exists → add a new \`## from goal: <X> (YYYY-MM-DD)\` section at the
   end of body. Do not modify existing sections.
 - Frontmatter array fields (sources, goals, related) → union, no duplicates.
-- Locked fields: \`title\`, \`type\`, \`created\` — never change.
+- Locked fields: \`title\`, \`type\`, \`created\` — never change. (Type is
+  locked precisely because it determines the folder; if you think the
+  type is wrong, surface that thought rather than silently moving the file.)
 - Update \`updated\` to today.
 
 ## 6. Frontmatter Schema (per page)
@@ -138,7 +169,9 @@ than re-Reading sources you've already covered.
 \`\`\`yaml
 ---
 title: Payment Gateway
-type: concept                    # concept | module | process | entity
+type: concept                    # concept | entity | module | process | synthesis
+                                  # MUST match the folder the file lives in
+                                  # (concept→concepts/, entity→entities/, etc.)
 sources:
   # IMPORTANT: only fill \`path\`! sha256 + at_commit are auto-filled
   # by codebus post-spawn (you cannot compute sha256 without Bash, which
@@ -160,11 +193,26 @@ stale: false
 
 ## 7. WikiLinks Convention
 
-- Link to other pages by slug: \`[[payment-gateway]]\` (NOT a path).
+- **Slug = file basename, NEVER the page title.** If the file is
+  \`concepts/project-purpose.md\` the slug is \`project-purpose\`. Writing
+  \`[[專案目的]]\` or \`[[Project Purpose]]\` will NOT resolve — Obsidian
+  matches by filename, not by title. Title (frontmatter \`title:\`) is
+  free-form and human-readable; slug is mechanical and ASCII.
+- Link to other pages by slug: \`[[payment-gateway]]\` (NOT a path) — Obsidian
+  resolves by filename, ignoring which type folder the target lives in, so
+  cross-folder linking is automatic.
+- Slug naming: lower-case kebab-case ASCII (\`payment-gateway\`, \`checkout-flow\`).
+  Avoid CJK characters, spaces, and capitals — they make filenames
+  inconsistent across systems and harder to type as wikilinks.
+- Slug uniqueness across folders matters: two pages with the same filename
+  in different folders make \`[[slug]]\` ambiguous. Pick distinct slugs.
 - In YAML lists you MUST quote each wikilink string:
   \`related: ["[[a]]", "[[b]]"]\` — do not write \`related: [[a]], [[b]]\`
   (that breaks YAML).
 - In body text wikilinks need no quoting.
+- Special files at \`wiki/\` root are also valid wikilink targets:
+  \`[[overview]]\`, \`[[index]]\`, \`[[log]]\` resolve to the corresponding
+  \`wiki/<file>.md\`.
 
 ## 8. Source Code References
 
@@ -199,7 +247,8 @@ Write thoughts in clear user-facing language.
 ## 12. Workflow per Query
 
 1. **Read index**: read wiki/index.md to see what pages exist.
-2. **Identify pages**: pick the relevant wiki/pages/*.md for the question.
+2. **Identify pages**: pick the relevant
+   \`wiki/{concepts,entities,modules,processes,synthesis}/*.md\` for the question.
 3. **Read pages**: Read those page files.
 4. **Answer + cite**: produce a final answer that cites pages by
    \`[[wikilink]]\`. **Do NOT write any files** in query mode.

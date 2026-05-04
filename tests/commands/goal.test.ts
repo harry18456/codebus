@@ -22,7 +22,7 @@ class FakeProvider implements LLMProvider {
 // effect for the wikiChanged=true case).
 class WritingFakeProvider implements LLMProvider {
   async *invoke(opts: InvokeOptions): AsyncIterable<StreamEvent> {
-    const pagesDir = join(opts.cwd, 'wiki', 'pages')
+    const pagesDir = join(opts.cwd, 'wiki', 'concepts')
     mkdirSync(pagesDir, { recursive: true })
     writeFileSync(
       join(pagesDir, 'fake.md'),
@@ -93,6 +93,6 @@ describe('runGoal', () => {
       provider: new WritingFakeProvider()
     })
     expect(result.wikiChanged).toBe(true)
-    expect(existsSync(join(dir, '.codebus', 'wiki', 'pages', 'fake.md'))).toBe(true)
+    expect(existsSync(join(dir, '.codebus', 'wiki', 'concepts', 'fake.md'))).toBe(true)
   })
 })

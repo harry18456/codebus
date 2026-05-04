@@ -72,14 +72,14 @@ describe('renderEvent', () => {
 
   it('renders tool_use Write with ✍️ + indented file path (two-line)', () => {
     const out = renderEvent(
-      { kind: 'tool_use', name: 'Write', input: { file_path: 'wiki/pages/a.md' } },
+      { kind: 'tool_use', name: 'Write', input: { file_path: 'wiki/concepts/a.md' } },
       { useEmoji: true, useColor: false }
     )
     expect(out).toContain('✍️')
     expect(out).toContain('a.md')
     const [first, second] = out.split('\n')
     expect(first).toContain('[正在生成]')
-    expect(second).toBe('    wiki/pages/a.md')
+    expect(second).toBe('    wiki/concepts/a.md')
   })
 
   it('renders tool_use Read with two-line label + Read(file_path)', () => {
@@ -131,7 +131,7 @@ describe('renderEvent', () => {
 
   it('suppresses Write tool_result success echo', () => {
     expect(renderEvent(
-      { kind: 'tool_result', output: 'File created successfully at: wiki/pages/a.md', isError: false },
+      { kind: 'tool_result', output: 'File created successfully at: wiki/concepts/a.md', isError: false },
       { useEmoji: true, useColor: false }
     )).toBe('')
     expect(renderEvent(

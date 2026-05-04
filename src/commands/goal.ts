@@ -87,8 +87,8 @@ export async function runGoal(opts: RunGoalOptions): Promise<RunGoalResult> {
       opts.onEvent?.(event)
     }
 
-    await enrichSourceMetadata(p.wikiPages, p.rawCode, ver.commit)
-    await flagStalePages(p.wikiPages, p.rawCode)
+    await enrichSourceMetadata(p.wikiPageFolders, p.rawCode, ver.commit)
+    await flagStalePages(p.wikiPageFolders, p.rawCode)
     // Soft auto-lint: never blocks commit, just captures result for caller
     // to surface. Phase 2 may add hard mode (--strict) and LLM correction
     // loop — both reuse this same lintWiki call; only the response differs.
@@ -103,6 +103,19 @@ export async function runGoal(opts: RunGoalOptions): Promise<RunGoalResult> {
   return { wikiChanged, lint }
 }
 
+// Enumerate all page .md files across the 5 type folders. Skips folders
+// that don't exist (init creates them but a partial vault may lack some).
+async function listPageFiles(folders: readonly string[]): Promise<string[]> {
+  const out: string[] = []
+  for (const folder of folders) {
+    if (!existsSync(folder)) continue
+    for (const f of await readdir(folder)) {
+      if (f.endsWith('.md')) out.push(join(folder, f))
+    }
+  }
+  return out
+}
+
 // CRITICAL (review iter-8): only enrich pages where AT LEAST ONE source
 // lacks sha256+at_commit (= newly written by agent in this run). Carry-over
 // pages from prior runs MUST keep their old sha256 so flagStalePages can
@@ -110,15 +123,11 @@ export async function runGoal(opts: RunGoalOptions): Promise<RunGoalResult> {
 // rewrote every page's sha256 to current raw hash → flagStalePages compared
 // same-hash-vs-same-hash → never stale → §10 mechanism dead.
 async function enrichSourceMetadata(
-  pagesDir: string,
+  pageFolders: readonly string[],
   rawCodeDir: string,
   commitHash: string | null
 ): Promise<void> {
-  if (!existsSync(pagesDir)) return
-  const files = await readdir(pagesDir)
-  for (const f of files) {
-    if (!f.endsWith('.md')) continue
-    const fullPath = join(pagesDir, f)
+  for (const fullPath of await listPageFiles(pageFolders)) {
     const content = await readFile(fullPath, 'utf8')
     let parsed
     try { parsed = parsePage(content) } catch { continue }
@@ -149,12 +158,8 @@ async function enrichSourceMetadata(
   }
 }
 
-async function flagStalePages(pagesDir: string, rawCodeDir: string): Promise<void> {
-  if (!existsSync(pagesDir)) return
-  const files = await readdir(pagesDir)
-  for (const f of files) {
-    if (!f.endsWith('.md')) continue
-    const fullPath = join(pagesDir, f)
+async function flagStalePages(pageFolders: readonly string[], rawCodeDir: string): Promise<void> {
+  for (const fullPath of await listPageFiles(pageFolders)) {
     const content = await readFile(fullPath, 'utf8')
     let parsed
     try { parsed = parsePage(content) } catch { continue }

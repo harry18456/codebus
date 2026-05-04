@@ -5,7 +5,7 @@ const REQUIRED_FIELDS: (keyof PageFrontmatter)[] = [
   'title', 'type', 'sources', 'goals', 'created', 'updated', 'related', 'stale'
 ]
 
-const VALID_TYPES: PageType[] = ['concept', 'module', 'process', 'entity']
+const VALID_TYPES: PageType[] = ['concept', 'entity', 'module', 'process', 'synthesis']
 
 export function parsePage(content: string): ParsedPage {
   const { data, content: body } = matter(content)

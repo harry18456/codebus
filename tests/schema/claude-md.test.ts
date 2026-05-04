@@ -50,4 +50,14 @@ describe('CODEBUS_SCHEMA_MARKDOWN', () => {
     expect(CODEBUS_SCHEMA_MARKDOWN).toContain('wikiChanged=false')
     expect(CODEBUS_SCHEMA_MARKDOWN).toContain('🤷')
   })
+
+  it('teaches concept vs process tiebreaker (algorithms with steps → process)', () => {
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/algorithms with ordered steps/i)
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/Concept vs process tiebreaker/i)
+  })
+
+  it('teaches slug = file basename discipline (CJK title must not become slug)', () => {
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/Slug = file basename/i)
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/lower-case kebab-case ASCII/i)
+  })
 })

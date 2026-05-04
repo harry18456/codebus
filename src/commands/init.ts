@@ -21,7 +21,9 @@ export async function runInit(repoRoot: string): Promise<void> {
   await mkdir(p.raw, { recursive: true })
   await mkdir(p.rawCode, { recursive: true })
   await mkdir(p.wiki, { recursive: true })
-  await mkdir(p.wikiPages, { recursive: true })
+  for (const folder of p.wikiPageFolders) {
+    await mkdir(folder, { recursive: true })
+  }
   await mkdir(p.wikiGoals, { recursive: true })
   await mkdir(p.output, { recursive: true })
 

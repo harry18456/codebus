@@ -30,22 +30,24 @@ describe('runQuery', () => {
   })
   afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
-  it('throws if .codebus/wiki/pages/ is missing (need --goal first)', async () => {
+  it('throws if no type folder contains any .md (need --goal first)', async () => {
     await expect(
       runQuery({ repoRoot: dir, query: 'q', provider: new FakeProvider() })
     ).rejects.toThrow(/請先用 --goal/)
   })
 
-  it('throws if .codebus/wiki/pages/ is empty', async () => {
-    mkdirSync(join(dir, '.codebus', 'wiki', 'pages'), { recursive: true })
+  it('throws if all 5 type folders are empty', async () => {
+    for (const f of ['concepts', 'entities', 'modules', 'processes', 'synthesis']) {
+      mkdirSync(join(dir, '.codebus', 'wiki', f), { recursive: true })
+    }
     await expect(
       runQuery({ repoRoot: dir, query: 'q', provider: new FakeProvider() })
     ).rejects.toThrow(/請先用 --goal/)
   })
 
-  it('invokes provider with mode=query and cwd=.codebus/ when wiki has pages', async () => {
-    mkdirSync(join(dir, '.codebus', 'wiki', 'pages'), { recursive: true })
-    writeFileSync(join(dir, '.codebus', 'wiki', 'pages', 'a.md'), '# a')
+  it('invokes provider with mode=query and cwd=.codebus/ when at least one type folder has a page', async () => {
+    mkdirSync(join(dir, '.codebus', 'wiki', 'concepts'), { recursive: true })
+    writeFileSync(join(dir, '.codebus', 'wiki', 'concepts', 'a.md'), '# a')
     writeFileSync(join(dir, '.codebus', 'wiki', 'index.md'), '- [[a]]')
     writeFileSync(join(dir, '.codebus', 'CLAUDE.md'), 'schema')
     const provider = new FakeProvider()
