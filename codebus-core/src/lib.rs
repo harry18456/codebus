@@ -7,4 +7,5 @@
 //! `openspec/changes/rust-rewrite/tasks.md`.
 
 pub mod schema;
+pub mod stream;
 pub mod wiki;

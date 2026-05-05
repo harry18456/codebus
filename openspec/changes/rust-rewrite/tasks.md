@@ -10,10 +10,10 @@
 
 - [x] 2.1 Define core data types in `codebus-core/src/wiki/types.rs`：Page、Frontmatter（含 sources []SourceRef、related []String、tags []String、stale bool、created/updated UTC string）、SourceRef、LintIssue、LintResult，加 serde Serialize/Deserialize derive
 - [x] 2.2 Schema include_str! lock-in：`codebus-core/src/schema/mod.rs` `pub const CODEBUS_SCHEMA: &str = include_str!("./CLAUDE.md");`，加幾個 `assert!(SCHEMA.contains("..."))` 的 lock-in test 鎖住關鍵字串（對應 TS `tests/schema/claude-md.test.ts`）
-- [ ] 2.3 [P] Write failing tests for date module（`utc_today_iso()` 回傳 `YYYY-MM-DD`，verify cross-timezone determinism）
-- [ ] 2.4 [P] Implement `codebus-core/src/wiki/date.rs`
-- [ ] 2.5 [P] Write failing tests for frontmatter parse/serialize against `tests/fixtures/uv-vault-snapshot/` 各 page 的 frontmatter（含 multi-line scalar、nested `sources[]`、broken cases 應 fail-soft）
-- [ ] 2.6 [P] Implement `codebus-core/src/wiki/frontmatter.rs` 用 serde_yaml + 自刻 `---` split helper
+- [x] 2.3 [P] Write failing tests for date module（`utc_today_iso()` 回傳 `YYYY-MM-DD`，verify cross-timezone determinism）
+- [x] 2.4 [P] Implement `codebus-core/src/wiki/date.rs`
+- [x] 2.5 [P] Write failing tests for frontmatter parse/serialize against `tests/fixtures/uv-vault-snapshot/` 各 page 的 frontmatter（含 multi-line scalar、nested `sources[]`、broken cases 應 fail-soft）
+- [x] 2.6 [P] Implement `codebus-core/src/wiki/frontmatter.rs` 用 serde_yaml + 自刻 `---` split helper
 - [ ] 2.7 [P] Write failing tests for page-merge（同名 page 合併、不同 frontmatter 處理規則）
 - [ ] 2.8 [P] Implement `codebus-core/src/wiki/page_merge.rs`
 - [ ] 2.9 [P] Write failing tests for stale-detect（compare frontmatter `sources[].sha256` vs current raw hash map，verify「全部一致 → not stale」「任一不一致 → stale」）
@@ -24,8 +24,8 @@
 - [ ] 2.14 [P] Implement `codebus-core/src/vault/sanity_check.rs`
 - [ ] 2.15 [P] Write failing tests for vault lock acquisition / release / stale-lock cleanup
 - [ ] 2.16 [P] Implement `codebus-core/src/vault/lock.rs`
-- [ ] 2.17 Write failing tests for stream parser：StreamEvent enum（thought / tool_use / tool_result / done）+ iter-8 schema 真相驗證（`{type:"assistant",message:{content:[...]}}`、`assistant.content[]` 多元素、unknown event 靜默丟棄不 throw）
-- [ ] 2.18 Implement `codebus-core/src/stream/parser.rs`
+- [x] 2.17 Write failing tests for stream parser：StreamEvent enum（thought / tool_use / tool_result / done）+ iter-8 schema 真相驗證（`{type:"assistant",message:{content:[...]}}`、`assistant.content[]` 多元素、unknown event 靜默丟棄不 throw）
+- [x] 2.18 Implement `codebus-core/src/stream/parser.rs`
 - [ ] 2.19 Define LLMProvider trait in `codebus-core/src/llm/provider.rs`：`async fn invoke(opts: InvokeOptions) -> impl Stream<Item = StreamEvent>` + `fn cancel()`，落地 **LLMProvider trait 保持單一 ClaudeCli 實作（Phase 2 抽象延後）**（trait 形狀對齊 TS 0.1.0、本 change 只實作 ClaudeCli）
 - [ ] 2.20 Write failing tests for lint covering all rules of "Lint emits warnings for structural and Obsidian-compatibility violations"：既有 4 條（root page、duplicate slug、missing nav、broken body wikilink）+ 2 條新 rule（page-size 6 個 scenario、unexpected-file 4 個 scenario）對應 **吸收 wiki-hygiene-signals 兩條 lint rule**
 - [ ] 2.21 Implement `codebus-core/src/wiki/lint.rs` 依序：(a) catalog（5 type folder + index/log）、(b) duplicate slug scan、(c) missing nav scan、(d) page-size scan（per-folder threshold strict greater-than，message 含 `size N bytes` + `threshold M bytes`）、(e) unexpected-file scan（hidden 排除、unrecognized folder、nested sub-folder、non-.md file）、(f) frontmatter integrity + related[] wikilink validation、(g) body wikilink scan（含 markdown-aware code region 跳過、`\|` 處理）
