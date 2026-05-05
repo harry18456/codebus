@@ -14,23 +14,23 @@
 - [x] 2.4 [P] Implement `codebus-core/src/wiki/date.rs`
 - [x] 2.5 [P] Write failing tests for frontmatter parse/serialize against `tests/fixtures/uv-vault-snapshot/` 各 page 的 frontmatter（含 multi-line scalar、nested `sources[]`、broken cases 應 fail-soft）
 - [x] 2.6 [P] Implement `codebus-core/src/wiki/frontmatter.rs` 用 serde_yaml + 自刻 `---` split helper
-- [ ] 2.7 [P] Write failing tests for page-merge（同名 page 合併、不同 frontmatter 處理規則）
-- [ ] 2.8 [P] Implement `codebus-core/src/wiki/page_merge.rs`
-- [ ] 2.9 [P] Write failing tests for stale-detect（compare frontmatter `sources[].sha256` vs current raw hash map，verify「全部一致 → not stale」「任一不一致 → stale」）
-- [ ] 2.10 [P] Implement `codebus-core/src/wiki/stale_detect.rs`
-- [ ] 2.11 [P] Write failing tests for vault layout（`vault_paths(repo)` 各路徑唯一 source of truth、wiki_page_folders 與 wiki_type_folder_map 一致）
-- [ ] 2.12 [P] Implement `codebus-core/src/vault/layout.rs`
-- [ ] 2.13 [P] Write failing tests for vault sanity-check（拒絕 `--repo .codebus/`、`--repo` 指向 vault 內部、`--repo` 指向不存在路徑）
-- [ ] 2.14 [P] Implement `codebus-core/src/vault/sanity_check.rs`
-- [ ] 2.15 [P] Write failing tests for vault lock acquisition / release / stale-lock cleanup
-- [ ] 2.16 [P] Implement `codebus-core/src/vault/lock.rs`
+- [x] 2.7 [P] Write failing tests for page-merge（同名 page 合併、不同 frontmatter 處理規則）
+- [x] 2.8 [P] Implement `codebus-core/src/wiki/page_merge.rs`
+- [x] 2.9 [P] Write failing tests for stale-detect（compare frontmatter `sources[].sha256` vs current raw hash map，verify「全部一致 → not stale」「任一不一致 → stale」）
+- [x] 2.10 [P] Implement `codebus-core/src/wiki/stale_detect.rs`
+- [x] 2.11 [P] Write failing tests for vault layout（`vault_paths(repo)` 各路徑唯一 source of truth、wiki_page_folders 與 wiki_type_folder_map 一致）
+- [x] 2.12 [P] Implement `codebus-core/src/vault/layout.rs`
+- [x] 2.13 [P] Write failing tests for vault sanity-check（拒絕 `--repo .codebus/`、`--repo` 指向 vault 內部、`--repo` 指向不存在路徑）
+- [x] 2.14 [P] Implement `codebus-core/src/vault/sanity_check.rs`
+- [x] 2.15 [P] Write failing tests for vault lock acquisition / release / stale-lock cleanup
+- [x] 2.16 [P] Implement `codebus-core/src/vault/lock.rs`
 - [x] 2.17 Write failing tests for stream parser：StreamEvent enum（thought / tool_use / tool_result / done）+ iter-8 schema 真相驗證（`{type:"assistant",message:{content:[...]}}`、`assistant.content[]` 多元素、unknown event 靜默丟棄不 throw）
 - [x] 2.18 Implement `codebus-core/src/stream/parser.rs`
-- [ ] 2.19 Define LLMProvider trait in `codebus-core/src/llm/provider.rs`：`async fn invoke(opts: InvokeOptions) -> impl Stream<Item = StreamEvent>` + `fn cancel()`，落地 **LLMProvider trait 保持單一 ClaudeCli 實作（Phase 2 抽象延後）**（trait 形狀對齊 TS 0.1.0、本 change 只實作 ClaudeCli）
-- [ ] 2.20 Write failing tests for lint covering all rules of "Lint emits warnings for structural and Obsidian-compatibility violations"：既有 4 條（root page、duplicate slug、missing nav、broken body wikilink）+ 2 條新 rule（page-size 6 個 scenario、unexpected-file 4 個 scenario）對應 **吸收 wiki-hygiene-signals 兩條 lint rule**
-- [ ] 2.21 Implement `codebus-core/src/wiki/lint.rs` 依序：(a) catalog（5 type folder + index/log）、(b) duplicate slug scan、(c) missing nav scan、(d) page-size scan（per-folder threshold strict greater-than，message 含 `size N bytes` + `threshold M bytes`）、(e) unexpected-file scan（hidden 排除、unrecognized folder、nested sub-folder、non-.md file）、(f) frontmatter integrity + related[] wikilink validation、(g) body wikilink scan（含 markdown-aware code region 跳過、`\|` 處理）
-- [ ] 2.22 Phase A coverage gate：`cargo llvm-cov` 全 codebus-core pure 模組報 ≥ 80%；確認 **Phase 順序：core pure → core I/O → CLI → cleanup** 第一段達標
-- [ ] 2.23 Phase A conformance gate：跑 `tests/fixtures/uv-vault-snapshot/` 中所有 deterministic frontmatter / lint case，Rust 輸出與 TS baseline byte-equal
+- [x] 2.19 Define LLMProvider trait in `codebus-core/src/llm/provider.rs`：`async fn invoke(opts: InvokeOptions) -> impl Stream<Item = StreamEvent>` + `fn cancel()`，落地 **LLMProvider trait 保持單一 ClaudeCli 實作（Phase 2 抽象延後）**（trait 形狀對齊 TS 0.1.0、本 change 只實作 ClaudeCli）
+- [x] 2.20 Write failing tests for lint covering all rules of "Lint emits warnings for structural and Obsidian-compatibility violations"：既有 4 條（root page、duplicate slug、missing nav、broken body wikilink）+ 2 條新 rule（page-size 6 個 scenario、unexpected-file 4 個 scenario）對應 **吸收 wiki-hygiene-signals 兩條 lint rule**
+- [x] 2.21 Implement `codebus-core/src/wiki/lint.rs` 依序：(a) catalog（5 type folder + index/log）、(b) duplicate slug scan、(c) missing nav scan、(d) page-size scan（per-folder threshold strict greater-than，message 含 `size N bytes` + `threshold M bytes`）、(e) unexpected-file scan（hidden 排除、unrecognized folder、nested sub-folder、non-.md file）、(f) frontmatter integrity + related[] wikilink validation、(g) body wikilink scan（含 markdown-aware code region 跳過、`\|` 處理）
+- [x] 2.22 Phase A coverage gate：`cargo llvm-cov` 全 codebus-core pure 模組報 ≥ 80%；確認 **Phase 順序：core pure → core I/O → CLI → cleanup** 第一段達標
+- [x] 2.23 Phase A conformance gate：跑 `tests/fixtures/uv-vault-snapshot/` 中所有 deterministic frontmatter / lint case，Rust 輸出與 TS baseline byte-equal
 
 ## 3. Phase B — codebus-core I/O modules
 

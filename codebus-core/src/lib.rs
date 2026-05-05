@@ -6,6 +6,8 @@
 //! Phase B adds I/O modules (`fs`, `git`, `llm/claude_cli`). See
 //! `openspec/changes/rust-rewrite/tasks.md`.
 
+pub mod llm;
 pub mod schema;
 pub mod stream;
+pub mod vault;
 pub mod wiki;
