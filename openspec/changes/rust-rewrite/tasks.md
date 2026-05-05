@@ -34,18 +34,18 @@
 
 ## 3. Phase B — codebus-core I/O modules
 
-- [ ] 3.1 Spike git2 vs `std::process::Command` for git operations：1 day timebox，跑通 `git status --porcelain`、`git rev-parse HEAD`、`git commit` 三條路徑各兩種實作，記錄 lifetime 複雜度 / API 表面差異 / Windows path 行為，挑一條進入 3.6-3.9
-- [ ] 3.2 [P] Write failing tests for `fs/file_ops`（sha256_file 對 known input 回傳 known hex digest）
-- [ ] 3.3 [P] Implement `codebus-core/src/fs/file_ops.rs`
-- [ ] 3.4 [P] Write failing tests for `fs/raw_sync`（gitignore-aware copy 跳過 `node_modules/`、`.git/`、custom `.gitignore` 規則）
-- [ ] 3.5 [P] Implement `codebus-core/src/fs/raw_sync.rs` 用 `ignore` crate（ripgrep 用的）
-- [ ] 3.6 [P] Write failing tests for `git/source_version`（commit hash + uncommitted boolean）
-- [ ] 3.7 [P] Implement `codebus-core/src/git/source_version.rs`
-- [ ] 3.8 [P] Write failing tests for `git/nested_repo`（auto-commit 一次 message、兩次 commit 之間 working tree 為空時不 commit）
-- [ ] 3.9 [P] Implement `codebus-core/src/git/nested_repo.rs`
-- [ ] 3.10 Write failing tests for `llm/claude_cli`：spawn 用 mock SpawnFn 注入、確認 argv 嚴格 sandbox（**雙重斷言**：`--tools Read,Glob,Grep[+Write,Edit if ingest]` 帶到 + 同一 list 出現在 `--allowedTools` + 「未授權 tool 名（Bash、WebFetch、TodoWrite 等）絕對不在 argv 任何位置」）— 重新驗證 iter-9 教訓；測 stream-json input + stream parsing roundtrip + classify_exit 三類 verdict
-- [ ] 3.11 Implement `codebus-core/src/llm/claude_cli.rs` 用 **Async runtime 選 tokio**（`tokio::process::Command` + `tokio::io::BufReader::lines`）
-- [ ] 3.12 Phase B coverage gate：cargo llvm-cov 報 codebus-core 整體 ≥ 80%
+- [x] 3.1 Spike git2 vs `std::process::Command` for git operations：1 day timebox，跑通 `git status --porcelain`、`git rev-parse HEAD`、`git commit` 三條路徑各兩種實作，記錄 lifetime 複雜度 / API 表面差異 / Windows path 行為，挑一條進入 3.6-3.9
+- [x] 3.2 [P] Write failing tests for `fs/file_ops`（sha256_file 對 known input 回傳 known hex digest）
+- [x] 3.3 [P] Implement `codebus-core/src/fs/file_ops.rs`
+- [x] 3.4 [P] Write failing tests for `fs/raw_sync`（gitignore-aware copy 跳過 `node_modules/`、`.git/`、custom `.gitignore` 規則）
+- [x] 3.5 [P] Implement `codebus-core/src/fs/raw_sync.rs` 用 `ignore` crate（ripgrep 用的）
+- [x] 3.6 [P] Write failing tests for `git/source_version`（commit hash + uncommitted boolean）
+- [x] 3.7 [P] Implement `codebus-core/src/git/source_version.rs`
+- [x] 3.8 [P] Write failing tests for `git/nested_repo`（auto-commit 一次 message、兩次 commit 之間 working tree 為空時不 commit）
+- [x] 3.9 [P] Implement `codebus-core/src/git/nested_repo.rs`
+- [x] 3.10 Write failing tests for `llm/claude_cli`：spawn 用 mock SpawnFn 注入、確認 argv 嚴格 sandbox（**雙重斷言**：`--tools Read,Glob,Grep[+Write,Edit if ingest]` 帶到 + 同一 list 出現在 `--allowedTools` + 「未授權 tool 名（Bash、WebFetch、TodoWrite 等）絕對不在 argv 任何位置」）— 重新驗證 iter-9 教訓；測 stream-json input + stream parsing roundtrip + classify_exit 三類 verdict
+- [x] 3.11 Implement `codebus-core/src/llm/claude_cli.rs` 用 **Async runtime 選 tokio**（`tokio::process::Command` + `tokio::io::BufReader::lines`）
+- [x] 3.12 Phase B coverage gate：cargo llvm-cov 報 codebus-core 整體 ≥ 80%
 
 ## 4. Phase C — codebus-cli
 

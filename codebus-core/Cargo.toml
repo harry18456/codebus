@@ -18,8 +18,12 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 async-trait = "0.1"
 futures-core = "0.3"
+futures-util = "0.3"
 regex = "1.10"
+sha2 = "0.10"
+ignore = "0.4"
+tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "time", "macros"] }
+tokio-stream = { version = "0.1", features = ["io-util"] }
 
 [dev-dependencies]
-futures-util = "0.3"
 tokio = { version = "1", features = ["macros", "rt"] }
