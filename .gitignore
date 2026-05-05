@@ -7,12 +7,16 @@ openspec/.vector-search.db*
 
 # claude
 
-# node project
+# node project (legacy ts-src reference impl during rust-rewrite)
 node_modules/
 dist/
 coverage/
 *.log
 .DS_Store
+
+# rust workspace
+target/
+# Cargo.lock is committed (workspace ships binaries — reproducible builds)
 
 # Live spike transcripts may contain external repo source content;
 # only the meta-docs (observations.md, REPORT.md) are tracked.

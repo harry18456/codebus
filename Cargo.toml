@@ -1,0 +1,19 @@
+[workspace]
+members = ["codebus-core", "codebus-cli", "codebus-app"]
+resolver = "3"
+
+[workspace.package]
+version = "0.2.0-dev"
+edition = "2024"
+license = "MIT"
+authors = ["harry18456 <harry18456@gmail.com>"]
+repository = "https://github.com/harry18456/codebus"
+rust-version = "1.85"
+
+[workspace.dependencies]
+codebus-core = { path = "codebus-core" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
