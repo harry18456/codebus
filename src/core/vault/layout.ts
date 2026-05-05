@@ -23,7 +23,8 @@ export interface VaultPaths {
   wikiSynthesis: string
   wikiPageFolders: readonly string[]
   wikiTypeFolderMap: Readonly<Record<PageType, string>>
-  wikiGoals: string
+  // wikiGoals removed in wiki-taxonomy-realign — wiki/goals/ is no longer
+  // a schema-managed directory. Per-goal narrative now folds into log.md.
   output: string
   lock: string
 }
@@ -62,7 +63,6 @@ export function vaultPaths(repoRoot: string): VaultPaths {
       process: wikiProcesses,
       synthesis: wikiSynthesis
     },
-    wikiGoals: join(wiki, 'goals'),
     output: join(root, 'output'),
     lock: join(root, '.lock')
   }

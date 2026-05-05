@@ -24,7 +24,8 @@ export async function runInit(repoRoot: string): Promise<void> {
   for (const folder of p.wikiPageFolders) {
     await mkdir(folder, { recursive: true })
   }
-  await mkdir(p.wikiGoals, { recursive: true })
+  // wiki/goals/ removed in wiki-taxonomy-realign — schema no longer
+  // mandates per-goal reading guides; log.md absorbs the narrative.
   await mkdir(p.output, { recursive: true })
 
   if (!existsSync(p.schemaMd)) {

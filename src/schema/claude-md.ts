@@ -17,8 +17,8 @@ under \`wiki/\` that helps engineers ramp up on the codebase.
 
 ## 1. Your Role
 
-- Goals: build / update wiki pages, maintain index.md / log.md / overview.md,
-  produce per-goal reading guide in goals/.
+- Goals: build / update wiki pages and maintain the two nav files
+  index.md / log.md.
 - Non-goals: do NOT modify source code, do NOT write outside wiki/, do NOT
   invoke shell commands or web fetch (Bash/WebFetch/WebSearch are disallowed).
 
@@ -35,14 +35,21 @@ under \`wiki/\` that helps engineers ramp up on the codebase.
 
 ## 3. Wiki Structure
 
-Four special files at \`wiki/\` root:
-- \`wiki/overview.md\` — repo-level overview, cross-goal, rewrite each run.
-- \`wiki/index.md\` — page catalog with summaries, rewrite each run.
-- \`wiki/log.md\` — chronological append: \`## [YYYY-MM-DD] goal: "X" → covers [[A]], [[B]]\`.
-- \`wiki/goals/<slug>.md\` — per-goal reading guide.
+Two nav files at \`wiki/\` root:
+- \`wiki/index.md\` — page catalog with summaries, rewrite each in-scope goal.
+- \`wiki/log.md\` — chronological journal of goals: each entry includes the
+  goal text, covered pages by \`[[wikilink]]\`, suggested reading order, and
+  the key takeaways from this run (the per-goal narrative absorbed from the
+  retired goal-guide concept).
 
-Knowledge pages live under **5 type folders** (Karpathy-style buckets) — pick
-the folder that matches the page's role:
+Knowledge pages live under **5 type buckets** — Karpathy-style page categories:
+\`concept\` / \`entity\` / \`module\` / \`process\` / \`synthesis\`. The frontmatter
+\`type\` field is the **authoritative** metadata; the same-named folders under
+\`wiki/\` are an **organizational hint** for Obsidian sidebar grouping (codebus
+init pre-creates them so the sidebar is structured even when empty), not a
+strict filing contract. Place each new page in the folder that matches its
+\`type\` whenever practical — that's how readers navigate visually — but a
+stray placement is no longer flagged.
 
 - \`wiki/concepts/<slug>.md\` — cross-cutting ideas, principles, mental models.
   Describes WHAT something is or HOW it's organized at a static level
@@ -58,11 +65,15 @@ the folder that matches the page's role:
   a concept, even when the topic is abstract / mathematical.
 - \`wiki/synthesis/<slug>.md\` — cross-cutting summaries that integrate multiple
   pages into one coherent view (e.g. "architecture overview",
-  "main themes", "how the modules fit together").
+  "main themes", "how the modules fit together"). When the wiki has
+  accumulated enough knowledge pages (≥ 5 across the other 4 type buckets) and
+  a coherent repo-level overview would help a new reader, write it as
+  \`wiki/synthesis/<slug>.md\` (e.g. \`synthesis/repo-overview.md\`) — there is
+  no longer a hard-coded \`wiki/overview.md\` named file; overview-style pages
+  ARE synthesis pages.
 
-The folder MUST match the page's frontmatter \`type\` (concept / entity / module
-/ process / synthesis). Wikilinks like \`[[slug]]\` resolve by filename
-regardless of folder, so cross-folder linking just works.
+Wikilinks like \`[[slug]]\` resolve by filename regardless of folder, so
+cross-folder linking just works.
 
 **Concept vs process tiebreaker:** if you find yourself writing "Step 1, Step 2, ..."
 or "first ... then ... finally ...", it's a process. Concepts are
@@ -78,7 +89,6 @@ Before doing any of the 7 steps below, judge the goal:
 
 - Goal text references something explorable in \`raw/code/\` (file name,
   function name, module name, process word that maps to actual code).
-- Goal is a re-run (\`wiki/goals/<this-slug>.md\` already exists).
 - Goal extracts wiki-shaped knowledge from existing \`wiki/\` or \`raw/\`
   context — even if phrased as imperative. E.g. "modify X to do Y"
   can legitimately reframe as "Y migration analysis" page IF X actually
@@ -101,11 +111,9 @@ When you judge a goal as out-of-scope:
    relevant files exist" is allowed; Read of individual source files
    is NOT.
 3. **DO NOT** create or modify any file. Specifically:
-   - No \`wiki/goals/<slug>.md\` (no "no-op record" goal-guide)
    - No \`wiki/log.md\` append
    - No \`wiki/index.md\` modification
    - No \`wiki/{concepts,entities,modules,processes,synthesis}/<slug>.md\`
-   - No \`wiki/overview.md\` update
 4. STOP — yield no further tool calls after the explanatory thought.
 
 The codebus harness records every goal attempt in \`goals.jsonl\` (out
@@ -114,13 +122,13 @@ Out-of-scope goals leaving \`wiki/\` unchanged is the correct outcome —
 codebus reports \`wikiChanged=false\` honestly and shows the user a 🤷
 banner instead of pretending wiki content was generated.
 
-### 4.1 In-scope path: 7 steps
+### 4.1 In-scope path: 6 steps
 
 1. **Discover**: grep \`wiki/{concepts,entities,modules,processes,synthesis}/*.md\`
    frontmatter \`sources:\` to see what raw files are already indexed.
    Read wiki/index.md for the catalog.
 2. **Plan**: list pages to update vs new pages to create, choosing the
-   correct type folder for each new page. **If a source file is already
+   most fitting type for each new page. **If a source file is already
    in some page's frontmatter sources[], DO NOT re-Read it** — prefer
    linking that page via [[wikilink]]. Re-Read only when the existing
    page is marked \`stale: true\` or the prior coverage genuinely missed
@@ -128,30 +136,34 @@ banner instead of pretending wiki content was generated.
 3. **Explore**: use Read/Grep/Glob on raw/code/ for source files not yet
    covered.
 4. **Write**: create or update \`wiki/<type-folder>/<slug>.md\` with
-   frontmatter (§6). Folder MUST match frontmatter \`type\`:
-   concept→concepts/, entity→entities/, module→modules/, process→processes/,
-   synthesis→synthesis/.
+   frontmatter (§6). Place each page in the folder that matches its
+   \`type\` (concept→concepts/, entity→entities/, module→modules/,
+   process→processes/, synthesis→synthesis/) — frontmatter \`type\` is
+   authoritative, folder is the recommended visual home.
 5. **Index**: rewrite wiki/index.md catalog.
-6. **Log**: append a line to wiki/log.md.
-7. **Guide**: write wiki/goals/<slug>.md as the reading guide for this goal.
+6. **Log**: append a chronological entry to wiki/log.md covering: goal
+   text, covered pages by \`[[wikilink]]\`, suggested reading order, and
+   the key takeaways from this run. Format example:
 
-**Re-run discipline:** If \`wiki/goals/<this-slug>.md\` already exists,
-this is a re-run of the SAME goal. Prefer incremental update via Page
-Conflict rules (§5) rather than wholesale rewrite — existing pages are
-the single source of truth for what's been covered.
+   \`\`\`markdown
+   ## [YYYY-MM-DD] goal: "<goal text>"
 
-**Caveat:** This signal can be defeated externally — different phrasings
-of the same intent (e.g. "了解購物車" vs "了解購物車流程") produce
-different slugs / different goal guides; user manually deleting
-\`wiki/goals/<slug>.md\` hides the re-run signal. Phase 1 accepts these
-as user-chosen behavior; do not second-guess by re-deriving slugs.
+   Covered pages: [[A]] → [[B]] → [[C]] (suggested reading order).
 
-**The two dedup signals are INDEPENDENT** — even when the goal-guide
-signal says "new goal" (no existing wiki/goals/<this-slug>.md), the
-source-dedup signal (frontmatter \`sources[]\` containing X) still
-applies. So for slug-drifted re-runs, the correct behavior is: **create
-a new goal-guide, but reuse existing pages via [[wikilink]]** rather
-than re-Reading sources you've already covered.
+   Key takeaways: <2-4 sentences capturing what a future reader most
+   needs to know — the narrative that previously lived in a separate
+   per-goal file is now folded directly into the log entry so there is
+   one chronological journal instead of two parallel files>.
+   \`\`\`
+
+**Re-run discipline:** When the goal text repeats (or paraphrases) a
+prior goal, the source-dedup signal — frontmatter \`sources[]\` already
+containing the file you'd otherwise re-Read — is the **only** anchor.
+Prefer incremental update via Page Conflict rules (§5) over wholesale
+rewrite. Different phrasings of the same intent (e.g. "了解購物車" vs
+"了解購物車流程") cannot be detected from goal text alone — phase 1
+accepts that as user-chosen behavior. The append-merge contract on
+existing pages keeps coverage stable across slug-drifted re-runs.
 
 ## 5. Page Conflict
 
@@ -210,8 +222,8 @@ stale: false
   \`related: ["[[a]]", "[[b]]"]\` — do not write \`related: [[a]], [[b]]\`
   (that breaks YAML).
 - In body text wikilinks need no quoting.
-- Special files at \`wiki/\` root are also valid wikilink targets:
-  \`[[overview]]\`, \`[[index]]\`, \`[[log]]\` resolve to the corresponding
+- Nav files at \`wiki/\` root are also valid wikilink targets:
+  \`[[index]]\` and \`[[log]]\` resolve to the corresponding
   \`wiki/<file>.md\`.
 
 ## 8. Source Code References

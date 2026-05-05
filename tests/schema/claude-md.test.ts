@@ -40,10 +40,47 @@ describe('CODEBUS_SCHEMA_MARKDOWN', () => {
 
   it('contains §4.0.1 STOP rules forbidding no-op record creation', () => {
     expect(CODEBUS_SCHEMA_MARKDOWN).toContain('If out-of-scope: STOP')
-    // Must explicitly forbid creating goal-guide / log / index for noop
-    expect(CODEBUS_SCHEMA_MARKDOWN).toContain('no "no-op record" goal-guide')
+    // Must explicitly forbid mutating log/index/type-folder pages for noop.
+    // wiki/goals/ and wiki/overview.md were removed from STOP-rules in
+    // wiki-taxonomy-realign — agent already won't create what no longer
+    // has schema-mandated semantics.
     expect(CODEBUS_SCHEMA_MARKDOWN).toContain('No `wiki/log.md` append')
     expect(CODEBUS_SCHEMA_MARKDOWN).toContain('No `wiki/index.md` modification')
+    expect(CODEBUS_SCHEMA_MARKDOWN).not.toContain('no "no-op record" goal-guide')
+    expect(CODEBUS_SCHEMA_MARKDOWN).not.toContain('No `wiki/overview.md` update')
+  })
+
+  it('does NOT mention wiki/overview.md as a named root file', () => {
+    // Post wiki-taxonomy-realign: overview is a synthesis page type, not
+    // a wiki/ root special. Schema §3 should describe overview as a kind
+    // of synthesis page, not as a strictly-named file at wiki/ root.
+    expect(CODEBUS_SCHEMA_MARKDOWN).not.toMatch(/`wiki\/overview\.md`\s*—/)
+    expect(CODEBUS_SCHEMA_MARKDOWN).not.toMatch(/rewrite each run/i)
+  })
+
+  it('does NOT mention wiki/goals/ as a schema-managed directory', () => {
+    // Post wiki-taxonomy-realign: per-goal reading guides are gone; the
+    // narrative is folded into the wiki/log.md entry. Schema must not
+    // describe wiki/goals/<slug>.md as a step or named directory.
+    expect(CODEBUS_SCHEMA_MARKDOWN).not.toMatch(/wiki\/goals\/<slug>\.md/)
+    expect(CODEBUS_SCHEMA_MARKDOWN).not.toMatch(/per-goal reading guide/i)
+    expect(CODEBUS_SCHEMA_MARKDOWN).not.toMatch(/Guide:\s*write\s*wiki\/goals/i)
+  })
+
+  it('describes the log step as carrying narrative coverage', () => {
+    // Step 6 (Log) absorbs the goal-guide narrative: not just a single
+    // line, but covered pages + reading suggestion + key takeaways.
+    // Pattern is markdown-bold tolerant: matches `Log:` or `**Log**:`.
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/Log\**:[^\n]*chronological[^\n]*entry/i)
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/covered\s+pages/i)
+  })
+
+  it('treats type folders as organizational hint, not strict mandate', () => {
+    // Post wiki-taxonomy-realign: 5 folders are still pre-created and
+    // recommended, but schema must not present folder/type matching as
+    // a hard contract; frontmatter `type` is the authoritative metadata.
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/organizational hint/i)
+    expect(CODEBUS_SCHEMA_MARKDOWN).toMatch(/frontmatter\s+`?type`?\s+is\s+(?:the\s+)?authoritative/i)
   })
 
   it('explicitly references the wikiChanged=false / 🤷 banner contract', () => {

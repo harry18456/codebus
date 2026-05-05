@@ -28,7 +28,9 @@ describe('runInit', () => {
     expect(existsSync(join(dir, '.codebus', 'wiki', 'modules'))).toBe(true)
     expect(existsSync(join(dir, '.codebus', 'wiki', 'processes'))).toBe(true)
     expect(existsSync(join(dir, '.codebus', 'wiki', 'synthesis'))).toBe(true)
-    expect(existsSync(join(dir, '.codebus', 'wiki', 'goals'))).toBe(true)
+    // wiki/goals/ removed in wiki-taxonomy-realign — init must NOT create
+    // it (per-goal narrative now lives in log.md, not separate guide files).
+    expect(existsSync(join(dir, '.codebus', 'wiki', 'goals'))).toBe(false)
     expect(existsSync(join(dir, '.codebus', 'raw'))).toBe(true)
     expect(existsSync(join(dir, '.codebus', 'raw', 'code'))).toBe(true)
     expect(existsSync(join(dir, '.codebus', 'output'))).toBe(true)

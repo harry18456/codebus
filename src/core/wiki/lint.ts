@@ -2,13 +2,12 @@ import { existsSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parsePage } from './frontmatter.js'
-import { PAGE_TYPE_FOLDERS, PAGE_TYPE_FROM_FOLDER, type PageType } from './types.js'
+import { PAGE_TYPE_FOLDERS } from './types.js'
 
 export type LintSeverity = 'error' | 'warn'
 
 export interface LintIssue {
-  // Path relative to wiki/ for display (e.g. "concepts/foo.md", "test.md",
-  // "goals/x.md").
+  // Path relative to wiki/ for display (e.g. "concepts/foo.md", "test.md").
   path: string
   severity: LintSeverity
   message: string
@@ -19,17 +18,18 @@ export interface LintResult {
   // parseable. Parse-failed files are NOT counted (they appear as errors
   // instead).
   pagesScanned: number
-  // Navigation/support files actually read: special files at wiki/ root
-  // (overview/index/log) + goal guides under wiki/goals/. Counted only
-  // when the file exists. Body wikilinks in these files are validated
-  // against the same slug catalog as knowledge pages.
+  // Navigation files actually read at wiki/ root (index.md and log.md).
+  // Counted only when the file exists. Body wikilinks in these files are
+  // validated against the same slug catalog as knowledge pages.
+  // (Pre wiki-taxonomy-realign this also counted overview.md and every
+  // file under wiki/goals/ — both removed in that change.)
   navFilesScanned: number
   issues: LintIssue[]
   errorCount: number
   warnCount: number
 }
 
-const SPECIAL_FILES = ['overview.md', 'index.md', 'log.md']
+const SPECIAL_FILES = ['index.md', 'log.md']
 const PAGE_FOLDER_NAMES = Object.values(PAGE_TYPE_FOLDERS)
 
 // Body wikilink regex — matches [[slug]], [[slug|display]], [[slug#heading]],
@@ -124,19 +124,13 @@ export async function lintWiki(vaultRoot: string): Promise<LintResult> {
     }
   }
 
-  // 1c. Goal guides at wiki/goals/*.md are also valid link targets — agent
-  //     legitimately writes \`[[<goal-slug>]]\` from index.md / log.md to
-  //     point readers at the per-goal reading guide. Collect filenames now
-  //     so section 6 can skip a second readdir.
-  const goalsDir = join(wikiRoot, 'goals')
-  const goalGuideFiles: string[] = []
-  if (existsSync(goalsDir)) {
-    for (const f of await readdir(goalsDir)) {
-      if (!f.endsWith('.md')) continue
-      goalGuideFiles.push(f)
-      pageSlugs.add(f.replace(/\.md$/, ''))
-    }
-  }
+  // 1c. (removed in wiki-taxonomy-realign) Previously this section walked
+  //     wiki/goals/*.md and added every goal-guide slug to the catalog so
+  //     [[<goal-slug>]] from index.md/log.md would resolve. wiki/goals/
+  //     is no longer a recognized directory; leftover goal-guide files
+  //     from older codebus versions are intentionally NOT catalogued so
+  //     `[[<goal-slug>]]` correctly reports as broken (signaling the user
+  //     to migrate the narrative into log.md).
 
   // 2. Cross-folder slug collision warning. Obsidian resolves [[slug]] by
   //    first match — multiple pages with the same slug make link target
@@ -170,17 +164,10 @@ export async function lintWiki(vaultRoot: string): Promise<LintResult> {
       continue
     }
 
-    // Folder ↔ frontmatter type alignment (warn — agent may legitimately
-    // place a borderline page; folder is the strong signal in Obsidian
-    // sidebar, type is the taxonomic claim).
-    const expectedType = PAGE_TYPE_FROM_FOLDER[entry.folder] as PageType | undefined
-    if (expectedType && parsed.frontmatter.type !== expectedType) {
-      issues.push({
-        path: entry.relPath,
-        severity: 'warn',
-        message: `folder/type mismatch: file in '${entry.folder}/' but frontmatter type is '${parsed.frontmatter.type}' (expected '${expectedType}')`
-      })
-    }
+    // (removed in wiki-taxonomy-realign) Folder/type mismatch warning was
+    // here. Folder is now treated as an organizational hint for Obsidian
+    // sidebar grouping; frontmatter `type` is the authoritative metadata
+    // and lint no longer flags placement vs type disagreement.
 
     // Validate frontmatter related[] entries — strict, must be parseable
     // [[wikilink]] format and resolve to existing page.
@@ -221,10 +208,14 @@ export async function lintWiki(vaultRoot: string): Promise<LintResult> {
     }
   }
 
-  // 5. Special files (overview/index/log) — presence check + body wikilink
-  //    scan. These files are catalogs/summaries dense with [[wikilink]];
-  //    a broken link here breaks wiki navigation more than a knowledge-page
-  //    body link does, so it's worth surfacing.
+  // 5. Nav files (index.md, log.md) — presence check + body wikilink scan.
+  //    These files are catalogs/summaries dense with [[wikilink]]; a broken
+  //    link here breaks wiki navigation more than a knowledge-page body
+  //    link does, so it's worth surfacing.
+  //    (Pre wiki-taxonomy-realign overview.md was also a special file;
+  //    it was removed because its "rewrite each run" semantic produced
+  //    last-goal-snapshot rather than cumulative overviews. Overview-style
+  //    pages now live as wiki/synthesis/<slug>.md.)
   for (const sf of SPECIAL_FILES) {
     const fullPath = join(wikiRoot, sf)
     if (!existsSync(fullPath)) {
@@ -240,15 +231,10 @@ export async function lintWiki(vaultRoot: string): Promise<LintResult> {
     scanBodyWikilinks(content, sf, pageSlugs, issues)
   }
 
-  // 6. Goal guides at wiki/goals/*.md — body wikilink scan. Goal guides
-  //    are free-form (no frontmatter contract) but they cite pages via
-  //    [[wikilink]]; a delete-and-forget on a referenced page leaves the
-  //    guide hanging. File list was collected in section 1c.
-  for (const f of goalGuideFiles) {
-    navFilesScanned++
-    const content = await readFile(join(goalsDir, f), 'utf8')
-    scanBodyWikilinks(content, `goals/${f}`, pageSlugs, issues)
-  }
+  // 6. (removed in wiki-taxonomy-realign) Previously scanned wiki/goals/*.md
+  //    bodies for [[wikilink]] references. Goal guides are no longer a
+  //    schema-managed concept; their narrative is folded into log.md
+  //    chronological entries.
 
   return summarize(pagesScanned, navFilesScanned, issues)
 }

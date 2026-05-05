@@ -34,16 +34,22 @@ class WritingFakeProvider implements LLMProvider {
   cancel(): void {}
 }
 
-// Replaces wiki/goals/ (created by runInit) with a regular file. Forces
-// lintWiki to throw at section 1c readdir(goalsDir) — existsSync sees a
-// path, then readdir errors with ENOTDIR. enrich/stale-detect don't read
-// goals/ so they complete normally; the fault is isolated to lintWiki,
-// matching the spec's "lint throws during goal execution" scenario.
+// Replaces the entire wiki/ directory with a regular file. Forces
+// lintWiki to throw at the §4 wiki/ root readdir — existsSync(wikiRoot)
+// returns true (it's a file), then readdir throws ENOTDIR. enrich and
+// stale-detect iterate the 5 type folders inside wiki/; existsSync of
+// wiki/<type>/ returns false once wiki/ is a file, so both phases skip
+// without error. The fault is isolated to lintWiki, matching the spec's
+// "lint throws during goal execution" scenario.
+//
+// (Pre wiki-taxonomy-realign this sabotaged wiki/goals/ instead. That
+// directory was removed in the realign, so a different lintWiki throw
+// vector is needed.)
 class SabotageGoalsProvider implements LLMProvider {
   async *invoke(opts: InvokeOptions): AsyncIterable<StreamEvent> {
-    const goalsDir = join(opts.cwd, 'wiki', 'goals')
-    rmSync(goalsDir, { recursive: true, force: true })
-    writeFileSync(goalsDir, 'sabotaged')
+    const wikiDir = join(opts.cwd, 'wiki')
+    rmSync(wikiDir, { recursive: true, force: true })
+    writeFileSync(wikiDir, 'sabotaged')
     yield { kind: 'done' }
   }
   cancel(): void {}

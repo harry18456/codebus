@@ -37,14 +37,14 @@ describe('lintWiki', () => {
   let vault: string
   beforeEach(() => {
     vault = mkdtempSync(join(tmpdir(), 'codebus-lint-'))
-    // Mirror init.ts: create the 5 type folders + goals/.
+    // Mirror init.ts post wiki-taxonomy-realign: 5 type folders only.
+    // wiki/goals/ is no longer created by init; overview.md is no longer
+    // a recognized special file.
     mkdirSync(join(vault, 'wiki', 'concepts'), { recursive: true })
     mkdirSync(join(vault, 'wiki', 'entities'), { recursive: true })
     mkdirSync(join(vault, 'wiki', 'modules'), { recursive: true })
     mkdirSync(join(vault, 'wiki', 'processes'), { recursive: true })
     mkdirSync(join(vault, 'wiki', 'synthesis'), { recursive: true })
-    mkdirSync(join(vault, 'wiki', 'goals'), { recursive: true })
-    writeFileSync(join(vault, 'wiki', 'overview.md'), '# Overview')
     writeFileSync(join(vault, 'wiki', 'index.md'), '# Index')
     writeFileSync(join(vault, 'wiki', 'log.md'), '# Log')
   })
@@ -55,8 +55,9 @@ describe('lintWiki', () => {
     expect(result.errorCount).toBe(0)
     expect(result.warnCount).toBe(0)
     expect(result.pagesScanned).toBe(0)
-    // overview/index/log all exist (beforeEach), no goal guides → 3 nav files.
-    expect(result.navFilesScanned).toBe(3)
+    // index.md + log.md exist (beforeEach) → 2 nav files (overview no
+    // longer counted; goals/ no longer scanned).
+    expect(result.navFilesScanned).toBe(2)
   })
 
   it('returns no issues when pages have valid frontmatter and resolve all wikilinks', async () => {
@@ -138,15 +139,14 @@ describe('lintWiki', () => {
     expect(result.pagesScanned).toBe(2)
   })
 
-  it('flags WARN for folder/type mismatch', async () => {
-    // file lives in concepts/ but frontmatter declares type=module
+  it('does NOT flag folder/type mismatch (folder is organizational hint, not contract)', async () => {
+    // Post wiki-taxonomy-realign: frontmatter type is authoritative;
+    // folder is the recommended visual home. Lint no longer reports
+    // mismatch.
     writeFileSync(join(vault, 'wiki', 'concepts', 'a.md'), validPage({ title: 'A', type: 'module' }))
     const result = await lintWiki(vault)
-    const issue = result.issues.find((i) => i.message.includes('folder/type mismatch'))
-    expect(issue).toBeDefined()
-    expect(issue!.severity).toBe('warn')
-    expect(issue!.path).toBe('concepts/a.md')
-    expect(issue!.message).toContain("expected 'concept'")
+    const mismatchIssues = result.issues.filter((i) => i.message.includes('folder/type mismatch'))
+    expect(mismatchIssues).toHaveLength(0)
   })
 
   it('flags WARN for duplicate slugs across folders (ambiguous wikilink target)', async () => {
@@ -167,13 +167,31 @@ describe('lintWiki', () => {
     expect(issue!.message).toContain('wiki/ root')
   })
 
-  it('flags WARN for missing special files', async () => {
-    rmSync(join(vault, 'wiki', 'overview.md'))
+  it('flags WARN for missing index.md', async () => {
+    rmSync(join(vault, 'wiki', 'index.md'))
     const result = await lintWiki(vault)
-    const issue = result.issues.find((i) => i.path === 'overview.md')
+    const issue = result.issues.find((i) => i.path === 'index.md')
     expect(issue).toBeDefined()
     expect(issue!.severity).toBe('warn')
     expect(issue!.message).toContain('missing')
+  })
+
+  it('flags WARN for missing log.md', async () => {
+    rmSync(join(vault, 'wiki', 'log.md'))
+    const result = await lintWiki(vault)
+    const issue = result.issues.find((i) => i.path === 'log.md')
+    expect(issue).toBeDefined()
+    expect(issue!.severity).toBe('warn')
+    expect(issue!.message).toContain('missing')
+  })
+
+  it('does NOT flag missing overview.md (no longer a special file)', async () => {
+    // overview.md was removed from SPECIAL_FILES in wiki-taxonomy-realign.
+    // beforeEach no longer creates it; lint must not warn about its
+    // absence (any "missing" issue keyed at overview.md is a regression).
+    const result = await lintWiki(vault)
+    const overviewIssues = result.issues.filter((i) => i.path === 'overview.md')
+    expect(overviewIssues).toHaveLength(0)
   })
 
   it('does not de-duplicate identical errors across pages (each occurrence reported)', async () => {
@@ -190,19 +208,6 @@ describe('lintWiki', () => {
     expect(result.navFilesScanned).toBe(0)
     expect(result.issues).toEqual([])
     rmSync(empty, { recursive: true, force: true })
-  })
-
-  it('flags WARN for broken wikilink in overview.md body', async () => {
-    writeFileSync(join(vault, 'wiki', 'concepts', 'a.md'), validPage({ title: 'A' }))
-    writeFileSync(join(vault, 'wiki', 'overview.md'), '# Overview\n\n見 [[a]] 與 [[ghost]] 兩頁。')
-    const result = await lintWiki(vault)
-    const issue = result.issues.find((i) => i.path === 'overview.md')
-    expect(issue).toBeDefined()
-    expect(issue!.severity).toBe('warn')
-    expect(issue!.message).toContain('broken wikilink in body')
-    expect(issue!.message).toContain('ghost')
-    // [[a]] resolves so only [[ghost]] should warn.
-    expect(result.issues.filter((i) => i.path === 'overview.md')).toHaveLength(1)
   })
 
   it('flags WARN for broken wikilink in index.md body', async () => {
@@ -223,57 +228,67 @@ describe('lintWiki', () => {
     expect(issue!.message).toContain('ghost')
   })
 
-  it('resolves wikilinks pointing at existing special files (overview/index/log)', async () => {
-    // overview/index/log are legit wikilink targets in Obsidian — they live
-    // at wiki/ root, are real .md files, and [[overview]] should resolve.
-    writeFileSync(join(vault, 'wiki', 'index.md'), '見 [[overview]] 與 [[log]]\n')
+  it('resolves wikilinks pointing at existing nav files (index/log)', async () => {
+    // index/log are valid wikilink targets in Obsidian — they live at
+    // wiki/ root, are real .md files, and [[index]] / [[log]] resolve.
+    writeFileSync(join(vault, 'wiki', 'index.md'), '見 [[log]]\n')
     const result = await lintWiki(vault)
     const indexIssues = result.issues.filter((i) => i.path === 'index.md')
     expect(indexIssues).toHaveLength(0)
   })
 
-  it('flags WARN when wikilink targets a missing special file', async () => {
-    rmSync(join(vault, 'wiki', 'overview.md'))
-    writeFileSync(join(vault, 'wiki', 'index.md'), '見 [[overview]]\n')
+  it('flags WARN when wikilink targets a missing nav file (log.md)', async () => {
+    rmSync(join(vault, 'wiki', 'log.md'))
+    writeFileSync(join(vault, 'wiki', 'index.md'), '見 [[log]]\n')
     const result = await lintWiki(vault)
-    const issue = result.issues.find((i) => i.path === 'index.md' && i.message.includes('overview'))
+    const issue = result.issues.find((i) => i.path === 'index.md' && i.message.includes('log'))
     expect(issue).toBeDefined()
     expect(issue!.severity).toBe('warn')
   })
 
-  it('resolves [[goal-slug]] wikilink targeting an existing goal guide', async () => {
-    // Goal guides under wiki/goals/ are valid wikilink targets. Agent often
-    // writes [[some-goal]] from index.md/log.md to point at the reading
-    // guide. catalog must include goal guide slugs.
+  it('flags [[goal-slug]] as broken even when wiki/goals/<slug>.md exists', async () => {
+    // Post wiki-taxonomy-realign: wiki/goals/ is no longer a recognized
+    // directory; even if a leftover goal-guide file exists from a prior
+    // codebus version, its slug SHALL NOT be added to the catalog.
+    mkdirSync(join(vault, 'wiki', 'goals'), { recursive: true })
     writeFileSync(join(vault, 'wiki', 'goals', 'project-purpose.md'), '# Goal: project-purpose')
     writeFileSync(join(vault, 'wiki', 'index.md'), '## Goals\n- [[project-purpose]]\n')
     const result = await lintWiki(vault)
-    const indexIssues = result.issues.filter((i) => i.path === 'index.md')
-    expect(indexIssues).toHaveLength(0)
+    const indexIssue = result.issues.find(
+      (i) => i.path === 'index.md' && i.message.includes('project-purpose')
+    )
+    expect(indexIssue).toBeDefined()
+    expect(indexIssue!.severity).toBe('warn')
+    expect(indexIssue!.message).toContain('broken wikilink in body')
   })
 
-  it('flags WARN for broken wikilink in goal guide', async () => {
-    writeFileSync(join(vault, 'wiki', 'goals', 'foo.md'), '# Goal: foo\n\n讀 [[ghost]] 開始。')
-    const result = await lintWiki(vault)
-    const issue = result.issues.find((i) => i.path === 'goals/foo.md')
-    expect(issue).toBeDefined()
-    expect(issue!.severity).toBe('warn')
-    expect(issue!.message).toContain('ghost')
-  })
-
-  it('counts all existing nav files (overview/index/log + each goal guide)', async () => {
+  it('counts only existing nav files index.md + log.md (ignores wiki/goals/)', async () => {
+    // Even if goal-guide leftover files exist, navFilesScanned must
+    // count only the two surviving specials.
+    mkdirSync(join(vault, 'wiki', 'goals'), { recursive: true })
     writeFileSync(join(vault, 'wiki', 'goals', 'one.md'), '# one')
     writeFileSync(join(vault, 'wiki', 'goals', 'two.md'), '# two')
     const result = await lintWiki(vault)
-    // 3 specials + 2 goal guides = 5
-    expect(result.navFilesScanned).toBe(5)
+    // beforeEach creates index.md + log.md → 2 nav files (goal guides
+    // are no longer scanned).
+    expect(result.navFilesScanned).toBe(2)
   })
 
-  it('does not count missing special files in navFilesScanned', async () => {
-    rmSync(join(vault, 'wiki', 'overview.md'))
+  it('does not count missing nav files in navFilesScanned', async () => {
     rmSync(join(vault, 'wiki', 'log.md'))
     const result = await lintWiki(vault)
     // only index.md remains → 1 nav file scanned
     expect(result.navFilesScanned).toBe(1)
+  })
+
+  it('clean run reports `N pages + 2 nav files scanned` in coverage line', async () => {
+    writeFileSync(join(vault, 'wiki', 'concepts', 'a.md'), validPage({ title: 'A' }))
+    writeFileSync(join(vault, 'wiki', 'concepts', 'b.md'), validPage({ title: 'B' }))
+    writeFileSync(join(vault, 'wiki', 'concepts', 'c.md'), validPage({ title: 'C' }))
+    const result = await lintWiki(vault)
+    expect(result.errorCount).toBe(0)
+    expect(result.warnCount).toBe(0)
+    expect(result.pagesScanned).toBe(3)
+    expect(result.navFilesScanned).toBe(2)
   })
 })

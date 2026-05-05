@@ -28,7 +28,9 @@ describe('vaultPaths', () => {
     expect(p.wikiTypeFolderMap.module).toBe(p.wikiModules)
     expect(p.wikiTypeFolderMap.process).toBe(p.wikiProcesses)
     expect(p.wikiTypeFolderMap.synthesis).toBe(p.wikiSynthesis)
-    expect(p.wikiGoals).toMatch(/[/\\]wiki[/\\]goals$/)
+    // wiki/goals/ removed in wiki-taxonomy-realign — VaultPaths no longer
+    // exposes a wikiGoals field. Per-goal narrative now lives in log.md.
+    expect((p as Record<string, unknown>).wikiGoals).toBeUndefined()
     expect(p.output).toMatch(/[/\\]\.codebus[/\\]output$/)
     expect(p.lock).toMatch(/[/\\]\.codebus[/\\]\.lock$/)
   })
