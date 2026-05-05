@@ -13,7 +13,7 @@ When invoked with `--repo <path>` and no `--goal` or `--query`, the system SHALL
 #### Scenario: Fresh init creates all expected paths
 
 - **WHEN** the user runs `codebus --repo /path/to/myrepo` and `/path/to/myrepo/.codebus/` does not yet exist
-- **THEN** the system creates `/path/to/myrepo/.codebus/` with subdirectories `raw/`, `raw/code/`, `wiki/`, `wiki/concepts/`, `wiki/entities/`, `wiki/modules/`, `wiki/processes/`, `wiki/synthesis/`, `wiki/goals/`, `output/`, and files `CLAUDE.md`, `goals.jsonl`, `.gitignore` (Karpathy-style 5-folder knowledge structure; folder = page `type` enum)
+- **THEN** the system creates `/path/to/myrepo/.codebus/` with subdirectories `raw/`, `raw/code/`, `wiki/`, `wiki/concepts/`, `wiki/entities/`, `wiki/modules/`, `wiki/processes/`, `wiki/synthesis/`, `output/`, and files `CLAUDE.md`, `goals.jsonl`, `.gitignore` (Karpathy-style 5-folder knowledge structure; folder = page `type` enum). The system SHALL NOT create `wiki/goals/`.
 
 #### Scenario: Internal .gitignore excludes lock and raw code
 
@@ -23,7 +23,7 @@ When invoked with `--repo <path>` and no `--goal` or `--query`, the system SHALL
 
 <!-- @trace
 source: codebus-v2-phase1
-updated: 2026-05-04
+updated: 2026-05-05
 code:
   - src/infra/fs/raw-sync.ts
   - docs/superpowers/REVIEW_LESSONS.md
