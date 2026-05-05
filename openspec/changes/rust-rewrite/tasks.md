@@ -4,12 +4,12 @@
 - [x] 1.2 Extract schema to standalone .md：把 `src/schema/claude-md.ts` 的 `CODEBUS_SCHEMA_MARKDOWN` template literal 抽出到 `codebus-core/src/schema/CLAUDE.md`，TS 端先改成 `readFileSync` 讀同一檔案（rewrite 期間共用），跑 152 個 TS test 確認無 regression — 落地 **Schema 拆出獨立 .md，Rust 與 TS 共用**
 - [x] 1.3 Move legacy TS code：`git mv src/ legacy/ts-src/src/`、`git mv tests/ legacy/ts-src/tests/`、寫 `legacy/README.md` 註明「reference impl, do not execute」用途，落地 **既有 TS code 移入 legacy/ts-src/，Phase D 達 parity 後刪**
 - [x] 1.4 Initialize Cargo workspace：建 root `Cargo.toml` 註冊三個 member（`codebus-core`、`codebus-cli`、`codebus-app`），三個資料夾各自 `Cargo.toml` + `src/lib.rs` 或 `src/main.rs` 空殼；`codebus-app/` 內僅 placeholder 印一行字（**Tauri app 留作獨立 spec（codebus-app/ 本 change 只預留位置）**），跑 `cargo check --workspace` 確認解析成功；落地 **Cargo workspace + 3 crate 結構**
-- [ ] 1.5 Pre-rewrite commit：完成 **Pre-rewrite checklist (Day 0)** 後 1 個 commit 把 1.1-1.4 的所有改動 push 上 main（**在 main 直接重寫，不開平行樹**），commit message 標明「pre-rewrite: snapshot fixture, move legacy, init cargo workspace」；commit 前確認 **Rollback 策略** 仍可用：`git reset --hard HEAD~1` 即恢復前一狀態（src/ tests/ package.json 全部還在 legacy/ 之前的位置）
+- [x] 1.5 Pre-rewrite commit：完成 **Pre-rewrite checklist (Day 0)** 後 1 個 commit 把 1.1-1.4 的所有改動 push 上 main（**在 main 直接重寫，不開平行樹**），commit message 標明「pre-rewrite: snapshot fixture, move legacy, init cargo workspace」；commit 前確認 **Rollback 策略** 仍可用：`git reset --hard HEAD~1` 即恢復前一狀態（src/ tests/ package.json 全部還在 legacy/ 之前的位置）
 
 ## 2. Phase A — codebus-core pure modules
 
-- [ ] 2.1 Define core data types in `codebus-core/src/wiki/types.rs`：Page、Frontmatter（含 sources []SourceRef、related []String、tags []String、stale bool、created/updated UTC string）、SourceRef、LintIssue、LintResult，加 serde Serialize/Deserialize derive
-- [ ] 2.2 Schema include_str! lock-in：`codebus-core/src/schema/mod.rs` `pub const CODEBUS_SCHEMA: &str = include_str!("./CLAUDE.md");`，加幾個 `assert!(SCHEMA.contains("..."))` 的 lock-in test 鎖住關鍵字串（對應 TS `tests/schema/claude-md.test.ts`）
+- [x] 2.1 Define core data types in `codebus-core/src/wiki/types.rs`：Page、Frontmatter（含 sources []SourceRef、related []String、tags []String、stale bool、created/updated UTC string）、SourceRef、LintIssue、LintResult，加 serde Serialize/Deserialize derive
+- [x] 2.2 Schema include_str! lock-in：`codebus-core/src/schema/mod.rs` `pub const CODEBUS_SCHEMA: &str = include_str!("./CLAUDE.md");`，加幾個 `assert!(SCHEMA.contains("..."))` 的 lock-in test 鎖住關鍵字串（對應 TS `tests/schema/claude-md.test.ts`）
 - [ ] 2.3 [P] Write failing tests for date module（`utc_today_iso()` 回傳 `YYYY-MM-DD`，verify cross-timezone determinism）
 - [ ] 2.4 [P] Implement `codebus-core/src/wiki/date.rs`
 - [ ] 2.5 [P] Write failing tests for frontmatter parse/serialize against `tests/fixtures/uv-vault-snapshot/` 各 page 的 frontmatter（含 multi-line scalar、nested `sources[]`、broken cases 應 fail-soft）

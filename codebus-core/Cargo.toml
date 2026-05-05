@@ -10,3 +10,8 @@ description = "Core library for codebus: vault layout, wiki frontmatter, lint, s
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
