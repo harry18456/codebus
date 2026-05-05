@@ -64,8 +64,8 @@
 ## 5. Phase D — cleanup
 
 - [x] 5.1 Verify all conformance gates pass（Phase A、B、C 全綠）+ 152 個原 TS test（在 legacy/ts-src/ 上仍可跑）對齊 Rust test 數量 ≥ 80% coverage
-- [ ] 5.2 Cool-down period：保留 legacy/ 一週、期間對 buddy-gacha 與 1 個公開 repo 跑 manual smoke，任何 user-facing behavior diff 翻 legacy 對照修 Rust
-- [ ] 5.3 Remove legacy and TS toolchain：`git rm -r legacy/`、刪除 `package.json`、`tsconfig.json`、`node_modules/`、`vitest.config.*`
+- [x] 5.2 Cool-down period：保留 legacy/ 一週、期間對 buddy-gacha 與 1 個公開 repo 跑 manual smoke，任何 user-facing behavior diff 翻 legacy 對照修 Rust
+- [x] 5.3 Remove legacy and TS toolchain：`git rm -r legacy/`、刪除 `package.json`、`tsconfig.json`、`node_modules/`、`vitest.config.*`
 - [x] 5.4 Update `.gitignore`：移除 TS 相關（`node_modules`、`dist/`），加 Rust 相關（`target/`、`Cargo.lock` 視 binary/lib 決定）
 - [x] 5.5 Update `CLAUDE.md` 反映 Rust-only 狀態：「Common commands」section 改為 cargo build / cargo test / cargo run；「Architecture」section 反映 3-crate workspace；删除 `npm run build` / `npm test` 指引
 - [x] 5.6 Final commit：「rust parity reached, removing ts reference impl after cool-down period」
