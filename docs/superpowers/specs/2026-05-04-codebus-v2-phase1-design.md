@@ -1,3 +1,5 @@
+> ⚠️ **Starting spec — design-intent snapshot from phase 1 brainstorming.** Source of truth for shipped behavior is `openspec/specs/`. Drift from current code is expected; do not implement from this file.
+
 # CodeBus v2 — Phase 1 Design
 
 > **狀態**：2026-05-04 brainstorm 完成，待 user review → writing-plans

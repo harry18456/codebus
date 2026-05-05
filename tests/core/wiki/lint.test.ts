@@ -84,6 +84,20 @@ describe('lintWiki', () => {
     expect(issue.message).toContain('nonexistent')
   })
 
+  it('flags ERROR for related[] entry not in [[wikilink]] format', async () => {
+    // Plain string (no surrounding [[ ]]) — fails the format guard before
+    // catalog lookup, so error message is about format not broken-target.
+    writeFileSync(
+      join(vault, 'wiki', 'concepts', 'a.md'),
+      validPage({ title: 'A', related: ['plain-text'] })
+    )
+    const result = await lintWiki(vault)
+    expect(result.errorCount).toBe(1)
+    const issue = result.issues.find((i) => i.severity === 'error')!
+    expect(issue.message).toContain('related[] entry not in [[wikilink]] format')
+    expect(issue.message).toContain('plain-text')
+  })
+
   it('flags WARN for broken wikilink in body (body is more lenient)', async () => {
     writeFileSync(
       join(vault, 'wiki', 'concepts', 'a.md'),

@@ -1,3 +1,5 @@
+> ⚠️ **Starting spec — design-intent snapshot from phase 1 brainstorming.** Source of truth for shipped behavior is `openspec/specs/`. Drift from current code is expected; do not implement from this file.
+
 # CodeBus v2 Phase 1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -34,6 +34,21 @@ class WritingFakeProvider implements LLMProvider {
   cancel(): void {}
 }
 
+// Replaces wiki/goals/ (created by runInit) with a regular file. Forces
+// lintWiki to throw at section 1c readdir(goalsDir) — existsSync sees a
+// path, then readdir errors with ENOTDIR. enrich/stale-detect don't read
+// goals/ so they complete normally; the fault is isolated to lintWiki,
+// matching the spec's "lint throws during goal execution" scenario.
+class SabotageGoalsProvider implements LLMProvider {
+  async *invoke(opts: InvokeOptions): AsyncIterable<StreamEvent> {
+    const goalsDir = join(opts.cwd, 'wiki', 'goals')
+    rmSync(goalsDir, { recursive: true, force: true })
+    writeFileSync(goalsDir, 'sabotaged')
+    yield { kind: 'done' }
+  }
+  cancel(): void {}
+}
+
 describe('runGoal', () => {
   let dir: string
   beforeEach(() => {
@@ -94,5 +109,21 @@ describe('runGoal', () => {
     })
     expect(result.wikiChanged).toBe(true)
     expect(existsSync(join(dir, '.codebus', 'wiki', 'concepts', 'fake.md'))).toBe(true)
+  })
+
+  it('returns lint: null and still auto-commits when lintWiki throws', async () => {
+    // Soft-mode contract: lint failure must not abort ingest. SabotageGoalsProvider
+    // breaks wiki/goals/ to force lintWiki to throw — runGoal must swallow,
+    // return lint: null, and continue to auto-commit.
+    const result = await runGoal({
+      repoRoot: dir,
+      goal: 'sabotage lint',
+      provider: new SabotageGoalsProvider()
+    })
+    expect(result.lint).toBe(null)
+    // goals.jsonl was appended (proves the run reached the body) AND
+    // auto-commit ran (file is in the nested-git working tree).
+    const goalsJsonl = readFileSync(join(dir, '.codebus', 'goals.jsonl'), 'utf8')
+    expect(goalsJsonl).toContain('sabotage lint')
   })
 })
