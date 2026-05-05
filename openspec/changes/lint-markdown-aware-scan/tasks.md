@@ -31,4 +31,4 @@
   - 整體 warning 數從目前 10 變 5（剩下的 5 是 wiki/overview.md 的 wiki/ root 警告 + index.md 的 4 個 broken-wikilink 指 retired goal-guide slug，那些是 wiki-taxonomy-realign 預期的 forward-compat signal，不該被本 change 動）
 - [x] 3.4 跑 `spectra validate lint-markdown-aware-scan` 確認 valid
 - [x] 3.5 跑 `spectra analyze lint-markdown-aware-scan --json` 確認 0 critical+warning
-- [ ] 3.6 commit：訊息標明 (a) 兩個 false-positive bug 的 root cause、(b) 對 spike vault 的具體 warning 數變化（10 → 5）、(c) Non-Goals 中提到的「不引入 markdown AST 套件」trade-off
+- [x] 3.6 commit：訊息標明 (a) 兩個 false-positive bug 的 root cause、(b) 對 spike vault 的具體 warning 數變化（10 → 5）、(c) Non-Goals 中提到的「不引入 markdown AST 套件」trade-off
