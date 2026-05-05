@@ -15,7 +15,10 @@ pub struct StaleResult {
 /// CRITICAL (iter-8 review lesson): callers must only enrich pages that
 /// are missing sha256/at_commit; rewriting hashes unconditionally compares
 /// same-vs-same forever and breaks this signal.
-pub fn detect_stale_sources(fm: &PageFrontmatter, current_hashes: &HashMap<String, String>) -> StaleResult {
+pub fn detect_stale_sources(
+    fm: &PageFrontmatter,
+    current_hashes: &HashMap<String, String>,
+) -> StaleResult {
     let mut changed = Vec::new();
     for src in &fm.sources {
         let current = current_hashes.get(&src.path);
@@ -45,7 +48,11 @@ mod tests {
             page_type: PageType::Concept,
             sources: sources
                 .into_iter()
-                .map(|(p, h)| SourceRef { path: p.into(), sha256: h.map(String::from), at_commit: None })
+                .map(|(p, h)| SourceRef {
+                    path: p.into(),
+                    sha256: h.map(String::from),
+                    at_commit: None,
+                })
                 .collect(),
             goals: vec![],
             related: vec![],
@@ -56,7 +63,10 @@ mod tests {
     }
 
     fn hashes(items: &[(&str, &str)]) -> HashMap<String, String> {
-        items.iter().map(|(p, h)| ((*p).into(), (*h).into())).collect()
+        items
+            .iter()
+            .map(|(p, h)| ((*p).into(), (*h).into()))
+            .collect()
     }
 
     #[test]

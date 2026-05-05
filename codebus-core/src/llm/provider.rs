@@ -124,7 +124,9 @@ mod tests {
 
     #[test]
     fn provider_error_display_includes_message() {
-        let e = ProviderError::Setup { message: "OAuth needed".into() };
+        let e = ProviderError::Setup {
+            message: "OAuth needed".into(),
+        };
         assert_eq!(format!("{e}"), "OAuth needed");
     }
 }

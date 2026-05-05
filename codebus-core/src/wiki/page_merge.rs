@@ -1,4 +1,4 @@
-use crate::wiki::types::{ParsedPage, PageFrontmatter, SourceRef};
+use crate::wiki::types::{PageFrontmatter, ParsedPage, SourceRef};
 
 fn unique_sources(a: &[SourceRef], b: &[SourceRef]) -> Vec<SourceRef> {
     let mut seen = std::collections::HashSet::new();
@@ -33,7 +33,12 @@ fn unique_strings(lists: &[&[String]]) -> Vec<String> {
 /// + incoming.goals (the earlier impl forgot the third source).
 /// `updated` is set to `today`. Body appends a `## from goal: <X> (YYYY-MM-DD)`
 /// section after a blank line.
-pub fn merge_page(existing: &ParsedPage, incoming: &ParsedPage, goal_text: &str, today: &str) -> ParsedPage {
+pub fn merge_page(
+    existing: &ParsedPage,
+    incoming: &ParsedPage,
+    goal_text: &str,
+    today: &str,
+) -> ParsedPage {
     let sources = unique_sources(&existing.frontmatter.sources, &incoming.frontmatter.sources);
     let goal_text_vec = vec![goal_text.to_string()];
     let goals = unique_strings(&[
@@ -71,12 +76,25 @@ mod tests {
     use super::*;
     use crate::wiki::types::PageType;
 
-    fn page(title: &str, sources: Vec<&str>, goals: Vec<&str>, related: Vec<&str>, body: &str) -> ParsedPage {
+    fn page(
+        title: &str,
+        sources: Vec<&str>,
+        goals: Vec<&str>,
+        related: Vec<&str>,
+        body: &str,
+    ) -> ParsedPage {
         ParsedPage {
             frontmatter: PageFrontmatter {
                 title: title.into(),
                 page_type: PageType::Concept,
-                sources: sources.into_iter().map(|p| SourceRef { path: p.into(), sha256: None, at_commit: None }).collect(),
+                sources: sources
+                    .into_iter()
+                    .map(|p| SourceRef {
+                        path: p.into(),
+                        sha256: None,
+                        at_commit: None,
+                    })
+                    .collect(),
                 goals: goals.into_iter().map(String::from).collect(),
                 related: related.into_iter().map(String::from).collect(),
                 created: "2026-05-01".into(),
@@ -115,7 +133,12 @@ mod tests {
         let existing = page("X", vec!["a.rs", "b.rs"], vec![], vec![], "");
         let incoming = page("X", vec!["b.rs", "c.rs"], vec![], vec![], "");
         let merged = merge_page(&existing, &incoming, "g", "today");
-        let paths: Vec<&str> = merged.frontmatter.sources.iter().map(|s| s.path.as_str()).collect();
+        let paths: Vec<&str> = merged
+            .frontmatter
+            .sources
+            .iter()
+            .map(|s| s.path.as_str())
+            .collect();
         assert_eq!(paths, vec!["a.rs", "b.rs", "c.rs"]);
     }
 
@@ -125,7 +148,10 @@ mod tests {
         let incoming = page("X", vec![], vec!["g3"], vec![], "");
         let merged = merge_page(&existing, &incoming, "g2", "today");
         // iter-8 lesson: incoming.goals must NOT be dropped
-        assert_eq!(merged.frontmatter.goals, vec!["g1".to_string(), "g2".into(), "g3".into()]);
+        assert_eq!(
+            merged.frontmatter.goals,
+            vec!["g1".to_string(), "g2".into(), "g3".into()]
+        );
     }
 
     #[test]
@@ -133,7 +159,10 @@ mod tests {
         let existing = page("X", vec![], vec!["g1", "g2"], vec![], "");
         let incoming = page("X", vec![], vec![], vec![], "");
         let merged = merge_page(&existing, &incoming, "g2", "today");
-        assert_eq!(merged.frontmatter.goals, vec!["g1".to_string(), "g2".into()]);
+        assert_eq!(
+            merged.frontmatter.goals,
+            vec!["g1".to_string(), "g2".into()]
+        );
     }
 
     #[test]
@@ -141,7 +170,10 @@ mod tests {
         let existing = page("X", vec![], vec![], vec!["[[a]]", "[[b]]"], "");
         let incoming = page("X", vec![], vec![], vec!["[[b]]", "[[c]]"], "");
         let merged = merge_page(&existing, &incoming, "g", "today");
-        assert_eq!(merged.frontmatter.related, vec!["[[a]]".to_string(), "[[b]]".into(), "[[c]]".into()]);
+        assert_eq!(
+            merged.frontmatter.related,
+            vec!["[[a]]".to_string(), "[[b]]".into(), "[[c]]".into()]
+        );
     }
 
     #[test]

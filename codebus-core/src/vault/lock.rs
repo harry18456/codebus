@@ -46,7 +46,10 @@ pub fn acquire_lock(lock_path: impl AsRef<Path>) -> Result<LockHandle, LockError
     let pid = std::process::id().to_string();
     file.write_all(pid.as_bytes())?;
     let _ = File::sync_all(&file);
-    Ok(LockHandle { path, released: false })
+    Ok(LockHandle {
+        path,
+        released: false,
+    })
 }
 
 /// Release a previously acquired lock. Idempotent — safe to call twice

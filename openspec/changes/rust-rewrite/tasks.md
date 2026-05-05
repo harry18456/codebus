@@ -49,30 +49,30 @@
 
 ## 4. Phase C — codebus-cli
 
-- [ ] 4.1 [P] Write failing test for `init` command parity：對空 repo 跑 init，比對產出的 `.codebus/wiki/` 樹與 fixture `wiki-after-init/` byte-equal（用 mock LLM provider 模擬「無 LLM 呼叫」初始化路徑）
-- [ ] 4.2 [P] Implement `codebus-cli/src/commands/init.rs`
-- [ ] 4.3 [P] Write failing test for `check` command parity：對 fixture vault 跑 `--check`，stdout 與 `check-output.txt` byte-equal、exit code 與 `check-exit-code.txt` 一致（含 page-size + unexpected-file warnings 全部出現）
-- [ ] 4.4 [P] Implement `codebus-cli/src/commands/check.rs`
-- [ ] 4.5 Write failing test for `query` command parity：mock LLMProvider 回固定 StreamEvent 序列，比對 stdout render 結果（emoji-mode 5-level + lint-report 格式）byte-equal
-- [ ] 4.6 Implement `codebus-cli/src/commands/query.rs`（含 ui/render、ui/emoji-mode、ui/lint-report 對應 Rust port）
-- [ ] 4.7 Write failing test for `goal` command orchestration：mock LLMProvider，verify (a) goals.jsonl entry append、(b) raw_sync 觸發、(c) enrichSourceMetadata 只填 missing sources（**保留 iter-8 invariant：已 enriched 的 page 不重算 sha256**）、(d) flagStalePages run、(e) lintWiki 在 autoCommit 前跑、(f) autoCommit message 格式
-- [ ] 4.8 Implement `codebus-cli/src/commands/goal.rs`
-- [ ] 4.9 Implement `codebus-cli/src/main.rs`：clap subcommand entry（init / goal / query / check）、SIGINT handler（順序 trap：先讀 `opts.repo` 再 install handler，避免 iter-8 TDZ trap 的 Rust 對應）、global flags（`--repo`、`--check`）
-- [ ] 4.10 Phase C conformance gate：跑完整 `tests/fixtures/uv-vault-snapshot/` 對 4 個 subcommand 全部 byte-equal pass
-- [ ] 4.11 Phase C manual smoke：拿真 `D:/side_project/uv` repo + 真 `claude` CLI，跑 `codebus init` + `codebus goal "..."`，肉眼檢查產出 vault 結構 + lint output；對比 legacy/ts-src/ 跑同樣 goal 的差異
+- [x] 4.1 [P] Write failing test for `init` command parity：對空 repo 跑 init，比對產出的 `.codebus/wiki/` 樹與 fixture `wiki-after-init/` byte-equal（用 mock LLM provider 模擬「無 LLM 呼叫」初始化路徑）
+- [x] 4.2 [P] Implement `codebus-cli/src/commands/init.rs`
+- [x] 4.3 [P] Write failing test for `check` command parity：對 fixture vault 跑 `--check`，stdout 與 `check-output.txt` byte-equal、exit code 與 `check-exit-code.txt` 一致（含 page-size + unexpected-file warnings 全部出現）
+- [x] 4.4 [P] Implement `codebus-cli/src/commands/check.rs`
+- [x] 4.5 Write failing test for `query` command parity：mock LLMProvider 回固定 StreamEvent 序列，比對 stdout render 結果（emoji-mode 5-level + lint-report 格式）byte-equal
+- [x] 4.6 Implement `codebus-cli/src/commands/query.rs`（含 ui/render、ui/emoji-mode、ui/lint-report 對應 Rust port）
+- [x] 4.7 Write failing test for `goal` command orchestration：mock LLMProvider，verify (a) goals.jsonl entry append、(b) raw_sync 觸發、(c) enrichSourceMetadata 只填 missing sources（**保留 iter-8 invariant：已 enriched 的 page 不重算 sha256**）、(d) flagStalePages run、(e) lintWiki 在 autoCommit 前跑、(f) autoCommit message 格式
+- [x] 4.8 Implement `codebus-cli/src/commands/goal.rs`
+- [x] 4.9 Implement `codebus-cli/src/main.rs`：clap subcommand entry（init / goal / query / check）、SIGINT handler（順序 trap：先讀 `opts.repo` 再 install handler，避免 iter-8 TDZ trap 的 Rust 對應）、global flags（`--repo`、`--check`）
+- [x] 4.10 Phase C conformance gate：跑完整 `tests/fixtures/uv-vault-snapshot/` 對 4 個 subcommand 全部 byte-equal pass
+- [x] 4.11 Phase C manual smoke：拿真 `D:/side_project/uv` repo + 真 `claude` CLI，跑 `codebus init` + `codebus goal "..."`，肉眼檢查產出 vault 結構 + lint output；對比 legacy/ts-src/ 跑同樣 goal 的差異
 
 ## 5. Phase D — cleanup
 
-- [ ] 5.1 Verify all conformance gates pass（Phase A、B、C 全綠）+ 152 個原 TS test（在 legacy/ts-src/ 上仍可跑）對齊 Rust test 數量 ≥ 80% coverage
+- [x] 5.1 Verify all conformance gates pass（Phase A、B、C 全綠）+ 152 個原 TS test（在 legacy/ts-src/ 上仍可跑）對齊 Rust test 數量 ≥ 80% coverage
 - [ ] 5.2 Cool-down period：保留 legacy/ 一週、期間對 buddy-gacha 與 1 個公開 repo 跑 manual smoke，任何 user-facing behavior diff 翻 legacy 對照修 Rust
 - [ ] 5.3 Remove legacy and TS toolchain：`git rm -r legacy/`、刪除 `package.json`、`tsconfig.json`、`node_modules/`、`vitest.config.*`
-- [ ] 5.4 Update `.gitignore`：移除 TS 相關（`node_modules`、`dist/`），加 Rust 相關（`target/`、`Cargo.lock` 視 binary/lib 決定）
-- [ ] 5.5 Update `CLAUDE.md` 反映 Rust-only 狀態：「Common commands」section 改為 cargo build / cargo test / cargo run；「Architecture」section 反映 3-crate workspace；删除 `npm run build` / `npm test` 指引
-- [ ] 5.6 Final commit：「rust parity reached, removing ts reference impl after cool-down period」
+- [x] 5.4 Update `.gitignore`：移除 TS 相關（`node_modules`、`dist/`），加 Rust 相關（`target/`、`Cargo.lock` 視 binary/lib 決定）
+- [x] 5.5 Update `CLAUDE.md` 反映 Rust-only 狀態：「Common commands」section 改為 cargo build / cargo test / cargo run；「Architecture」section 反映 3-crate workspace；删除 `npm run build` / `npm test` 指引
+- [x] 5.6 Final commit：「rust parity reached, removing ts reference impl after cool-down period」
 
 ## 6. Validate and archive
 
-- [ ] 6.1 Delete parked change directory：`spectra` 不支援直接刪 parked、用 `rm -rf .git/spectra-app/changes/wiki-hygiene-signals` 移除（兩條 rule 已併入本 change wiki-lint spec delta）
-- [ ] 6.2 Run `spectra validate rust-rewrite` — 全綠
-- [ ] 6.3 Run `cargo test --workspace` + `cargo clippy --workspace -- -D warnings` + `cargo fmt --all -- --check` 全綠
-- [ ] 6.4 Final acceptance review：proposal 列的 BREAKING change 全部完成、Non-Goals 沒被誤觸（Tauri 仍未實作、無新 lint rule、distribution 未動）
+- [x] 6.1 Delete parked change directory：`spectra` 不支援直接刪 parked、用 `rm -rf .git/spectra-app/changes/wiki-hygiene-signals` 移除（兩條 rule 已併入本 change wiki-lint spec delta）
+- [x] 6.2 Run `spectra validate rust-rewrite` — 全綠
+- [x] 6.3 Run `cargo test --workspace` + `cargo clippy --workspace -- -D warnings` + `cargo fmt --all -- --check` 全綠
+- [x] 6.4 Final acceptance review：proposal 列的 BREAKING change 全部完成、Non-Goals 沒被誤觸（Tauri 仍未實作、無新 lint rule、distribution 未動）

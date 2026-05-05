@@ -11,11 +11,19 @@ pub struct VaultSanityResult {
 
 impl VaultSanityResult {
     pub fn ok() -> Self {
-        Self { ok: true, reason: None, hint: None }
+        Self {
+            ok: true,
+            reason: None,
+            hint: None,
+        }
     }
 
     pub fn deny(reason: String, hint: String) -> Self {
-        Self { ok: false, reason: Some(reason), hint: Some(hint) }
+        Self {
+            ok: false,
+            reason: Some(reason),
+            hint: Some(hint),
+        }
     }
 }
 
@@ -74,7 +82,10 @@ pub fn check_repo_is_not_vault(repo_root: impl AsRef<Path>) -> VaultSanityResult
     if basename == ".codebus" || looks_like_vault(&resolved) {
         let parent = resolved.parent().map(Path::to_path_buf).unwrap_or_default();
         return VaultSanityResult::deny(
-            format!("--repo points at a codebus vault ({}), not a source repo.", resolved.display()),
+            format!(
+                "--repo points at a codebus vault ({}), not a source repo.",
+                resolved.display()
+            ),
             format!(
                 "Vaults live AT the source repo's .codebus/ subdir. Pass --repo {} (the parent).",
                 parent.display()
@@ -92,8 +103,15 @@ pub fn check_repo_is_not_vault(repo_root: impl AsRef<Path>) -> VaultSanityResult
         if name == ".codebus" && looks_like_vault(&c) {
             let parent = c.parent().map(Path::to_path_buf).unwrap_or_default();
             return VaultSanityResult::deny(
-                format!("--repo ({}) is inside a codebus vault at {}.", resolved.display(), c.display()),
-                format!("Pass --repo {} (the source repo containing the vault).", parent.display()),
+                format!(
+                    "--repo ({}) is inside a codebus vault at {}.",
+                    resolved.display(),
+                    c.display()
+                ),
+                format!(
+                    "Pass --repo {} (the source repo containing the vault).",
+                    parent.display()
+                ),
             );
         }
         cur = c.parent().map(Path::to_path_buf);

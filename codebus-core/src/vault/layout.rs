@@ -111,14 +111,20 @@ mod tests {
             .iter()
             .map(|p| p.file_name().unwrap().to_str().unwrap())
             .collect();
-        assert_eq!(folders, vec!["concepts", "entities", "modules", "processes", "synthesis"]);
+        assert_eq!(
+            folders,
+            vec!["concepts", "entities", "modules", "processes", "synthesis"]
+        );
     }
 
     #[test]
     fn folder_for_returns_each_type_bucket() {
         let p = vault_paths("/r");
         assert_eq!(p.folder_for(PageType::Concept), p.wiki_concepts.as_path());
-        assert_eq!(p.folder_for(PageType::Synthesis), p.wiki_synthesis.as_path());
+        assert_eq!(
+            p.folder_for(PageType::Synthesis),
+            p.wiki_synthesis.as_path()
+        );
     }
 
     #[test]

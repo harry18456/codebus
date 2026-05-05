@@ -47,7 +47,11 @@ pub fn parse_claude_stream_line(raw: &str) -> Vec<StreamEvent> {
 }
 
 fn parse_assistant_content(parsed: &Value) -> Vec<StreamEvent> {
-    let Some(items) = parsed.get("message").and_then(|m| m.get("content")).and_then(Value::as_array) else {
+    let Some(items) = parsed
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
         return Vec::new();
     };
     let mut events = Vec::with_capacity(items.len());
@@ -57,7 +61,9 @@ fn parse_assistant_content(parsed: &Value) -> Vec<StreamEvent> {
             Some("text") => {
                 if let Some(text) = item.get("text").and_then(Value::as_str) {
                     if !text.is_empty() {
-                        events.push(StreamEvent::Thought { text: text.to_string() });
+                        events.push(StreamEvent::Thought {
+                            text: text.to_string(),
+                        });
                     }
                 }
             }
@@ -78,7 +84,11 @@ fn parse_assistant_content(parsed: &Value) -> Vec<StreamEvent> {
 }
 
 fn parse_user_content(parsed: &Value) -> Vec<StreamEvent> {
-    let Some(items) = parsed.get("message").and_then(|m| m.get("content")).and_then(Value::as_array) else {
+    let Some(items) = parsed
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
         return Vec::new();
     };
     let mut events = Vec::with_capacity(items.len());
@@ -96,7 +106,10 @@ fn parse_user_content(parsed: &Value) -> Vec<StreamEvent> {
             Some(other) => other.to_string(),
             None => String::new(),
         };
-        let is_error = item.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+        let is_error = item
+            .get("is_error")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         events.push(StreamEvent::ToolResult { output, is_error });
     }
     events
@@ -116,7 +129,9 @@ mod tests {
         .to_string();
         assert_eq!(
             parse_claude_stream_line(&line),
-            vec![StreamEvent::Thought { text: "hello".into() }]
+            vec![StreamEvent::Thought {
+                text: "hello".into()
+            }]
         );
     }
 
@@ -129,7 +144,10 @@ mod tests {
         .to_string();
         assert_eq!(
             parse_claude_stream_line(&line),
-            vec![StreamEvent::ToolUse { name: "Read".into(), input: json!({ "path": "a" }) }]
+            vec![StreamEvent::ToolUse {
+                name: "Read".into(),
+                input: json!({ "path": "a" })
+            }]
         );
     }
 
@@ -142,7 +160,10 @@ mod tests {
         .to_string();
         assert_eq!(
             parse_claude_stream_line(&line),
-            vec![StreamEvent::ToolResult { output: "ok".into(), is_error: false }]
+            vec![StreamEvent::ToolResult {
+                output: "ok".into(),
+                is_error: false
+            }]
         );
     }
 
@@ -155,7 +176,10 @@ mod tests {
         .to_string();
         assert_eq!(
             parse_claude_stream_line(&line),
-            vec![StreamEvent::ToolResult { output: "fail".into(), is_error: true }]
+            vec![StreamEvent::ToolResult {
+                output: "fail".into(),
+                is_error: true
+            }]
         );
     }
 
@@ -175,8 +199,13 @@ mod tests {
         assert_eq!(
             parse_claude_stream_line(&line),
             vec![
-                StreamEvent::Thought { text: "visible".into() },
-                StreamEvent::ToolUse { name: "Grep".into(), input: json!({ "pattern": "x" }) },
+                StreamEvent::Thought {
+                    text: "visible".into()
+                },
+                StreamEvent::ToolUse {
+                    name: "Grep".into(),
+                    input: json!({ "pattern": "x" })
+                },
             ]
         );
     }
@@ -205,7 +234,8 @@ mod tests {
         // or non-array must NOT panic.
         let line = json!({ "type": "assistant", "message": {} }).to_string();
         assert_eq!(parse_claude_stream_line(&line), vec![]);
-        let line = json!({ "type": "assistant", "message": { "content": "not-an-array" } }).to_string();
+        let line =
+            json!({ "type": "assistant", "message": { "content": "not-an-array" } }).to_string();
         assert_eq!(parse_claude_stream_line(&line), vec![]);
     }
 
@@ -229,7 +259,10 @@ mod tests {
         .to_string();
         assert_eq!(
             parse_claude_stream_line(&line),
-            vec![StreamEvent::ToolUse { name: String::new(), input: json!({}) }]
+            vec![StreamEvent::ToolUse {
+                name: String::new(),
+                input: json!({})
+            }]
         );
     }
 }

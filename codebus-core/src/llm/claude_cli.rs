@@ -17,7 +17,7 @@
 //!   confirmed by spike E). No `--add-dir`: it widens, not narrows.
 
 use crate::llm::provider::{EventStream, InvokeOptions, LlmMode, LlmProvider, ProviderError};
-use crate::stream::{parse_claude_stream_line, StreamEvent};
+use crate::stream::{StreamEvent, parse_claude_stream_line};
 use futures_util::StreamExt;
 use std::path::Path;
 use std::process::Stdio;
@@ -34,7 +34,15 @@ pub const INGEST_EXTRA: &[&str] = &["Write", "Edit"];
 /// Tools that MUST never reach the agent under any mode. Sentinel set used
 /// by the iter-9 negative assertion test — if any of these ever appears in
 /// argv, the sandbox is broken.
-pub const FORBIDDEN_TOOLS: &[&str] = &["Bash", "WebFetch", "WebSearch", "TodoWrite", "NotebookEdit", "BashOutput", "KillShell"];
+pub const FORBIDDEN_TOOLS: &[&str] = &[
+    "Bash",
+    "WebFetch",
+    "WebSearch",
+    "TodoWrite",
+    "NotebookEdit",
+    "BashOutput",
+    "KillShell",
+];
 
 /// Build the argv passed to `claude -p`. Pure function; tests pin both the
 /// positive list (every allowed tool present) and the negative list (no
@@ -97,11 +105,15 @@ pub struct ClaudeCliProvider {
 
 impl ClaudeCliProvider {
     pub fn new() -> Self {
-        Self { binary: "claude".into() }
+        Self {
+            binary: "claude".into(),
+        }
     }
 
     pub fn with_binary(binary: impl Into<String>) -> Self {
-        Self { binary: binary.into() }
+        Self {
+            binary: binary.into(),
+        }
     }
 }
 
@@ -270,7 +282,11 @@ mod tests {
             "no token found",
             "please login first",
         ] {
-            assert_eq!(classify_exit(1, stderr), ExitVerdict::OauthNeeded, "stderr: {stderr}");
+            assert_eq!(
+                classify_exit(1, stderr),
+                ExitVerdict::OauthNeeded,
+                "stderr: {stderr}"
+            );
         }
     }
 
@@ -278,6 +294,9 @@ mod tests {
     fn unrelated_failure_is_generic_error() {
         assert_eq!(classify_exit(1, "Out of memory"), ExitVerdict::GenericError);
         assert_eq!(classify_exit(2, "syntax error"), ExitVerdict::GenericError);
-        assert_eq!(classify_exit(127, "command not found"), ExitVerdict::GenericError);
+        assert_eq!(
+            classify_exit(127, "command not found"),
+            ExitVerdict::GenericError
+        );
     }
 }

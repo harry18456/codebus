@@ -7,7 +7,14 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 const SPECIAL_FILES: &[&str] = &["index.md", "log.md"];
-const RECOGNIZED_ROOT_DIRS: &[&str] = &["concepts", "entities", "modules", "processes", "synthesis", "goals"];
+const RECOGNIZED_ROOT_DIRS: &[&str] = &[
+    "concepts",
+    "entities",
+    "modules",
+    "processes",
+    "synthesis",
+    "goals",
+];
 
 // Page-size thresholds per file type (bytes, strict greater-than). log.md is
 // unlimited — it grows by design.
@@ -26,8 +33,7 @@ static RELATED_STRIP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*\[\[([^\]]+)\]\]\s*$").unwrap());
 
 // Fenced code block (greedy across lines).
-static FENCED_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)```.*?```").unwrap());
+static FENCED_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)```.*?```").unwrap());
 
 // Inline code span — single line, no embedded backticks.
 static INLINE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`[^`\n]+`").unwrap());
@@ -54,11 +60,19 @@ fn strip_code_regions(content: &str) -> String {
     stripped.into_owned()
 }
 
-fn scan_body_wikilinks(content: &str, rel_path: &str, page_slugs: &HashSet<String>, issues: &mut Vec<LintIssue>) {
+fn scan_body_wikilinks(
+    content: &str,
+    rel_path: &str,
+    page_slugs: &HashSet<String>,
+    issues: &mut Vec<LintIssue>,
+) {
     let stripped = strip_code_regions(content);
     let mut seen = HashSet::new();
     for caps in BODY_WIKILINK_REGEX.captures_iter(&stripped) {
-        let slug = caps.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+        let slug = caps
+            .get(1)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
         if slug.is_empty() || !seen.insert(slug.clone()) {
             continue;
         }
@@ -110,7 +124,9 @@ fn check_page_size(rel_path: &str, content: &str, issues: &mut Vec<LintIssue>) {
 /// are not flagged. Files at root other than nav specials are handled by
 /// the existing root-page rule, not this scan.
 fn scan_unexpected_root_dirs(wiki_root: &Path, issues: &mut Vec<LintIssue>) {
-    let Ok(entries) = fs::read_dir(wiki_root) else { return };
+    let Ok(entries) = fs::read_dir(wiki_root) else {
+        return;
+    };
     for e in entries.flatten() {
         let name = match e.file_name().into_string() {
             Ok(s) => s,
@@ -137,7 +153,9 @@ fn scan_unexpected_root_dirs(wiki_root: &Path, issues: &mut Vec<LintIssue>) {
 }
 
 fn scan_type_folder_for_unexpected(folder_path: &Path, folder: &str, issues: &mut Vec<LintIssue>) {
-    let Ok(entries) = fs::read_dir(folder_path) else { return };
+    let Ok(entries) = fs::read_dir(folder_path) else {
+        return;
+    };
     for e in entries.flatten() {
         let name = match e.file_name().into_string() {
             Ok(s) => s,
@@ -194,7 +212,9 @@ pub fn lint_wiki(vault_root: impl AsRef<Path>) -> LintResult {
         // Unexpected-file scan happens here (per-type-folder readdir).
         scan_type_folder_for_unexpected(&folder_path, folder, &mut issues);
 
-        let Ok(rd) = fs::read_dir(&folder_path) else { continue };
+        let Ok(rd) = fs::read_dir(&folder_path) else {
+            continue;
+        };
         for e in rd.flatten() {
             let name = match e.file_name().into_string() {
                 Ok(s) => s,
@@ -305,7 +325,9 @@ pub fn lint_wiki(vault_root: impl AsRef<Path>) -> LintResult {
     // 4. Pages directly under wiki/ root (other than nav specials).
     if let Ok(rd) = fs::read_dir(&wiki_root) {
         for e in rd.flatten() {
-            let Ok(name) = e.file_name().into_string() else { continue };
+            let Ok(name) = e.file_name().into_string() else {
+                continue;
+            };
             let Ok(ft) = e.file_type() else { continue };
             if ft.is_file() && name.ends_with(".md") && !SPECIAL_FILES.contains(&name.as_str()) {
                 issues.push(LintIssue {
@@ -331,7 +353,9 @@ pub fn lint_wiki(vault_root: impl AsRef<Path>) -> LintResult {
             continue;
         }
         nav_files_scanned += 1;
-        let Ok(content) = fs::read_to_string(&full_path) else { continue };
+        let Ok(content) = fs::read_to_string(&full_path) else {
+            continue;
+        };
         check_page_size(sf, &content, &mut issues);
         scan_body_wikilinks(&content, sf, &page_slugs, &mut issues);
     }
@@ -340,9 +364,21 @@ pub fn lint_wiki(vault_root: impl AsRef<Path>) -> LintResult {
 }
 
 fn summarize(pages_scanned: usize, nav_files_scanned: usize, issues: Vec<LintIssue>) -> LintResult {
-    let error_count = issues.iter().filter(|i| i.severity == LintSeverity::Error).count();
-    let warn_count = issues.iter().filter(|i| i.severity == LintSeverity::Warn).count();
-    LintResult { pages_scanned, nav_files_scanned, issues, error_count, warn_count }
+    let error_count = issues
+        .iter()
+        .filter(|i| i.severity == LintSeverity::Error)
+        .count();
+    let warn_count = issues
+        .iter()
+        .filter(|i| i.severity == LintSeverity::Warn)
+        .count();
+    LintResult {
+        pages_scanned,
+        nav_files_scanned,
+        issues,
+        error_count,
+        warn_count,
+    }
 }
 
 #[cfg(test)]
@@ -352,7 +388,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp_vault(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("codebus-lint-{name}-{}-{}", std::process::id(), rand_suffix()));
+        let dir = std::env::temp_dir().join(format!(
+            "codebus-lint-{name}-{}-{}",
+            std::process::id(),
+            rand_suffix()
+        ));
         if dir.exists() {
             let _ = fs::remove_dir_all(&dir);
         }
@@ -369,7 +409,10 @@ mod tests {
 
     fn rand_suffix() -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
         format!("{nanos}")
     }
 
@@ -397,7 +440,11 @@ mod tests {
     }
 
     fn count(result: &LintResult, sev: LintSeverity, msg_substring: &str) -> usize {
-        result.issues.iter().filter(|i| i.severity == sev && i.message.contains(msg_substring)).count()
+        result
+            .issues
+            .iter()
+            .filter(|i| i.severity == sev && i.message.contains(msg_substring))
+            .count()
     }
 
     fn issues_for_path<'a>(result: &'a LintResult, path: &str) -> Vec<&'a LintIssue> {
@@ -412,7 +459,10 @@ mod tests {
         fs::write(v.join("wiki/test.md"), "---\ntitle: x\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-05'\nupdated: '2026-05-05'\nrelated: []\nstale: false\n---\n").unwrap();
         let r = lint_wiki(&v);
         let warns = issues_for_path(&r, "test.md");
-        assert!(warns.iter().any(|i| i.severity == LintSeverity::Warn && i.message.contains("page lives in wiki/ root")));
+        assert!(
+            warns.iter().any(|i| i.severity == LintSeverity::Warn
+                && i.message.contains("page lives in wiki/ root"))
+        );
         cleanup(&v);
     }
 
@@ -423,7 +473,11 @@ mod tests {
         let r = lint_wiki(&v);
         // No issue for foo.md other than possibly broken-wikilink (none here)
         let foo_issues = issues_for_path(&r, "concepts/foo.md");
-        assert!(foo_issues.iter().all(|i| !i.message.contains("type") || !i.message.contains("folder")));
+        assert!(
+            foo_issues
+                .iter()
+                .all(|i| !i.message.contains("type") || !i.message.contains("folder"))
+        );
         cleanup(&v);
     }
 
@@ -444,7 +498,11 @@ mod tests {
         fs::remove_file(v.join("wiki/index.md")).unwrap();
         let r = lint_wiki(&v);
         let warns = issues_for_path(&r, "index.md");
-        assert!(warns.iter().any(|i| i.severity == LintSeverity::Warn && i.message.contains("missing")));
+        assert!(
+            warns
+                .iter()
+                .any(|i| i.severity == LintSeverity::Warn && i.message.contains("missing"))
+        );
         cleanup(&v);
     }
 
@@ -454,7 +512,11 @@ mod tests {
         fs::remove_file(v.join("wiki/log.md")).unwrap();
         let r = lint_wiki(&v);
         let warns = issues_for_path(&r, "log.md");
-        assert!(warns.iter().any(|i| i.severity == LintSeverity::Warn && i.message.contains("missing")));
+        assert!(
+            warns
+                .iter()
+                .any(|i| i.severity == LintSeverity::Warn && i.message.contains("missing"))
+        );
         cleanup(&v);
     }
 
@@ -463,17 +525,30 @@ mod tests {
         let v = tmp_vault("missoverview");
         // overview.md is intentionally absent in tmp_vault
         let r = lint_wiki(&v);
-        assert!(r.issues.iter().all(|i| !(i.path == "overview.md" && i.message.contains("missing"))));
+        assert!(
+            r.issues
+                .iter()
+                .all(|i| !(i.path == "overview.md" && i.message.contains("missing")))
+        );
         cleanup(&v);
     }
 
     #[test]
     fn body_wikilink_to_nonexistent_slug_flagged_at_warn() {
         let v = tmp_vault("bodyghost");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), "see [[ghost]]");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &[]),
+            "see [[ghost]]",
+        );
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.md");
-        assert!(issues.iter().any(|i| i.severity == LintSeverity::Warn && i.message.contains("[[ghost]]")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.severity == LintSeverity::Warn && i.message.contains("[[ghost]]"))
+        );
         cleanup(&v);
     }
 
@@ -484,14 +559,25 @@ mod tests {
         frontmatter = frontmatter.replace("related: []", "related:\n  - 'broken-no-brackets'");
         write_page(&v, "concepts/foo.md", &frontmatter, "# foo");
         let r = lint_wiki(&v);
-        assert!(count(&r, LintSeverity::Error, "related[] entry not in [[wikilink]] format") > 0);
+        assert!(
+            count(
+                &r,
+                LintSeverity::Error,
+                "related[] entry not in [[wikilink]] format"
+            ) > 0
+        );
         cleanup(&v);
     }
 
     #[test]
     fn related_entry_to_missing_slug_is_error() {
         let v = tmp_vault("relmissing");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &["[[ghost]]"]), "# foo");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &["[[ghost]]"]),
+            "# foo",
+        );
         let r = lint_wiki(&v);
         assert!(count(&r, LintSeverity::Error, "broken wikilink in related") > 0);
         cleanup(&v);
@@ -500,7 +586,11 @@ mod tests {
     #[test]
     fn frontmatter_parse_failure_is_error() {
         let v = tmp_vault("fmparse");
-        fs::write(v.join("wiki/concepts/broken.md"), "---\n: : not yaml\n---\n").unwrap();
+        fs::write(
+            v.join("wiki/concepts/broken.md"),
+            "---\n: : not yaml\n---\n",
+        )
+        .unwrap();
         let r = lint_wiki(&v);
         assert!(count(&r, LintSeverity::Error, "frontmatter parse failed") > 0);
         cleanup(&v);
@@ -509,17 +599,30 @@ mod tests {
     #[test]
     fn body_wikilink_inside_inline_code_is_skipped() {
         let v = tmp_vault("inline");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), "use `[[wikilink]]` here");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &[]),
+            "use `[[wikilink]]` here",
+        );
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.md");
-        assert!(issues.is_empty(), "expected zero issues for inline-code wikilink, got {issues:?}");
+        assert!(
+            issues.is_empty(),
+            "expected zero issues for inline-code wikilink, got {issues:?}"
+        );
         cleanup(&v);
     }
 
     #[test]
     fn body_wikilink_inside_fenced_block_is_skipped() {
         let v = tmp_vault("fenced");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), "\n```\n[[ghost]]\n```\n");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &[]),
+            "\n```\n[[ghost]]\n```\n",
+        );
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.md");
         assert!(issues.is_empty());
@@ -529,8 +632,18 @@ mod tests {
     #[test]
     fn table_cell_wikilink_with_escaped_alias_resolves_to_bare_slug() {
         let v = tmp_vault("escape");
-        write_page(&v, "concepts/resolver-resolve.md", &fm("resolve", "concept", &[]), "# resolve");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), "| col | [[resolver-resolve\\|Resolver]] |");
+        write_page(
+            &v,
+            "concepts/resolver-resolve.md",
+            &fm("resolve", "concept", &[]),
+            "# resolve",
+        );
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &[]),
+            "| col | [[resolver-resolve\\|Resolver]] |",
+        );
         let r = lint_wiki(&v);
         let foo_issues = issues_for_path(&r, "concepts/foo.md");
         assert!(foo_issues.is_empty());
@@ -540,7 +653,12 @@ mod tests {
     #[test]
     fn table_cell_wikilink_with_escape_still_flags_broken_slug() {
         let v = tmp_vault("escapebroken");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), "| [[ghost\\|alias]] |");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &[]),
+            "| [[ghost\\|alias]] |",
+        );
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.md");
         assert!(issues.iter().any(|i| i.message.contains("[[ghost]]")));
@@ -553,7 +671,11 @@ mod tests {
         fs::write(v.join("wiki/index.md"), "see [[ghost]]").unwrap();
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "index.md");
-        assert!(issues.iter().any(|i| i.severity == LintSeverity::Warn && i.message.contains("[[ghost]]")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.severity == LintSeverity::Warn && i.message.contains("[[ghost]]"))
+        );
         cleanup(&v);
     }
 
@@ -586,7 +708,10 @@ mod tests {
         fs::write(v.join("wiki/index.md"), &big).unwrap();
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "index.md");
-        let oversized: Vec<_> = issues.iter().filter(|i| i.message.contains("oversize")).collect();
+        let oversized: Vec<_> = issues
+            .iter()
+            .filter(|i| i.message.contains("oversize"))
+            .collect();
         assert_eq!(oversized.len(), 1);
         assert!(oversized[0].message.contains("size 1500 bytes"));
         assert!(oversized[0].message.contains("threshold 1024 bytes"));
@@ -597,10 +722,18 @@ mod tests {
     fn oversized_synthesis_page_is_flagged() {
         let v = tmp_vault("synsize");
         let body = "x".repeat(5800);
-        write_page(&v, "synthesis/cart-flow.md", &fm("flow", "synthesis", &[]), &body);
+        write_page(
+            &v,
+            "synthesis/cart-flow.md",
+            &fm("flow", "synthesis", &[]),
+            &body,
+        );
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "synthesis/cart-flow.md");
-        let oversized: Vec<_> = issues.iter().filter(|i| i.message.contains("oversize")).collect();
+        let oversized: Vec<_> = issues
+            .iter()
+            .filter(|i| i.message.contains("oversize"))
+            .collect();
         assert_eq!(oversized.len(), 1);
         assert!(oversized[0].message.contains("threshold 5120 bytes"));
         cleanup(&v);
@@ -613,7 +746,10 @@ mod tests {
         write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), &body);
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.md");
-        let oversized: Vec<_> = issues.iter().filter(|i| i.message.contains("oversize")).collect();
+        let oversized: Vec<_> = issues
+            .iter()
+            .filter(|i| i.message.contains("oversize"))
+            .collect();
         assert_eq!(oversized.len(), 1);
         assert!(oversized[0].message.contains("threshold 8192 bytes"));
         cleanup(&v);
@@ -651,7 +787,12 @@ mod tests {
     #[test]
     fn page_below_threshold_is_not_flagged() {
         let v = tmp_vault("small");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), &"z".repeat(1000));
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &[]),
+            &"z".repeat(1000),
+        );
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.md");
         assert!(issues.iter().all(|i| !i.message.contains("oversize")));
@@ -666,7 +807,8 @@ mod tests {
         fs::write(v.join("wiki/concepts/foo.txt"), "not markdown").unwrap();
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.txt");
-        assert!(issues.iter().any(|i| i.severity == LintSeverity::Warn && i.message.contains("non-.md file in type folder")));
+        assert!(issues.iter().any(|i| i.severity == LintSeverity::Warn
+            && i.message.contains("non-.md file in type folder")));
         cleanup(&v);
     }
 
@@ -677,7 +819,11 @@ mod tests {
         fs::write(v.join("wiki/modules/legacy/old.md"), "x").unwrap();
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "modules/legacy");
-        assert!(issues.iter().any(|i| i.message.contains("nested sub-folder in type folder")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.message.contains("nested sub-folder in type folder"))
+        );
         cleanup(&v);
     }
 
@@ -687,7 +833,11 @@ mod tests {
         fs::create_dir_all(v.join("wiki/scratch")).unwrap();
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "scratch");
-        assert!(issues.iter().any(|i| i.message.contains("unrecognized folder under wiki/")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.message.contains("unrecognized folder under wiki/"))
+        );
         cleanup(&v);
     }
 
@@ -734,11 +884,19 @@ mod tests {
         // Legacy 5 warnings: 1 root-page (overview.md) + 4 broken body wikilinks.
         // Plus: any page-size or unexpected-file from the fixture state.
         assert_eq!(r.error_count, 0, "unexpected errors: {:?}", r.issues);
-        assert!(r.warn_count >= 5, "expected ≥5 warnings, got {}: {:#?}", r.warn_count, r.issues);
+        assert!(
+            r.warn_count >= 5,
+            "expected ≥5 warnings, got {}: {:#?}",
+            r.warn_count,
+            r.issues
+        );
         // Specifically: the 4 broken-body-wikilink warnings recorded in
         // tests/fixtures/uv-vault-snapshot/check-output.txt.
         let broken_body = count(&r, LintSeverity::Warn, "broken wikilink in body");
-        assert!(broken_body >= 4, "expected ≥4 broken body wikilinks, got {broken_body}");
+        assert!(
+            broken_body >= 4,
+            "expected ≥4 broken body wikilinks, got {broken_body}"
+        );
         // And the root-page warning for overview.md.
         let root_warn = count(&r, LintSeverity::Warn, "page lives in wiki/ root");
         assert_eq!(root_warn, 1);

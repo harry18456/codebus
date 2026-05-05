@@ -6,10 +6,10 @@ pub mod stale_detect;
 pub mod types;
 
 pub use date::utc_today_iso;
-pub use frontmatter::{parse_page, serialize_page, FrontmatterError};
+pub use frontmatter::{FrontmatterError, parse_page, serialize_page};
 pub use lint::lint_wiki;
 pub use page_merge::merge_page;
-pub use stale_detect::{detect_stale_sources, StaleResult};
+pub use stale_detect::{StaleResult, detect_stale_sources};
 pub use types::{
     LintIssue, LintResult, LintSeverity, PageFrontmatter, PageType, ParsedPage, SourceRef,
 };

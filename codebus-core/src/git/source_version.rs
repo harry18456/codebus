@@ -13,18 +13,28 @@ pub struct SourceVersion {
 pub fn get_source_version(repo_root: impl AsRef<Path>) -> SourceVersion {
     let repo_root = repo_root.as_ref();
     if !repo_root.join(".git").exists() {
-        return SourceVersion { commit: None, uncommitted: false };
+        return SourceVersion {
+            commit: None,
+            uncommitted: false,
+        };
     }
 
     let commit = run_git(repo_root, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string());
     let status = run_git(repo_root, &["status", "--porcelain"]).unwrap_or_default();
     let uncommitted = !status.trim().is_empty();
 
-    SourceVersion { commit, uncommitted }
+    SourceVersion {
+        commit,
+        uncommitted,
+    }
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git").current_dir(cwd).args(args).output().ok()?;
+    let out = Command::new("git")
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -38,7 +48,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("codebus-srcver-{name}-{}-{}", std::process::id(), nanos()));
+        let p = std::env::temp_dir().join(format!(
+            "codebus-srcver-{name}-{}-{}",
+            std::process::id(),
+            nanos()
+        ));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p
@@ -46,12 +60,23 @@ mod tests {
 
     fn nanos() -> u32 {
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
     }
 
     fn run(cwd: &Path, args: &[&str]) {
-        let out = Command::new("git").current_dir(cwd).args(args).output().expect("git command");
-        assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+        let out = Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .expect("git command");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     fn init_repo(p: &Path) {
@@ -77,7 +102,11 @@ mod tests {
         run(&p, &["add", "."]);
         run(&p, &["commit", "-m", "init", "-q"]);
         let v = get_source_version(&p);
-        assert!(v.commit.as_deref().map(|s| s.len() == 40).unwrap_or(false), "expected 40-char sha, got {:?}", v.commit);
+        assert!(
+            v.commit.as_deref().map(|s| s.len() == 40).unwrap_or(false),
+            "expected 40-char sha, got {:?}",
+            v.commit
+        );
         assert_eq!(v.uncommitted, false);
         let _ = fs::remove_dir_all(&p);
     }

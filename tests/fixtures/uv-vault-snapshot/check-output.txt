@@ -1,8 +1,13 @@
-# 14 pages + 2 nav files scanned, 0 error(s), 5 warning(s)
+# 14 pages + 2 nav files scanned, 0 error(s), 8 warning(s)
 
+! wiki/processes/resolver-resolve.md
+   warn:  oversize page (size 9690 bytes, threshold 8192 bytes) — split or extract sub-page
+! wiki/processes/wheel-install-pipeline.md
+   warn:  oversize page (size 11921 bytes, threshold 8192 bytes) — split or extract sub-page
 ! wiki/overview.md
    warn:  page lives in wiki/ root — schema §3 expects wiki/<type>/overview.md (one of: concepts, entities, modules, processes, synthesis)
 ! wiki/index.md
+   warn:  oversize page (size 2193 bytes, threshold 1024 bytes) — split or extract sub-page
    warn:  broken wikilink in body: [[uv-cache-key-design]] (no page named uv-cache-key-design.md in any wiki/<type>/ folder)
    warn:  broken wikilink in body: [[uv-cache-info-and-uv-cache-key]] (no page named uv-cache-info-and-uv-cache-key.md in any wiki/<type>/ folder)
    warn:  broken wikilink in body: [[uv-resolver-core-api]] (no page named uv-resolver-core-api.md in any wiki/<type>/ folder)

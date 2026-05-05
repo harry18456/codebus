@@ -144,7 +144,11 @@ mod tests {
 
     #[test]
     fn source_ref_skips_none_fields_on_serialize() {
-        let s = SourceRef { path: "src/a.rs".into(), sha256: None, at_commit: None };
+        let s = SourceRef {
+            path: "src/a.rs".into(),
+            sha256: None,
+            at_commit: None,
+        };
         let yaml = serde_yaml::to_string(&s).unwrap();
         assert!(yaml.contains("path:"));
         assert!(!yaml.contains("sha256"));

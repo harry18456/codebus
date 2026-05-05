@@ -44,7 +44,9 @@ mod tests {
         assert!(CODEBUS_SCHEMA.contains("\"[["));
         let lower = CODEBUS_SCHEMA.to_lowercase();
         assert!(
-            lower.contains("quote") || CODEBUS_SCHEMA.contains("引號") || CODEBUS_SCHEMA.contains("MUST quote"),
+            lower.contains("quote")
+                || CODEBUS_SCHEMA.contains("引號")
+                || CODEBUS_SCHEMA.contains("MUST quote"),
             "schema must instruct YAML quoting for wikilinks"
         );
     }
@@ -52,7 +54,10 @@ mod tests {
     #[test]
     fn instructs_only_path_in_sources() {
         let lower = CODEBUS_SCHEMA.to_lowercase();
-        assert!(lower.contains("only fill"), "schema must say only fill path");
+        assert!(
+            lower.contains("only fill"),
+            "schema must say only fill path"
+        );
         assert!(lower.contains("path"));
         assert!(lower.contains("sha256"));
         assert!(lower.contains("auto-fill"));

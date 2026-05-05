@@ -97,7 +97,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("codebus-raw-{name}-{}-{}", std::process::id(), nanos()));
+        let p = std::env::temp_dir().join(format!(
+            "codebus-raw-{name}-{}-{}",
+            std::process::id(),
+            nanos()
+        ));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p
@@ -105,7 +109,10 @@ mod tests {
 
     fn nanos() -> u32 {
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
     }
 
     fn write(p: &Path, content: &str) {

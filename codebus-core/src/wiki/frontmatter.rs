@@ -25,7 +25,10 @@ impl fmt::Display for FrontmatterError {
                 write!(f, "Missing required field in frontmatter: {field}")
             }
             FrontmatterError::InvalidPageType(t) => {
-                write!(f, "Invalid page type: {t} (must be one of concept|entity|module|process|synthesis)")
+                write!(
+                    f,
+                    "Invalid page type: {t} (must be one of concept|entity|module|process|synthesis)"
+                )
             }
         }
     }
@@ -63,8 +66,8 @@ pub fn parse_page(content: &str) -> Result<ParsedPage, FrontmatterError> {
     // Closing delimiter is `---` on its own line. Search for `\n---\n`,
     // `\n---\r\n`, or `\n---` immediately followed by EOF. Eat the leading
     // `\n` as part of the close delim (so yaml ends with no trailing nl).
-    let (yaml, body) = split_at_closing(after_open)
-        .ok_or(FrontmatterError::MissingClosingDelimiter)?;
+    let (yaml, body) =
+        split_at_closing(after_open).ok_or(FrontmatterError::MissingClosingDelimiter)?;
 
     let raw: RawFrontmatter = serde_yaml::from_str(yaml).map_err(FrontmatterError::YamlParse)?;
 
@@ -144,7 +147,10 @@ fn split_at_closing(s: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn required_string(v: &Option<serde_yaml::Value>, field: &'static str) -> Result<String, FrontmatterError> {
+fn required_string(
+    v: &Option<serde_yaml::Value>,
+    field: &'static str,
+) -> Result<String, FrontmatterError> {
     match v {
         Some(serde_yaml::Value::String(s)) => Ok(s.clone()),
         Some(other) => Ok(yaml_value_to_string(other)),
@@ -161,15 +167,22 @@ fn yaml_value_to_string(v: &serde_yaml::Value) -> String {
         // For sequences/mappings we fall back to a YAML serialization;
         // TS coerces via String(...) which would give "[object Object]"
         // for objects but we never hit that path for the documented schema.
-        _ => serde_yaml::to_string(v).unwrap_or_default().trim().to_string(),
+        _ => serde_yaml::to_string(v)
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
     }
 }
 
 fn normalize_sources(v: &Option<serde_yaml::Value>) -> Vec<SourceRef> {
-    let Some(serde_yaml::Value::Sequence(seq)) = v else { return Vec::new() };
+    let Some(serde_yaml::Value::Sequence(seq)) = v else {
+        return Vec::new();
+    };
     seq.iter()
         .filter_map(|entry| {
-            let serde_yaml::Value::Mapping(map) = entry else { return None };
+            let serde_yaml::Value::Mapping(map) = entry else {
+                return None;
+            };
             let path = map
                 .get(serde_yaml::Value::String("path".into()))
                 .and_then(|p| p.as_str())
@@ -184,15 +197,24 @@ fn normalize_sources(v: &Option<serde_yaml::Value>) -> Vec<SourceRef> {
                 .and_then(|p| p.as_str())
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string());
-            Some(SourceRef { path, sha256, at_commit })
+            Some(SourceRef {
+                path,
+                sha256,
+                at_commit,
+            })
         })
         .collect()
 }
 
-fn normalize_string_list(v: &Option<serde_yaml::Value>, field: &'static str) -> Result<Vec<String>, FrontmatterError> {
+fn normalize_string_list(
+    v: &Option<serde_yaml::Value>,
+    field: &'static str,
+) -> Result<Vec<String>, FrontmatterError> {
     match v {
         None => Err(FrontmatterError::MissingRequiredField(field)),
-        Some(serde_yaml::Value::Sequence(seq)) => Ok(seq.iter().map(yaml_value_to_string).collect()),
+        Some(serde_yaml::Value::Sequence(seq)) => {
+            Ok(seq.iter().map(yaml_value_to_string).collect())
+        }
         Some(_) => Ok(Vec::new()),
     }
 }
@@ -231,9 +253,8 @@ mod tests {
                     continue;
                 }
                 let content = fs::read_to_string(entry.path()).unwrap();
-                let parsed = parse_page(&content).unwrap_or_else(|e| {
-                    panic!("failed to parse {:?}: {e}", entry.path())
-                });
+                let parsed = parse_page(&content)
+                    .unwrap_or_else(|e| panic!("failed to parse {:?}: {e}", entry.path()));
                 assert!(!parsed.frontmatter.title.is_empty());
                 assert!(!parsed.frontmatter.created.is_empty());
                 assert!(!parsed.frontmatter.updated.is_empty());
@@ -247,7 +268,11 @@ mod tests {
     fn body_preserves_leading_newline_after_closing_delim() {
         let content = "---\ntitle: X\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-05'\nupdated: '2026-05-05'\nrelated: []\nstale: false\n---\n\n# heading\n";
         let parsed = parse_page(content).unwrap();
-        assert!(parsed.body.starts_with('\n'), "body should start with the post-delimiter newline, got: {:?}", &parsed.body);
+        assert!(
+            parsed.body.starts_with('\n'),
+            "body should start with the post-delimiter newline, got: {:?}",
+            &parsed.body
+        );
         assert!(parsed.body.contains("# heading"));
     }
 
@@ -268,12 +293,23 @@ mod tests {
                 let parsed = parse_page(&content).unwrap();
                 let reserialized = serialize_page(&parsed.frontmatter, &parsed.body);
                 let reparsed = parse_page(&reserialized).unwrap_or_else(|e| {
-                    panic!("reparse failed for {:?}: {e}\nreserialized:\n{reserialized}", entry.path())
+                    panic!(
+                        "reparse failed for {:?}: {e}\nreserialized:\n{reserialized}",
+                        entry.path()
+                    )
                 });
-                assert_eq!(parsed.frontmatter, reparsed.frontmatter,
-                    "roundtrip frontmatter mismatch for {:?}", entry.path());
-                assert_eq!(parsed.body, reparsed.body,
-                    "roundtrip body mismatch for {:?}", entry.path());
+                assert_eq!(
+                    parsed.frontmatter,
+                    reparsed.frontmatter,
+                    "roundtrip frontmatter mismatch for {:?}",
+                    entry.path()
+                );
+                assert_eq!(
+                    parsed.body,
+                    reparsed.body,
+                    "roundtrip body mismatch for {:?}",
+                    entry.path()
+                );
             }
         }
     }
@@ -328,7 +364,10 @@ mod tests {
     fn related_with_quoted_wikilinks_parses_to_bracketed_strings() {
         let content = "---\ntitle: x\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-05'\nupdated: '2026-05-05'\nrelated:\n  - '[[a]]'\n  - '[[b]]'\nstale: false\n---\n";
         let p = parse_page(content).unwrap();
-        assert_eq!(p.frontmatter.related, vec!["[[a]]".to_string(), "[[b]]".to_string()]);
+        assert_eq!(
+            p.frontmatter.related,
+            vec!["[[a]]".to_string(), "[[b]]".to_string()]
+        );
     }
 
     #[test]
