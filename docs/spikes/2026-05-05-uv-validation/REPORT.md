@@ -75,7 +75,7 @@ Both bugs are deterministic regex issues, not "AI literacy" gaps. Fix scope per 
 | 2 | **Lint Bug A** — `[[…]]` inside backticks falsely flagged | Low (1 warn typically) | ~10 LoC + 2 tests in lint.ts | Lint hygiene |
 | 3 | **Page-merge bias too weak** — schema doesn't drive incremental update of existing concepts | Medium (defeats Karpathy "incremental wiki" promise) | Schema language tightening + new section in CLAUDE.md template | Concern 2 |
 | 4 | **index.md size cap** — full file enters every system prompt, grows linearly with pages | Medium (eats context window over time) | Goal: design TOC/abstract OR truncation policy; impl: change goal.ts system prompt composition | Concern 2 |
-| 5 | **Incremental raw-sync** — full re-copy on every goal | Low-Medium (wasted I/O, slow on HDD) | mtime/hash skip in `syncRepoToRaw` | Concern 2 |
+| 5 | **Incremental raw-sync** — full re-copy on every goal | Low-Medium (wasted I/O, slow on HDD) | mtime/hash skip in `syncRepoToRaw` + free-space preflight (`statfs` source size vs free; abort with typed error before partial copy) | Concern 2 |
 | 6 | **`--debug` flag not wired** — declared but no effect | Low (blocks token-cost instrumentation) | Wire `--debug` to dump raw stream-json to file in `.codebus/output/` | Tooling |
 
 Items 1+2 can be one change (`lint-markdown-aware-scan`). Items 3+4 belong together (`schema-drift-prevention` or similar). Item 5 standalone. Item 6 standalone.
