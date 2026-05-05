@@ -13,3 +13,7 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+# Live spike transcripts may contain external repo source content;
+# only the meta-docs (observations.md, REPORT.md) are tracked.
+docs/spikes/*/transcripts/
