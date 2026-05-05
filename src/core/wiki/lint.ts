@@ -34,7 +34,11 @@ const PAGE_FOLDER_NAMES = Object.values(PAGE_TYPE_FOLDERS)
 
 // Body wikilink regex — matches [[slug]], [[slug|display]], [[slug#heading]],
 // [[slug#heading|display]]; captures slug only.
-const BODY_WIKILINK_REGEX = /\[\[([^\]|#\s]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g
+// The slug class excludes the backslash so that markdown table escapes
+// `[[slug\|alias]]` parse with slug=`slug` (not `slug\`); the alias separator
+// then accepts either `|` or `\|`, the latter being the standard table-cell
+// escape for the column delimiter.
+const BODY_WIKILINK_REGEX = /\[\[([^\]|#\s\\]+)(?:#[^\]|]+)?(?:\\?\|[^\]]+)?\]\]/g
 
 // Strip [[ ]] from a related[] entry to get the bare slug. Tolerant of
 // whitespace because YAML parsers may keep surrounding whitespace.
@@ -48,6 +52,18 @@ interface PageEntry {
   fullPath: string
 }
 
+// Strip markdown code regions (fenced blocks first, then inline spans) so
+// that [[wikilink]] occurrences inside them are not scanned. Obsidian renders
+// these regions as literal text. Order matters: fenced is removed before
+// inline so a triple-backtick fence's interior single backticks cannot
+// confuse the inline pass. Out of scope per Non-Goals: 4-space indent code
+// blocks, HTML <code> tags, multi-line inline spans.
+function stripCodeRegions(content: string): string {
+  return content
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`\n]+`/g, '')
+}
+
 // Scan a body of markdown text for [[wikilink]] occurrences, push a warn
 // for any slug not in the catalog. Used by both knowledge-page bodies and
 // nav-file bodies (which have no frontmatter to strip).
@@ -57,8 +73,9 @@ function scanBodyWikilinks(
   pageSlugs: Set<string>,
   issues: LintIssue[]
 ): void {
+  const stripped = stripCodeRegions(content)
   const seen = new Set<string>()
-  for (const m of content.matchAll(BODY_WIKILINK_REGEX)) {
+  for (const m of stripped.matchAll(BODY_WIKILINK_REGEX)) {
     const slug = m[1].trim()
     if (seen.has(slug)) continue
     seen.add(slug)

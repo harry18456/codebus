@@ -291,4 +291,69 @@ describe('lintWiki', () => {
     expect(result.pagesScanned).toBe(3)
     expect(result.navFilesScanned).toBe(2)
   })
+
+  it('does not flag wikilink inside inline code', async () => {
+    // Backtick-delimited inline code renders as literal text in Obsidian;
+    // [[wikilink]] inside such a span must not be scanned as a reference.
+    writeFileSync(
+      join(vault, 'wiki', 'concepts', 'a.md'),
+      validPage({ title: 'A', body: '透過 `[[wikilink]]` 互相串接' })
+    )
+    const result = await lintWiki(vault)
+    expect(result.errorCount).toBe(0)
+    expect(result.warnCount).toBe(0)
+  })
+
+  it('does not flag wikilink inside fenced code block', async () => {
+    writeFileSync(
+      join(vault, 'wiki', 'concepts', 'a.md'),
+      validPage({ title: 'A', body: '```\n[[ghost]]\n```' })
+    )
+    const result = await lintWiki(vault)
+    expect(result.errorCount).toBe(0)
+    expect(result.warnCount).toBe(0)
+  })
+
+  it('resolves table-cell wikilink with escaped alias separator', async () => {
+    // Markdown table escape `\|` prevents pipe collision with the column
+    // delimiter; Obsidian parses [[slug\|alias]] as slug=`slug`, alias=`alias`.
+    writeFileSync(
+      join(vault, 'wiki', 'concepts', 'a.md'),
+      validPage({ title: 'A', body: '| Entry | [[other-page\\|顯示名]] |\n' })
+    )
+    writeFileSync(
+      join(vault, 'wiki', 'concepts', 'other-page.md'),
+      validPage({ title: 'Other' })
+    )
+    const result = await lintWiki(vault)
+    expect(result.errorCount).toBe(0)
+    expect(result.warnCount).toBe(0)
+  })
+
+  it('table-cell wikilink with escaped separator still flags broken slug', async () => {
+    writeFileSync(
+      join(vault, 'wiki', 'concepts', 'a.md'),
+      validPage({ title: 'A', body: '| Entry | [[ghost\\|alias]] |\n' })
+    )
+    const result = await lintWiki(vault)
+    expect(result.warnCount).toBe(1)
+    const issue = result.issues.find((i) => i.severity === 'warn')!
+    expect(issue.message).toContain('broken wikilink in body')
+    expect(issue.message).toContain('[[ghost]]')
+    expect(issue.message).not.toContain('ghost\\')
+  })
+
+  it('regression: plain [[slug]] still resolves and is not affected by markdown-aware changes', async () => {
+    writeFileSync(
+      join(vault, 'wiki', 'concepts', 'a.md'),
+      validPage({ title: 'A', body: 'See [[checkout-flow]] for details.' })
+    )
+    writeFileSync(
+      join(vault, 'wiki', 'processes', 'checkout-flow.md'),
+      validPage({ title: 'Checkout', type: 'process' })
+    )
+    const result = await lintWiki(vault)
+    expect(result.errorCount).toBe(0)
+    expect(result.warnCount).toBe(0)
+  })
 })
