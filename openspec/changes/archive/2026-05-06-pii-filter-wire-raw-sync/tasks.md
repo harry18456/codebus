@@ -34,5 +34,5 @@
 ## 7. Final commit + archive
 
 - [x] 7.1 Cool-down：用自己 `patterns_extra` 設 `INTERNAL-\d{6}` 之類 marker、放到測試 repo 中、跑 codebus 確認真的偵測到（驗證 patterns_extra 端到端）
-- [ ] 7.2 Final commit：`feat(pii): wire RegexBasicScanner into raw_sync with three on_hit modes`（單一 commit；如 cool-down 期間發現 regression，依 design 的 **Rollback 策略**：`git revert <hash>` 回前一 commit）
-- [ ] 7.3 `spectra archive pii-filter-wire-raw-sync`
+- [x] 7.2 Final commit：`feat(pii): wire RegexBasicScanner into raw_sync with three on_hit modes`（單一 commit；如 cool-down 期間發現 regression，依 design 的 **Rollback 策略**：`git revert <hash>` 回前一 commit）
+- [x] 7.3 `spectra archive pii-filter-wire-raw-sync`
