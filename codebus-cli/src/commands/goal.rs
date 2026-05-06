@@ -135,14 +135,7 @@ pub async fn run_goal(
 
         if !opts.fix_disabled {
             // Spec: "Goal flow auto-runs lint_and_fix after ingest completes".
-            // Best-effort — fix-loop errors are surfaced via stderr but do
-            // not block the surrounding goal flow's auto_commit.
-            match lint_and_fix(&p.root, opts.provider, opts.fix_max_iterations).await {
-                Ok(_report) => {}
-                Err(e) => {
-                    eprintln!("warning: lint fix loop errored ({e}); continuing");
-                }
-            }
+            lint_and_fix(&p.root, opts.provider, opts.fix_max_iterations).await?;
             // Re-lint so RunGoalResult.lint reflects the user-visible
             // post-fix state.
             final_lint = lint_wiki(&p.root);

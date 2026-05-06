@@ -63,12 +63,7 @@ pub async fn run_fix(
 
     let result: io::Result<RunFixResult> = (async {
         let pre_lint = lint_wiki(&p.root);
-        match lint_and_fix(&p.root, opts.provider, opts.fix_max_iterations).await {
-            Ok(_report) => {}
-            Err(e) => {
-                eprintln!("warning: lint fix loop errored ({e}); continuing");
-            }
-        }
+        lint_and_fix(&p.root, opts.provider, opts.fix_max_iterations).await?;
         let post_lint = lint_wiki(&p.root);
 
         // Spec: "--fix mode commits its results to the nested vault git
