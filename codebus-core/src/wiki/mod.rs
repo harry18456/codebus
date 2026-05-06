@@ -1,4 +1,5 @@
 pub mod date;
+pub mod fix;
 pub mod frontmatter;
 pub mod lint;
 pub mod page_merge;

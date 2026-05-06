@@ -17,7 +17,8 @@
 //! parsed [`GlobalConfig`] without needing to capture stderr.
 
 use crate::config::schema::{
-    EmojiMode, GlobalConfig, LintConfig, LlmConfig, LogConfig, PiiConfig, RenderConfig,
+    AutoFixConfig, EmojiMode, GlobalConfig, LintConfig, LlmConfig, LogConfig, PiiConfig,
+    RenderConfig,
 };
 use crate::llm::ProviderKind;
 use crate::log::SinkKind;
@@ -260,10 +261,39 @@ fn parse_lint(v: &Value) -> Option<LintConfig> {
                 None if matches!(val, Value::Null) => {} // explicit null = unset
                 None => warn_type_mismatch("lint.custom_rules_dir", "string", val),
             },
+            "auto_fix" => out.auto_fix = parse_auto_fix(val),
             _ => {}
         }
     }
     Some(out)
+}
+
+fn parse_auto_fix(v: &Value) -> AutoFixConfig {
+    let Value::Mapping(map) = v else {
+        if !matches!(v, Value::Null) {
+            warn_type_mismatch("lint.auto_fix", "mapping", v);
+        }
+        return AutoFixConfig::default();
+    };
+    let mut out = AutoFixConfig::default();
+    for (k, val) in map {
+        let Some(key) = k.as_str() else { continue };
+        match key {
+            "enabled" => match val.as_bool() {
+                Some(b) => out.enabled = b,
+                None => warn_type_mismatch("lint.auto_fix.enabled", "bool", val),
+            },
+            "max_iterations" => match val.as_u64() {
+                Some(n) => out.max_iterations = n as u32,
+                None => {
+                    warn_type_mismatch("lint.auto_fix.max_iterations", "non-negative integer", val)
+                }
+            },
+            // Forward-compat: unknown sub-fields silently ignored.
+            _ => {}
+        }
+    }
+    out
 }
 
 fn parse_render(v: &Value) -> Option<RenderConfig> {
@@ -481,6 +511,67 @@ mod tests {
         let cfg = load_config_from_path(&p);
         let lint = cfg.lint.expect("lint parsed");
         assert_eq!(lint.disabled_rules, vec!["oversize-page"]);
+        cleanup(&p);
+    }
+
+    // === lint-feedback-loop: lint.auto_fix parsing ===
+
+    #[test]
+    fn lint_section_without_auto_fix_falls_through_to_default() {
+        // Spec scenario: "Default config enables fix with max iterations five"
+        // — even when the lint section is otherwise present, an absent
+        // auto_fix sub-section yields the agentic default.
+        let p = write_tmp(
+            "noautofix",
+            "lint:\n  disabled_rules:\n    - oversize-page\n",
+        );
+        let cfg = load_config_from_path(&p);
+        let lint = cfg.lint.expect("lint parsed");
+        assert!(lint.auto_fix.enabled);
+        assert_eq!(lint.auto_fix.max_iterations, 5);
+        cleanup(&p);
+    }
+
+    #[test]
+    fn lint_auto_fix_explicit_values_parse() {
+        // Explicit override: enabled=false, max_iterations=10.
+        let p = write_tmp(
+            "autofixexplicit",
+            "lint:\n  auto_fix:\n    enabled: false\n    max_iterations: 10\n",
+        );
+        let cfg = load_config_from_path(&p);
+        let lint = cfg.lint.expect("lint parsed");
+        assert!(!lint.auto_fix.enabled);
+        assert_eq!(lint.auto_fix.max_iterations, 10);
+        cleanup(&p);
+    }
+
+    #[test]
+    fn lint_auto_fix_type_mismatch_falls_back_to_default_field() {
+        // Tolerance contract: type-mismatched sub-field warns and treats
+        // that field as unset (default kicks in for the bad field).
+        let p = write_tmp(
+            "autofixbad",
+            "lint:\n  auto_fix:\n    enabled: true\n    max_iterations: 'twenty'\n",
+        );
+        let cfg = load_config_from_path(&p);
+        let lint = cfg.lint.expect("lint parsed");
+        assert!(lint.auto_fix.enabled);
+        assert_eq!(lint.auto_fix.max_iterations, 5);
+        cleanup(&p);
+    }
+
+    #[test]
+    fn lint_auto_fix_unknown_subfield_silently_ignored() {
+        // Forward-compat: future fields like `prompt_style` should not break
+        // existing parsing.
+        let p = write_tmp(
+            "autofixfut",
+            "lint:\n  auto_fix:\n    enabled: false\n    future_unknown: 'x'\n",
+        );
+        let cfg = load_config_from_path(&p);
+        let lint = cfg.lint.expect("lint parsed");
+        assert!(!lint.auto_fix.enabled);
         cleanup(&p);
     }
 

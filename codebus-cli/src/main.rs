@@ -13,7 +13,7 @@ use std::process::ExitCode;
 
 mod commands;
 
-use commands::{check, goal, init, query};
+use commands::{check, fix, goal, init, query};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -37,6 +37,19 @@ struct Cli {
     /// Lint vault wiki/ for Obsidian compatibility (read-only).
     #[arg(long)]
     check: bool,
+
+    /// Run lint feedback loop against the vault without ingest. Targets
+    /// existing vaults; errors out when `<repo>/.codebus/` doesn't exist.
+    #[arg(long)]
+    fix: bool,
+
+    /// Skip the auto-fix step (overrides `lint.auto_fix.enabled`).
+    #[arg(long = "no-fix")]
+    no_fix: bool,
+
+    /// Override the fix-loop max iteration count for this invocation.
+    #[arg(long = "fix-max-iter")]
+    fix_max_iter: Option<u32>,
 
     /// Verbose stream-json output (debug aid).
     #[arg(long)]
@@ -155,17 +168,52 @@ async fn dispatch(
         return run_check_cmd(&repo, render_opts).await;
     }
 
+    let (fix_disabled, fix_max_iterations) = resolve_fix_config(cli.no_fix, cli.fix_max_iter, &cfg);
+
+    if cli.fix {
+        return run_fix_cmd(&repo, render_opts, &cfg, fix_disabled, fix_max_iterations).await;
+    }
+
     if cli.goal.is_none() && cli.query.is_none() {
         return run_init_cmd(&repo, render_opts).await;
     }
 
     if let Some(g) = cli.goal {
-        return run_goal_cmd(&repo, &g, render_opts, &cfg).await;
+        return run_goal_cmd(
+            &repo,
+            &g,
+            render_opts,
+            &cfg,
+            fix_disabled,
+            fix_max_iterations,
+        )
+        .await;
     }
     if let Some(q) = cli.query {
         return run_query_cmd(&repo, &q, render_opts, &cfg).await;
     }
     ExitCode::from(0)
+}
+
+/// Resolve the effective fix-loop policy by combining CLI overrides with
+/// the global config. Used by both the goal flow and the standalone
+/// `--fix` mode so they share one policy.
+///
+/// Rules (spec scenarios):
+/// - `--no-fix` wins over `--fix-max-iter` (the latter is moot when the
+///   loop is disabled).
+/// - `--fix-max-iter` overrides `lint.auto_fix.max_iterations` when supplied.
+/// - Default config (no `lint.auto_fix` section) yields
+///   `(fix_disabled = false, max_iterations = 5)`.
+fn resolve_fix_config(
+    no_fix_cli: bool,
+    fix_max_iter_cli: Option<u32>,
+    cfg: &GlobalConfig,
+) -> (bool, u32) {
+    let auto_fix = cfg.lint.as_ref().map(|l| l.auto_fix).unwrap_or_default();
+    let fix_disabled = no_fix_cli || !auto_fix.enabled;
+    let max_iterations = fix_max_iter_cli.unwrap_or(auto_fix.max_iterations);
+    (fix_disabled, max_iterations)
 }
 
 /// Build a [`ProviderConfig`] from a [`GlobalConfig`]. `cfg.llm == None`
@@ -201,6 +249,67 @@ fn scanner_config_from(cfg: &GlobalConfig) -> ScannerConfig {
         sc.patterns_extra = pii.patterns_extra.clone();
     }
     sc
+}
+
+async fn run_fix_cmd(
+    repo: &PathBuf,
+    render_opts: RenderOptions,
+    cfg: &GlobalConfig,
+    fix_disabled: bool,
+    fix_max_iterations: u32,
+) -> ExitCode {
+    let mut renderer = TerminalRenderer::new(render_opts);
+    use codebus_core::render::EventRenderer;
+    renderer.render_banner(&Banner::Start {
+        path: &repo.to_string_lossy(),
+    });
+
+    if fix_disabled {
+        // Spec: "--no-fix wins when both flags are present" and the
+        // user-facing semantics for `--fix --no-fix` should be: short-
+        // circuit politely rather than running the loop and committing
+        // an empty fix-loop run.
+        eprintln!("info: --no-fix supplied; fix loop skipped");
+        return ExitCode::from(0);
+    }
+
+    let provider = match build_provider(provider_config_from(cfg)) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let mut log_sink = NullSink::new();
+    let result = match fix::run_fix(
+        fix::RunFixOptions {
+            repo_root: repo,
+            provider: provider.as_ref(),
+            fix_max_iterations,
+        },
+        &mut renderer,
+        &mut log_sink,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let wiki_path = format!("{}/.codebus/wiki", repo.display()).replace('\\', "/");
+    renderer.render_banner(&Banner::Done {
+        wiki_path: &wiki_path,
+    });
+    let pre = result.pre_lint.issues.len();
+    let post = result.post_lint.issues.len();
+    if pre != post {
+        eprintln!("info: lint fix loop reduced issues {pre} -> {post}");
+    }
+    renderer.render_lint_summary(&result.post_lint);
+    ExitCode::from(0)
 }
 
 async fn run_check_cmd(repo: &PathBuf, render_opts: RenderOptions) -> ExitCode {
@@ -244,6 +353,8 @@ async fn run_goal_cmd(
     goal_text: &str,
     render_opts: RenderOptions,
     cfg: &GlobalConfig,
+    fix_disabled: bool,
+    fix_max_iterations: u32,
 ) -> ExitCode {
     let mut renderer = TerminalRenderer::new(render_opts);
     use codebus_core::render::EventRenderer;
@@ -279,6 +390,8 @@ async fn run_goal_cmd(
             provider: provider.as_ref(),
             pii_scanner: pii_scanner.as_ref(),
             pii_on_hit,
+            fix_disabled,
+            fix_max_iterations,
         },
         &mut renderer,
         &mut log_sink,
@@ -347,7 +460,7 @@ async fn run_query_cmd(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codebus_core::config::PiiConfig;
+    use codebus_core::config::{AutoFixConfig, LintConfig, PiiConfig};
     use codebus_core::pii::{OnHit, ScannerKind};
 
     #[test]
@@ -400,5 +513,65 @@ mod tests {
             result.is_err(),
             "malformed patterns_extra must propagate Err"
         );
+    }
+
+    // === lint-feedback-loop: resolve_fix_config ===
+
+    fn cfg_with_auto_fix(enabled: bool, max_iterations: u32) -> GlobalConfig {
+        GlobalConfig {
+            lint: Some(LintConfig {
+                disabled_rules: Vec::new(),
+                custom_rules_dir: None,
+                auto_fix: AutoFixConfig {
+                    enabled,
+                    max_iterations,
+                },
+            }),
+            ..GlobalConfig::default()
+        }
+    }
+
+    #[test]
+    fn resolve_fix_config_default_when_no_lint_section() {
+        // Spec: "Default config enables fix with max iterations five"
+        let cfg = GlobalConfig::default();
+        let (disabled, max_iter) = resolve_fix_config(false, None, &cfg);
+        assert!(!disabled);
+        assert_eq!(max_iter, 5);
+    }
+
+    #[test]
+    fn resolve_fix_config_no_fix_flag_disables_even_when_config_enables() {
+        // Spec: "--no-fix flag disables fix even when config enables it"
+        let cfg = cfg_with_auto_fix(true, 5);
+        let (disabled, max_iter) = resolve_fix_config(true, None, &cfg);
+        assert!(disabled);
+        assert_eq!(max_iter, 5);
+    }
+
+    #[test]
+    fn resolve_fix_config_max_iter_flag_overrides_config_max() {
+        // Spec: "--fix-max-iter overrides config max_iterations"
+        let cfg = cfg_with_auto_fix(true, 5);
+        let (disabled, max_iter) = resolve_fix_config(false, Some(10), &cfg);
+        assert!(!disabled);
+        assert_eq!(max_iter, 10);
+    }
+
+    #[test]
+    fn resolve_fix_config_no_fix_wins_over_max_iter() {
+        // Spec: "--no-fix wins when both flags are present"
+        let cfg = cfg_with_auto_fix(true, 5);
+        let (disabled, _max_iter) = resolve_fix_config(true, Some(10), &cfg);
+        assert!(disabled);
+    }
+
+    #[test]
+    fn resolve_fix_config_disabled_in_config_propagates() {
+        // Spec: "Disabled config skips the fix loop in goal flow"
+        let cfg = cfg_with_auto_fix(false, 7);
+        let (disabled, max_iter) = resolve_fix_config(false, None, &cfg);
+        assert!(disabled);
+        assert_eq!(max_iter, 7);
     }
 }

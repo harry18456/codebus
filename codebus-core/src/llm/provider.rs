@@ -143,4 +143,32 @@ mod tests {
         };
         assert_eq!(format!("{e}"), "OAuth needed");
     }
+
+    /// Lock-in: the `LlmProvider` trait surface must NOT grow session /
+    /// history fields as part of `lint-feedback-loop`. Cross-iteration
+    /// memory lives entirely inside the prompt body assembled by
+    /// `wiki/fix/prompt.rs`. If a future change adds `session_id`,
+    /// `with_history`, or similar, this test will fail to compile and
+    /// force an explicit re-evaluation of the design promise.
+    #[test]
+    fn invoke_options_struct_shape_unchanged_after_lint_feedback_loop() {
+        // Construct an InvokeOptions using ALL its fields by name. If a
+        // field is added without updating this assertion, the destructure
+        // below will fail with `missing field` / `unknown field` and
+        // surface the trait change as a lock-in violation.
+        let opts = InvokeOptions {
+            system_prompt: String::new(),
+            user_message: String::new(),
+            mode: LlmMode::Ingest,
+            cwd: std::path::PathBuf::from("."),
+            vault_root: std::path::PathBuf::from("."),
+        };
+        let InvokeOptions {
+            system_prompt: _,
+            user_message: _,
+            mode: _,
+            cwd: _,
+            vault_root: _,
+        } = opts;
+    }
 }

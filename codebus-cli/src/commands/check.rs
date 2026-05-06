@@ -148,4 +148,45 @@ mod tests {
         }
         Ok(())
     }
+
+    /// Spec: "--check stays read-only" + "--check mode is unchanged by
+    /// this capability". `run_check` is a synchronous function that
+    /// accepts only the repo path — it has no LlmProvider parameter, so
+    /// the fix loop (which requires a provider) cannot be triggered.
+    /// This test pins:
+    ///   1. Calling `run_check` against a vault with lint issues returns
+    ///      a populated `LintResult` without panicking.
+    ///   2. The vault's wiki/ contents are byte-identical before and
+    ///      after the run (no provider could have written there).
+    #[test]
+    fn check_is_read_only_and_does_not_invoke_provider() {
+        let repo = tmp("readonly");
+        fs::create_dir_all(repo.join(".codebus/wiki/concepts")).unwrap();
+        fs::create_dir_all(repo.join(".codebus/wiki/entities")).unwrap();
+        fs::create_dir_all(repo.join(".codebus/wiki/modules")).unwrap();
+        fs::create_dir_all(repo.join(".codebus/wiki/processes")).unwrap();
+        fs::create_dir_all(repo.join(".codebus/wiki/synthesis")).unwrap();
+        fs::write(repo.join(".codebus/wiki/index.md"), "# index\n").unwrap();
+        fs::write(repo.join(".codebus/wiki/log.md"), "# log\n").unwrap();
+        // Page with a broken wikilink — would normally trigger fix loop.
+        let page = repo.join(".codebus/wiki/concepts/foo.md");
+        let body = "---\ntitle: Foo\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-05'\nupdated: '2026-05-05'\nrelated: []\nstale: false\n---\nsee [[ghost]]\n";
+        fs::write(&page, body).unwrap();
+
+        let before = fs::read(&page).unwrap();
+        let r = run_check(&repo).unwrap();
+        let after = fs::read(&page).unwrap();
+
+        // Fix loop would have rewritten / removed the page; --check must
+        // leave it untouched.
+        assert_eq!(before, after, "wiki contents must be byte-identical");
+        // Lint reports the broken link; --check surfaces it without acting
+        // on it.
+        assert!(
+            r.issues.iter().any(|i| i.message.contains("[[ghost]]")),
+            "expected broken-link warning to surface: {:?}",
+            r.issues
+        );
+        let _ = fs::remove_dir_all(&repo);
+    }
 }

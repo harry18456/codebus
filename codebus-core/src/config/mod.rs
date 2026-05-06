@@ -7,5 +7,6 @@ pub mod schema;
 
 pub use loader::{config_path, load_config, load_config_from_path};
 pub use schema::{
-    EmojiMode, GlobalConfig, LintConfig, LlmConfig, LogConfig, PiiConfig, RenderConfig,
+    AutoFixConfig, EmojiMode, GlobalConfig, LintConfig, LlmConfig, LogConfig, PiiConfig,
+    RenderConfig,
 };

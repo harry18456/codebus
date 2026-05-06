@@ -45,6 +45,27 @@ pub struct PiiConfig {
 pub struct LintConfig {
     pub disabled_rules: Vec<String>,
     pub custom_rules_dir: Option<String>,
+    #[serde(default)]
+    pub auto_fix: AutoFixConfig,
+}
+
+/// Lint auto-fix policy. `enabled` flips the goal-flow auto-fix step;
+/// `max_iterations` caps the lint→fix→re-lint loop. Defaults align with
+/// the `lint-feedback-loop` design: agentic feel by default, hard upper
+/// bound on token spend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AutoFixConfig {
+    pub enabled: bool,
+    pub max_iterations: u32,
+}
+
+impl Default for AutoFixConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_iterations: 5,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,5 +104,24 @@ mod tests {
         assert!(g.lint.is_none());
         assert!(g.render.is_none());
         assert!(g.log.is_none());
+    }
+
+    // === lint-feedback-loop: AutoFixConfig defaults ===
+
+    #[test]
+    fn auto_fix_config_default_is_enabled_with_max_iterations_five() {
+        // Spec scenario: "Default config enables fix with max iterations five"
+        let cfg = AutoFixConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.max_iterations, 5);
+    }
+
+    #[test]
+    fn lint_config_default_includes_auto_fix_default() {
+        // Lint config without explicit auto_fix still produces the agentic
+        // default (enabled = true, max_iterations = 5).
+        let cfg = LintConfig::default();
+        assert!(cfg.auto_fix.enabled);
+        assert_eq!(cfg.auto_fix.max_iterations, 5);
     }
 }
