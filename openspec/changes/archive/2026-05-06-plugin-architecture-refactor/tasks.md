@@ -75,6 +75,6 @@
 - [x] 8.2 對 `D:/side_project/uv` 跑 `--check` byte-equal
 - [x] 8.3 對 `D:/side_project/buddy-gacha` 跑完整 init + goal + check 流程驗 e2e 視覺與 0.2.0 一致
 - [x] 8.4 寫一筆 `~/.codebus/config.yaml` 含 5 個 plugin section + emoji 設定，跑 codebus 確認每個 section 都被讀取（debug log 或加 `--debug` flag 印 effective config）
-- [ ] 8.5 Cool-down 一週 — 期間用 codebus 跑自己的探索任務、發現 plugin 介面 friction 就回頭調
+- [x] 8.5 Cool-down 一週 — 期間用 codebus 跑自己的探索任務、發現 plugin 介面 friction 就回頭調
 - [x] 8.6 Final commit：`refactor(plugin-architecture): 5 plugin domains + config.yaml restored`
-- [ ] 8.7 `spectra archive plugin-architecture-refactor`；如過程中任一 R 階段 fail，依 design 的 **Rollback 策略** 用 `git reset --hard HEAD~1` 回前一個 R checkpoint，整個 change 失敗則回 `267b3c5`（rust-rewrite 完成 commit）
+- [x] 8.7 `spectra archive plugin-architecture-refactor`；如過程中任一 R 階段 fail，依 design 的 **Rollback 策略** 用 `git reset --hard HEAD~1` 回前一個 R checkpoint，整個 change 失敗則回 `267b3c5`（rust-rewrite 完成 commit）
