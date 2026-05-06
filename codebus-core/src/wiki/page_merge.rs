@@ -31,6 +31,7 @@ fn unique_strings(lists: &[&[String]]) -> Vec<String> {
 /// `SourceRef.path` for sources and by full string for goals/related.
 /// `goals` unions three lists per iter-8 review: existing + `[goal_text]`
 /// + incoming.goals (the earlier impl forgot the third source).
+///
 /// `updated` is set to `today`. Body appends a `## from goal: <X> (YYYY-MM-DD)`
 /// section after a blank line.
 pub fn merge_page(
@@ -117,7 +118,7 @@ mod tests {
         assert_eq!(merged.frontmatter.title, "Original Title");
         assert_eq!(merged.frontmatter.page_type, PageType::Concept);
         assert_eq!(merged.frontmatter.created, "2026-05-01");
-        assert_eq!(merged.frontmatter.stale, false);
+        assert!(!merged.frontmatter.stale);
     }
 
     #[test]

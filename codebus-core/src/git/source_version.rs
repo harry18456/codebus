@@ -90,7 +90,7 @@ mod tests {
         let p = tmp("nogit");
         let v = get_source_version(&p);
         assert_eq!(v.commit, None);
-        assert_eq!(v.uncommitted, false);
+        assert!(!v.uncommitted);
         let _ = fs::remove_dir_all(&p);
     }
 
@@ -107,7 +107,7 @@ mod tests {
             "expected 40-char sha, got {:?}",
             v.commit
         );
-        assert_eq!(v.uncommitted, false);
+        assert!(!v.uncommitted);
         let _ = fs::remove_dir_all(&p);
     }
 
@@ -121,7 +121,7 @@ mod tests {
         fs::write(p.join("b.txt"), "y").unwrap();
         let v = get_source_version(&p);
         assert!(v.commit.is_some());
-        assert_eq!(v.uncommitted, true);
+        assert!(v.uncommitted);
         let _ = fs::remove_dir_all(&p);
     }
 
@@ -134,7 +134,7 @@ mod tests {
         run(&p, &["commit", "-m", "init", "-q"]);
         fs::write(p.join("a.txt"), "y").unwrap();
         let v = get_source_version(&p);
-        assert_eq!(v.uncommitted, true);
+        assert!(v.uncommitted);
         let _ = fs::remove_dir_all(&p);
     }
 }

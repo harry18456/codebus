@@ -1,22 +1,60 @@
-//! Terminal rendering for stream events, banners, and the lint report.
+//! Terminal renderer — `println!` to stdout. Mirrors the legacy
+//! `codebus-cli/src/ui.rs` byte-equal at `--check` paths used by Phase C
+//! conformance fixtures.
 //!
-//! Mirrors the TS `ui/render.ts` + `ui/lint-report.ts` + `ui/emoji-mode.ts`
-//! modules at byte-equal level for the deterministic paths used by Phase C
-//! conformance tests (specifically `--check` stdout). Color formatting is
-//! intentionally deferred — tests run with `use_color = false` so chalk
-//! escape sequences never appear in the captured output.
+//! Color formatting is intentionally deferred (`use_color` is honored by
+//! reserving the field but no chalk-like escape sequences are emitted in
+//! Phase 1). Tests run with `use_color: false` so captured stdout matches
+//! the fixture byte-for-byte.
 
-use codebus_core::stream::StreamEvent;
-use codebus_core::wiki::types::{LintIssue, LintResult, LintSeverity};
+use crate::render::event_renderer::{Banner, EventRenderer};
+use crate::stream::StreamEvent;
+use crate::wiki::types::{LintIssue, LintResult, LintSeverity};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Copy)]
+const INDENT: &str = "    ";
+
+/// Renderer-specific options. Field of [`TerminalRenderer`]; not exposed via
+/// the trait because other renderers (`Tauri`, `JsonLines`) don't need it.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct RenderOptions {
     pub use_emoji: bool,
     pub use_color: bool,
 }
 
-const INDENT: &str = "    ";
+pub struct TerminalRenderer {
+    opts: RenderOptions,
+}
+
+impl TerminalRenderer {
+    pub fn new(opts: RenderOptions) -> Self {
+        Self { opts }
+    }
+}
+
+impl EventRenderer for TerminalRenderer {
+    fn render(&mut self, event: &StreamEvent) {
+        let line = format_event(event, self.opts);
+        if !line.is_empty() {
+            println!("{line}");
+        }
+    }
+
+    fn render_banner(&mut self, banner: &Banner<'_>) {
+        println!("{}", format_banner(*banner, self.opts));
+    }
+
+    fn render_lint_report(&mut self, result: &LintResult) {
+        print!("{}", format_lint_report(result, self.opts));
+    }
+
+    fn render_lint_summary(&mut self, result: &LintResult) {
+        let s = format_lint_summary(result, self.opts);
+        if !s.is_empty() {
+            println!("{s}");
+        }
+    }
+}
 
 fn lead(emoji: &'static str, symbol: &'static str, use_emoji: bool) -> &'static str {
     if use_emoji { emoji } else { symbol }
@@ -26,7 +64,7 @@ fn normalize_path(p: &str) -> String {
     p.replace('\\', "/")
 }
 
-pub fn render_event(event: &StreamEvent, opts: RenderOptions) -> String {
+pub fn format_event(event: &StreamEvent, opts: RenderOptions) -> String {
     match event {
         StreamEvent::Thought { text } => {
             let label = format!("{} [Agent 思考]", lead("🤔", "◆", opts.use_emoji));
@@ -160,15 +198,7 @@ fn indent(text: &str) -> String {
         .join("\n")
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Banner<'a> {
-    Start { path: &'a str },
-    Goal { goal: &'a str },
-    Done { wiki_path: &'a str },
-    Hint { path: &'a str },
-}
-
-pub fn render_banner(b: Banner<'_>, opts: RenderOptions) -> String {
+pub fn format_banner(b: Banner<'_>, opts: RenderOptions) -> String {
     match b {
         Banner::Start { path } => format!(
             "{} 來囉來囉~ CodeBus 駛入 {} ...",
@@ -189,10 +219,9 @@ pub fn render_banner(b: Banner<'_>, opts: RenderOptions) -> String {
     }
 }
 
-/// Print full lint report (used by `codebus --check`). Output format
-/// matches TS `printLintReport` byte-for-byte under `use_color = false`
-/// (the path used by stdout fixture comparison).
-pub fn print_lint_report(result: &LintResult, opts: RenderOptions) -> String {
+/// Full lint report (`--check` stdout). Output format matches TS
+/// `printLintReport` byte-for-byte under `use_color = false`.
+pub fn format_lint_report(result: &LintResult, opts: RenderOptions) -> String {
     let coverage = format_coverage(result);
 
     if result.issues.is_empty() {
@@ -208,7 +237,6 @@ pub fn print_lint_report(result: &LintResult, opts: RenderOptions) -> String {
     ));
     out.push('\n');
 
-    // Group by path, preserve insertion order via BTreeMap-like Vec.
     let mut order: Vec<String> = Vec::new();
     let mut by_path: BTreeMap<String, Vec<&LintIssue>> = BTreeMap::new();
     for i in &result.issues {
@@ -238,8 +266,8 @@ pub fn print_lint_report(result: &LintResult, opts: RenderOptions) -> String {
     out
 }
 
-/// One-line summary for the goal flow's banner sequence.
-/// Empty string when there are no issues.
+/// One-line summary for the goal flow's banner sequence. Empty string when
+/// there are no issues.
 pub fn format_lint_summary(result: &LintResult, opts: RenderOptions) -> String {
     if result.issues.is_empty() {
         return String::new();
@@ -269,7 +297,7 @@ fn format_coverage(r: &LintResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codebus_core::wiki::types::{LintIssue, LintSeverity};
+    use crate::wiki::types::{LintIssue, LintSeverity};
 
     fn no_color() -> RenderOptions {
         RenderOptions {
@@ -287,7 +315,7 @@ mod tests {
             error_count: 0,
             warn_count: 0,
         };
-        let out = print_lint_report(&r, no_color());
+        let out = format_lint_report(&r, no_color());
         assert_eq!(out, "ok 0 pages + 0 nav files scanned, no issues\n");
     }
 
@@ -300,7 +328,7 @@ mod tests {
             error_count: 0,
             warn_count: 0,
         };
-        let out = print_lint_report(&r, no_color());
+        let out = format_lint_report(&r, no_color());
         assert!(out.contains("1 page + 1 nav file scanned"));
     }
 
@@ -324,7 +352,7 @@ mod tests {
             error_count: 0,
             warn_count: 2,
         };
-        let out = print_lint_report(&r, no_color());
+        let out = format_lint_report(&r, no_color());
         let expected = "# 14 pages + 2 nav files scanned, 0 error(s), 2 warning(s)\n\n! wiki/overview.md\n   warn:  page lives in wiki/ root\n! wiki/index.md\n   warn:  broken wikilink in body: [[ghost]]\n";
         assert_eq!(out, expected);
     }

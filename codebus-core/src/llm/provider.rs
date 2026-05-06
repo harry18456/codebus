@@ -59,6 +59,14 @@ pub enum ProviderError {
     Setup { message: String },
     /// An internal error (process spawn failure, malformed config, etc.).
     Internal(String),
+    /// A known provider kind was selected (e.g. via `~/.codebus/config.yaml`
+    /// `llm: { provider: openai }`), but the binary was built without the
+    /// corresponding cargo feature. `feature` names the feature flag and
+    /// `hint` is a user-facing rebuild instruction.
+    FeatureNotCompiled {
+        feature: &'static str,
+        hint: &'static str,
+    },
 }
 
 impl std::fmt::Display for ProviderError {
@@ -66,6 +74,12 @@ impl std::fmt::Display for ProviderError {
         match self {
             ProviderError::Setup { message } => write!(f, "{message}"),
             ProviderError::Internal(msg) => write!(f, "internal provider error: {msg}"),
+            ProviderError::FeatureNotCompiled { feature, hint } => {
+                write!(
+                    f,
+                    "provider requires cargo feature `{feature}` (not compiled). {hint}"
+                )
+            }
         }
     }
 }

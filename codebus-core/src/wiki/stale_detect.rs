@@ -74,7 +74,7 @@ mod tests {
         let fm = fm(vec![("a.rs", Some("hash-a")), ("b.rs", Some("hash-b"))]);
         let cur = hashes(&[("a.rs", "hash-a"), ("b.rs", "hash-b")]);
         let r = detect_stale_sources(&fm, &cur);
-        assert_eq!(r.is_stale, false);
+        assert!(!r.is_stale);
         assert!(r.changed_sources.is_empty());
     }
 
@@ -83,7 +83,7 @@ mod tests {
         let fm = fm(vec![("a.rs", Some("hash-a")), ("b.rs", Some("hash-b"))]);
         let cur = hashes(&[("a.rs", "hash-a"), ("b.rs", "DIFFERENT")]);
         let r = detect_stale_sources(&fm, &cur);
-        assert_eq!(r.is_stale, true);
+        assert!(r.is_stale);
         assert_eq!(r.changed_sources, vec!["b.rs".to_string()]);
     }
 
@@ -92,7 +92,7 @@ mod tests {
         let fm = fm(vec![("a.rs", Some("hash-a"))]);
         let cur = hashes(&[]);
         let r = detect_stale_sources(&fm, &cur);
-        assert_eq!(r.is_stale, true);
+        assert!(r.is_stale);
         assert_eq!(r.changed_sources, vec!["a.rs".to_string()]);
     }
 
@@ -103,7 +103,7 @@ mod tests {
         let fm = fm(vec![("a.rs", None)]);
         let cur = hashes(&[("a.rs", "hash-a")]);
         let r = detect_stale_sources(&fm, &cur);
-        assert_eq!(r.is_stale, true);
+        assert!(r.is_stale);
     }
 
     #[test]
@@ -111,7 +111,7 @@ mod tests {
         let fm = fm(vec![]);
         let cur = hashes(&[]);
         let r = detect_stale_sources(&fm, &cur);
-        assert_eq!(r.is_stale, false);
+        assert!(!r.is_stale);
         assert!(r.changed_sources.is_empty());
     }
 }

@@ -163,6 +163,6 @@ mod tests {
         assert_eq!(parsed.page_type, PageType::Concept);
         assert!(parsed.sources.is_empty());
         assert!(parsed.related.is_empty());
-        assert_eq!(parsed.stale, false);
+        assert!(!parsed.stale);
     }
 }

@@ -1,6 +1,7 @@
 use codebus_core::llm::provider::{InvokeOptions, LlmMode, LlmProvider};
+use codebus_core::log::LogSink;
+use codebus_core::render::EventRenderer;
 use codebus_core::schema::CODEBUS_SCHEMA;
-use codebus_core::stream::StreamEvent;
 use codebus_core::vault::layout::vault_paths;
 use futures_util::StreamExt;
 use std::io;
@@ -14,12 +15,16 @@ pub struct RunQueryOptions<'a> {
 
 /// Read-only LLM round-trip. Spawns the provider in [`LlmMode::Query`]
 /// (no Write/Edit), feeds it the schema + index.md + the user query,
-/// and yields each emitted [`StreamEvent`] back via the callback so the
+/// and yields each emitted [`StreamEvent`] back via `renderer` so the
 /// CLI can render to stdout. No mutation, no commit.
 pub async fn run_query(
     opts: RunQueryOptions<'_>,
-    mut on_event: impl FnMut(&StreamEvent),
+    renderer: &mut dyn EventRenderer,
+    log_sink: &mut dyn LogSink,
 ) -> io::Result<()> {
+    // Plumbing only: per the change Non-Goal "不啟用 LogSink 寫檔", the sink
+    // is accepted but not wired in this change.
+    let _ = log_sink;
     let p = vault_paths(opts.repo_root);
     if !p.root.exists() {
         return Err(io::Error::new(
@@ -50,10 +55,10 @@ pub async fn run_query(
         .provider
         .invoke(invoke)
         .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     while let Some(event) = stream.next().await {
-        on_event(&event);
+        renderer.render(&event);
     }
     Ok(())
 }
@@ -62,8 +67,24 @@ pub async fn run_query(
 mod tests {
     use super::*;
     use codebus_core::llm::provider::ProviderError;
+    use codebus_core::log::sinks::null_sink::NullSink;
+    use codebus_core::render::Banner;
+    use codebus_core::stream::StreamEvent;
+    use codebus_core::wiki::types::LintResult;
     use std::fs;
-    use std::sync::{Arc, Mutex};
+
+    struct CollectingRenderer {
+        events: Vec<StreamEvent>,
+    }
+
+    impl EventRenderer for CollectingRenderer {
+        fn render(&mut self, e: &StreamEvent) {
+            self.events.push(e.clone());
+        }
+        fn render_banner(&mut self, _: &Banner<'_>) {}
+        fn render_lint_report(&mut self, _: &LintResult) {}
+        fn render_lint_summary(&mut self, _: &LintResult) {}
+    }
 
     struct ScriptedProvider {
         events: Vec<StreamEvent>,
@@ -89,7 +110,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_query_streams_events_to_callback() {
+    async fn run_query_streams_events_to_renderer() {
         let repo =
             std::env::temp_dir().join(format!("codebus-q-{}-{}", std::process::id(), nanos()));
         let _ = fs::remove_dir_all(&repo);
@@ -104,22 +125,22 @@ mod tests {
                 StreamEvent::Done,
             ],
         };
-        let collected: Arc<Mutex<Vec<StreamEvent>>> = Arc::new(Mutex::new(Vec::new()));
-        let cl = collected.clone();
+        let mut renderer = CollectingRenderer { events: Vec::new() };
+        let mut sink = NullSink::new();
         run_query(
             RunQueryOptions {
                 repo_root: &repo,
                 query: "what is X?",
                 provider: &provider,
             },
-            move |e| cl.lock().unwrap().push(e.clone()),
+            &mut renderer,
+            &mut sink,
         )
         .await
         .unwrap();
 
-        let got = collected.lock().unwrap();
-        assert_eq!(got.len(), 2);
-        assert!(matches!(got[0], StreamEvent::Thought { .. }));
+        assert_eq!(renderer.events.len(), 2);
+        assert!(matches!(renderer.events[0], StreamEvent::Thought { .. }));
         let _ = fs::remove_dir_all(&repo);
     }
 }

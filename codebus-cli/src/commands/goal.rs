@@ -3,8 +3,9 @@ use codebus_core::fs::raw_sync::sync_repo_to_raw;
 use codebus_core::git::nested_repo::auto_commit;
 use codebus_core::git::source_version::get_source_version;
 use codebus_core::llm::provider::{InvokeOptions, LlmMode, LlmProvider};
+use codebus_core::log::LogSink;
+use codebus_core::render::EventRenderer;
 use codebus_core::schema::CODEBUS_SCHEMA;
-use codebus_core::stream::StreamEvent;
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::vault::lock::{acquire_lock, release_lock};
 use codebus_core::wiki::date::utc_today_iso;
@@ -40,8 +41,14 @@ pub struct RunGoalResult {
 
 pub async fn run_goal(
     opts: RunGoalOptions<'_>,
-    mut on_event: impl FnMut(&StreamEvent),
+    renderer: &mut dyn EventRenderer,
+    log_sink: &mut dyn LogSink,
 ) -> io::Result<RunGoalResult> {
+    // Plumbing only: per the change Non-Goal "不啟用 LogSink 寫檔", the sink
+    // is accepted but not wired to receive run summaries in this change.
+    // A follow-up token-tracking change will populate `RunLog` and call
+    // `log_sink.write_run(&run_log)` here.
+    let _ = log_sink;
     let p = vault_paths(opts.repo_root);
 
     if !p.root.exists() {
@@ -94,9 +101,9 @@ pub async fn run_goal(
             .provider
             .invoke(invoke)
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
         while let Some(event) = stream.next().await {
-            on_event(&event);
+            renderer.render(&event);
         }
 
         enrich_source_metadata(&p.wiki_page_folders, &p.raw_code, ver.commit.as_deref())?;
@@ -108,7 +115,7 @@ pub async fn run_goal(
         wiki_changed = has_wiki_changes(&p.root)?;
 
         let _ = auto_commit(&p.root, &format!("wiki: {}", opts.goal))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         Ok(())
     })
@@ -253,7 +260,22 @@ fn has_wiki_changes(vault_root: &Path) -> io::Result<bool> {
 mod tests {
     use super::*;
     use codebus_core::llm::provider::ProviderError;
-    use std::sync::{Arc, Mutex};
+    use codebus_core::log::sinks::null_sink::NullSink;
+    use codebus_core::render::Banner;
+    use codebus_core::stream::StreamEvent;
+
+    struct CollectingRenderer {
+        events: Vec<StreamEvent>,
+    }
+
+    impl EventRenderer for CollectingRenderer {
+        fn render(&mut self, e: &StreamEvent) {
+            self.events.push(e.clone());
+        }
+        fn render_banner(&mut self, _: &Banner<'_>) {}
+        fn render_lint_report(&mut self, _: &LintResult) {}
+        fn render_lint_summary(&mut self, _: &LintResult) {}
+    }
 
     struct WriteOnePageProvider;
 
@@ -320,8 +342,8 @@ mod tests {
             .status()
             .unwrap();
 
-        let collected: Arc<Mutex<Vec<StreamEvent>>> = Arc::new(Mutex::new(Vec::new()));
-        let cl = collected.clone();
+        let mut renderer = CollectingRenderer { events: Vec::new() };
+        let mut sink = NullSink::new();
         let provider = WriteOnePageProvider;
         let result = run_goal(
             RunGoalOptions {
@@ -329,14 +351,14 @@ mod tests {
                 goal: "explore foo",
                 provider: &provider,
             },
-            move |e| cl.lock().unwrap().push(e.clone()),
+            &mut renderer,
+            &mut sink,
         )
         .await
         .expect("run_goal succeeded");
 
         // Stream events forwarded
-        let got = collected.lock().unwrap();
-        assert!(got.len() >= 1);
+        assert!(!renderer.events.is_empty());
 
         // goals.jsonl appended
         let p = vault_paths(&repo);

@@ -1,366 +1,70 @@
-use crate::wiki::frontmatter::parse_page;
-use crate::wiki::types::{LintIssue, LintResult, LintSeverity, PageType};
-use regex::Regex;
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+//! Wiki linter — checks an Obsidian-compatible vault for structural issues.
+//!
+//! The linter is a thin orchestrator over a `Vec<Box<dyn LintRule>>`: each
+//! rule is implemented under [`rules`] and registered via
+//! [`factory::build_default_rules`]. Rules are pure read; the orchestrator
+//! never writes.
+//!
+//! Adding a rule = one new file under `rules/<rule>.rs` + one entry in
+//! `factory.rs`. No edits anywhere else.
 
-const SPECIAL_FILES: &[&str] = &["index.md", "log.md"];
-const RECOGNIZED_ROOT_DIRS: &[&str] = &[
-    "concepts",
-    "entities",
-    "modules",
-    "processes",
-    "synthesis",
-    "goals",
-];
+pub mod factory;
+pub mod rule;
+pub mod rules;
 
-// Page-size thresholds per file type (bytes, strict greater-than). log.md is
-// unlimited — it grows by design.
-const INDEX_MD_THRESHOLD: usize = 1024;
-const SYNTHESIS_THRESHOLD: usize = 5120;
-const TYPE_FOLDER_THRESHOLD: usize = 8192;
+pub use factory::build_default_rules;
+pub use rule::{LintRule, LoadedPage, NavFile, RECOGNIZED_ROOT_DIRS, SPECIAL_FILES, VaultContext};
 
-// Body wikilink regex — matches [[slug]], [[slug|display]], [[slug#heading]],
-// [[slug#heading|display]]; captures slug only. The slug class excludes
-// backslash so markdown table escapes `[[slug\|alias]]` parse with slug=`slug`
-// (not `slug\`); the alias separator accepts either `|` or `\|`.
-static BODY_WIKILINK_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[\[([^\]|#\s\\]+)(?:#[^\]|]+)?(?:\\?\|[^\]]+)?\]\]").unwrap());
+use crate::wiki::types::{LintIssue, LintResult, LintSeverity};
+use std::path::Path;
 
-static RELATED_STRIP_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\[\[([^\]]+)\]\]\s*$").unwrap());
-
-// Fenced code block (greedy across lines).
-static FENCED_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)```.*?```").unwrap());
-
-// Inline code span — single line, no embedded backticks.
-static INLINE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`[^`\n]+`").unwrap());
-
-#[derive(Debug, Clone)]
-struct PageEntry {
-    folder: &'static str,
-    filename: String,
-    slug: String,
-    rel_path: String,
-    full_path: PathBuf,
-}
-
-fn folder_name(t: PageType) -> &'static str {
-    t.folder()
-}
-
-/// Strip markdown code regions (fenced first, then inline) so [[wikilink]]
-/// occurrences inside them are not scanned. Obsidian renders these as
-/// literal text. Order matters: fenced before inline.
-fn strip_code_regions(content: &str) -> String {
-    let no_fenced = FENCED_REGEX.replace_all(content, "");
-    let stripped = INLINE_REGEX.replace_all(&no_fenced, "");
-    stripped.into_owned()
-}
-
-fn scan_body_wikilinks(
-    content: &str,
-    rel_path: &str,
-    page_slugs: &HashSet<String>,
-    issues: &mut Vec<LintIssue>,
-) {
-    let stripped = strip_code_regions(content);
-    let mut seen = HashSet::new();
-    for caps in BODY_WIKILINK_REGEX.captures_iter(&stripped) {
-        let slug = caps
-            .get(1)
-            .map(|m| m.as_str().trim().to_string())
-            .unwrap_or_default();
-        if slug.is_empty() || !seen.insert(slug.clone()) {
-            continue;
-        }
-        if !page_slugs.contains(&slug) {
-            issues.push(LintIssue {
-                path: rel_path.to_string(),
-                severity: LintSeverity::Warn,
-                message: format!(
-                    "broken wikilink in body: [[{slug}]] (no page named {slug}.md in any wiki/<type>/ folder)"
-                ),
-            });
-        }
-    }
-}
-
-fn page_size_threshold(rel_path: &str) -> Option<usize> {
-    if rel_path == "index.md" {
-        return Some(INDEX_MD_THRESHOLD);
-    }
-    if rel_path == "log.md" || rel_path == "overview.md" {
-        return None;
-    }
-    let folder = rel_path.split('/').next()?;
-    match folder {
-        "synthesis" => Some(SYNTHESIS_THRESHOLD),
-        "concepts" | "entities" | "modules" | "processes" => Some(TYPE_FOLDER_THRESHOLD),
-        _ => None,
-    }
-}
-
-fn check_page_size(rel_path: &str, content: &str, issues: &mut Vec<LintIssue>) {
-    let Some(threshold) = page_size_threshold(rel_path) else {
-        return;
-    };
-    let size = content.len();
-    if size > threshold {
-        issues.push(LintIssue {
-            path: rel_path.to_string(),
-            severity: LintSeverity::Warn,
-            message: format!(
-                "oversize page (size {size} bytes, threshold {threshold} bytes) — split or extract sub-page"
-            ),
-        });
-    }
-}
-
-/// Walk `wiki/` looking for unexpected entries. Hidden entries (starting
-/// with `.`) skip silently. Recognized root dirs (5 type folders + goals/)
-/// are not flagged. Files at root other than nav specials are handled by
-/// the existing root-page rule, not this scan.
-fn scan_unexpected_root_dirs(wiki_root: &Path, issues: &mut Vec<LintIssue>) {
-    let Ok(entries) = fs::read_dir(wiki_root) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let name = match e.file_name().into_string() {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if name.starts_with('.') {
-            continue;
-        }
-        let ft = match e.file_type() {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        if !ft.is_dir() {
-            continue;
-        }
-        if !RECOGNIZED_ROOT_DIRS.contains(&name.as_str()) {
-            issues.push(LintIssue {
-                path: name.clone(),
-                severity: LintSeverity::Warn,
-                message: format!("unrecognized folder under wiki/: {name}"),
-            });
-        }
-    }
-}
-
-fn scan_type_folder_for_unexpected(folder_path: &Path, folder: &str, issues: &mut Vec<LintIssue>) {
-    let Ok(entries) = fs::read_dir(folder_path) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let name = match e.file_name().into_string() {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if name.starts_with('.') {
-            continue;
-        }
-        let ft = match e.file_type() {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        if ft.is_dir() {
-            issues.push(LintIssue {
-                path: format!("{folder}/{name}"),
-                severity: LintSeverity::Warn,
-                message: format!("nested sub-folder in type folder: {folder}/{name}"),
-            });
-        } else if ft.is_file() && !name.ends_with(".md") {
-            issues.push(LintIssue {
-                path: format!("{folder}/{name}"),
-                severity: LintSeverity::Warn,
-                message: format!("non-.md file in type folder: {folder}/{name}"),
-            });
-        }
-    }
-}
-
-/// Validate a vault's `wiki/` subtree. Pure read — never writes. Mirrors TS
-/// `lintWiki(vaultRoot)`. Returns coverage counts plus `Vec<LintIssue>`;
-/// callers (auto-lint after ingest, `--check` standalone) decide how to
-/// surface based on `error_count` vs `warn_count`.
+/// Validate a vault's `wiki/` subtree. Pure read — never writes. Returns
+/// coverage counts plus `Vec<LintIssue>`; callers (auto-lint after ingest,
+/// `--check` standalone) decide how to surface based on `error_count` vs
+/// `warn_count`.
 ///
 /// `vault_root` is the `.codebus/` path (e.g. `/repo/.codebus/`).
 pub fn lint_wiki(vault_root: impl AsRef<Path>) -> LintResult {
     let wiki_root = vault_root.as_ref().join("wiki");
-    let mut issues: Vec<LintIssue> = Vec::new();
-    let mut pages_scanned: usize = 0;
-    let mut nav_files_scanned: usize = 0;
 
     if !wiki_root.exists() {
-        return summarize(pages_scanned, nav_files_scanned, issues);
+        return summarize(0, 0, Vec::new());
     }
 
-    // 1. Catalog pages across the 5 type folders.
-    let mut all_pages: Vec<PageEntry> = Vec::new();
-    let mut slug_to_pages: HashMap<String, Vec<PageEntry>> = HashMap::new();
-    for t in PageType::ALL {
-        let folder = folder_name(t);
-        let folder_path = wiki_root.join(folder);
-        if !folder_path.exists() {
-            continue;
-        }
-        // Unexpected-file scan happens here (per-type-folder readdir).
-        scan_type_folder_for_unexpected(&folder_path, folder, &mut issues);
+    let ctx = VaultContext::build(&wiki_root);
+    let pages_scanned = ctx.pages_scanned();
+    let nav_files_scanned = ctx.nav_files_scanned();
 
-        let Ok(rd) = fs::read_dir(&folder_path) else {
-            continue;
-        };
-        for e in rd.flatten() {
-            let name = match e.file_name().into_string() {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            if !name.ends_with(".md") {
-                continue;
-            }
-            let slug = name.trim_end_matches(".md").to_string();
-            let entry = PageEntry {
-                folder,
-                filename: name.clone(),
-                slug: slug.clone(),
-                rel_path: format!("{folder}/{name}"),
-                full_path: folder_path.join(&name),
-            };
-            all_pages.push(entry.clone());
-            slug_to_pages.entry(slug).or_default().push(entry);
-        }
-    }
-    let mut page_slugs: HashSet<String> = all_pages.iter().map(|p| p.slug.clone()).collect();
-
-    // 1b. Special files at root that exist are also valid wikilink targets.
-    for sf in SPECIAL_FILES {
-        if wiki_root.join(sf).exists() {
-            page_slugs.insert(sf.trim_end_matches(".md").to_string());
-        }
+    let mut issues: Vec<LintIssue> = Vec::new();
+    for rule in build_default_rules() {
+        issues.extend(rule.check(&ctx));
     }
 
-    // 1c. Unrecognized folders directly under wiki/.
-    scan_unexpected_root_dirs(&wiki_root, &mut issues);
-
-    // 2. Cross-folder slug collision.
-    for (slug, entries) in &slug_to_pages {
-        if entries.len() > 1 {
-            let others: Vec<&str> = entries.iter().map(|e| e.rel_path.as_str()).collect();
-            let others_str = others.join(", ");
-            for e in entries {
-                issues.push(LintIssue {
-                    path: e.rel_path.clone(),
-                    severity: LintSeverity::Warn,
-                    message: format!(
-                        "duplicate slug '{slug}' across folders: {others_str} — wikilink [[{slug}]] becomes ambiguous"
-                    ),
-                });
-            }
-        }
-    }
-
-    // 3. Walk pages — parse, validate related[], scan body wikilinks, page-size.
-    for entry in &all_pages {
-        let content = match fs::read_to_string(&entry.full_path) {
-            Ok(s) => s,
-            Err(e) => {
-                issues.push(LintIssue {
-                    path: entry.rel_path.clone(),
-                    severity: LintSeverity::Error,
-                    message: format!("file read failed: {e}"),
-                });
-                continue;
-            }
-        };
-
-        check_page_size(&entry.rel_path, &content, &mut issues);
-
-        let parsed = match parse_page(&content) {
-            Ok(p) => {
-                pages_scanned += 1;
-                p
-            }
-            Err(e) => {
-                issues.push(LintIssue {
-                    path: entry.rel_path.clone(),
-                    severity: LintSeverity::Error,
-                    message: format!("frontmatter parse failed: {e}"),
-                });
-                continue;
-            }
-        };
-
-        for r in &parsed.frontmatter.related {
-            let m = RELATED_STRIP_REGEX.captures(r);
-            let slug = match m {
-                Some(caps) => caps.get(1).unwrap().as_str().trim().to_string(),
-                None => {
-                    issues.push(LintIssue {
-                        path: entry.rel_path.clone(),
-                        severity: LintSeverity::Error,
-                        message: format!("related[] entry not in [[wikilink]] format: {r}"),
-                    });
-                    continue;
-                }
-            };
-            if !page_slugs.contains(&slug) {
-                issues.push(LintIssue {
-                    path: entry.rel_path.clone(),
-                    severity: LintSeverity::Error,
-                    message: format!(
-                        "broken wikilink in related: [[{slug}]] (no page named {slug}.md in any wiki/<type>/ folder)"
-                    ),
-                });
-            }
-        }
-
-        scan_body_wikilinks(&parsed.body, &entry.rel_path, &page_slugs, &mut issues);
-    }
-
-    // 4. Pages directly under wiki/ root (other than nav specials).
-    if let Ok(rd) = fs::read_dir(&wiki_root) {
-        for e in rd.flatten() {
-            let Ok(name) = e.file_name().into_string() else {
-                continue;
-            };
-            let Ok(ft) = e.file_type() else { continue };
-            if ft.is_file() && name.ends_with(".md") && !SPECIAL_FILES.contains(&name.as_str()) {
-                issues.push(LintIssue {
-                    path: name.clone(),
-                    severity: LintSeverity::Warn,
-                    message: format!(
-                        "page lives in wiki/ root — schema §3 expects wiki/<type>/{name} (one of: concepts, entities, modules, processes, synthesis)"
-                    ),
-                });
-            }
-        }
-    }
-
-    // 5. Nav files presence + body wikilinks. index.md also gets page-size.
-    for sf in SPECIAL_FILES {
-        let full_path = wiki_root.join(sf);
-        if !full_path.exists() {
-            issues.push(LintIssue {
-                path: sf.to_string(),
-                severity: LintSeverity::Warn,
-                message: format!("{sf} missing — schema §3 expects this special file"),
-            });
-            continue;
-        }
-        nav_files_scanned += 1;
-        let Ok(content) = fs::read_to_string(&full_path) else {
-            continue;
-        };
-        check_page_size(sf, &content, &mut issues);
-        scan_body_wikilinks(&content, sf, &page_slugs, &mut issues);
-    }
+    // Stable-sort issues by path rank so the renderer's first-appearance
+    // grouping reproduces the legacy single-file emission order:
+    //   type-folder pages (rank 1) → root .md files (rank 2) → nav files
+    //   (rank 3). Folder warnings (rank 0) come first.
+    // `Vec::sort_by` is stable, so within-rank emission order from the rule
+    // sequence in `build_default_rules` is preserved.
+    issues.sort_by_key(|i| path_rank(&i.path));
 
     summarize(pages_scanned, nav_files_scanned, issues)
+}
+
+/// Rank used to interleave issues from multiple rules so the report groups
+/// pages → root files → nav files (matching the legacy lint emission
+/// order). Folder warnings (no `.md` suffix at the leaf) sort to the top.
+fn path_rank(path: &str) -> u8 {
+    if path.contains('/') {
+        return 1;
+    }
+    if SPECIAL_FILES.contains(&path) {
+        return 3;
+    }
+    if path.ends_with(".md") {
+        return 2;
+    }
+    0
 }
 
 fn summarize(pages_scanned: usize, nav_files_scanned: usize, issues: Vec<LintIssue>) -> LintResult {
@@ -385,7 +89,7 @@ fn summarize(pages_scanned: usize, nav_files_scanned: usize, issues: Vec<LintIss
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn tmp_vault(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -471,7 +175,6 @@ mod tests {
         let v = tmp_vault("typefolder");
         write_page(&v, "concepts/foo.md", &fm("foo", "module", &[]), "# foo");
         let r = lint_wiki(&v);
-        // No issue for foo.md other than possibly broken-wikilink (none here)
         let foo_issues = issues_for_path(&r, "concepts/foo.md");
         assert!(
             foo_issues
@@ -523,7 +226,6 @@ mod tests {
     #[test]
     fn missing_overview_md_is_not_flagged() {
         let v = tmp_vault("missoverview");
-        // overview.md is intentionally absent in tmp_vault
         let r = lint_wiki(&v);
         assert!(
             r.issues
@@ -769,8 +471,6 @@ mod tests {
     #[test]
     fn page_exactly_at_threshold_is_not_flagged() {
         let v = tmp_vault("exact");
-        // Build content of EXACTLY 8192 bytes: TS test sentinel.
-        // Construct a page whose total .md length equals 8192.
         let frontmatter = fm("x", "concept", &[]);
         let prefix = format!("---\n{frontmatter}---\n");
         let pad = 8192usize.saturating_sub(prefix.len());
@@ -848,7 +548,6 @@ mod tests {
         fs::write(v.join("wiki/.obsidian/app.json"), "{}").unwrap();
         fs::write(v.join("wiki/.gitkeep"), "").unwrap();
         let r = lint_wiki(&v);
-        // No issue should be keyed to .obsidian or .gitkeep
         assert!(r.issues.iter().all(|i| !i.path.starts_with('.')));
         cleanup(&v);
     }
@@ -857,20 +556,10 @@ mod tests {
 
     #[test]
     fn lint_uv_fixture_produces_known_warning_count() {
-        // The pre-rewrite snapshot recorded TS lint output as
-        // "0 error(s), 5 warning(s)" for the uv vault. Rust lint adds two
-        // new rules (page-size, unexpected-file) — those are absent from
-        // a vault that hasn't grown beyond thresholds (synthesis pages are
-        // small) and has no extraneous files. The Rust port should produce
-        // AT LEAST the same 5 warnings (legacy rules) and no extra ones
-        // for the recorded fixture. Exact byte-equal stdout matching is
-        // the job of Phase C task 4.10 once the CLI render layer exists.
         let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
             .join("tests/fixtures/uv-vault-snapshot/uv-wiki-snapshot");
-        // Wrap fixture in a fake .codebus/wiki/ structure so lint_wiki
-        // (which expects vaultRoot/wiki/) resolves correctly.
         let stage = std::env::temp_dir().join(format!(
             "codebus-lint-uvfixture-{}-{}",
             std::process::id(),
@@ -881,8 +570,6 @@ mod tests {
         copy_dir_all(&fixture_root, &stage.join("wiki")).unwrap();
 
         let r = lint_wiki(&stage);
-        // Legacy 5 warnings: 1 root-page (overview.md) + 4 broken body wikilinks.
-        // Plus: any page-size or unexpected-file from the fixture state.
         assert_eq!(r.error_count, 0, "unexpected errors: {:?}", r.issues);
         assert!(
             r.warn_count >= 5,
@@ -890,14 +577,11 @@ mod tests {
             r.warn_count,
             r.issues
         );
-        // Specifically: the 4 broken-body-wikilink warnings recorded in
-        // tests/fixtures/uv-vault-snapshot/check-output.txt.
         let broken_body = count(&r, LintSeverity::Warn, "broken wikilink in body");
         assert!(
             broken_body >= 4,
             "expected ≥4 broken body wikilinks, got {broken_body}"
         );
-        // And the root-page warning for overview.md.
         let root_warn = count(&r, LintSeverity::Warn, "page lives in wiki/ root");
         assert_eq!(root_warn, 1);
 

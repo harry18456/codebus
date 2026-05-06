@@ -2,17 +2,17 @@
 //! `codebus --repo <path> [--goal <text> | --query <text> | --check]`.
 
 use clap::Parser;
-use codebus_core::llm::claude_cli::ClaudeCliProvider;
-use codebus_core::stream::StreamEvent;
+use codebus_core::config::{EmojiMode, GlobalConfig, load_config};
+use codebus_core::llm::{ProviderConfig, build_provider};
+use codebus_core::log::sinks::null_sink::NullSink;
+use codebus_core::render::{Banner, RenderOptions, TerminalRenderer};
 use codebus_core::vault::sanity_check::check_repo_is_not_vault;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 mod commands;
-mod ui;
 
 use commands::{check, goal, init, query};
-use ui::{Banner, RenderOptions, print_lint_report, render_banner, render_event};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -71,7 +71,8 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
 
-    let render_opts = resolve_render_opts(&cli);
+    let cfg = load_config();
+    let render_opts = resolve_render_opts(&cli, &cfg);
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -84,21 +85,26 @@ fn main() -> ExitCode {
         }
     };
 
-    runtime.block_on(async move { dispatch(cli, repo, render_opts).await })
+    runtime.block_on(async move { dispatch(cli, repo, render_opts, cfg).await })
 }
 
-fn resolve_render_opts(cli: &Cli) -> RenderOptions {
-    // Settings priority: --no-emoji wins over --emoji unset; --emoji off
-    // wins over auto. Auto: TTY + non-Windows-cmd → emoji on. For phase 1
-    // we keep it simple: explicit on/off, fall back to auto = on.
-    let use_emoji = if cli.no_emoji {
-        false
-    } else {
-        match cli.emoji.as_deref() {
-            Some("off") => false,
-            Some("on") => true,
-            _ => is_term_emoji_capable(),
-        }
+fn resolve_render_opts(cli: &Cli, cfg: &GlobalConfig) -> RenderOptions {
+    // 5-level emoji priority (highest → lowest):
+    //   1. --emoji on|off  (explicit CLI flag)
+    //   2. --no-emoji      (sugar for --emoji off)
+    //   3. NO_EMOJI env    (community standard)
+    //   4. config.yaml `emoji:`
+    //   5. auto-detect (TTY heuristic)
+    let use_emoji = match cli.emoji.as_deref() {
+        Some("on") => true,
+        Some("off") => false,
+        _ if cli.no_emoji => false,
+        _ if std::env::var_os("NO_EMOJI").is_some() => false,
+        _ => match cfg.emoji {
+            Some(EmojiMode::On) => true,
+            Some(EmojiMode::Off) => false,
+            Some(EmojiMode::Auto) | None => auto_detect_emoji(),
+        },
     };
     let use_color = is_color_capable();
     RenderOptions {
@@ -107,10 +113,7 @@ fn resolve_render_opts(cli: &Cli) -> RenderOptions {
     }
 }
 
-fn is_term_emoji_capable() -> bool {
-    if std::env::var_os("NO_EMOJI").is_some() {
-        return false;
-    }
+fn auto_detect_emoji() -> bool {
     // Conservative auto: on for non-Windows TTYs, off for Windows cmd.
     #[cfg(windows)]
     {
@@ -141,7 +144,12 @@ fn is_color_capable() -> bool {
         .unwrap_or(false)
 }
 
-async fn dispatch(cli: Cli, repo: PathBuf, render_opts: RenderOptions) -> ExitCode {
+async fn dispatch(
+    cli: Cli,
+    repo: PathBuf,
+    render_opts: RenderOptions,
+    cfg: GlobalConfig,
+) -> ExitCode {
     if cli.check {
         return run_check_cmd(&repo, render_opts).await;
     }
@@ -151,12 +159,29 @@ async fn dispatch(cli: Cli, repo: PathBuf, render_opts: RenderOptions) -> ExitCo
     }
 
     if let Some(g) = cli.goal {
-        return run_goal_cmd(&repo, &g, render_opts).await;
+        return run_goal_cmd(&repo, &g, render_opts, &cfg).await;
     }
     if let Some(q) = cli.query {
-        return run_query_cmd(&repo, &q, render_opts).await;
+        return run_query_cmd(&repo, &q, render_opts, &cfg).await;
     }
     ExitCode::from(0)
+}
+
+/// Build a [`ProviderConfig`] from a [`GlobalConfig`]. `cfg.llm == None`
+/// (section unset or unknown discriminator) yields the default config,
+/// which the LLM factory maps to `claude_cli` — preserving 0.2.0 behavior
+/// when no `~/.codebus/config.yaml` exists.
+fn provider_config_from(cfg: &GlobalConfig) -> ProviderConfig {
+    let mut pc = ProviderConfig::default();
+    if let Some(llm) = &cfg.llm {
+        if let Some(kind) = llm.provider {
+            pc.kind = kind;
+        }
+        pc.binary_path = llm.binary_path.clone();
+        pc.timeout_secs = llm.timeout_secs;
+        pc.api_key = llm.api_key.clone();
+    }
+    pc
 }
 
 async fn run_check_cmd(repo: &PathBuf, render_opts: RenderOptions) -> ExitCode {
@@ -167,7 +192,9 @@ async fn run_check_cmd(repo: &PathBuf, render_opts: RenderOptions) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    print!("{}", print_lint_report(&result, render_opts));
+    let mut renderer = TerminalRenderer::new(render_opts);
+    use codebus_core::render::EventRenderer;
+    renderer.render_lint_report(&result);
     if result.error_count > 0 {
         ExitCode::from(1)
     } else {
@@ -176,15 +203,11 @@ async fn run_check_cmd(repo: &PathBuf, render_opts: RenderOptions) -> ExitCode {
 }
 
 async fn run_init_cmd(repo: &PathBuf, render_opts: RenderOptions) -> ExitCode {
-    println!(
-        "{}",
-        render_banner(
-            Banner::Start {
-                path: &repo.to_string_lossy()
-            },
-            render_opts
-        )
-    );
+    let mut renderer = TerminalRenderer::new(render_opts);
+    use codebus_core::render::EventRenderer;
+    renderer.render_banner(&Banner::Start {
+        path: &repo.to_string_lossy(),
+    });
     if let Err(e) = init::run_init(repo) {
         eprintln!("error: {e}");
         return ExitCode::from(1);
@@ -197,35 +220,35 @@ async fn run_init_cmd(repo: &PathBuf, render_opts: RenderOptions) -> ExitCode {
     ExitCode::from(0)
 }
 
-async fn run_goal_cmd(repo: &PathBuf, goal_text: &str, render_opts: RenderOptions) -> ExitCode {
-    println!(
-        "{}",
-        render_banner(
-            Banner::Start {
-                path: &repo.to_string_lossy()
-            },
-            render_opts
-        )
-    );
-    println!(
-        "{}",
-        render_banner(Banner::Goal { goal: goal_text }, render_opts)
-    );
+async fn run_goal_cmd(
+    repo: &PathBuf,
+    goal_text: &str,
+    render_opts: RenderOptions,
+    cfg: &GlobalConfig,
+) -> ExitCode {
+    let mut renderer = TerminalRenderer::new(render_opts);
+    use codebus_core::render::EventRenderer;
+    renderer.render_banner(&Banner::Start {
+        path: &repo.to_string_lossy(),
+    });
+    renderer.render_banner(&Banner::Goal { goal: goal_text });
 
-    let provider = ClaudeCliProvider::new();
-    let on_event = |e: &StreamEvent| {
-        let line = render_event(e, render_opts);
-        if !line.is_empty() {
-            println!("{line}");
+    let provider = match build_provider(provider_config_from(cfg)) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(1);
         }
     };
+    let mut log_sink = NullSink::new();
     let result = match goal::run_goal(
         goal::RunGoalOptions {
             repo_root: repo,
             goal: goal_text,
-            provider: &provider,
+            provider: provider.as_ref(),
         },
-        on_event,
+        &mut renderer,
+        &mut log_sink,
     )
     .await
     {
@@ -237,25 +260,13 @@ async fn run_goal_cmd(repo: &PathBuf, goal_text: &str, render_opts: RenderOption
     };
     if result.wiki_changed {
         let wiki_path = format!("{}/.codebus/wiki", repo.display());
-        println!(
-            "{}",
-            render_banner(
-                Banner::Done {
-                    wiki_path: &wiki_path
-                },
-                render_opts
-            )
-        );
+        renderer.render_banner(&Banner::Done {
+            wiki_path: &wiki_path,
+        });
         if let Some(lint) = &result.lint {
-            let summary = ui::format_lint_summary(lint, render_opts);
-            if !summary.is_empty() {
-                println!("{summary}");
-            }
+            renderer.render_lint_summary(lint);
         }
-        println!(
-            "{}",
-            render_banner(Banner::Hint { path: &wiki_path }, render_opts)
-        );
+        renderer.render_banner(&Banner::Hint { path: &wiki_path });
     } else {
         let shrug = if render_opts.use_emoji { "🤷" } else { "~" };
         println!("{shrug} Agent 跑完但沒動 wiki — 可能此 goal 不適合（agent 自我判斷拒絕）");
@@ -264,30 +275,33 @@ async fn run_goal_cmd(repo: &PathBuf, goal_text: &str, render_opts: RenderOption
     ExitCode::from(0)
 }
 
-async fn run_query_cmd(repo: &PathBuf, query_text: &str, render_opts: RenderOptions) -> ExitCode {
-    println!(
-        "{}",
-        render_banner(
-            Banner::Start {
-                path: &repo.to_string_lossy()
-            },
-            render_opts
-        )
-    );
-    let provider = ClaudeCliProvider::new();
-    let on_event = |e: &StreamEvent| {
-        let line = render_event(e, render_opts);
-        if !line.is_empty() {
-            println!("{line}");
+async fn run_query_cmd(
+    repo: &PathBuf,
+    query_text: &str,
+    render_opts: RenderOptions,
+    cfg: &GlobalConfig,
+) -> ExitCode {
+    let mut renderer = TerminalRenderer::new(render_opts);
+    use codebus_core::render::EventRenderer;
+    renderer.render_banner(&Banner::Start {
+        path: &repo.to_string_lossy(),
+    });
+    let provider = match build_provider(provider_config_from(cfg)) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(1);
         }
     };
+    let mut log_sink = NullSink::new();
     if let Err(e) = query::run_query(
         query::RunQueryOptions {
             repo_root: repo,
             query: query_text,
-            provider: &provider,
+            provider: provider.as_ref(),
         },
-        on_event,
+        &mut renderer,
+        &mut log_sink,
     )
     .await
     {

@@ -376,7 +376,7 @@ mod tests {
         // 'false', number 0, etc.) becomes false. Replicate that quirk.
         let content = "---\ntitle: x\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-05'\nupdated: '2026-05-05'\nrelated: []\nstale: 'false'\n---\n";
         let p = parse_page(content).unwrap();
-        assert_eq!(p.frontmatter.stale, false);
+        assert!(!p.frontmatter.stale);
     }
 
     #[test]

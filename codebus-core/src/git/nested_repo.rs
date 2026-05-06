@@ -37,13 +37,10 @@ pub fn auto_commit(vault_root: impl AsRef<Path>, message: &str) -> io::Result<St
 fn run_git(cwd: &Path, args: &[&str]) -> io::Result<()> {
     let out = Command::new("git").current_dir(cwd).args(args).output()?;
     if !out.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "git {args:?} failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-        ));
+        return Err(io::Error::other(format!(
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
     }
     Ok(())
 }
@@ -51,13 +48,10 @@ fn run_git(cwd: &Path, args: &[&str]) -> io::Result<()> {
 fn capture_git(cwd: &Path, args: &[&str]) -> io::Result<String> {
     let out = Command::new("git").current_dir(cwd).args(args).output()?;
     if !out.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "git {args:?} failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-        ));
+        return Err(io::Error::other(format!(
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }

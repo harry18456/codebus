@@ -35,8 +35,7 @@ pub fn run_init(repo_root: impl AsRef<Path>) -> io::Result<()> {
         ensure_codebus_in_source_gitignore(repo_root)?;
     }
 
-    auto_commit(&p.root, "init: codebus vault")
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+    auto_commit(&p.root, "init: codebus vault").map_err(|e| io::Error::other(e.to_string()))?;
     let _ = p; // p borrowed only above
     Ok(())
 }
