@@ -5,6 +5,7 @@ use clap::Parser;
 use codebus_core::config::{EmojiMode, GlobalConfig, load_config};
 use codebus_core::llm::{ProviderConfig, build_provider};
 use codebus_core::log::sinks::null_sink::NullSink;
+use codebus_core::pii::{ScannerConfig, build_scanner};
 use codebus_core::render::{Banner, RenderOptions, TerminalRenderer};
 use codebus_core::vault::sanity_check::check_repo_is_not_vault;
 use std::path::PathBuf;
@@ -184,6 +185,24 @@ fn provider_config_from(cfg: &GlobalConfig) -> ProviderConfig {
     pc
 }
 
+/// Build a [`ScannerConfig`] from a [`GlobalConfig`]. `cfg.pii == None`
+/// (section unset or unknown discriminator) yields the default config,
+/// which maps to `NullScanner` + `OnHit::Warn` — preserving 0.2.0 raw
+/// mirror behavior when no `~/.codebus/config.yaml` exists.
+fn scanner_config_from(cfg: &GlobalConfig) -> ScannerConfig {
+    let mut sc = ScannerConfig::default();
+    if let Some(pii) = &cfg.pii {
+        if let Some(kind) = pii.scanner {
+            sc.kind = kind;
+        }
+        if let Some(on_hit) = pii.on_hit {
+            sc.on_hit = on_hit;
+        }
+        sc.patterns_extra = pii.patterns_extra.clone();
+    }
+    sc
+}
+
 async fn run_check_cmd(repo: &PathBuf, render_opts: RenderOptions) -> ExitCode {
     let result = match check::run_check(repo) {
         Ok(r) => r,
@@ -240,12 +259,26 @@ async fn run_goal_cmd(
             return ExitCode::from(1);
         }
     };
+    let scanner_cfg = scanner_config_from(cfg);
+    let pii_on_hit = scanner_cfg.on_hit;
+    // Fail-fast BEFORE invoking the LLM agent — a malformed `patterns_extra`
+    // entry should not silently degrade to NullScanner (per design open
+    // question resolution).
+    let pii_scanner = match build_scanner(scanner_cfg) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to build PII scanner: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let mut log_sink = NullSink::new();
     let result = match goal::run_goal(
         goal::RunGoalOptions {
             repo_root: repo,
             goal: goal_text,
             provider: provider.as_ref(),
+            pii_scanner: pii_scanner.as_ref(),
+            pii_on_hit,
         },
         &mut renderer,
         &mut log_sink,
@@ -309,4 +342,63 @@ async fn run_query_cmd(
         return ExitCode::from(1);
     }
     ExitCode::from(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codebus_core::config::PiiConfig;
+    use codebus_core::pii::{OnHit, ScannerKind};
+
+    #[test]
+    fn scanner_config_from_default_when_pii_section_absent() {
+        // Default config preserves 0.2.0 behavior in goal flow:
+        // no pii section → ScannerKind::Null + OnHit::Warn (defaults).
+        let cfg = GlobalConfig::default();
+        let sc = scanner_config_from(&cfg);
+        assert_eq!(sc.kind, ScannerKind::Null);
+        assert_eq!(sc.on_hit, OnHit::Warn);
+        assert!(sc.patterns_extra.is_empty());
+    }
+
+    #[test]
+    fn scanner_config_from_propagates_kind_on_hit_and_extras() {
+        // Goal command propagates PII config from global config to raw_sync.
+        let pii = PiiConfig {
+            scanner: Some(ScannerKind::RegexBasic),
+            on_hit: Some(OnHit::Skip),
+            patterns_extra: vec![r"INTERNAL-\d{6}".to_string()],
+        };
+        let cfg = GlobalConfig {
+            pii: Some(pii),
+            ..GlobalConfig::default()
+        };
+        let sc = scanner_config_from(&cfg);
+        assert_eq!(sc.kind, ScannerKind::RegexBasic);
+        assert_eq!(sc.on_hit, OnHit::Skip);
+        assert_eq!(sc.patterns_extra, vec![r"INTERNAL-\d{6}".to_string()]);
+    }
+
+    #[test]
+    fn malformed_patterns_extra_fails_build_scanner_so_main_can_abort() {
+        // Sharp edge: when patterns_extra contains bad regex, build_scanner
+        // returns Err so main can fail-fast before invoking the LLM agent.
+        // This pins the contract that main.rs `match build_scanner(...)`
+        // path receives an Err and exits with code 1.
+        let pii = PiiConfig {
+            scanner: Some(ScannerKind::RegexBasic),
+            on_hit: None,
+            patterns_extra: vec!["[unterminated".to_string()],
+        };
+        let cfg = GlobalConfig {
+            pii: Some(pii),
+            ..GlobalConfig::default()
+        };
+        let sc = scanner_config_from(&cfg);
+        let result = build_scanner(sc);
+        assert!(
+            result.is_err(),
+            "malformed patterns_extra must propagate Err"
+        );
+    }
 }

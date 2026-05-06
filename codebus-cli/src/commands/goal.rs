@@ -1,9 +1,10 @@
 use codebus_core::fs::file_ops::sha256_file;
-use codebus_core::fs::raw_sync::sync_repo_to_raw;
+use codebus_core::fs::raw_sync::sync_repo_to_raw_with_scanner;
 use codebus_core::git::nested_repo::auto_commit;
 use codebus_core::git::source_version::get_source_version;
 use codebus_core::llm::provider::{InvokeOptions, LlmMode, LlmProvider};
 use codebus_core::log::LogSink;
+use codebus_core::pii::{OnHit, PiiScanner};
 use codebus_core::render::EventRenderer;
 use codebus_core::schema::CODEBUS_SCHEMA;
 use codebus_core::vault::layout::vault_paths;
@@ -26,6 +27,12 @@ pub struct RunGoalOptions<'a> {
     pub repo_root: &'a Path,
     pub goal: &'a str,
     pub provider: &'a dyn LlmProvider,
+    /// Scanner for raw_sync to invoke against each candidate text file.
+    /// Built from `cfg.pii` in main.rs; default config produces a
+    /// `NullScanner` so 0.2.0 raw mirror behavior is preserved.
+    pub pii_scanner: &'a dyn PiiScanner,
+    /// Behavior on PII hit (Warn / Skip / Mask).
+    pub pii_on_hit: OnHit,
 }
 
 pub struct RunGoalResult {
@@ -61,7 +68,12 @@ pub async fn run_goal(
     let mut lint: Option<LintResult> = None;
 
     let result: io::Result<()> = (async {
-        sync_repo_to_raw(opts.repo_root, &p.raw_code)?;
+        sync_repo_to_raw_with_scanner(
+            opts.repo_root,
+            &p.raw_code,
+            opts.pii_scanner,
+            opts.pii_on_hit,
+        )?;
 
         let ver = get_source_version(opts.repo_root);
         let goal_entry = serde_json::json!({
@@ -261,6 +273,7 @@ mod tests {
     use super::*;
     use codebus_core::llm::provider::ProviderError;
     use codebus_core::log::sinks::null_sink::NullSink;
+    use codebus_core::pii::scanners::null_scanner::NullScanner;
     use codebus_core::render::Banner;
     use codebus_core::stream::StreamEvent;
 
@@ -345,11 +358,14 @@ mod tests {
         let mut renderer = CollectingRenderer { events: Vec::new() };
         let mut sink = NullSink::new();
         let provider = WriteOnePageProvider;
+        let null_scanner = NullScanner::new();
         let result = run_goal(
             RunGoalOptions {
                 repo_root: &repo,
                 goal: "explore foo",
                 provider: &provider,
+                pii_scanner: &null_scanner,
+                pii_on_hit: OnHit::Warn,
             },
             &mut renderer,
             &mut sink,

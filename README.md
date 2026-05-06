@@ -124,21 +124,20 @@ cargo install codebus --features all
 [x] Sandbox: --tools whitelist (iter-9 hard-won lesson — 詳見 CLAUDE.md)
 [x] Auto-lint after every goal + standalone --check command
 [x] Source enrichment + stale detection（追蹤 wiki page 對應的 raw 檔有沒有變）
+[x] PII filter (regex_basic / null) wired into raw_sync — 3 OnHit modes (warn / skip / mask) + patterns_extra；防 hardcoded secrets / API keys / 個資進入 LLM context
 ```
 
 ### 🛣️ Next stops（規劃中）
 
 按目前評估的優先序（會隨真實使用回饋調整）：
 
-1. 🔐 **PII filter**（multi-provider：regex / presidio / 雲端 API / 自訂 ML）
-   — 防 hardcoded secrets、API keys、個資進入 LLM context；v1-archive 曾有過 sanitizer，Phase 1 重寫期間沒 port 回來，是 security blocker
-2. 🔌 **Multi-LLM provider** — Anthropic API direct / OpenAI / 本地 model；`LlmProvider` trait 已就緒，只缺各家 impl，可解綁對 Claude CLI 的硬依賴
-3. ⚙️ **Restore `~/.codebus/config.yaml`** — emoji 等 user-level 預設值；**regression from TS 0.1.0**（5 級優先序砍到 3 級），補回來工程量小
-4. 🪙 **Token usage & log tracking** — 紀錄每趟車花多少油、累積成本；在做後面幾項 feature 前先建立 telemetry
-5. 🔧 **Lint feedback loop** — 司機自己檢查 wiki 寫得乾不乾淨、自動修 broken wikilink / oversize page 等
-6. 🆘 **Query gap detection** — 「這站沒明信片」→ 提議升級成 goal 補完缺口
-7. 💾 **Disk preflight** — raw-sync 前估算 + 警告剩餘容量，避免大型 monorepo 把 disk 撐爆
-8. 📦 **Multi-platform binary release + CI** — cargo install / homebrew tap / GitHub Releases / GitHub Actions cross-platform test matrix
+1. 🔌 **Multi-LLM provider** — Anthropic API direct / OpenAI / 本地 model；`LlmProvider` trait 已就緒，只缺各家 impl，可解綁對 Claude CLI 的硬依賴
+2. 🪙 **Token usage & log tracking** — 紀錄每趟車花多少油、累積成本；在做後面幾項 feature 前先建立 telemetry
+3. 🔧 **Lint feedback loop** — 司機自己檢查 wiki 寫得乾不乾淨、自動修 broken wikilink / oversize page 等
+4. 🆘 **Query gap detection** — 「這站沒明信片」→ 提議升級成 goal 補完缺口
+5. 🛡️ **Heavy-dep PII scanners** — `presidio` / `aws` Comprehend Detect-PII / 自訂 ML；regex_basic 已上車，需要更精準匹配時才補
+6. 💾 **Disk preflight** — raw-sync 前估算 + 警告剩餘容量，避免大型 monorepo 把 disk 撐爆
+7. 📦 **Multi-platform binary release + CI** — cargo install / homebrew tap / GitHub Releases / GitHub Actions cross-platform test matrix
 
 ### 🌅 Final destination — Tauri tutorial app
 
