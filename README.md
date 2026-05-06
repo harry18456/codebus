@@ -133,11 +133,13 @@ cargo install codebus --features all
 
 1. 🔌 **Multi-LLM provider** — Anthropic API direct / OpenAI / 本地 model；`LlmProvider` trait 已就緒，只缺各家 impl，可解綁對 Claude CLI 的硬依賴
 2. 🪙 **Token usage & log tracking** — 紀錄每趟車花多少油、累積成本；在做後面幾項 feature 前先建立 telemetry
-3. 🔧 **Lint feedback loop** — 司機自己檢查 wiki 寫得乾不乾淨、自動修 broken wikilink / oversize page 等
-4. 🆘 **Query gap detection** — 「這站沒明信片」→ 提議升級成 goal 補完缺口
-5. 🛡️ **Heavy-dep PII scanners** — `presidio` / `aws` Comprehend Detect-PII / 自訂 ML；regex_basic 已上車，需要更精準匹配時才補
-6. 💾 **Disk preflight** — raw-sync 前估算 + 警告剩餘容量，避免大型 monorepo 把 disk 撐爆
-7. 📦 **Multi-platform binary release + CI** — cargo install / homebrew tap / GitHub Releases / GitHub Actions cross-platform test matrix
+3. 🧭 **Onboarding wizard (`codebus setup`)** — 全域偏好 wizard：偵測 `claude` CLI、選 LLM provider、設 PII 模式 + patterns_extra，寫 `~/.codebus/config.yaml`（含註解）；補上目前「沒 config = 隱性預設」第一次使用會卡的洞
+4. 🔧 **Lint feedback loop** — 司機自己檢查 wiki 寫得乾不乾淨、自動修 broken wikilink / oversize page 等
+5. 🆘 **Query gap detection** — 「這站沒明信片」→ 提議升級成 goal 補完缺口
+6. 🗂️ **Vault registry** — `~/.codebus/registry.json` 紀錄機台上每個 codebus vault 的路徑 + last_used + source_version；獨立於 `config.yaml`（preferences vs machine state 分開），為下一段 Tauri hub view 鋪資料層
+7. 🛡️ **Heavy-dep PII scanners** — `presidio` / `aws` Comprehend Detect-PII / 自訂 ML；regex_basic 已上車，需要更精準匹配時才補
+8. 💾 **Disk preflight** — raw-sync 前估算 + 警告剩餘容量，避免大型 monorepo 把 disk 撐爆
+9. 📦 **Multi-platform binary release + CI** — cargo install / homebrew tap / GitHub Releases / GitHub Actions cross-platform test matrix
 
 ### 🌅 Final destination — Tauri tutorial app
 
