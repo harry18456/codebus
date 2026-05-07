@@ -130,11 +130,11 @@ cargo install codebus --features all
 
 ### 🛣️ Next stops（規劃中）
 
-優先序背後的策略（會隨真實使用回饋調整）：lint feedback loop 已 ship 為第一個多回合 trait use case，下一個 AI-pattern-heavy 是 #1 query gap detection（第二個壓力測試方向）；token tracking 安插在後面，因為多回合呼叫剛好讓 cost 痛點浮現，再開多家 provider。
+優先序背後的策略：lint feedback loop 已 ship 為第一個多回合 trait use case；Multi-LLM provider 是接下來的軸心，因為 API 家族不內建 Read/Write 等工具，這一階段勢必引入 codebus 自己的 tool 抽象 —— 一旦 tool 抽象就位，custom tool 場景（query gap detection 等）才有合適的家。Token tracking 排在 Multi-LLM 之前，因為 multi-provider 切換時需要 cost 對比資料。
 
-1. 🆘 **Query gap detection** — 「這站沒明信片」→ 提議升級成 goal 補完缺口；meta-分析 → 升級成新 goal，第二個壓力測試方向
-2. 🪙 **Token usage & log tracking** — 紀錄每趟車花多少油、累積成本；lint loop / query gap 跑下來剛好是 telemetry 痛點浮現的時機
-3. 🔌 **Multi-LLM provider** — Anthropic API direct / OpenAI / 本地 model；有 3 個 use case 壓過 trait 後再開家，避免 retrofit；解綁對 Claude CLI 的硬依賴
+1. 🪙 **Token usage & log tracking** — 紀錄每趟車花多少油、累積成本；接 `LogSink` + `RunLog` 已鋪好的骨架，補 token usage 抽取 + jsonl 寫檔；Multi-LLM 切換時的 cost 比較基礎建設
+2. 🔌 **Multi-LLM provider + tool abstraction** — Anthropic API direct / OpenAI / 本地 model；同時要把 Read/Glob/Grep/Write/Edit 從 Claude CLI 內建提到 codebus 自己的 tool runtime（API 家族不內建這套）；tool 抽象一旦就位也順帶打開 custom tool 場景的大門；解綁對 Claude CLI 的硬依賴
+3. 🆘 **Query gap detection** — 「這站沒明信片」→ 提議升級成 goal 補完缺口；屬於 #2 tool 抽象後的第一個 custom tool 範例（`propose_goal` 跨 provider 一致實作）
 4. 🧭 **Onboarding wizard (`codebus setup`)** — 全域偏好 wizard：偵測 `claude` CLI、選 LLM provider、設 PII 模式 + patterns_extra，寫 `~/.codebus/config.yaml`（含註解）；多 provider 真的存在後 wizard 才有意義
 5. 🗂️ **Vault registry** — `~/.codebus/registry.json` 紀錄機台上每個 codebus vault 的路徑 + last_used + source_version；獨立於 `config.yaml`（preferences vs machine state 分開），為下一段 Tauri hub view 鋪資料層
 6. 🛡️ **Heavy-dep PII scanners** — `presidio` / `aws` Comprehend Detect-PII / 自訂 ML；regex_basic 已上車，需要更精準匹配時才補
