@@ -384,7 +384,7 @@ The config schema SHALL recognize the following top-level keys, each optional an
 - `pii`: PII scanner configuration block. Discriminator field `scanner` selects one of `null` | `regex_basic` | `presidio` | `aws`; the remaining sub-fields are variant-specific fields valid for the selected scanner (every variant accepts `on_hit`).
 - `lint`: lint rule configuration block (rule overrides, disabled rules, custom rules path). Not a tagged-variant section.
 - `render`: output renderer configuration block. Discriminator field `format` selects one of `terminal` | `json_lines` | `tauri`; the remaining sub-fields are variant-specific.
-- `log`: log sink configuration block. Discriminator field `sink` selects one of `null` | `jsonl` | `otel`; the remaining sub-fields are variant-specific.
+- `log`: log sink configuration block. Discriminator field `sink` selects one of `null` | `jsonl` | `otel`; the remaining sub-fields are variant-specific. For the `jsonl` sink, the recognized sub-field is `dir`, which is optional — when omitted, the system SHALL fall back to `<repo>/.codebus/logs/` for the active vault.
 
 For each of the four tagged-variant plugin section keys (`llm`, `pii`, `render`, `log`), the loader SHALL:
 
@@ -461,10 +461,20 @@ For the `lint` section, the loader SHALL parse the (non-discriminated) struct as
 - **WHEN** `~/.codebus/config.yaml` contains `render: { format: terminal }`
 - **THEN** the loader returns a render config of variant `terminal`
 
-#### Scenario: Log section selects sink
+#### Scenario: Log section selects jsonl sink with explicit dir
+
+- **WHEN** `~/.codebus/config.yaml` contains `log: { sink: jsonl, dir: /var/log/codebus }`
+- **THEN** the loader returns a log config of variant `jsonl` with directory `/var/log/codebus`
+
+#### Scenario: Log section selects jsonl sink without dir defaulting to vault
+
+- **WHEN** `~/.codebus/config.yaml` contains `log: { sink: jsonl }` with no `dir` sub-field
+- **THEN** the loader returns a log config of variant `jsonl` with `dir: None`; downstream the run flow SHALL fall back to `<repo>/.codebus/logs/` of the active vault
+
+#### Scenario: Log section retention_days is silently ignored
 
 - **WHEN** `~/.codebus/config.yaml` contains `log: { sink: jsonl, dir: /var/log/codebus, retention_days: 30 }`
-- **THEN** the loader returns a log config of variant `jsonl` with directory `/var/log/codebus` and retention 30 days
+- **THEN** the loader returns a log config of variant `jsonl` with `dir: /var/log/codebus` and silently ignores `retention_days` (the field has been removed from the schema; this matches the behavior for any unknown sub-field under the chosen variant)
 
 #### Scenario: Empty plugin section parses as defaults
 
@@ -473,17 +483,23 @@ For the `lint` section, the loader SHALL parse the (non-discriminated) struct as
 
 
 <!-- @trace
-source: llm-claude-cli-params
+source: token-tracking
 updated: 2026-05-07
 code:
-  - codebus-core/src/wiki/fix/mod.rs
-  - codebus-core/src/llm/providers/claude_cli.rs
   - codebus-cli/src/commands/goal.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/llm/factory.rs
-  - codebus-core/src/llm/provider.rs
-  - codebus-core/src/config/loader.rs
+  - codebus-core/src/render/renderers/terminal.rs
   - codebus-cli/src/commands/query.rs
+  - codebus-core/src/log/sinks/null_sink.rs
+  - codebus-core/src/stream/parser.rs
+  - codebus-core/src/log/mod.rs
+  - codebus-core/src/config/loader.rs
+  - codebus-cli/src/main.rs
+  - codebus-cli/src/commands/fix.rs
+  - codebus-core/src/log/factory.rs
+  - codebus-core/src/log/sinks/jsonl_sink.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/log/sink.rs
+  - codebus-core/src/wiki/fix/mod.rs
 -->
 
 ---

@@ -10,79 +10,52 @@
 
 When invoked with `--repo <path> --query "<text>"`, the system SHALL run a read-only flow that lets the agent read existing wiki pages and produce an answer with citations, without writing any files or modifying the vault.
 
+After the query stream completes (success or failure), the system SHALL build a `RunLog` carrying `mode: "query"`, the configured `model` and `effort` (if any), accumulated `tokens` from every `StreamEvent::Usage` observed during the run, `started_at` / `finished_at` UTC timestamps, `wiki_changed: false` (query never mutates), `lint_error_count: 0`, `lint_warn_count: 0`, and call `log_sink.write_run(&run_log)` exactly once. The default sink (`SinkConfig::Jsonl { dir: None }`) writes the entry to `<repo>/.codebus/logs/runs-YYYY-MM-DD.jsonl` automatically. Users opt out of run logging by setting `log: { sink: null }` in `~/.codebus/config.yaml`.
+
 #### Scenario: Query with non-empty wiki succeeds
 
 - **WHEN** the user runs `codebus --repo X --query "how does checkout work?"` and at least one of `.codebus/wiki/{concepts,entities,modules,processes,synthesis}/` contains a `.md` file
 - **THEN** the system spawns the LLM agent in query mode and streams the agent's reasoning and answer to the terminal
 
+#### Scenario: Query flow writes a single RunLog after success
+
+- **WHEN** a `--query` run completes successfully
+- **THEN** the system calls `log_sink.write_run(&run_log)` exactly once with `mode: "query"`, `tokens` reflecting the single LLM invocation, and `wiki_changed: false`
+
+#### Scenario: Query flow writes a RunLog even on failure
+
+- **WHEN** a `--query` run errors mid-stream after at least one `StreamEvent::Usage` was observed
+- **THEN** the system still calls `log_sink.write_run(&run_log)` exactly once with the partial token counts; the run still surfaces the error via the existing exit-code path
+
+#### Scenario: Default sink writes RunLog to vault-local logs directory
+
+- **WHEN** the user has no `log:` section in `~/.codebus/config.yaml` (the default) and runs `--query` against repo `X`
+- **THEN** the system writes the `RunLog` as one JSON line to `X/.codebus/logs/runs-YYYY-MM-DD.jsonl`
+
+#### Scenario: Explicit null sink discards the RunLog write silently
+
+- **WHEN** the user sets `log: { sink: null }` in `~/.codebus/config.yaml` and runs `--query`
+- **THEN** the system still constructs the `RunLog` and calls `log_sink.write_run`, but `NullSink::write_run` returns `Ok(())` without producing any file output (the explicit opt-out)
+
 
 <!-- @trace
-source: codebus-v2-phase1
-updated: 2026-05-04
+source: token-tracking
+updated: 2026-05-07
 code:
-  - src/infra/fs/raw-sync.ts
-  - docs/superpowers/REVIEW_LESSONS.md
-  - src/infra/cli-detect.ts
-  - src/core/wiki/types.ts
-  - README.md
-  - src/core/wiki/frontmatter.ts
-  - package.json
-  - src/core/vault/lock.ts
-  - src/core/vault/sanity-check.ts
-  - src/core/wiki/stale-detect.ts
-  - src/schema/claude-md.ts
-  - src/commands/goal.ts
-  - src/core/wiki/date.ts
-  - LICENSE
-  - src/cli.ts
-  - tsconfig.json
-  - src/commands/query.ts
-  - src/infra/git/source-version.ts
-  - src/ui/lint-report.ts
-  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
-  - src/infra/llm/types.ts
-  - .spectra.yaml
-  - src/core/vault/layout.ts
-  - src/infra/git/nested-repo.ts
-  - src/commands/check.ts
-  - src/core/wiki/page-merge.ts
-  - vitest.config.ts
-  - src/commands/init.ts
-  - src/ui/stream-parser.ts
-  - src/core/wiki/lint.ts
-  - src/infra/llm/claude-cli.ts
-  - src/infra/fs/file-ops.ts
-  - src/ui/emoji-mode.ts
-  - src/infra/global-config.ts
-  - src/core/wiki/frontmatter-repair.ts
-  - src/ui/render.ts
-tests:
-  - tests/e2e/init-smoke.test.ts
-  - tests/infra/fs/file-ops.test.ts
-  - tests/commands/goal.test.ts
-  - tests/cli.test.ts
-  - tests/commands/query.test.ts
-  - tests/commands/check.test.ts
-  - tests/core/wiki/date.test.ts
-  - tests/core/wiki/page-merge.test.ts
-  - tests/core/wiki/stale-detect.test.ts
-  - tests/infra/cli-detect.test.ts
-  - tests/ui/emoji-mode.test.ts
-  - tests/core/wiki/frontmatter-repair.test.ts
-  - tests/infra/git/source-version.test.ts
-  - tests/commands/init.test.ts
-  - tests/infra/global-config.test.ts
-  - tests/ui/stream-parser.test.ts
-  - tests/core/vault/sanity-check.test.ts
-  - tests/core/wiki/lint.test.ts
-  - tests/infra/git/nested-repo.test.ts
-  - tests/infra/fs/raw-sync.test.ts
-  - tests/core/vault/layout.test.ts
-  - tests/core/vault/lock.test.ts
-  - tests/infra/llm/claude-cli.test.ts
-  - tests/schema/claude-md.test.ts
-  - tests/core/wiki/frontmatter.test.ts
-  - tests/ui/render.test.ts
+  - codebus-cli/src/commands/goal.rs
+  - codebus-core/src/render/renderers/terminal.rs
+  - codebus-cli/src/commands/query.rs
+  - codebus-core/src/log/sinks/null_sink.rs
+  - codebus-core/src/stream/parser.rs
+  - codebus-core/src/log/mod.rs
+  - codebus-core/src/config/loader.rs
+  - codebus-cli/src/main.rs
+  - codebus-cli/src/commands/fix.rs
+  - codebus-core/src/log/factory.rs
+  - codebus-core/src/log/sinks/jsonl_sink.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/log/sink.rs
+  - codebus-core/src/wiki/fix/mod.rs
 -->
 
 ---

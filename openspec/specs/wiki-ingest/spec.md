@@ -10,6 +10,8 @@
 
 When invoked with `--repo <path> --goal "<text>"`, the system SHALL run the full ingest sequence: ensure vault exists, sync raw code, record source version, invoke the LLM agent in ingest mode, post-process pages, and commit the result to the nested git repo.
 
+After the ingest sequence completes (success or failure), the system SHALL build a `RunLog` carrying `mode: "goal"`, the configured `model` and `effort` (if any), accumulated `tokens` from every `StreamEvent::Usage` observed during the run (including all fix-loop iterations when auto-fix is enabled), `started_at` / `finished_at` UTC timestamps, `wiki_changed`, `lint_error_count`, `lint_warn_count`, and call `log_sink.write_run(&run_log)` exactly once. The default sink (`SinkConfig::Jsonl { dir: None }`) writes the entry to `<repo>/.codebus/logs/runs-YYYY-MM-DD.jsonl` automatically — same per-vault auto-tracking precedent as `goals.jsonl`. Users opt out of run logging by setting `log: { sink: null }` in `~/.codebus/config.yaml`.
+
 #### Scenario: First-time goal triggers init then ingest
 
 - **WHEN** the user runs `codebus --repo X --goal "understand checkout"` and `.codebus/` does not exist
@@ -21,74 +23,45 @@ When invoked with `--repo <path> --goal "<text>"`, the system SHALL run the full
 - **AND** the user runs `codebus --repo X --goal "understand checkout"`
 - **THEN** the system skips init and proceeds directly with sync + agent invocation
 
+#### Scenario: Goal flow writes a single RunLog after success
+
+- **WHEN** a `--goal` run completes successfully (with or without fix loop)
+- **THEN** the system calls `log_sink.write_run(&run_log)` exactly once with `mode: "goal"`, `tokens` summing every `StreamEvent::Usage` observed during the run (including fix-loop iterations), and `wiki_changed` reflecting the post-commit state
+
+#### Scenario: Goal flow writes a RunLog even on failure
+
+- **WHEN** a `--goal` run errors mid-stream after at least one `StreamEvent::Usage` was observed
+- **THEN** the system still calls `log_sink.write_run(&run_log)` exactly once with the partial token counts and `wiki_changed: false`; the run still surfaces the error to the user via the existing exit-code path
+
+#### Scenario: Default sink writes RunLog to vault-local logs directory
+
+- **WHEN** the user has no `log:` section in `~/.codebus/config.yaml` (the default) and runs `--goal` against repo `X`
+- **THEN** the system writes the `RunLog` as one JSON line to `X/.codebus/logs/runs-YYYY-MM-DD.jsonl` where `YYYY-MM-DD` is the UTC date of the run's `started_at`
+
+#### Scenario: Explicit null sink discards the RunLog write silently
+
+- **WHEN** the user sets `log: { sink: null }` in `~/.codebus/config.yaml` and runs `--goal`
+- **THEN** the system still constructs the `RunLog` and calls `log_sink.write_run`, but `NullSink::write_run` returns `Ok(())` without producing any file output (the explicit opt-out)
+
 
 <!-- @trace
-source: codebus-v2-phase1
-updated: 2026-05-04
+source: token-tracking
+updated: 2026-05-07
 code:
-  - src/infra/fs/raw-sync.ts
-  - docs/superpowers/REVIEW_LESSONS.md
-  - src/infra/cli-detect.ts
-  - src/core/wiki/types.ts
-  - README.md
-  - src/core/wiki/frontmatter.ts
-  - package.json
-  - src/core/vault/lock.ts
-  - src/core/vault/sanity-check.ts
-  - src/core/wiki/stale-detect.ts
-  - src/schema/claude-md.ts
-  - src/commands/goal.ts
-  - src/core/wiki/date.ts
-  - LICENSE
-  - src/cli.ts
-  - tsconfig.json
-  - src/commands/query.ts
-  - src/infra/git/source-version.ts
-  - src/ui/lint-report.ts
-  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
-  - src/infra/llm/types.ts
-  - .spectra.yaml
-  - src/core/vault/layout.ts
-  - src/infra/git/nested-repo.ts
-  - src/commands/check.ts
-  - src/core/wiki/page-merge.ts
-  - vitest.config.ts
-  - src/commands/init.ts
-  - src/ui/stream-parser.ts
-  - src/core/wiki/lint.ts
-  - src/infra/llm/claude-cli.ts
-  - src/infra/fs/file-ops.ts
-  - src/ui/emoji-mode.ts
-  - src/infra/global-config.ts
-  - src/core/wiki/frontmatter-repair.ts
-  - src/ui/render.ts
-tests:
-  - tests/e2e/init-smoke.test.ts
-  - tests/infra/fs/file-ops.test.ts
-  - tests/commands/goal.test.ts
-  - tests/cli.test.ts
-  - tests/commands/query.test.ts
-  - tests/commands/check.test.ts
-  - tests/core/wiki/date.test.ts
-  - tests/core/wiki/page-merge.test.ts
-  - tests/core/wiki/stale-detect.test.ts
-  - tests/infra/cli-detect.test.ts
-  - tests/ui/emoji-mode.test.ts
-  - tests/core/wiki/frontmatter-repair.test.ts
-  - tests/infra/git/source-version.test.ts
-  - tests/commands/init.test.ts
-  - tests/infra/global-config.test.ts
-  - tests/ui/stream-parser.test.ts
-  - tests/core/vault/sanity-check.test.ts
-  - tests/core/wiki/lint.test.ts
-  - tests/infra/git/nested-repo.test.ts
-  - tests/infra/fs/raw-sync.test.ts
-  - tests/core/vault/layout.test.ts
-  - tests/core/vault/lock.test.ts
-  - tests/infra/llm/claude-cli.test.ts
-  - tests/schema/claude-md.test.ts
-  - tests/core/wiki/frontmatter.test.ts
-  - tests/ui/render.test.ts
+  - codebus-cli/src/commands/goal.rs
+  - codebus-core/src/render/renderers/terminal.rs
+  - codebus-cli/src/commands/query.rs
+  - codebus-core/src/log/sinks/null_sink.rs
+  - codebus-core/src/stream/parser.rs
+  - codebus-core/src/log/mod.rs
+  - codebus-core/src/config/loader.rs
+  - codebus-cli/src/main.rs
+  - codebus-cli/src/commands/fix.rs
+  - codebus-core/src/log/factory.rs
+  - codebus-core/src/log/sinks/jsonl_sink.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/log/sink.rs
+  - codebus-core/src/wiki/fix/mod.rs
 -->
 
 ---
