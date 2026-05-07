@@ -21,12 +21,14 @@ pub mod memory;
 pub mod prompt;
 
 use crate::llm::provider::{InvokeOptions, LlmMode, LlmProvider};
+use crate::render::{Banner, EventRenderer};
 use crate::wiki::lint::lint_wiki;
 use crate::wiki::types::LintIssue;
 use futures_util::StreamExt;
 use std::io;
 use std::path::Path;
 use std::process::Command;
+use std::time::Instant;
 
 /// Terminal state of one [`lint_and_fix`] run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +49,12 @@ pub enum FixReport {
 /// vault is clean or `max_iterations` is hit. `provider` is invoked at
 /// most `max_iterations` times.
 ///
+/// `renderer` receives a [`Banner::FixIterStart`] before each LLM invoke
+/// and a matching [`Banner::FixIterDone`] after the iteration's re-lint —
+/// this lets the CLI's stage-banner UX expose what the loop is doing.
+/// Pass a renderer that no-ops `render_banner` (e.g. `NullSink`-style)
+/// when the caller doesn't care.
+///
 /// The function snapshots the vault's nested git HEAD before the first LLM
 /// invocation. From the second iteration onward, the prompt embeds
 /// `git diff <snapshot> -- wiki/` as "previous-attempt memory" so the
@@ -55,6 +63,7 @@ pub async fn lint_and_fix(
     vault_root: &Path,
     provider: &dyn LlmProvider,
     max_iterations: u32,
+    renderer: &mut dyn EventRenderer,
 ) -> io::Result<FixReport> {
     // Spec: "Skip the loop entirely when initial lint reports zero issues".
     let initial = lint_wiki(vault_root);
@@ -79,11 +88,17 @@ pub async fn lint_and_fix(
         };
         let prompt = prompt::build_fix_prompt(&current_issues, prior_diff.as_deref());
 
+        let pre_iter_count = current_issues.len();
+        let iter_one_based = iter + 1;
+        renderer.render_banner(&Banner::FixIterStart {
+            i: iter_one_based,
+            max: max_iterations,
+        });
+        let iter_started_at = Instant::now();
+
         eprintln!(
             "lint fix iteration {}/{}: {} issues",
-            iter + 1,
-            max_iterations,
-            current_issues.len()
+            iter_one_based, max_iterations, pre_iter_count
         );
 
         let opts = InvokeOptions {
@@ -104,6 +119,19 @@ pub async fn lint_and_fix(
 
         iter += 1;
         let after = lint_wiki(vault_root);
+        let post_iter_count = after.issues.len();
+        // `fixed` reports drop in issue count vs the iteration's own pre-lint
+        // count. saturating_sub guards against the (unusual) case where the
+        // agent introduced new issues this iteration.
+        let fixed = pre_iter_count.saturating_sub(post_iter_count);
+        let elapsed_ms = elapsed_ms_saturating(iter_started_at);
+        renderer.render_banner(&Banner::FixIterDone {
+            i: iter_one_based,
+            fixed,
+            remaining: post_iter_count,
+            elapsed_ms,
+        });
+
         if after.issues.is_empty() {
             return Ok(FixReport::Clean { iterations: iter });
         }
@@ -114,6 +142,14 @@ pub async fn lint_and_fix(
         iterations: iter,
         remaining_issues: current_issues,
     })
+}
+
+/// Cap elapsed at `u64::MAX` if the conversion overflows. Realistically a
+/// goal run is under an hour so `as_millis()` fits in u64 — this guard
+/// exists for the long-running pathological case (goal stuck for years
+/// without timeout) so we never panic on overflow.
+fn elapsed_ms_saturating(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 fn head_sha(vault_root: &Path) -> Option<String> {
@@ -227,6 +263,17 @@ mod tests {
         fn cancel(&self) {}
     }
 
+    /// Renderer that drops every event and banner. Tests that don't care
+    /// about banner emission use this to satisfy the new `lint_and_fix`
+    /// signature without pulling in `TerminalRenderer`'s stdout side-effect.
+    struct NullRenderer;
+    impl EventRenderer for NullRenderer {
+        fn render(&mut self, _: &StreamEvent) {}
+        fn render_banner(&mut self, _: &Banner<'_>) {}
+        fn render_lint_report(&mut self, _: &crate::wiki::types::LintResult) {}
+        fn render_lint_summary(&mut self, _: &crate::wiki::types::LintResult) {}
+    }
+
     // === Task 3.1: 0-issue short-circuit ===
 
     #[tokio::test]
@@ -237,7 +284,7 @@ mod tests {
         // No issues: 5 type folders + index + log all present, no broken
         // links, no oversize pages.
         let provider = FailOnCallProvider;
-        let report = lint_and_fix(&v, &provider, 5).await.unwrap();
+        let report = lint_and_fix(&v, &provider, 5, &mut NullRenderer).await.unwrap();
         assert_eq!(report, FixReport::Clean { iterations: 0 });
         cleanup(&v);
     }
@@ -255,7 +302,7 @@ mod tests {
 
         let no_op: OnInvoke = Arc::new(|_path: &Path| {});
         let mock = RecordingMock::new(no_op);
-        let report = lint_and_fix(&v, &mock, 3).await.unwrap();
+        let report = lint_and_fix(&v, &mock, 3, &mut NullRenderer).await.unwrap();
 
         match report {
             FixReport::MaxIter {
@@ -287,7 +334,7 @@ mod tests {
             let _ = fs::remove_file(target);
         });
         let mock = RecordingMock::new(fix_once);
-        let report = lint_and_fix(&v, &mock, 5).await.unwrap();
+        let report = lint_and_fix(&v, &mock, 5, &mut NullRenderer).await.unwrap();
 
         assert_eq!(report, FixReport::Clean { iterations: 1 });
         assert_eq!(mock.invoke_count(), 1, "provider called exactly once");
@@ -319,7 +366,7 @@ mod tests {
             fs::write(marker, format!("marker iteration {}\n", *n)).unwrap();
         });
         let mock = RecordingMock::new(add_marker);
-        let report = lint_and_fix(&v, &mock, 3).await.unwrap();
+        let report = lint_and_fix(&v, &mock, 3, &mut NullRenderer).await.unwrap();
 
         assert!(matches!(report, FixReport::MaxIter { .. }));
         let captured = mock.captured();
@@ -387,7 +434,7 @@ mod tests {
         // prompt.
         let no_op: OnInvoke = Arc::new(|_| {});
         let mock = RecordingMock::new(no_op);
-        let _ = lint_and_fix(&v, &mock, 1).await.unwrap();
+        let _ = lint_and_fix(&v, &mock, 1, &mut NullRenderer).await.unwrap();
 
         let captured = mock.captured();
         assert_eq!(captured.len(), 1);

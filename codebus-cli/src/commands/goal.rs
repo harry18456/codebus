@@ -5,7 +5,7 @@ use codebus_core::git::source_version::get_source_version;
 use codebus_core::llm::provider::{InvokeOptions, LlmMode, LlmProvider};
 use codebus_core::log::LogSink;
 use codebus_core::pii::{OnHit, PiiScanner};
-use codebus_core::render::EventRenderer;
+use codebus_core::render::{Banner, EventRenderer};
 use codebus_core::schema::CODEBUS_SCHEMA;
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::vault::lock::{acquire_lock, release_lock};
@@ -21,6 +21,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
 
 use crate::commands::init::run_init;
 
@@ -75,12 +76,27 @@ pub async fn run_goal(
     let mut lint: Option<LintResult> = None;
 
     let result: io::Result<()> = (async {
-        sync_repo_to_raw_with_scanner(
+        renderer.render_banner(&Banner::SyncStart);
+        let sync_started = Instant::now();
+        let summary = sync_repo_to_raw_with_scanner(
             opts.repo_root,
             &p.raw_code,
             opts.pii_scanner,
             opts.pii_on_hit,
         )?;
+        let sync_elapsed_ms = elapsed_ms_saturating(sync_started);
+        renderer.render_banner(&Banner::SyncDone {
+            files: summary.files,
+            mib: summary.bytes / (1024 * 1024),
+            elapsed_ms: sync_elapsed_ms,
+        });
+        let action_label = on_hit_label(summary.action);
+        renderer.render_banner(&Banner::PiiSummary {
+            scanner: opts.pii_scanner.name(),
+            scanned: summary.scanned,
+            hits: summary.hits,
+            action: action_label,
+        });
 
         let ver = get_source_version(opts.repo_root);
         let goal_entry = serde_json::json!({
@@ -130,15 +146,38 @@ pub async fn run_goal(
 
         // Soft lint — never block commit. Run before any fix attempt so
         // the pre-fix issue list is observable for downstream debugging.
+        renderer.render_banner(&Banner::LintStart);
+        let lint_started = Instant::now();
         let pre_fix = lint_wiki(&p.root);
+        let pre_fix_elapsed = elapsed_ms_saturating(lint_started);
+        renderer.render_banner(&Banner::LintDone {
+            errors: pre_fix.error_count,
+            warns: pre_fix.warn_count,
+            elapsed_ms: pre_fix_elapsed,
+        });
         let mut final_lint = pre_fix;
 
         if !opts.fix_disabled {
             // Spec: "Goal flow auto-runs lint_and_fix after ingest completes".
-            lint_and_fix(&p.root, opts.provider, opts.fix_max_iterations).await?;
+            lint_and_fix(
+                &p.root,
+                opts.provider,
+                opts.fix_max_iterations,
+                renderer,
+            )
+            .await?;
             // Re-lint so RunGoalResult.lint reflects the user-visible
-            // post-fix state.
+            // post-fix state. Bracket with another LintStart/LintDone pair so
+            // the "post-fix lint" is also visible in the banner stream.
+            renderer.render_banner(&Banner::LintStart);
+            let post_fix_started = Instant::now();
             final_lint = lint_wiki(&p.root);
+            let post_fix_elapsed = elapsed_ms_saturating(post_fix_started);
+            renderer.render_banner(&Banner::LintDone {
+                errors: final_lint.error_count,
+                warns: final_lint.warn_count,
+                elapsed_ms: post_fix_elapsed,
+            });
         }
 
         lint = Some(final_lint);
@@ -147,8 +186,10 @@ pub async fn run_goal(
 
         // Spec: "Auto-commit happens once after fix loop terminates" —
         // single commit captures both goal-ingest writes and fix-loop edits.
-        let _ = auto_commit(&p.root, &format!("wiki: {}", opts.goal))
+        let head_sha = auto_commit(&p.root, &format!("wiki: {}", opts.goal))
             .map_err(|e| io::Error::other(e.to_string()))?;
+        let sha7: String = head_sha.chars().take(7).collect();
+        renderer.render_banner(&Banner::CommitDone { sha7: &sha7 });
 
         Ok(())
     })
@@ -167,6 +208,25 @@ fn append_file(path: &Path, data: &[u8]) -> io::Result<()> {
         .append(true)
         .open(path)?;
     f.write_all(data)
+}
+
+/// Saturate `as u64` if a stage runs long enough to overflow u128→u64.
+/// Realistic goal runs are < 1 hour, but a stuck goal could in principle
+/// hit the boundary; we never panic on it.
+fn elapsed_ms_saturating(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Stable string label for `OnHit` policy (used by `Banner::PiiSummary`).
+/// Kept here rather than as `impl OnHit` so adding a label doesn't reach
+/// across crate boundaries; `OnHit` is a closed enum so this match is
+/// guaranteed-exhaustive at compile time.
+fn on_hit_label(action: OnHit) -> &'static str {
+    match action {
+        OnHit::Warn => "warn",
+        OnHit::Skip => "skip",
+        OnHit::Mask => "mask",
+    }
 }
 
 fn chrono_iso_now() -> String {
@@ -300,13 +360,29 @@ mod tests {
 
     struct CollectingRenderer {
         events: Vec<StreamEvent>,
+        /// One Debug-formatted line per `render_banner` call. Tests assert on
+        /// these via `.contains("SyncStart")` etc. — the `{:?}` form embeds
+        /// both the variant name and field values, which is enough granularity
+        /// to verify ordering and payloads without an extra `OwnedBanner` mirror.
+        banners: Vec<String>,
+    }
+
+    impl CollectingRenderer {
+        fn new() -> Self {
+            Self {
+                events: Vec::new(),
+                banners: Vec::new(),
+            }
+        }
     }
 
     impl EventRenderer for CollectingRenderer {
         fn render(&mut self, e: &StreamEvent) {
             self.events.push(e.clone());
         }
-        fn render_banner(&mut self, _: &Banner<'_>) {}
+        fn render_banner(&mut self, b: &Banner<'_>) {
+            self.banners.push(format!("{b:?}"));
+        }
         fn render_lint_report(&mut self, _: &LintResult) {}
         fn render_lint_summary(&mut self, _: &LintResult) {}
     }
@@ -460,7 +536,7 @@ mod tests {
             .status()
             .unwrap();
 
-        let mut renderer = CollectingRenderer { events: Vec::new() };
+        let mut renderer = CollectingRenderer::new();
         let mut sink = NullSink::new();
         let provider = WriteOnePageProvider;
         let null_scanner = NullScanner::new();
@@ -508,7 +584,7 @@ mod tests {
         // Spec: "Default goal run triggers the fix loop after lint"
         // Spec: "Auto-commit happens once after fix loop terminates"
         let repo = seed_repo();
-        let mut renderer = CollectingRenderer { events: Vec::new() };
+        let mut renderer = CollectingRenderer::new();
         let mut sink = NullSink::new();
         let provider = CountingMock::new();
         let null_scanner = NullScanner::new();
@@ -570,7 +646,7 @@ mod tests {
         // Spec: "--no-fix flag skips the fix loop in goal flow"
         // Spec: "Disabled config skips the fix loop in goal flow"
         let repo = seed_repo();
-        let mut renderer = CollectingRenderer { events: Vec::new() };
+        let mut renderer = CollectingRenderer::new();
         let mut sink = NullSink::new();
         let provider = CountingMock::new();
         let null_scanner = NullScanner::new();
@@ -614,6 +690,140 @@ mod tests {
             "expected init + goal commit, got: {lines}"
         );
         assert!(commits[0].contains("wiki: explore foo"));
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    // === Stage banner integration (goal-stage-banners change) ===
+
+    #[tokio::test]
+    async fn run_goal_emits_stage_banners_in_order() {
+        // Spec: "Render stage banners during goal flow" + "Render PII summary
+        // banner" — goal flow surfaces SyncStart/SyncDone, PiiSummary,
+        // LintStart/LintDone, and CommitDone in that order, plus FixIter*
+        // banners from the inner fix loop when --no-fix is not set.
+        let repo = seed_repo();
+        let mut renderer = CollectingRenderer::new();
+        let mut sink = NullSink::new();
+        let provider = WriteOnePageProvider;
+        let null_scanner = NullScanner::new();
+
+        run_goal(
+            RunGoalOptions {
+                repo_root: &repo,
+                goal: "explore foo",
+                provider: &provider,
+                pii_scanner: &null_scanner,
+                pii_on_hit: OnHit::Warn,
+                fix_disabled: true, // keep fix loop out of this test's scope
+                fix_max_iterations: 1,
+            },
+            &mut renderer,
+            &mut sink,
+        )
+        .await
+        .expect("run_goal succeeded");
+
+        // Required stage banners in this order. We assert the index of each
+        // marker is monotonically increasing, ignoring any other banner in
+        // between (e.g. lifecycle banners emitted by main.rs are absent here
+        // because we call run_goal directly).
+        let banners = &renderer.banners;
+        let idx = |needle: &str| -> Option<usize> {
+            banners.iter().position(|b| b.starts_with(needle))
+        };
+        let i_sync_start = idx("SyncStart").expect("SyncStart missing");
+        let i_sync_done = idx("SyncDone").expect("SyncDone missing");
+        let i_pii = idx("PiiSummary").expect("PiiSummary missing");
+        let i_lint_start = idx("LintStart").expect("LintStart missing");
+        let i_lint_done = idx("LintDone").expect("LintDone missing");
+        let i_commit = idx("CommitDone").expect("CommitDone missing");
+
+        assert!(
+            i_sync_start < i_sync_done,
+            "SyncStart before SyncDone: {banners:?}"
+        );
+        assert!(
+            i_sync_done < i_pii,
+            "SyncDone before PiiSummary: {banners:?}"
+        );
+        assert!(
+            i_pii < i_lint_start,
+            "PiiSummary before LintStart: {banners:?}"
+        );
+        assert!(
+            i_lint_start < i_lint_done,
+            "LintStart before LintDone: {banners:?}"
+        );
+        assert!(
+            i_lint_done < i_commit,
+            "LintDone before CommitDone: {banners:?}"
+        );
+
+        // PiiSummary payload sanity: scanner name "null" + 0 hits.
+        let pii_line = &banners[i_pii];
+        assert!(pii_line.contains("null"), "PII banner: {pii_line}");
+        assert!(pii_line.contains("hits: 0"), "PII banner: {pii_line}");
+
+        // SyncDone payload: WriteOnePageProvider seeds a small fixture
+        // (seed_repo writes a.rs only), so files >= 1.
+        let sync_done_line = &banners[i_sync_done];
+        assert!(
+            sync_done_line.contains("files:"),
+            "sync done banner: {sync_done_line}"
+        );
+
+        // CommitDone sha7 should be 7 hex chars.
+        let commit_line = &banners[i_commit];
+        assert!(
+            commit_line.contains("sha7"),
+            "commit banner missing sha7 field: {commit_line}"
+        );
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[tokio::test]
+    async fn run_goal_continues_when_renderer_swallows_banner_errors() {
+        // Spec: "Stage banners do not block on stdout failures" — the
+        // EventRenderer trait returns `()` from render_banner, so banner
+        // emission is non-fallible by construction. This test pins that
+        // contract: a renderer that ignores every input still lets the goal
+        // flow complete with the same wiki / lint / commit outcome.
+        struct DropAllRenderer;
+        impl EventRenderer for DropAllRenderer {
+            fn render(&mut self, _: &StreamEvent) {}
+            fn render_banner(&mut self, _: &Banner<'_>) {}
+            fn render_lint_report(&mut self, _: &LintResult) {}
+            fn render_lint_summary(&mut self, _: &LintResult) {}
+        }
+
+        let repo = seed_repo();
+        let mut renderer = DropAllRenderer;
+        let mut sink = NullSink::new();
+        let provider = WriteOnePageProvider;
+        let null_scanner = NullScanner::new();
+
+        let result = run_goal(
+            RunGoalOptions {
+                repo_root: &repo,
+                goal: "explore foo",
+                provider: &provider,
+                pii_scanner: &null_scanner,
+                pii_on_hit: OnHit::Warn,
+                fix_disabled: true,
+                fix_max_iterations: 1,
+            },
+            &mut renderer,
+            &mut sink,
+        )
+        .await
+        .expect("run_goal must succeed even when renderer drops every banner");
+
+        let p = vault_paths(&repo);
+        assert!(p.wiki_concepts.join("foo.md").exists());
+        assert!(result.wiki_changed);
+        assert!(result.lint.is_some());
 
         let _ = fs::remove_dir_all(&repo);
     }

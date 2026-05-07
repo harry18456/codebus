@@ -216,6 +216,52 @@ pub fn format_banner(b: Banner<'_>, opts: RenderOptions) -> String {
             lead("💡", "i", opts.use_emoji),
             normalize_path(path)
         ),
+        Banner::SyncStart => format!(
+            "{} 同步 source → raw/code...",
+            lead("🔄", "~", opts.use_emoji)
+        ),
+        Banner::SyncDone {
+            files,
+            mib,
+            elapsed_ms,
+        } => format!(
+            "{} 同步完成 ({files} 檔, {mib} MiB, {elapsed_ms} ms)",
+            lead("✓", "ok", opts.use_emoji)
+        ),
+        Banner::PiiSummary {
+            scanner,
+            scanned,
+            hits,
+            action,
+        } => format!(
+            "{} PII：{scanner}, scanned {scanned}, hits {hits}, action {action}",
+            lead("🛡", "!", opts.use_emoji)
+        ),
+        Banner::LintStart => format!("{} lint 中...", lead("🔍", "~", opts.use_emoji)),
+        Banner::LintDone {
+            errors,
+            warns,
+            elapsed_ms,
+        } => format!(
+            "{} lint：{errors} errors, {warns} warnings ({elapsed_ms} ms)",
+            lead("✓", "ok", opts.use_emoji)
+        ),
+        Banner::FixIterStart { i, max } => format!(
+            "{} fix iter {i}/{max}...",
+            lead("🔧", "~", opts.use_emoji)
+        ),
+        Banner::FixIterDone {
+            i,
+            fixed,
+            remaining,
+            elapsed_ms,
+        } => format!(
+            "{} fix iter {i}: {fixed} fixed, {remaining} remaining ({elapsed_ms} ms)",
+            lead("✓", "ok", opts.use_emoji)
+        ),
+        Banner::CommitDone { sha7 } => {
+            format!("{} commit {sha7}", lead("📌", ".", opts.use_emoji))
+        }
     }
 }
 
@@ -355,6 +401,136 @@ mod tests {
         let out = format_lint_report(&r, no_color());
         let expected = "# 14 pages + 2 nav files scanned, 0 error(s), 2 warning(s)\n\n! wiki/overview.md\n   warn:  page lives in wiki/ root\n! wiki/index.md\n   warn:  broken wikilink in body: [[ghost]]\n";
         assert_eq!(out, expected);
+    }
+
+    fn with_emoji() -> RenderOptions {
+        RenderOptions {
+            use_emoji: true,
+            use_color: false,
+        }
+    }
+
+    // === Stage banners (goal-stage-banners change) ===
+
+    #[test]
+    fn sync_start_banner_renders_in_both_modes() {
+        let s = format_banner(Banner::SyncStart, no_color());
+        assert!(
+            s.contains("同步") || s.contains("sync"),
+            "no-emoji line should mention sync, got: {s}"
+        );
+        let e = format_banner(Banner::SyncStart, with_emoji());
+        assert!(
+            e.starts_with("🔄"),
+            "emoji line should lead with 🔄, got: {e}"
+        );
+    }
+
+    #[test]
+    fn sync_done_banner_carries_files_mib_elapsed() {
+        let b = Banner::SyncDone {
+            files: 1289,
+            mib: 26,
+            elapsed_ms: 6234,
+        };
+        let s = format_banner(b, no_color());
+        assert!(s.contains("1289"), "files count missing: {s}");
+        assert!(s.contains("26"), "mib missing: {s}");
+        assert!(s.contains("6234"), "elapsed_ms missing: {s}");
+    }
+
+    #[test]
+    fn pii_summary_banner_carries_scanner_counts_and_action() {
+        let b = Banner::PiiSummary {
+            scanner: "null",
+            scanned: 1289,
+            hits: 0,
+            action: "warn",
+        };
+        let s = format_banner(b, no_color());
+        assert!(s.contains("null"), "scanner name missing: {s}");
+        assert!(s.contains("1289"), "scanned count missing: {s}");
+        assert!(s.contains("warn"), "action missing: {s}");
+
+        let b2 = Banner::PiiSummary {
+            scanner: "regex_basic",
+            scanned: 1289,
+            hits: 3,
+            action: "skip",
+        };
+        let s2 = format_banner(b2, no_color());
+        assert!(s2.contains("regex_basic"));
+        assert!(s2.contains("3"), "hits missing: {s2}");
+        assert!(s2.contains("skip"));
+    }
+
+    #[test]
+    fn lint_start_and_done_banners() {
+        let s = format_banner(Banner::LintStart, no_color());
+        assert!(s.contains("lint"), "lint start line: {s}");
+
+        let d = format_banner(
+            Banner::LintDone {
+                errors: 0,
+                warns: 2,
+                elapsed_ms: 312,
+            },
+            no_color(),
+        );
+        assert!(d.contains("0"), "errors missing: {d}");
+        assert!(d.contains("2"), "warns missing: {d}");
+        assert!(d.contains("312"), "elapsed_ms missing: {d}");
+    }
+
+    #[test]
+    fn fix_iter_start_and_done_banners() {
+        let s = format_banner(Banner::FixIterStart { i: 1, max: 3 }, no_color());
+        assert!(s.contains("1"), "iter index missing: {s}");
+        assert!(s.contains("3"), "max missing: {s}");
+
+        let d = format_banner(
+            Banner::FixIterDone {
+                i: 1,
+                fixed: 2,
+                remaining: 1,
+                elapsed_ms: 8123,
+            },
+            no_color(),
+        );
+        assert!(d.contains("1"), "iter index missing: {d}");
+        assert!(d.contains("2"), "fixed missing: {d}");
+        assert!(d.contains("8123"), "elapsed_ms missing: {d}");
+    }
+
+    #[test]
+    fn commit_done_banner_carries_sha7() {
+        let b = Banner::CommitDone { sha7: "abc1234" };
+        let s = format_banner(b, no_color());
+        assert!(s.contains("abc1234"), "sha7 missing: {s}");
+    }
+
+    #[test]
+    fn stage_banners_use_emoji_glyph_when_enabled() {
+        // Spec: "Stage banners follow existing emoji mode" — emoji flag flips
+        // the prefix; the same glyph family as lifecycle banners.
+        let s = format_banner(
+            Banner::SyncDone {
+                files: 0,
+                mib: 0,
+                elapsed_ms: 0,
+            },
+            with_emoji(),
+        );
+        // Check emoji-version differs from no-emoji version.
+        let s_no = format_banner(
+            Banner::SyncDone {
+                files: 0,
+                mib: 0,
+                elapsed_ms: 0,
+            },
+            no_color(),
+        );
+        assert_ne!(s, s_no, "emoji vs non-emoji output should differ");
     }
 
     #[test]

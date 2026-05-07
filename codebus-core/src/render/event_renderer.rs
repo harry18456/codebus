@@ -11,9 +11,11 @@
 use crate::stream::StreamEvent;
 use crate::wiki::types::LintResult;
 
-/// One of the structural CLI banners (start, goal, done, hint). Carried as
-/// `&'a str` to avoid intermediate allocation; the renderer is responsible
-/// for any required normalization (e.g. backslash → forward-slash).
+/// One of the structural CLI banners. Lifecycle banners (start/goal/done/hint)
+/// frame the run; stage banners (sync/pii/lint/fix/commit) surface progress
+/// through the otherwise-silent goal pipeline. Strings carried as `&'a str`
+/// to avoid intermediate allocation; the renderer is responsible for any
+/// required normalization (e.g. backslash → forward-slash).
 #[derive(Debug, Clone, Copy)]
 pub enum Banner<'a> {
     /// "CodeBus 駛入 <path>" — startup line printed by every command.
@@ -24,6 +26,41 @@ pub enum Banner<'a> {
     Done { wiki_path: &'a str },
     /// "請用 Obsidian 開 <path>" — post-goal next-step hint.
     Hint { path: &'a str },
+    /// Sync stage opening banner — emitted before raw_sync starts.
+    SyncStart,
+    /// Sync stage closing banner — emitted after raw_sync returns.
+    SyncDone {
+        files: usize,
+        mib: u64,
+        elapsed_ms: u64,
+    },
+    /// PII summary banner — emitted once after sync, regardless of scanner.
+    PiiSummary {
+        scanner: &'a str,
+        scanned: usize,
+        hits: usize,
+        action: &'a str,
+    },
+    /// Lint stage opening banner.
+    LintStart,
+    /// Lint stage closing banner.
+    LintDone {
+        errors: usize,
+        warns: usize,
+        elapsed_ms: u64,
+    },
+    /// Fix-loop iteration opening banner. `i` is 1-based.
+    FixIterStart { i: u32, max: u32 },
+    /// Fix-loop iteration closing banner. `fixed` is the drop in issue count
+    /// versus the iteration's pre-lint snapshot; `remaining` is post-lint.
+    FixIterDone {
+        i: u32,
+        fixed: usize,
+        remaining: usize,
+        elapsed_ms: u64,
+    },
+    /// Auto-commit closing banner with the short (7-char) HEAD sha.
+    CommitDone { sha7: &'a str },
 }
 
 /// Object-safe renderer trait. Each method side-effects on the underlying

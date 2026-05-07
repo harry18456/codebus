@@ -40,7 +40,7 @@ pub struct RunFixResult {
 
 pub async fn run_fix(
     opts: RunFixOptions<'_>,
-    _renderer: &mut dyn EventRenderer,
+    renderer: &mut dyn EventRenderer,
     log_sink: &mut dyn LogSink,
 ) -> io::Result<RunFixResult> {
     let _ = log_sink;
@@ -63,7 +63,7 @@ pub async fn run_fix(
 
     let result: io::Result<RunFixResult> = (async {
         let pre_lint = lint_wiki(&p.root);
-        lint_and_fix(&p.root, opts.provider, opts.fix_max_iterations).await?;
+        lint_and_fix(&p.root, opts.provider, opts.fix_max_iterations, renderer).await?;
         let post_lint = lint_wiki(&p.root);
 
         // Spec: "--fix mode commits its results to the nested vault git
@@ -98,13 +98,28 @@ mod tests {
 
     struct CollectingRenderer {
         events: Vec<StreamEvent>,
+        /// Same Debug-string capture pattern as goal.rs's CollectingRenderer
+        /// (one entry per `render_banner` call). Tests assert ordering and
+        /// payload via `.contains("FixIterStart")` etc.
+        banners: Vec<String>,
+    }
+
+    impl CollectingRenderer {
+        fn new() -> Self {
+            Self {
+                events: Vec::new(),
+                banners: Vec::new(),
+            }
+        }
     }
 
     impl EventRenderer for CollectingRenderer {
         fn render(&mut self, e: &StreamEvent) {
             self.events.push(e.clone());
         }
-        fn render_banner(&mut self, _: &Banner<'_>) {}
+        fn render_banner(&mut self, b: &Banner<'_>) {
+            self.banners.push(format!("{b:?}"));
+        }
         fn render_lint_report(&mut self, _: &LintResult) {}
         fn render_lint_summary(&mut self, _: &LintResult) {}
     }
@@ -184,7 +199,7 @@ mod tests {
         seed_vault(&repo);
 
         let provider = FixModeMock::new();
-        let mut renderer = CollectingRenderer { events: Vec::new() };
+        let mut renderer = CollectingRenderer::new();
         let mut sink = NullSink::new();
 
         let result = run_fix(
@@ -231,7 +246,7 @@ mod tests {
         }
 
         let provider = FailMock;
-        let mut renderer = CollectingRenderer { events: Vec::new() };
+        let mut renderer = CollectingRenderer::new();
         let mut sink = NullSink::new();
 
         let err = run_fix(
@@ -272,7 +287,7 @@ mod tests {
         fs::write(&sentinel, "do not delete").unwrap();
 
         let provider = FixModeMock::new();
-        let mut renderer = CollectingRenderer { events: Vec::new() };
+        let mut renderer = CollectingRenderer::new();
         let mut sink = NullSink::new();
 
         run_fix(
@@ -308,6 +323,101 @@ mod tests {
                 "fix-loop user_message must not look like a goal prompt"
             );
         }
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    // === Stage banner integration (goal-stage-banners change) ===
+
+    #[tokio::test]
+    async fn run_fix_emits_fix_iter_start_and_done_banners_per_iteration() {
+        // Spec: "Fix iteration start banner" + "Fix iteration done banner"
+        // — for each iteration of the fix loop, run_fix must surface a
+        // FixIterStart before the LLM invoke and a FixIterDone after.
+        // Mock fixes nothing → loop runs to max_iterations cap.
+        let repo = tmp_repo("fixiterbanners");
+        seed_vault(&repo);
+
+        let provider = FixModeMock::new();
+        let mut renderer = CollectingRenderer::new();
+        let mut sink = NullSink::new();
+
+        let max_iters = 3u32;
+        run_fix(
+            RunFixOptions {
+                repo_root: &repo,
+                provider: &provider,
+                fix_max_iterations: max_iters,
+            },
+            &mut renderer,
+            &mut sink,
+        )
+        .await
+        .expect("run_fix succeeded");
+
+        // Provider invoked once per iteration.
+        assert_eq!(provider.count(), max_iters as usize);
+
+        // Filter to FixIter banners and verify exact count + ordering.
+        let fix_iter_starts: Vec<&String> = renderer
+            .banners
+            .iter()
+            .filter(|b| b.starts_with("FixIterStart"))
+            .collect();
+        let fix_iter_dones: Vec<&String> = renderer
+            .banners
+            .iter()
+            .filter(|b| b.starts_with("FixIterDone"))
+            .collect();
+        assert_eq!(
+            fix_iter_starts.len(),
+            max_iters as usize,
+            "expected {max_iters} FixIterStart banners, got {}: {:?}",
+            fix_iter_starts.len(),
+            renderer.banners
+        );
+        assert_eq!(
+            fix_iter_dones.len(),
+            max_iters as usize,
+            "expected {max_iters} FixIterDone banners, got {}: {:?}",
+            fix_iter_dones.len(),
+            renderer.banners
+        );
+
+        // Banner ordering within the captured list must alternate Start/Done
+        // (we don't assert payload values in detail — that's covered by the
+        // format_banner unit tests).
+        let interleave: Vec<&String> = renderer
+            .banners
+            .iter()
+            .filter(|b| b.starts_with("FixIterStart") || b.starts_with("FixIterDone"))
+            .collect();
+        for (i, line) in interleave.iter().enumerate() {
+            if i % 2 == 0 {
+                assert!(
+                    line.starts_with("FixIterStart"),
+                    "expected FixIterStart at idx {i}, got: {line}"
+                );
+            } else {
+                assert!(
+                    line.starts_with("FixIterDone"),
+                    "expected FixIterDone at idx {i}, got: {line}"
+                );
+            }
+        }
+
+        // Each FixIterStart carries `i` (1-based) and `max`.
+        // Verify the first start has i: 1, max: 3 by looking at the Debug string.
+        assert!(
+            fix_iter_starts[0].contains("i: 1"),
+            "first iter index should be 1: {}",
+            fix_iter_starts[0]
+        );
+        assert!(
+            fix_iter_starts[0].contains("max: 3"),
+            "max should be 3: {}",
+            fix_iter_starts[0]
+        );
 
         let _ = fs::remove_dir_all(&repo);
     }

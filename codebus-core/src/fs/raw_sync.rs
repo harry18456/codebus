@@ -8,13 +8,37 @@ use std::path::{Path, PathBuf};
 const ALWAYS_SKIP_AT_ROOT: &[&str] = &[".codebus", ".git", ".env"];
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
+/// Counters returned from one sync run. Consumed by the goal flow's stage
+/// banners (`SyncDone` + `PiiSummary`); also useful for ad-hoc diagnostics
+/// from CLI debug output.
+///
+/// - `files`: number of files actually mirrored to `raw_dir` (excludes
+///   skipped files and oversize files).
+/// - `bytes`: aggregate byte size of mirrored files as written to `raw_dir`.
+/// - `scanned`: number of UTF-8 text files passed through the PII scanner.
+///   Binary files are mirrored byte-for-byte and not counted here.
+/// - `hits`: number of UTF-8 text files for which the scanner returned at
+///   least one [`PiiMatch`].
+/// - `action`: the [`OnHit`] policy that was active during this run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyncSummary {
+    pub files: usize,
+    pub bytes: u64,
+    pub scanned: usize,
+    pub hits: usize,
+    pub action: OnHit,
+}
+
 /// Mirror `repo_root` into `raw_dir` using gitignore-aware traversal.
 /// Thin wrapper preserved for callers that don't go through `cfg.pii` —
 /// dispatches to [`sync_repo_to_raw_with_scanner`] with a [`NullScanner`]
 /// and [`OnHit::Warn`]. With a NullScanner the scanner returns no matches
 /// and the on_hit branch never fires, so output is byte-equal to a build
 /// without PII filter wired in.
-pub fn sync_repo_to_raw(repo_root: impl AsRef<Path>, raw_dir: impl AsRef<Path>) -> io::Result<()> {
+pub fn sync_repo_to_raw(
+    repo_root: impl AsRef<Path>,
+    raw_dir: impl AsRef<Path>,
+) -> io::Result<SyncSummary> {
     let null = NullScanner::new();
     sync_repo_to_raw_with_scanner(repo_root, raw_dir, &null, OnHit::Warn)
 }
@@ -37,7 +61,7 @@ pub fn sync_repo_to_raw_with_scanner(
     raw_dir: impl AsRef<Path>,
     scanner: &dyn PiiScanner,
     on_hit: OnHit,
-) -> io::Result<()> {
+) -> io::Result<SyncSummary> {
     let mut stderr_w = io::stderr();
     sync_repo_to_raw_inner(
         repo_root.as_ref(),
@@ -54,7 +78,7 @@ fn sync_repo_to_raw_inner(
     scanner: &dyn PiiScanner,
     on_hit: OnHit,
     stderr_w: &mut dyn io::Write,
-) -> io::Result<()> {
+) -> io::Result<SyncSummary> {
     if raw_dir.exists() {
         fs::remove_dir_all(raw_dir)?;
     }
@@ -77,6 +101,11 @@ fn sync_repo_to_raw_inner(
         let _ = builder.add_ignore(&gi);
     }
     let walker = builder.build();
+
+    let mut summary = SyncSummary {
+        action: on_hit,
+        ..SyncSummary::default()
+    };
 
     for entry in walker {
         let entry = match entry {
@@ -120,24 +149,43 @@ fn sync_repo_to_raw_inner(
 
             match fs::read_to_string(path) {
                 Ok(content) => {
+                    summary.scanned += 1;
                     let matches = scanner.scan(&content, &rel_path_str);
                     if matches.is_empty() {
                         fs::write(&dst, &content)?;
+                        summary.files += 1;
+                        summary.bytes += content.len() as u64;
                     } else {
-                        apply_on_hit(on_hit, &content, &matches, &rel_path_str, &dst, stderr_w)?;
+                        summary.hits += 1;
+                        if let Some(written) = apply_on_hit(
+                            on_hit,
+                            &content,
+                            &matches,
+                            &rel_path_str,
+                            &dst,
+                            stderr_w,
+                        )? {
+                            summary.files += 1;
+                            summary.bytes += written;
+                        }
                     }
                 }
                 Err(_) => {
                     // Binary / non-UTF-8 / IO error → fall through to original copy path.
-                    fs::copy(path, &dst)?;
+                    let written = fs::copy(path, &dst)?;
+                    summary.files += 1;
+                    summary.bytes += written;
                 }
             }
         }
     }
 
-    Ok(())
+    Ok(summary)
 }
 
+/// Returns `Some(bytes_written)` when the file was mirrored to `dst`, or
+/// `None` when the policy was `Skip` and the file was omitted. Caller uses
+/// this to update the `SyncSummary.files` / `bytes` counters consistently.
 fn apply_on_hit(
     on_hit: OnHit,
     content: &str,
@@ -145,7 +193,7 @@ fn apply_on_hit(
     rel_path: &str,
     dst: &Path,
     stderr_w: &mut dyn io::Write,
-) -> io::Result<()> {
+) -> io::Result<Option<u64>> {
     match on_hit {
         OnHit::Warn => {
             for m in matches {
@@ -156,6 +204,7 @@ fn apply_on_hit(
                 )?;
             }
             fs::write(dst, content)?;
+            Ok(Some(content.len() as u64))
         }
         OnHit::Skip => {
             // Spec: "naming the first match's pattern". `RegexBasicScanner`
@@ -167,13 +216,15 @@ fn apply_on_hit(
                 first.pattern_name
             )?;
             // Skip = file is omitted from mirror entirely (no write, no placeholder).
+            Ok(None)
         }
         OnHit::Mask => {
             let masked = apply_mask(content, matches);
+            let n = masked.len() as u64;
             fs::write(dst, masked)?;
+            Ok(Some(n))
         }
     }
-    Ok(())
 }
 
 /// Replace each matched byte range with `[REDACTED:<pattern_name>]`.
@@ -697,6 +748,66 @@ mod tests {
         // File still mirrored (Warn mode).
         assert!(raw.join("notes.md").exists());
 
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_dir_all(&raw);
+    }
+
+    // === SyncSummary return type (goal-stage-banners change) ===
+
+    #[test]
+    fn sync_summary_null_scanner_reports_files_bytes_zero_hits() {
+        let src = tmp("summarynull");
+        let raw = tmp("summarynullraw");
+        write(&src.join("a.rs"), "12345"); // 5 bytes
+        write(&src.join("nested/b.txt"), "abc"); // 3 bytes
+        let null = NullScanner::new();
+        let summary =
+            sync_repo_to_raw_with_scanner(&src, &raw, &null, OnHit::Warn).unwrap();
+        assert_eq!(summary.files, 2, "files counted: {summary:?}");
+        assert_eq!(summary.bytes, 8, "bytes summed: {summary:?}");
+        // NullScanner.scan() returns no matches but is still invoked on each
+        // text file → scanned == files (for text-only fixture).
+        assert_eq!(summary.scanned, 2, "text files scanned: {summary:?}");
+        assert_eq!(summary.hits, 0, "null scanner never hits");
+        assert_eq!(summary.action, OnHit::Warn);
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_dir_all(&raw);
+    }
+
+    #[test]
+    fn sync_summary_regex_basic_counts_files_with_pii_hits() {
+        // Two files with PII, one clean. RegexBasic + Warn → all mirrored.
+        let src = tmp("summaryregex");
+        let raw = tmp("summaryregexraw");
+        write(&src.join("clean.rs"), "fn main() {}\n");
+        write(&src.join("dirty1.env"), "KEY=AKIAIOSFODNN7EXAMPLE\n");
+        write(&src.join("dirty2.md"), "contact alice@example.com\n");
+        let scanner = RegexBasicScanner::new(&[]).expect("builtin compiles");
+        let summary =
+            sync_repo_to_raw_with_scanner(&src, &raw, &scanner, OnHit::Warn).unwrap();
+        assert_eq!(summary.files, 3, "all files mirrored under Warn: {summary:?}");
+        assert_eq!(summary.scanned, 3, "all text files scanned: {summary:?}");
+        assert_eq!(summary.hits, 2, "two files have PII: {summary:?}");
+        assert_eq!(summary.action, OnHit::Warn);
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_dir_all(&raw);
+    }
+
+    #[test]
+    fn sync_summary_skip_action_excludes_skipped_from_files_count() {
+        let src = tmp("summaryskip");
+        let raw = tmp("summaryskipraw");
+        write(&src.join("clean.rs"), "fn main() {}\n");
+        write(&src.join("dirty.env"), "KEY=AKIAIOSFODNN7EXAMPLE\n");
+        let scanner = RegexBasicScanner::new(&[]).expect("builtin compiles");
+        let summary =
+            sync_repo_to_raw_with_scanner(&src, &raw, &scanner, OnHit::Skip).unwrap();
+        // Skipped file is NOT in files count (not mirrored), but IS counted
+        // in hits and scanned.
+        assert_eq!(summary.files, 1, "only clean file mirrored: {summary:?}");
+        assert_eq!(summary.scanned, 2, "both files scanned: {summary:?}");
+        assert_eq!(summary.hits, 1, "one PII hit: {summary:?}");
+        assert_eq!(summary.action, OnHit::Skip);
         let _ = fs::remove_dir_all(&src);
         let _ = fs::remove_dir_all(&raw);
     }
