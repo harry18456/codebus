@@ -44,16 +44,35 @@ pub const FORBIDDEN_TOOLS: &[&str] = &[
     "KillShell",
 ];
 
+/// Sandbox-breaking Claude CLI flags that MUST NEVER appear in argv. These
+/// either widen filesystem reach (`--add-dir`) or bypass permission gates
+/// (`--*dangerously-skip-permissions`). A negative-assertion test pins
+/// them out across every mode + every model/effort combination.
+pub const FORBIDDEN_FLAGS: &[&str] = &[
+    "--add-dir",
+    "--allow-dangerously-skip-permissions",
+    "--dangerously-skip-permissions",
+];
+
 /// Build the argv passed to `claude -p`. Pure function; tests pin both the
 /// positive list (every allowed tool present) and the negative list (no
-/// forbidden tool anywhere).
-pub fn build_argv(mode: LlmMode, _vault_root: &Path) -> Vec<String> {
+/// forbidden tool / flag anywhere).
+///
+/// `model` and `effort` are forwarded as `--model <m>` / `--effort <e>`
+/// flags when `Some`. When `None`, the flag is omitted and Claude CLI's
+/// own defaults apply.
+pub fn build_argv(
+    mode: LlmMode,
+    _vault_root: &Path,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Vec<String> {
     let mut allowed: Vec<&str> = ALWAYS_ALLOWED.to_vec();
     if matches!(mode, LlmMode::Ingest) {
         allowed.extend_from_slice(INGEST_EXTRA);
     }
     let list = allowed.join(",");
-    vec![
+    let mut argv = vec![
         "-p".into(),
         "--output-format".into(),
         "stream-json".into(),
@@ -66,7 +85,16 @@ pub fn build_argv(mode: LlmMode, _vault_root: &Path) -> Vec<String> {
         list.clone(),
         "--allowedTools".into(),
         list,
-    ]
+    ];
+    if let Some(m) = model {
+        argv.push("--model".into());
+        argv.push(m.into());
+    }
+    if let Some(e) = effort {
+        argv.push("--effort".into());
+        argv.push(e.into());
+    }
+    argv
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +154,12 @@ impl Default for ClaudeCliProvider {
 #[async_trait::async_trait]
 impl LlmProvider for ClaudeCliProvider {
     async fn invoke(&self, opts: InvokeOptions) -> Result<EventStream, ProviderError> {
-        let argv = build_argv(opts.mode, &opts.vault_root);
+        let argv = build_argv(
+            opts.mode,
+            &opts.vault_root,
+            opts.model.as_deref(),
+            opts.effort.as_deref(),
+        );
 
         let mut child = Command::new(&self.binary)
             .args(&argv)
@@ -202,7 +235,7 @@ mod tests {
 
     #[test]
     fn ingest_argv_contains_full_allowed_set() {
-        let argv = build_argv(LlmMode::Ingest, &PathBuf::from("/v"));
+        let argv = build_argv(LlmMode::Ingest, &PathBuf::from("/v"), None, None);
         let joined = argv.join(" ");
         // Both --tools and --allowedTools mirror each other and contain
         // the same list of allowed names (iter-9 redundant safety net).
@@ -217,7 +250,7 @@ mod tests {
 
     #[test]
     fn query_argv_excludes_write_edit() {
-        let argv = build_argv(LlmMode::Query, &PathBuf::from("/v"));
+        let argv = build_argv(LlmMode::Query, &PathBuf::from("/v"), None, None);
         // Inspect the --tools / --allowedTools VALUES specifically — the
         // overall argv legitimately contains the substring "Edit" via
         // `acceptEdits` (the permission mode), which is unrelated to the
@@ -236,7 +269,7 @@ mod tests {
         // flag, not as positional). Anything in FORBIDDEN_TOOLS that ever
         // shows up here means the toolset whitelist regressed.
         for mode in [LlmMode::Ingest, LlmMode::Query] {
-            let argv = build_argv(mode, &PathBuf::from("/v"));
+            let argv = build_argv(mode, &PathBuf::from("/v"), None, None);
             for forbidden in FORBIDDEN_TOOLS {
                 for arg in &argv {
                     assert!(
@@ -250,7 +283,7 @@ mod tests {
 
     #[test]
     fn argv_uses_p_flag_with_stream_json_io() {
-        let argv = build_argv(LlmMode::Query, &PathBuf::from("/v"));
+        let argv = build_argv(LlmMode::Query, &PathBuf::from("/v"), None, None);
         assert!(argv.contains(&"-p".to_string()));
         assert!(argv.contains(&"--output-format".to_string()));
         assert!(argv.contains(&"stream-json".to_string()));
@@ -260,7 +293,7 @@ mod tests {
 
     #[test]
     fn argv_pins_permission_mode_to_accept_edits() {
-        let argv = build_argv(LlmMode::Ingest, &PathBuf::from("/v"));
+        let argv = build_argv(LlmMode::Ingest, &PathBuf::from("/v"), None, None);
         let joined = argv.join(" ");
         assert!(joined.contains("--permission-mode acceptEdits"));
     }

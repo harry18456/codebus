@@ -170,6 +170,10 @@ tests:
 
 The system SHALL spawn the LLM provider with cwd = `.codebus/` (same isolation as ingest) and SHALL omit `Write` and `Edit` from the `--tools` toolset whitelist so the agent cannot write files even within the vault. (See §3.2.4 of the design spec for why `--tools` is the toolset gate, not `--allowedTools`.)
 
+When the resolved `ProviderConfig::ClaudeCli` carries a non-empty `model` value, the system SHALL append `--model <value>` to the spawned argv. When the resolved `ProviderConfig::ClaudeCli` carries a non-empty `effort` value, the system SHALL append `--effort <value>` to the spawned argv. When either field is `None`, the corresponding flag SHALL NOT appear in argv.
+
+The system SHALL NOT pass any of the following sandbox-breaking flags under any combination of mode, model, or effort: `--add-dir`, `--allow-dangerously-skip-permissions`, `--dangerously-skip-permissions`.
+
 #### Scenario: Required argv flags are present in query mode
 
 - **WHEN** the system builds argv for query mode
@@ -180,74 +184,39 @@ The system SHALL spawn the LLM provider with cwd = `.codebus/` (same isolation a
 - **WHEN** the system invokes the LLM provider for query mode against repo X
 - **THEN** the spawn cwd equals `<X>/.codebus/`
 
+#### Scenario: Model flag is injected in query mode when ClaudeCli config sets model
+
+- **WHEN** the system builds argv for query mode with `ProviderConfig::ClaudeCli { model: Some("haiku"), ... }`
+- **THEN** argv contains `--model haiku`
+
+#### Scenario: Effort flag is injected in query mode when ClaudeCli config sets effort
+
+- **WHEN** the system builds argv for query mode with `ProviderConfig::ClaudeCli { effort: Some("low"), ... }`
+- **THEN** argv contains `--effort low`
+
+#### Scenario: Model and effort flags are absent in query mode when config leaves them None
+
+- **WHEN** the system builds argv for query mode with `ProviderConfig::ClaudeCli { model: None, effort: None, ... }`
+- **THEN** argv contains neither `--model` nor `--effort`
+
+#### Scenario: Forbidden sandbox-breaking flags never appear in query argv
+
+- **WHEN** the system builds argv for query mode under any combination of `model` and `effort` values (set or unset)
+- **THEN** argv contains none of `--add-dir`, `--allow-dangerously-skip-permissions`, `--dangerously-skip-permissions`
+
 
 <!-- @trace
-source: codebus-v2-phase1
-updated: 2026-05-04
+source: llm-claude-cli-params
+updated: 2026-05-07
 code:
-  - src/infra/fs/raw-sync.ts
-  - docs/superpowers/REVIEW_LESSONS.md
-  - src/infra/cli-detect.ts
-  - src/core/wiki/types.ts
-  - README.md
-  - src/core/wiki/frontmatter.ts
-  - package.json
-  - src/core/vault/lock.ts
-  - src/core/vault/sanity-check.ts
-  - src/core/wiki/stale-detect.ts
-  - src/schema/claude-md.ts
-  - src/commands/goal.ts
-  - src/core/wiki/date.ts
-  - LICENSE
-  - src/cli.ts
-  - tsconfig.json
-  - src/commands/query.ts
-  - src/infra/git/source-version.ts
-  - src/ui/lint-report.ts
-  - docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
-  - src/infra/llm/types.ts
-  - .spectra.yaml
-  - src/core/vault/layout.ts
-  - src/infra/git/nested-repo.ts
-  - src/commands/check.ts
-  - src/core/wiki/page-merge.ts
-  - vitest.config.ts
-  - src/commands/init.ts
-  - src/ui/stream-parser.ts
-  - src/core/wiki/lint.ts
-  - src/infra/llm/claude-cli.ts
-  - src/infra/fs/file-ops.ts
-  - src/ui/emoji-mode.ts
-  - src/infra/global-config.ts
-  - src/core/wiki/frontmatter-repair.ts
-  - src/ui/render.ts
-tests:
-  - tests/e2e/init-smoke.test.ts
-  - tests/infra/fs/file-ops.test.ts
-  - tests/commands/goal.test.ts
-  - tests/cli.test.ts
-  - tests/commands/query.test.ts
-  - tests/commands/check.test.ts
-  - tests/core/wiki/date.test.ts
-  - tests/core/wiki/page-merge.test.ts
-  - tests/core/wiki/stale-detect.test.ts
-  - tests/infra/cli-detect.test.ts
-  - tests/ui/emoji-mode.test.ts
-  - tests/core/wiki/frontmatter-repair.test.ts
-  - tests/infra/git/source-version.test.ts
-  - tests/commands/init.test.ts
-  - tests/infra/global-config.test.ts
-  - tests/ui/stream-parser.test.ts
-  - tests/core/vault/sanity-check.test.ts
-  - tests/core/wiki/lint.test.ts
-  - tests/infra/git/nested-repo.test.ts
-  - tests/infra/fs/raw-sync.test.ts
-  - tests/core/vault/layout.test.ts
-  - tests/core/vault/lock.test.ts
-  - tests/infra/llm/claude-cli.test.ts
-  - tests/schema/claude-md.test.ts
-  - tests/core/wiki/frontmatter.test.ts
-  - tests/ui/render.test.ts
+  - codebus-core/src/wiki/fix/mod.rs
+  - codebus-core/src/llm/providers/claude_cli.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/llm/factory.rs
+  - codebus-core/src/llm/provider.rs
+  - codebus-core/src/config/loader.rs
+  - codebus-cli/src/commands/query.rs
 -->
 
 ---

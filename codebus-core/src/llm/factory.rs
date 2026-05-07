@@ -60,12 +60,23 @@ use crate::llm::providers::claude_cli::ClaudeCliProvider;
 pub enum ProviderConfig {
     /// `claude -p` subprocess. Always available — zero new deps.
     ///
-    /// `binary_path`: path to the `claude` CLI binary. `None` (or omitted in
-    /// YAML) → `"claude"` (rely on `$PATH`). An empty string is also treated
-    /// as unset (defensive against config typos like `binary_path: ""`).
+    /// - `binary_path`: path to the `claude` CLI binary. `None` (or omitted
+    ///   in YAML) → `"claude"` (rely on `$PATH`). An empty string is also
+    ///   treated as unset (defensive against config typos like
+    ///   `binary_path: ""`).
+    /// - `model`: optional Claude CLI `--model` value (alias like `sonnet`,
+    ///   `opus`, `haiku` or full model id). `None` → omit the flag, let the
+    ///   CLI pick its default. Stored as opaque string; codebus does not
+    ///   validate the value (alias list evolves with the CLI).
+    /// - `effort`: optional Claude CLI `--effort` value (`low`, `medium`,
+    ///   `high`, `xhigh`, `max`). Same opaque-forward semantics as `model`.
     ClaudeCli {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         binary_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effort: Option<String>,
     },
     /// Direct Anthropic API (HTTP + SSE). Requires `llm-anthropic-api`
     /// feature.
@@ -101,7 +112,11 @@ impl Default for ProviderConfig {
     /// (any user with the Claude CLI installed gets a working setup with no
     /// configuration).
     fn default() -> Self {
-        Self::ClaudeCli { binary_path: None }
+        Self::ClaudeCli {
+            binary_path: None,
+            model: None,
+            effort: None,
+        }
     }
 }
 
@@ -111,7 +126,16 @@ impl Default for ProviderConfig {
 /// maps to a feature that wasn't compiled into this binary.
 pub fn build_provider(cfg: ProviderConfig) -> Result<Box<dyn LlmProvider>, ProviderError> {
     match cfg {
-        ProviderConfig::ClaudeCli { binary_path } => {
+        ProviderConfig::ClaudeCli {
+            binary_path,
+            model: _,
+            effort: _,
+        } => {
+            // model + effort are not consumed at provider construction time;
+            // they're carried per-invocation via InvokeOptions and turned
+            // into argv flags by build_argv. Keeping the destructure
+            // exhaustive so future additions to the variant are caught at
+            // compile time.
             let binary = binary_path
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "claude".into());
@@ -156,8 +180,14 @@ mod tests {
     #[test]
     fn default_config_is_claude_cli_with_no_binary_path() {
         match ProviderConfig::default() {
-            ProviderConfig::ClaudeCli { binary_path } => {
+            ProviderConfig::ClaudeCli {
+                binary_path,
+                model,
+                effort,
+            } => {
                 assert!(binary_path.is_none(), "default binary_path should be None");
+                assert!(model.is_none(), "default model should be None");
+                assert!(effort.is_none(), "default effort should be None");
             }
             other => panic!("expected ClaudeCli default, got {other:?}"),
         }
@@ -173,8 +203,14 @@ binary_path: /opt/claude/bin/claude
 "#;
         let cfg: ProviderConfig = serde_yaml::from_str(yaml).expect("should deserialize");
         match cfg {
-            ProviderConfig::ClaudeCli { binary_path } => {
+            ProviderConfig::ClaudeCli {
+                binary_path,
+                model,
+                effort,
+            } => {
                 assert_eq!(binary_path.as_deref(), Some("/opt/claude/bin/claude"));
+                assert!(model.is_none());
+                assert!(effort.is_none());
             }
             other => panic!("expected ClaudeCli, got {other:?}"),
         }
@@ -187,9 +223,51 @@ binary_path: /opt/claude/bin/claude
         let yaml = "provider: claude_cli\n";
         let cfg: ProviderConfig = serde_yaml::from_str(yaml).expect("should deserialize");
         match cfg {
-            ProviderConfig::ClaudeCli { binary_path } => assert!(binary_path.is_none()),
+            ProviderConfig::ClaudeCli {
+                binary_path,
+                model,
+                effort,
+            } => {
+                assert!(binary_path.is_none());
+                assert!(model.is_none());
+                assert!(effort.is_none());
+            }
             other => panic!("expected ClaudeCli, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn deserializes_claude_cli_with_model_and_effort_from_yaml() {
+        let yaml = r#"
+provider: claude_cli
+model: sonnet
+effort: high
+"#;
+        let cfg: ProviderConfig = serde_yaml::from_str(yaml).expect("should deserialize");
+        match cfg {
+            ProviderConfig::ClaudeCli {
+                binary_path,
+                model,
+                effort,
+            } => {
+                assert!(binary_path.is_none());
+                assert_eq!(model.as_deref(), Some("sonnet"));
+                assert_eq!(effort.as_deref(), Some("high"));
+            }
+            other => panic!("expected ClaudeCli, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn round_trips_claude_cli_with_all_fields() {
+        let original = ProviderConfig::ClaudeCli {
+            binary_path: Some("/opt/claude".into()),
+            model: Some("opus".into()),
+            effort: Some("xhigh".into()),
+        };
+        let yaml = serde_yaml::to_string(&original).expect("serialize");
+        let parsed: ProviderConfig = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(parsed, original);
     }
 
     #[test]
@@ -263,6 +341,8 @@ timeout_secs: 30
     fn build_provider_honors_explicit_binary_path() {
         let provider = build_provider(ProviderConfig::ClaudeCli {
             binary_path: Some("/opt/claude/bin/claude".into()),
+            model: None,
+            effort: None,
         });
         assert!(provider.is_ok());
     }
@@ -274,6 +354,8 @@ timeout_secs: 30
         // with a confusing error). Audit / Lazy-developer lens.
         let provider = build_provider(ProviderConfig::ClaudeCli {
             binary_path: Some(String::new()),
+            model: None,
+            effort: None,
         });
         assert!(provider.is_ok());
     }
@@ -344,7 +426,11 @@ timeout_secs: 30
         // to update this test deliberately.
         assert_eq!(
             ProviderConfig::default(),
-            ProviderConfig::ClaudeCli { binary_path: None }
+            ProviderConfig::ClaudeCli {
+                binary_path: None,
+                model: None,
+                effort: None,
+            }
         );
     }
 

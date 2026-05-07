@@ -137,6 +137,8 @@ fn parse_llm(v: &Value) -> Option<ProviderConfig> {
 
     let mut provider_str: Option<String> = None;
     let mut binary_path: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut effort: Option<String> = None;
     let mut timeout_secs: Option<u64> = None;
     let mut api_key: Option<String> = None;
     let mut provider_was_explicitly_invalid = false;
@@ -159,6 +161,14 @@ fn parse_llm(v: &Value) -> Option<ProviderConfig> {
             "binary_path" => match val.as_str() {
                 Some(s) => binary_path = Some(s.to_string()),
                 None => warn_type_mismatch("llm.binary_path", "string", val),
+            },
+            "model" => match val.as_str() {
+                Some(s) => model = Some(s.to_string()),
+                None => warn_type_mismatch("llm.model", "string", val),
+            },
+            "effort" => match val.as_str() {
+                Some(s) => effort = Some(s.to_string()),
+                None => warn_type_mismatch("llm.effort", "string", val),
             },
             "timeout_secs" => match val.as_u64() {
                 Some(n) => timeout_secs = Some(n),
@@ -183,7 +193,11 @@ fn parse_llm(v: &Value) -> Option<ProviderConfig> {
 
     // Construct the variant. Missing provider field → default variant.
     let variant = match provider_str.as_deref() {
-        None | Some("claude_cli") => ProviderConfig::ClaudeCli { binary_path },
+        None | Some("claude_cli") => ProviderConfig::ClaudeCli {
+            binary_path,
+            model,
+            effort,
+        },
         Some("anthropic_api") => ProviderConfig::AnthropicApi {
             api_key,
             timeout_secs,
@@ -536,8 +550,84 @@ mod tests {
         let cfg = load_config_from_path(&p);
         let llm = cfg.llm.expect("llm section parsed");
         match llm {
-            ProviderConfig::ClaudeCli { binary_path } => {
+            ProviderConfig::ClaudeCli {
+                binary_path,
+                model,
+                effort,
+            } => {
                 assert_eq!(binary_path.as_deref(), Some("/usr/local/bin/claude"));
+                assert!(model.is_none());
+                assert!(effort.is_none());
+            }
+            other => panic!("expected ClaudeCli, got {other:?}"),
+        }
+        cleanup(&p);
+    }
+
+    #[test]
+    fn claude_cli_model_and_effort_are_parsed_when_present() {
+        // Spec scenario: ClaudeCli model and effort are parsed when present
+        let p = write_tmp(
+            "claudemodel",
+            "llm:\n  provider: claude_cli\n  model: sonnet\n  effort: high\n",
+        );
+        let cfg = load_config_from_path(&p);
+        let llm = cfg.llm.expect("llm section parsed");
+        match llm {
+            ProviderConfig::ClaudeCli {
+                binary_path,
+                model,
+                effort,
+            } => {
+                assert!(binary_path.is_none());
+                assert_eq!(model.as_deref(), Some("sonnet"));
+                assert_eq!(effort.as_deref(), Some("high"));
+            }
+            other => panic!("expected ClaudeCli, got {other:?}"),
+        }
+        cleanup(&p);
+    }
+
+    #[test]
+    fn claude_cli_model_and_effort_default_to_none_when_absent() {
+        // Spec scenario: ClaudeCli model and effort default to None when absent
+        let p = write_tmp("claudenomodel", "llm:\n  provider: claude_cli\n");
+        let cfg = load_config_from_path(&p);
+        let llm = cfg.llm.expect("llm section parsed");
+        match llm {
+            ProviderConfig::ClaudeCli {
+                binary_path,
+                model,
+                effort,
+            } => {
+                assert!(binary_path.is_none());
+                assert!(model.is_none());
+                assert!(effort.is_none());
+            }
+            other => panic!("expected ClaudeCli, got {other:?}"),
+        }
+        cleanup(&p);
+    }
+
+    #[test]
+    fn claude_cli_model_type_mismatch_is_treated_as_unset_per_field() {
+        // Sanity: field-level tolerance applies to model/effort too. Bad
+        // `model` (e.g., a list) only nukes that field; binary_path stays.
+        let p = write_tmp(
+            "modelbad",
+            "llm:\n  provider: claude_cli\n  binary_path: /opt/c\n  model:\n    - sonnet\n",
+        );
+        let cfg = load_config_from_path(&p);
+        let llm = cfg.llm.expect("llm parsed despite bad model");
+        match llm {
+            ProviderConfig::ClaudeCli {
+                binary_path,
+                model,
+                effort,
+            } => {
+                assert_eq!(binary_path.as_deref(), Some("/opt/c"));
+                assert!(model.is_none(), "bad model should be unset");
+                assert!(effort.is_none());
             }
             other => panic!("expected ClaudeCli, got {other:?}"),
         }
@@ -577,8 +667,14 @@ mod tests {
         let cfg = load_config_from_path(&p);
         let llm = cfg.llm.expect("llm parsed");
         match llm {
-            ProviderConfig::ClaudeCli { binary_path } => {
+            ProviderConfig::ClaudeCli {
+                binary_path,
+                model,
+                effort,
+            } => {
                 assert!(binary_path.is_none(), "claude_cli has no api_key field");
+                assert!(model.is_none());
+                assert!(effort.is_none());
             }
             other => panic!("expected ClaudeCli, got {other:?}"),
         }

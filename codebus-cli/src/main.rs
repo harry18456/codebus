@@ -236,6 +236,21 @@ fn scanner_config_from(cfg: &GlobalConfig) -> ScannerConfig {
     cfg.pii.clone().unwrap_or_default()
 }
 
+/// Extract `(model, effort)` from `ProviderConfig::ClaudeCli`, returning
+/// `(None, None)` for any other provider variant (those don't carry the
+/// `--model` / `--effort` flag concept; their model/effort knobs live on
+/// their own variant fields and will be plumbed in #2 multi-LLM).
+fn claude_cli_model_effort(pc: &ProviderConfig) -> (Option<String>, Option<String>) {
+    match pc {
+        ProviderConfig::ClaudeCli {
+            model,
+            effort,
+            ..
+        } => (model.clone(), effort.clone()),
+        _ => (None, None),
+    }
+}
+
 /// Extract the `on_hit` policy from a [`ScannerConfig`] regardless of
 /// variant. Used by goal flow which needs the policy alongside the built
 /// scanner. Centralized here so the goal-call site doesn't carry a match
@@ -361,7 +376,9 @@ async fn run_goal_cmd(
     });
     renderer.render_banner(&Banner::Goal { goal: goal_text });
 
-    let provider = match build_provider(provider_config_from(cfg)) {
+    let provider_cfg = provider_config_from(cfg);
+    let (model, effort) = claude_cli_model_effort(&provider_cfg);
+    let provider = match build_provider(provider_cfg) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
@@ -390,6 +407,8 @@ async fn run_goal_cmd(
             pii_on_hit,
             fix_disabled,
             fix_max_iterations,
+            model: model.as_deref(),
+            effort: effort.as_deref(),
         },
         &mut renderer,
         &mut log_sink,
@@ -430,7 +449,9 @@ async fn run_query_cmd(
     renderer.render_banner(&Banner::Start {
         path: &repo.to_string_lossy(),
     });
-    let provider = match build_provider(provider_config_from(cfg)) {
+    let provider_cfg = provider_config_from(cfg);
+    let (model, effort) = claude_cli_model_effort(&provider_cfg);
+    let provider = match build_provider(provider_cfg) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
@@ -443,6 +464,8 @@ async fn run_query_cmd(
             repo_root: repo,
             query: query_text,
             provider: provider.as_ref(),
+            model: model.as_deref(),
+            effort: effort.as_deref(),
         },
         &mut renderer,
         &mut log_sink,

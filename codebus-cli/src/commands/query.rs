@@ -11,6 +11,10 @@ pub struct RunQueryOptions<'a> {
     pub repo_root: &'a Path,
     pub query: &'a str,
     pub provider: &'a dyn LlmProvider,
+    /// Optional `--model` override forwarded to the LLM invocation.
+    pub model: Option<&'a str>,
+    /// Optional `--effort` override forwarded to the LLM invocation.
+    pub effort: Option<&'a str>,
 }
 
 /// Read-only LLM round-trip. Spawns the provider in [`LlmMode::Query`]
@@ -49,6 +53,8 @@ pub async fn run_query(
         mode: LlmMode::Query,
         cwd: p.root.clone(),
         vault_root: p.root.clone(),
+        model: opts.model.map(str::to_string),
+        effort: opts.effort.map(str::to_string),
     };
 
     let mut stream = opts
@@ -132,6 +138,8 @@ mod tests {
                 repo_root: &repo,
                 query: "what is X?",
                 provider: &provider,
+                model: None,
+                effort: None,
             },
             &mut renderer,
             &mut sink,

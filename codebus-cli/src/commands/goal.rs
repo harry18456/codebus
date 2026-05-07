@@ -41,6 +41,12 @@ pub struct RunGoalOptions<'a> {
     /// Cap on fix-loop iterations. Resolved by main.rs from
     /// `cli.fix_max_iter.unwrap_or(cfg.lint.auto_fix.max_iterations)`.
     pub fix_max_iterations: u32,
+    /// Optional `--model` override forwarded to the LLM invocation.
+    /// Extracted from `ProviderConfig::ClaudeCli { model, .. }` in main.rs;
+    /// `None` for non-ClaudeCli variants.
+    pub model: Option<&'a str>,
+    /// Optional `--effort` override forwarded to the LLM invocation.
+    pub effort: Option<&'a str>,
 }
 
 pub struct RunGoalResult {
@@ -130,6 +136,8 @@ pub async fn run_goal(
             mode: LlmMode::Ingest,
             cwd: p.root.clone(),
             vault_root: p.root.clone(),
+            model: opts.model.map(str::to_string),
+            effort: opts.effort.map(str::to_string),
         };
 
         let mut stream = opts
@@ -549,6 +557,8 @@ mod tests {
                 pii_on_hit: OnHit::Warn,
                 fix_disabled: true,
                 fix_max_iterations: 5,
+                model: None,
+                effort: None,
             },
             &mut renderer,
             &mut sink,
@@ -597,6 +607,8 @@ mod tests {
                 pii_on_hit: OnHit::Warn,
                 fix_disabled: false,
                 fix_max_iterations: 2, // 1 goal-ingest + 2 fix iters = 3 invokes
+                model: None,
+                effort: None,
             },
             &mut renderer,
             &mut sink,
@@ -659,6 +671,8 @@ mod tests {
                 pii_on_hit: OnHit::Warn,
                 fix_disabled: true, // <- escape hatch
                 fix_max_iterations: 5,
+                model: None,
+                effort: None,
             },
             &mut renderer,
             &mut sink,
@@ -717,6 +731,8 @@ mod tests {
                 pii_on_hit: OnHit::Warn,
                 fix_disabled: true, // keep fix loop out of this test's scope
                 fix_max_iterations: 1,
+                model: None,
+                effort: None,
             },
             &mut renderer,
             &mut sink,
@@ -813,6 +829,8 @@ mod tests {
                 pii_on_hit: OnHit::Warn,
                 fix_disabled: true,
                 fix_max_iterations: 1,
+                model: None,
+                effort: None,
             },
             &mut renderer,
             &mut sink,

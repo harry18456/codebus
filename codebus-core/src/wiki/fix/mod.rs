@@ -107,6 +107,13 @@ pub async fn lint_and_fix(
             mode: LlmMode::Ingest,
             cwd: vault_root.to_path_buf(),
             vault_root: vault_root.to_path_buf(),
+            // The fix loop falls back to Claude CLI defaults for model /
+            // effort. Plumbing the user-configured values through
+            // `lint_and_fix` would require extending its signature; the
+            // `llm-claude-cli-params` change explicitly leaves that for a
+            // future follow-up so the surface here stays narrow.
+            model: None,
+            effort: None,
         };
         let mut stream = provider
             .invoke(opts)

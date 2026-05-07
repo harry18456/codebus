@@ -23,6 +23,15 @@ pub struct InvokeOptions {
     /// Vault root, kept separately for callers that resolve schema / index
     /// paths independently of `cwd`.
     pub vault_root: std::path::PathBuf,
+    /// Optional Claude CLI `--model` value (alias like `sonnet` / `opus` /
+    /// `haiku` or full model id). `None` → omit the flag and let the CLI
+    /// pick its default. Forwarded as opaque string; codebus does not
+    /// validate the value. Other providers may interpret this differently
+    /// (e.g. native `model` field on Anthropic/OpenAI API requests).
+    pub model: Option<String>,
+    /// Optional Claude CLI `--effort` value (`low` / `medium` / `high` /
+    /// `xhigh` / `max`). Same opaque-forward semantics as `model`.
+    pub effort: Option<String>,
 }
 
 /// Stream of [`StreamEvent`]s yielded by the provider until the turn ends.
@@ -123,6 +132,8 @@ mod tests {
                 mode: LlmMode::Query,
                 cwd: std::path::PathBuf::from("."),
                 vault_root: std::path::PathBuf::from("."),
+                model: None,
+                effort: None,
             })
             .await
             .unwrap();
@@ -144,14 +155,17 @@ mod tests {
         assert_eq!(format!("{e}"), "OAuth needed");
     }
 
-    /// Lock-in: the `LlmProvider` trait surface must NOT grow session /
-    /// history fields as part of `lint-feedback-loop`. Cross-iteration
-    /// memory lives entirely inside the prompt body assembled by
-    /// `wiki/fix/prompt.rs`. If a future change adds `session_id`,
-    /// `with_history`, or similar, this test will fail to compile and
-    /// force an explicit re-evaluation of the design promise.
+    /// Lock-in: the `LlmProvider` trait surface SHALL stay tight enough
+    /// that adding a field here is a deliberate cross-cutting design move,
+    /// not a drive-by edit. The `lint-feedback-loop` change pinned the
+    /// shape (no `session_id` / `with_history`); the
+    /// `llm-claude-cli-params` change extended it with `model` + `effort`
+    /// because both fields are universal "what to ask the LLM with"
+    /// concepts (every provider needs them, just expressed differently).
+    /// Future field additions must update this assertion to force the same
+    /// re-evaluation.
     #[test]
-    fn invoke_options_struct_shape_unchanged_after_lint_feedback_loop() {
+    fn invoke_options_struct_shape_carries_model_and_effort() {
         // Construct an InvokeOptions using ALL its fields by name. If a
         // field is added without updating this assertion, the destructure
         // below will fail with `missing field` / `unknown field` and
@@ -162,6 +176,8 @@ mod tests {
             mode: LlmMode::Ingest,
             cwd: std::path::PathBuf::from("."),
             vault_root: std::path::PathBuf::from("."),
+            model: None,
+            effort: None,
         };
         let InvokeOptions {
             system_prompt: _,
@@ -169,6 +185,8 @@ mod tests {
             mode: _,
             cwd: _,
             vault_root: _,
+            model: _,
+            effort: _,
         } = opts;
     }
 }

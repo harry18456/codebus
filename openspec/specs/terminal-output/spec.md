@@ -380,7 +380,7 @@ The system SHALL load `~/.codebus/config.yaml` if present, ignore unknown fields
 The config schema SHALL recognize the following top-level keys, each optional and tolerantly parsed:
 
 - `emoji`: emoji mode preference (one of `auto` | `on` | `off`)
-- `llm`: LLM provider configuration block. Discriminator field `provider` selects one of `claude_cli` | `anthropic_api` | `openai` | `ollama_local`; the remaining sub-fields under the `llm` mapping are the variant-specific fields valid for the selected provider.
+- `llm`: LLM provider configuration block. Discriminator field `provider` selects one of `claude_cli` | `anthropic_api` | `openai` | `ollama_local`; the remaining sub-fields under the `llm` mapping are the variant-specific fields valid for the selected provider. For `claude_cli` the recognized sub-fields are `binary_path`, `model`, and `effort`.
 - `pii`: PII scanner configuration block. Discriminator field `scanner` selects one of `null` | `regex_basic` | `presidio` | `aws`; the remaining sub-fields are variant-specific fields valid for the selected scanner (every variant accepts `on_hit`).
 - `lint`: lint rule configuration block (rule overrides, disabled rules, custom rules path). Not a tagged-variant section.
 - `render`: output renderer configuration block. Discriminator field `format` selects one of `terminal` | `json_lines` | `tauri`; the remaining sub-fields are variant-specific.
@@ -436,6 +436,16 @@ For the `lint` section, the loader SHALL parse the (non-discriminated) struct as
 - **WHEN** `~/.codebus/config.yaml` contains `llm: { provider: claude_cli, api_key: secret }` (where `api_key` is valid for the `anthropic_api` and `openai` variants but not for `claude_cli`)
 - **THEN** the loader honors `provider: claude_cli` and silently ignores `api_key`, matching the behavior for any unknown sub-field under the chosen variant
 
+#### Scenario: ClaudeCli model and effort are parsed when present
+
+- **WHEN** `~/.codebus/config.yaml` contains `llm: { provider: claude_cli, model: sonnet, effort: high }`
+- **THEN** the loader returns an LLM config of variant `claude_cli` with `model` set to `"sonnet"` and `effort` set to `"high"` (both stored as opaque strings; the loader does not validate the values against the Claude CLI's accepted aliases)
+
+#### Scenario: ClaudeCli model and effort default to None when absent
+
+- **WHEN** `~/.codebus/config.yaml` contains `llm: { provider: claude_cli }` with no `model` or `effort` sub-field
+- **THEN** the loader returns an LLM config of variant `claude_cli` with both `model` and `effort` as `None`, so the agent is spawned with the Claude CLI's default model and effort
+
 #### Scenario: PII section selects scanner via discriminator
 
 - **WHEN** `~/.codebus/config.yaml` contains `pii: { scanner: regex_basic, on_hit: warn, patterns_extra: ["INTERNAL-\\d{6}"] }`
@@ -463,22 +473,17 @@ For the `lint` section, the loader SHALL parse the (non-discriminated) struct as
 
 
 <!-- @trace
-source: config-tagged-enum-refactor
+source: llm-claude-cli-params
 updated: 2026-05-07
 code:
-  - codebus-core/src/render/renderers/terminal.rs
-  - codebus-core/src/llm/mod.rs
-  - codebus-core/src/log/factory.rs
-  - codebus-core/src/render/factory.rs
-  - codebus-core/src/render/mod.rs
-  - codebus-core/src/config/loader.rs
-  - codebus-core/src/config/mod.rs
+  - codebus-core/src/wiki/fix/mod.rs
+  - codebus-core/src/llm/providers/claude_cli.rs
+  - codebus-cli/src/commands/goal.rs
   - codebus-cli/src/main.rs
   - codebus-core/src/llm/factory.rs
-  - codebus-core/src/pii/mod.rs
-  - codebus-core/src/pii/factory.rs
-  - codebus-core/src/config/schema.rs
-  - codebus-core/src/log/mod.rs
+  - codebus-core/src/llm/provider.rs
+  - codebus-core/src/config/loader.rs
+  - codebus-cli/src/commands/query.rs
 -->
 
 ---
