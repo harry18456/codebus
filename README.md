@@ -125,21 +125,21 @@ cargo install codebus --features all
 [x] Auto-lint after every goal + standalone --check command
 [x] Source enrichment + stale detection（追蹤 wiki page 對應的 raw 檔有沒有變）
 [x] PII filter (regex_basic / null) wired into raw_sync — 3 OnHit modes (warn / skip / mask) + patterns_extra；防 hardcoded secrets / API keys / 個資進入 LLM context
+[x] Lint feedback loop — 司機自動修 broken wikilink / oversize page / frontmatter 錯誤等；goal flow 自動接 + 獨立 `codebus --fix` mode；`--no-fix` / `lint.auto_fix.enabled` 可關（多回合用 git diff 假記憶撐 trait stateless）
 ```
 
 ### 🛣️ Next stops（規劃中）
 
-優先序背後的策略（會隨真實使用回饋調整）：先用 Claude CLI（目前最強 AI baseline）把 AI-pattern-heavy 的 #1-#2 跑透、壓出 `LlmProvider` trait 的真實需求，再開多家 provider；token tracking 安插在中間，因為 lint loop 多回合呼叫剛好讓 cost 痛點浮現。
+優先序背後的策略（會隨真實使用回饋調整）：lint feedback loop 已 ship 為第一個多回合 trait use case，下一個 AI-pattern-heavy 是 #1 query gap detection（第二個壓力測試方向）；token tracking 安插在後面，因為多回合呼叫剛好讓 cost 痛點浮現，再開多家 provider。
 
-1. 🔧 **Lint feedback loop** — 司機自己檢查 wiki 寫得乾不乾淨、自動修 broken wikilink / oversize page 等；多回合修正循環，第一個壓力測試 trait 的 use case
-2. 🆘 **Query gap detection** — 「這站沒明信片」→ 提議升級成 goal 補完缺口；meta-分析 → 升級成新 goal，第二個壓力測試方向
-3. 🪙 **Token usage & log tracking** — 紀錄每趟車花多少油、累積成本；#1/#2 跑下來剛好是 telemetry 痛點浮現的時機
-4. 🔌 **Multi-LLM provider** — Anthropic API direct / OpenAI / 本地 model；有 3 個 use case 壓過 trait 後再開家，避免 retrofit；解綁對 Claude CLI 的硬依賴
-5. 🧭 **Onboarding wizard (`codebus setup`)** — 全域偏好 wizard：偵測 `claude` CLI、選 LLM provider、設 PII 模式 + patterns_extra，寫 `~/.codebus/config.yaml`（含註解）；多 provider 真的存在後 wizard 才有意義
-6. 🗂️ **Vault registry** — `~/.codebus/registry.json` 紀錄機台上每個 codebus vault 的路徑 + last_used + source_version；獨立於 `config.yaml`（preferences vs machine state 分開），為下一段 Tauri hub view 鋪資料層
-7. 🛡️ **Heavy-dep PII scanners** — `presidio` / `aws` Comprehend Detect-PII / 自訂 ML；regex_basic 已上車，需要更精準匹配時才補
-8. 💾 **Disk preflight** — raw-sync 前估算 + 警告剩餘容量，避免大型 monorepo 把 disk 撐爆
-9. 📦 **Multi-platform binary release + CI** — cargo install / homebrew tap / GitHub Releases / GitHub Actions cross-platform test matrix
+1. 🆘 **Query gap detection** — 「這站沒明信片」→ 提議升級成 goal 補完缺口；meta-分析 → 升級成新 goal，第二個壓力測試方向
+2. 🪙 **Token usage & log tracking** — 紀錄每趟車花多少油、累積成本；lint loop / query gap 跑下來剛好是 telemetry 痛點浮現的時機
+3. 🔌 **Multi-LLM provider** — Anthropic API direct / OpenAI / 本地 model；有 3 個 use case 壓過 trait 後再開家，避免 retrofit；解綁對 Claude CLI 的硬依賴
+4. 🧭 **Onboarding wizard (`codebus setup`)** — 全域偏好 wizard：偵測 `claude` CLI、選 LLM provider、設 PII 模式 + patterns_extra，寫 `~/.codebus/config.yaml`（含註解）；多 provider 真的存在後 wizard 才有意義
+5. 🗂️ **Vault registry** — `~/.codebus/registry.json` 紀錄機台上每個 codebus vault 的路徑 + last_used + source_version；獨立於 `config.yaml`（preferences vs machine state 分開），為下一段 Tauri hub view 鋪資料層
+6. 🛡️ **Heavy-dep PII scanners** — `presidio` / `aws` Comprehend Detect-PII / 自訂 ML；regex_basic 已上車，需要更精準匹配時才補
+7. 💾 **Disk preflight** — raw-sync 前估算 + 警告剩餘容量，避免大型 monorepo 把 disk 撐爆
+8. 📦 **Multi-platform binary release + CI** — cargo install / homebrew tap / GitHub Releases / GitHub Actions cross-platform test matrix
 
 ### 🌅 Final destination — Tauri tutorial app
 
