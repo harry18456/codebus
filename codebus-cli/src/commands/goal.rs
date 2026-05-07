@@ -3,10 +3,11 @@ use codebus_core::fs::raw_sync::sync_repo_to_raw_with_scanner;
 use codebus_core::git::nested_repo::auto_commit;
 use codebus_core::git::source_version::get_source_version;
 use codebus_core::llm::provider::{InvokeOptions, LlmMode, LlmProvider};
-use codebus_core::log::LogSink;
+use codebus_core::log::{LogSink, RunLog, TokenUsage, accumulate_token_usage};
 use codebus_core::pii::{OnHit, PiiScanner};
 use codebus_core::render::{Banner, EventRenderer};
 use codebus_core::schema::CODEBUS_SCHEMA;
+use codebus_core::stream::StreamEvent;
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::vault::lock::{acquire_lock, release_lock};
 use codebus_core::wiki::date::utc_today_iso;
@@ -65,11 +66,6 @@ pub async fn run_goal(
     renderer: &mut dyn EventRenderer,
     log_sink: &mut dyn LogSink,
 ) -> io::Result<RunGoalResult> {
-    // Plumbing only: per the change Non-Goal "不啟用 LogSink 寫檔", the sink
-    // is accepted but not wired to receive run summaries in this change.
-    // A follow-up token-tracking change will populate `RunLog` and call
-    // `log_sink.write_run(&run_log)` here.
-    let _ = log_sink;
     let p = vault_paths(opts.repo_root);
 
     if !p.root.exists() {
@@ -80,6 +76,8 @@ pub async fn run_goal(
         .map_err(|e| io::Error::new(io::ErrorKind::AlreadyExists, e.to_string()))?;
     let mut wiki_changed = false;
     let mut lint: Option<LintResult> = None;
+    let mut accumulated_tokens = TokenUsage::default();
+    let started_at = chrono_iso_now();
 
     let result: io::Result<()> = (async {
         renderer.render_banner(&Banner::SyncStart);
@@ -146,6 +144,9 @@ pub async fn run_goal(
             .await
             .map_err(|e| io::Error::other(e.to_string()))?;
         while let Some(event) = stream.next().await {
+            if let StreamEvent::Usage(u) = &event {
+                accumulate_token_usage(&mut accumulated_tokens, u);
+            }
             renderer.render(&event);
         }
 
@@ -172,6 +173,7 @@ pub async fn run_goal(
                 opts.provider,
                 opts.fix_max_iterations,
                 renderer,
+                &mut accumulated_tokens,
             )
             .await?;
             // Re-lint so RunGoalResult.lint reflects the user-visible
@@ -204,6 +206,30 @@ pub async fn run_goal(
     .await;
 
     let _ = release_lock(&mut lock);
+
+    // Build the RunLog regardless of success / failure of the inner run
+    // — partial token counts are still informative. Per the spec the
+    // sink write is best-effort: a sink failure SHALL NOT mask a goal
+    // failure, and SHALL NOT promote a successful goal to a failure.
+    let finished_at = chrono_iso_now();
+    let lint_error_count = lint.as_ref().map(|l| l.error_count).unwrap_or(0);
+    let lint_warn_count = lint.as_ref().map(|l| l.warn_count).unwrap_or(0);
+    let run_log = RunLog {
+        goal: opts.goal.to_string(),
+        mode: "goal".into(),
+        model: opts.model.map(str::to_string),
+        effort: opts.effort.map(str::to_string),
+        started_at,
+        finished_at,
+        tokens: accumulated_tokens,
+        wiki_changed,
+        lint_error_count,
+        lint_warn_count,
+    };
+    if let Err(e) = log_sink.write_run(&run_log) {
+        eprintln!("warning: failed to write run log: {e}");
+    }
+
     result?;
 
     Ok(RunGoalResult { wiki_changed, lint })

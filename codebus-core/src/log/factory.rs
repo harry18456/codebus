@@ -21,31 +21,40 @@ use std::path::PathBuf;
 /// ```yaml
 /// sink: jsonl
 /// dir: /var/log/codebus
-/// retention_days: 30
 /// ```
+///
+/// `dir` is optional in YAML — when omitted, the run flow substitutes
+/// `<repo>/.codebus/logs/` of the active vault (the spec's default).
+/// `build_sink` itself still rejects `None`; the caller (`run_goal` /
+/// `run_query` via `main.rs`) is responsible for resolving the default
+/// vault path before invoking the factory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "sink", rename_all = "snake_case")]
 pub enum SinkConfig {
     /// `null` — no-op sink, the 0.2.0 behavior-preserving default.
     Null {},
-    /// `jsonl` — date-rotated `.jsonl` files.
+    /// `jsonl` — date-rotated `runs-YYYY-MM-DD.jsonl` files.
     Jsonl {
-        /// Output directory. Required at build time. `None` is allowed at
-        /// the config layer so the loader / caller can later substitute a
-        /// default (e.g. `~/.codebus/log`); `build_sink` rejects `None`.
+        /// Output directory. `None` at the config layer signals "use the
+        /// vault-local default"; the run flow resolves this before
+        /// calling `build_sink`. `build_sink` rejects an unresolved
+        /// `None` because by that layer the path should already be
+        /// concrete.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dir: Option<PathBuf>,
-        /// Retention in days. Currently advisory — no rotation logic yet.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        retention_days: Option<u32>,
     },
     /// `otel` — OpenTelemetry export. Requires `log-otel` cargo feature.
     Otel {},
 }
 
 impl Default for SinkConfig {
+    /// Default sink is `Jsonl { dir: None }` — the run flow resolves
+    /// `dir: None` to `<repo>/.codebus/logs/`. This matches the
+    /// `goals.jsonl` precedent: codebus auto-tracks per-vault metadata
+    /// without requiring an explicit opt-in. Users who don't want any
+    /// run logging set `log: { sink: null }` in `~/.codebus/config.yaml`.
     fn default() -> Self {
-        Self::Null {}
+        Self::Jsonl { dir: None }
     }
 }
 
@@ -92,37 +101,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_is_null() {
-        assert_eq!(SinkConfig::default(), SinkConfig::Null {});
+    fn default_is_jsonl_with_dir_none() {
+        // Pinning the new default. The run flow downstream resolves
+        // `dir: None` to `<repo>/.codebus/logs/` so users get auto
+        // logging without opt-in (matches goals.jsonl precedent).
+        // Changing the default is a behavior break for every existing
+        // user; force any future change to update this test deliberately.
+        assert_eq!(SinkConfig::default(), SinkConfig::Jsonl { dir: None });
     }
 
     #[test]
-    fn null_default_round_trips_via_serde_yaml() {
+    fn jsonl_default_serializes_with_only_sink_key() {
         let cfg = SinkConfig::default();
         let yaml = serde_yaml::to_string(&cfg).expect("serialize");
-        // Tag-only variant produces `sink: 'null'` — serde_yaml quotes the
-        // discriminator string to disambiguate from YAML's bare `null`
-        // literal. Both quoted and unquoted forms deserialize back to the
-        // same variant; we just check round-trip correctness.
+        // `dir: None` is skipped, so the serialized form is just the
+        // discriminator. Round-trip back yields the same default.
+        assert!(
+            yaml.contains("sink: jsonl"),
+            "expected `sink: jsonl`, got: {yaml}"
+        );
+        assert!(!yaml.contains("dir:"), "dir: None should be skipped");
+        let parsed: SinkConfig = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(parsed, SinkConfig::Jsonl { dir: None });
+    }
+
+    #[test]
+    fn explicit_null_sink_round_trips_via_serde_yaml() {
+        // Users opt OUT of run logging via `log: { sink: null }`. Verify
+        // the explicit form (de)serializes correctly. serde_yaml quotes
+        // the discriminator string `"null"` to disambiguate from YAML's
+        // bare `null` literal.
+        let cfg = SinkConfig::Null {};
+        let yaml = serde_yaml::to_string(&cfg).expect("serialize");
         let parsed: SinkConfig = serde_yaml::from_str(&yaml).expect("deserialize");
         assert_eq!(parsed, SinkConfig::Null {});
-        // Also accept the explicit unquoted form on input.
         let parsed_unquoted: SinkConfig =
             serde_yaml::from_str("sink: \"null\"\n").expect("deserialize unquoted");
         assert_eq!(parsed_unquoted, SinkConfig::Null {});
     }
 
     #[test]
-    fn jsonl_round_trips_with_dir_and_retention() {
-        let yaml = "sink: jsonl\ndir: /var/log/codebus\nretention_days: 30\n";
+    fn jsonl_round_trips_with_dir() {
+        let yaml = "sink: jsonl\ndir: /var/log/codebus\n";
         let parsed: SinkConfig = serde_yaml::from_str(yaml).expect("deserialize");
         match &parsed {
-            SinkConfig::Jsonl {
-                dir,
-                retention_days,
-            } => {
+            SinkConfig::Jsonl { dir } => {
                 assert_eq!(dir.as_deref(), Some(std::path::Path::new("/var/log/codebus")));
-                assert_eq!(*retention_days, Some(30));
             }
             other => panic!("expected Jsonl variant, got {other:?}"),
         }
@@ -133,26 +157,32 @@ mod tests {
     }
 
     #[test]
-    fn jsonl_omits_unset_fields_when_serialized() {
-        let cfg = SinkConfig::Jsonl {
-            dir: None,
-            retention_days: None,
-        };
-        let yaml = serde_yaml::to_string(&cfg).expect("serialize");
-        // `skip_serializing_if = Option::is_none` — fields shouldn't appear.
-        assert!(!yaml.contains("dir:"), "unexpected `dir:` in {yaml}");
-        assert!(
-            !yaml.contains("retention_days:"),
-            "unexpected `retention_days:` in {yaml}"
+    fn jsonl_silently_ignores_legacy_retention_days_field() {
+        // `retention_days` was removed in the token-tracking change. YAML
+        // configs in the wild may still carry it; serde + the variant's
+        // unknown-field default (no `deny_unknown_fields`) silently drops
+        // the field rather than erroring. Verifies graceful migration.
+        let yaml = "sink: jsonl\ndir: /var/log/codebus\nretention_days: 30\n";
+        let parsed: SinkConfig = serde_yaml::from_str(yaml).expect("deserialize");
+        assert_eq!(
+            parsed,
+            SinkConfig::Jsonl {
+                dir: Some(std::path::PathBuf::from("/var/log/codebus")),
+            }
         );
     }
 
     #[test]
+    fn jsonl_omits_unset_dir_when_serialized() {
+        let cfg = SinkConfig::Jsonl { dir: None };
+        let yaml = serde_yaml::to_string(&cfg).expect("serialize");
+        // `skip_serializing_if = Option::is_none` — field shouldn't appear.
+        assert!(!yaml.contains("dir:"), "unexpected `dir:` in {yaml}");
+    }
+
+    #[test]
     fn jsonl_without_dir_returns_setup_error() {
-        let cfg = SinkConfig::Jsonl {
-            dir: None,
-            retention_days: None,
-        };
+        let cfg = SinkConfig::Jsonl { dir: None };
         // `Box<dyn LogSink>` doesn't impl Debug, so use match instead of expect_err.
         match build_sink(cfg) {
             Err(SinkError::Setup(msg)) => {
@@ -168,7 +198,6 @@ mod tests {
         let tmp = std::env::temp_dir().join("codebus-factory-test-jsonl");
         let cfg = SinkConfig::Jsonl {
             dir: Some(tmp.clone()),
-            retention_days: Some(7),
         };
         let sink = build_sink(cfg).expect("should build");
         assert_eq!(sink.name(), "jsonl");

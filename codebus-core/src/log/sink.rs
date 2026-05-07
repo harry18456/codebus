@@ -5,22 +5,43 @@
 //! `await`. Object-safe so a `Box<dyn LogSink>` can be swapped via
 //! [`super::factory::build_sink`].
 //!
-//! `LogSink` is **not wired into `goal` / `query` flows yet** — Phase 1
-//! ships the trait + impls so the contract exists, but the default
-//! [`super::sinks::null_sink::NullSink`] keeps user-visible behavior
-//! identical to 0.2.0. Plumbing the sink to actually receive run summaries
-//! is a follow-up change (#4 token tracking).
+//! Wired into `goal` / `query` flows by the `token-tracking` change. The
+//! default [`super::sinks::null_sink::NullSink`] silently discards writes,
+//! preserving 0.2.0 user-visible behavior; users opt into persistence by
+//! configuring `log: { sink: jsonl }` in `~/.codebus/config.yaml`.
 
 use serde::{Deserialize, Serialize};
 
-/// Token usage for one LLM invocation. Fields default to `0` when the
-/// provider didn't report a number (e.g. local / mock providers).
+/// Token usage for one LLM invocation, normalized across providers.
+///
+/// `input_tokens` and `output_tokens` are universal — every LLM API
+/// exposes them. The remaining fields are `Option<u64>` because not every
+/// provider has them (e.g. OpenAI legacy / Ollama have no cache concept).
+/// `None` means "the provider does not have this concept"; `Some(0)`
+/// means "the concept exists but no tokens were attributed this run".
+///
+/// `extras` is the escape hatch for vendor-specific fields the normalized
+/// shape can't carry. Providers SHOULD place the original wire-format
+/// `usage` object here so downstream tools can recover full fidelity.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cache_write_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+    /// Reasoning tokens for o-series models / extended-thinking-style
+    /// providers that bill reasoning separately from output. `None` for
+    /// providers without this concept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+    /// Vendor-specific raw JSON. Providers SHOULD set this to their
+    /// original `usage` object so high-fidelity post-hoc analysis is
+    /// possible. Default is `Value::Null`, which is skipped during
+    /// serialization to keep jsonl entries compact.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub extras: serde_json::Value,
 }
 
 /// One row in the run log. Captures everything a future analytics consumer
@@ -33,6 +54,17 @@ pub struct TokenUsage {
 pub struct RunLog {
     /// The goal / query text that triggered the run.
     pub goal: String,
+    /// `"goal"` or `"query"`. Required because runs.jsonl mixes both
+    /// modes; consumers filter on this field.
+    pub mode: String,
+    /// Model alias / id passed to the provider for this run, if any.
+    /// `None` when the user didn't configure a model (provider used its
+    /// default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Reasoning effort level passed to the provider, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// RFC 3339 UTC start timestamp.
     pub started_at: String,
     /// RFC 3339 UTC end timestamp.
@@ -69,6 +101,31 @@ impl From<std::io::Error> for LogError {
 impl From<serde_json::Error> for LogError {
     fn from(e: serde_json::Error) -> Self {
         LogError::Serialize(e)
+    }
+}
+
+/// Add `addend` into `acc` field-by-field. `input_tokens` and
+/// `output_tokens` use `saturating_add` so a pathologically long-running
+/// session doesn't panic on overflow. `Option<u64>` fields combine via:
+/// both `Some` → sum; one `Some` → keep that value; both `None` → `None`.
+/// `extras` keeps the most recent non-null value (later events typically
+/// have more complete data; this preserves the latest snapshot).
+pub fn accumulate_token_usage(acc: &mut TokenUsage, addend: &TokenUsage) {
+    acc.input_tokens = acc.input_tokens.saturating_add(addend.input_tokens);
+    acc.output_tokens = acc.output_tokens.saturating_add(addend.output_tokens);
+    acc.cache_read_tokens = combine_opt(acc.cache_read_tokens, addend.cache_read_tokens);
+    acc.cache_write_tokens = combine_opt(acc.cache_write_tokens, addend.cache_write_tokens);
+    acc.reasoning_tokens = combine_opt(acc.reasoning_tokens, addend.reasoning_tokens);
+    if !addend.extras.is_null() {
+        acc.extras = addend.extras.clone();
+    }
+}
+
+fn combine_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    match (a, b) {
+        (None, None) => None,
+        (Some(x), None) | (None, Some(x)) => Some(x),
+        (Some(x), Some(y)) => Some(x.saturating_add(y)),
     }
 }
 

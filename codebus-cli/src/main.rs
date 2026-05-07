@@ -4,11 +4,11 @@
 use clap::Parser;
 use codebus_core::config::{EmojiMode, GlobalConfig, load_config};
 use codebus_core::llm::{ProviderConfig, build_provider};
-use codebus_core::log::sinks::null_sink::NullSink;
+use codebus_core::log::{SinkConfig, build_sink};
 use codebus_core::pii::{ScannerConfig, build_scanner};
 use codebus_core::render::{Banner, RenderOptions, TerminalRenderer};
 use codebus_core::vault::sanity_check::check_repo_is_not_vault;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 mod commands;
@@ -236,6 +236,25 @@ fn scanner_config_from(cfg: &GlobalConfig) -> ScannerConfig {
     cfg.pii.clone().unwrap_or_default()
 }
 
+/// Build a [`SinkConfig`] from a [`GlobalConfig`]. `cfg.log == None`
+/// (section unset) yields the default variant (`Null {}`) — preserving
+/// 0.x behavior of "no telemetry persistence" until the user opts in.
+fn sink_config_from(cfg: &GlobalConfig) -> SinkConfig {
+    cfg.log.clone().unwrap_or_default()
+}
+
+/// Resolve the vault-local default for `SinkConfig::Jsonl { dir: None }`.
+/// When the user wrote `log: { sink: jsonl }` without a `dir`, fall back
+/// to `<repo>/.codebus/logs/`. Other variants pass through unchanged.
+fn resolve_jsonl_dir(repo: &Path, cfg: SinkConfig) -> SinkConfig {
+    match cfg {
+        SinkConfig::Jsonl { dir: None } => SinkConfig::Jsonl {
+            dir: Some(repo.join(".codebus").join("logs")),
+        },
+        other => other,
+    }
+}
+
 /// Extract `(model, effort)` from `ProviderConfig::ClaudeCli`, returning
 /// `(None, None)` for any other provider variant (those don't carry the
 /// `--model` / `--effort` flag concept; their model/effort knobs live on
@@ -294,7 +313,13 @@ async fn run_fix_cmd(
         }
     };
 
-    let mut log_sink = NullSink::new();
+    let mut log_sink = match build_sink(resolve_jsonl_dir(repo, sink_config_from(cfg))) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to build log sink: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let result = match fix::run_fix(
         fix::RunFixOptions {
             repo_root: repo,
@@ -302,7 +327,7 @@ async fn run_fix_cmd(
             fix_max_iterations,
         },
         &mut renderer,
-        &mut log_sink,
+        log_sink.as_mut(),
     )
     .await
     {
@@ -397,7 +422,13 @@ async fn run_goal_cmd(
             return ExitCode::from(1);
         }
     };
-    let mut log_sink = NullSink::new();
+    let mut log_sink = match build_sink(resolve_jsonl_dir(repo, sink_config_from(cfg))) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to build log sink: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let result = match goal::run_goal(
         goal::RunGoalOptions {
             repo_root: repo,
@@ -411,7 +442,7 @@ async fn run_goal_cmd(
             effort: effort.as_deref(),
         },
         &mut renderer,
-        &mut log_sink,
+        log_sink.as_mut(),
     )
     .await
     {
@@ -458,7 +489,13 @@ async fn run_query_cmd(
             return ExitCode::from(1);
         }
     };
-    let mut log_sink = NullSink::new();
+    let mut log_sink = match build_sink(resolve_jsonl_dir(repo, sink_config_from(cfg))) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to build log sink: {e}");
+            return ExitCode::from(1);
+        }
+    };
     if let Err(e) = query::run_query(
         query::RunQueryOptions {
             repo_root: repo,
@@ -468,7 +505,7 @@ async fn run_query_cmd(
             effort: effort.as_deref(),
         },
         &mut renderer,
-        &mut log_sink,
+        log_sink.as_mut(),
     )
     .await
     {

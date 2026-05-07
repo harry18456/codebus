@@ -13,7 +13,7 @@
 
 use codebus_core::git::nested_repo::auto_commit;
 use codebus_core::llm::provider::LlmProvider;
-use codebus_core::log::LogSink;
+use codebus_core::log::{LogSink, RunLog, TokenUsage};
 use codebus_core::render::EventRenderer;
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::vault::lock::{acquire_lock, release_lock};
@@ -43,7 +43,6 @@ pub async fn run_fix(
     renderer: &mut dyn EventRenderer,
     log_sink: &mut dyn LogSink,
 ) -> io::Result<RunFixResult> {
-    let _ = log_sink;
     let p = vault_paths(opts.repo_root);
 
     if !p.root.exists() {
@@ -61,9 +60,19 @@ pub async fn run_fix(
     let mut lock = acquire_lock(&p.lock)
         .map_err(|e| io::Error::new(io::ErrorKind::AlreadyExists, e.to_string()))?;
 
+    let started_at = chrono::Utc::now().to_rfc3339();
+    let mut accumulated_tokens = TokenUsage::default();
+
     let result: io::Result<RunFixResult> = (async {
         let pre_lint = lint_wiki(&p.root);
-        lint_and_fix(&p.root, opts.provider, opts.fix_max_iterations, renderer).await?;
+        lint_and_fix(
+            &p.root,
+            opts.provider,
+            opts.fix_max_iterations,
+            renderer,
+            &mut accumulated_tokens,
+        )
+        .await?;
         let post_lint = lint_wiki(&p.root);
 
         // Spec: "--fix mode commits its results to the nested vault git
@@ -80,6 +89,30 @@ pub async fn run_fix(
     .await;
 
     let _ = release_lock(&mut lock);
+
+    // Build a RunLog with mode="fix" so jsonl analysis can distinguish
+    // standalone fix-loop runs from goal/query. This isn't covered by
+    // the token-tracking spec (which scopes runs to goal+query) but
+    // omitting fix-mode logging would silently lose token data the user
+    // expects to see, so we record it under a third mode value.
+    let post_lint_for_log = result.as_ref().map(|r| &r.post_lint);
+    let finished_at = chrono::Utc::now().to_rfc3339();
+    let run_log = RunLog {
+        goal: "wiki: lint fix loop".into(),
+        mode: "fix".into(),
+        model: None,
+        effort: None,
+        started_at,
+        finished_at,
+        tokens: accumulated_tokens,
+        wiki_changed: result.is_ok(),
+        lint_error_count: post_lint_for_log.map(|l| l.error_count).unwrap_or(0),
+        lint_warn_count: post_lint_for_log.map(|l| l.warn_count).unwrap_or(0),
+    };
+    if let Err(e) = log_sink.write_run(&run_log) {
+        eprintln!("warning: failed to write run log: {e}");
+    }
+
     result
 }
 

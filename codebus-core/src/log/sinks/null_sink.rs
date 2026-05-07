@@ -33,6 +33,9 @@ mod tests {
     fn sample_run() -> RunLog {
         RunLog {
             goal: "explore foo".into(),
+            mode: "goal".into(),
+            model: None,
+            effort: None,
             started_at: "2026-05-06T10:00:00Z".into(),
             finished_at: "2026-05-06T10:00:30Z".into(),
             tokens: TokenUsage::default(),

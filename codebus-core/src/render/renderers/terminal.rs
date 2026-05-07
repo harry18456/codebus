@@ -116,6 +116,13 @@ pub fn format_event(event: &StreamEvent, opts: RenderOptions) -> String {
                 indent(&body)
             )
         }
+        StreamEvent::Usage(_) => {
+            // Token usage is consumed by run_goal / run_query for RunLog
+            // accumulation; not surfaced to the terminal directly. Future
+            // banner-level UX could surface a per-run cost summary if
+            // desired.
+            String::new()
+        }
         StreamEvent::Done => String::new(),
     }
 }

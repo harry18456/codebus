@@ -21,6 +21,7 @@ pub mod memory;
 pub mod prompt;
 
 use crate::llm::provider::{InvokeOptions, LlmMode, LlmProvider};
+use crate::log::accumulate_token_usage;
 use crate::render::{Banner, EventRenderer};
 use crate::wiki::lint::lint_wiki;
 use crate::wiki::types::LintIssue;
@@ -64,6 +65,7 @@ pub async fn lint_and_fix(
     provider: &dyn LlmProvider,
     max_iterations: u32,
     renderer: &mut dyn EventRenderer,
+    accumulated_tokens: &mut crate::log::TokenUsage,
 ) -> io::Result<FixReport> {
     // Spec: "Skip the loop entirely when initial lint reports zero issues".
     let initial = lint_wiki(vault_root);
@@ -119,9 +121,14 @@ pub async fn lint_and_fix(
             .invoke(opts)
             .await
             .map_err(|e| io::Error::other(e.to_string()))?;
-        while let Some(_event) = stream.next().await {
+        while let Some(event) = stream.next().await {
             // Drain stream — the fix loop relies on disk diff, not stream
-            // event content, for cross-iteration memory.
+            // event content, for cross-iteration memory. We do however
+            // peek for `Usage` events so cost accumulates across the full
+            // goal+fix run.
+            if let crate::stream::StreamEvent::Usage(u) = &event {
+                accumulate_token_usage(accumulated_tokens, u);
+            }
         }
 
         iter += 1;
@@ -177,6 +184,7 @@ mod tests {
     use super::*;
     use crate::git::nested_repo::{auto_commit, init_nested_repo};
     use crate::llm::provider::{EventStream, ProviderError};
+    use crate::log::TokenUsage;
     use crate::stream::StreamEvent;
     use crate::wiki::types::{LintIssue, LintSeverity};
     use std::fs;
@@ -291,7 +299,7 @@ mod tests {
         // No issues: 5 type folders + index + log all present, no broken
         // links, no oversize pages.
         let provider = FailOnCallProvider;
-        let report = lint_and_fix(&v, &provider, 5, &mut NullRenderer).await.unwrap();
+        let report = lint_and_fix(&v, &provider, 5, &mut NullRenderer, &mut TokenUsage::default()).await.unwrap();
         assert_eq!(report, FixReport::Clean { iterations: 0 });
         cleanup(&v);
     }
@@ -309,7 +317,7 @@ mod tests {
 
         let no_op: OnInvoke = Arc::new(|_path: &Path| {});
         let mock = RecordingMock::new(no_op);
-        let report = lint_and_fix(&v, &mock, 3, &mut NullRenderer).await.unwrap();
+        let report = lint_and_fix(&v, &mock, 3, &mut NullRenderer, &mut TokenUsage::default()).await.unwrap();
 
         match report {
             FixReport::MaxIter {
@@ -341,7 +349,7 @@ mod tests {
             let _ = fs::remove_file(target);
         });
         let mock = RecordingMock::new(fix_once);
-        let report = lint_and_fix(&v, &mock, 5, &mut NullRenderer).await.unwrap();
+        let report = lint_and_fix(&v, &mock, 5, &mut NullRenderer, &mut TokenUsage::default()).await.unwrap();
 
         assert_eq!(report, FixReport::Clean { iterations: 1 });
         assert_eq!(mock.invoke_count(), 1, "provider called exactly once");
@@ -373,7 +381,7 @@ mod tests {
             fs::write(marker, format!("marker iteration {}\n", *n)).unwrap();
         });
         let mock = RecordingMock::new(add_marker);
-        let report = lint_and_fix(&v, &mock, 3, &mut NullRenderer).await.unwrap();
+        let report = lint_and_fix(&v, &mock, 3, &mut NullRenderer, &mut TokenUsage::default()).await.unwrap();
 
         assert!(matches!(report, FixReport::MaxIter { .. }));
         let captured = mock.captured();
@@ -441,7 +449,7 @@ mod tests {
         // prompt.
         let no_op: OnInvoke = Arc::new(|_| {});
         let mock = RecordingMock::new(no_op);
-        let _ = lint_and_fix(&v, &mock, 1, &mut NullRenderer).await.unwrap();
+        let _ = lint_and_fix(&v, &mock, 1, &mut NullRenderer, &mut TokenUsage::default()).await.unwrap();
 
         let captured = mock.captured();
         assert_eq!(captured.len(), 1);

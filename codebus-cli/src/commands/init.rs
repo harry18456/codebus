@@ -5,7 +5,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-const REQUIRED_INTERNAL_GITIGNORE_LINES: &[&str] = &[".lock", "raw/code/", "**/.obsidian/"];
+const REQUIRED_INTERNAL_GITIGNORE_LINES: &[&str] =
+    &[".lock", "raw/code/", "**/.obsidian/", "logs/"];
 
 pub fn run_init(repo_root: impl AsRef<Path>) -> io::Result<()> {
     let repo_root = repo_root.as_ref();

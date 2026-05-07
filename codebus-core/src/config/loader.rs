@@ -410,7 +410,6 @@ fn parse_log(v: &Value) -> Option<SinkConfig> {
 
     let mut sink_str: Option<String> = None;
     let mut dir: Option<PathBuf> = None;
-    let mut retention_days: Option<u32> = None;
     let mut sink_was_explicitly_invalid = false;
 
     for (k, val) in map {
@@ -430,10 +429,9 @@ fn parse_log(v: &Value) -> Option<SinkConfig> {
                 Some(s) => dir = Some(PathBuf::from(s)),
                 None => warn_type_mismatch("log.dir", "string", val),
             },
-            "retention_days" => match val.as_u64() {
-                Some(n) => retention_days = Some(n as u32),
-                None => warn_type_mismatch("log.retention_days", "non-negative integer", val),
-            },
+            // `retention_days` was removed in token-tracking change.
+            // Falls into the silently-ignore arm below — preserves
+            // forward / backward compat for users with legacy configs.
             _ => {}
         }
     }
@@ -443,11 +441,12 @@ fn parse_log(v: &Value) -> Option<SinkConfig> {
     }
 
     let variant = match sink_str.as_deref() {
-        None | Some("null") => SinkConfig::Null {},
-        Some("jsonl") => SinkConfig::Jsonl {
-            dir,
-            retention_days,
-        },
+        // No discriminator → default variant (Jsonl with vault-local
+        // resolution downstream). Distinct from `Some("null")` which
+        // is the explicit user opt-out.
+        None => SinkConfig::default(),
+        Some("null") => SinkConfig::Null {},
+        Some("jsonl") => SinkConfig::Jsonl { dir },
         Some("otel") => SinkConfig::Otel {},
         _ => unreachable!("sink_str validated above"),
     };
@@ -778,17 +777,51 @@ mod tests {
     fn log_section_selects_sink() {
         let p = write_tmp(
             "log",
-            "log:\n  sink: jsonl\n  dir: /var/log/codebus\n  retention_days: 30\n",
+            "log:\n  sink: jsonl\n  dir: /var/log/codebus\n",
         );
         let cfg = load_config_from_path(&p);
         let log = cfg.log.expect("log parsed");
         match log {
-            SinkConfig::Jsonl {
-                dir,
-                retention_days,
-            } => {
+            SinkConfig::Jsonl { dir } => {
                 assert_eq!(dir.as_deref(), Some(Path::new("/var/log/codebus")));
-                assert_eq!(retention_days, Some(30));
+            }
+            other => panic!("expected Jsonl, got {other:?}"),
+        }
+        cleanup(&p);
+    }
+
+    #[test]
+    fn log_section_jsonl_without_dir_yields_dir_none() {
+        // Spec scenario: "Log section selects jsonl sink without dir
+        // defaulting to vault" — loader returns dir: None; the run flow
+        // is responsible for resolving the vault-local default before
+        // calling build_sink.
+        let p = write_tmp("logjsonlnodir", "log:\n  sink: jsonl\n");
+        let cfg = load_config_from_path(&p);
+        match cfg.log.expect("log parsed") {
+            SinkConfig::Jsonl { dir } => {
+                assert!(
+                    dir.is_none(),
+                    "loader leaves dir as None when YAML omits it; vault fallback is downstream"
+                );
+            }
+            other => panic!("expected Jsonl, got {other:?}"),
+        }
+        cleanup(&p);
+    }
+
+    #[test]
+    fn log_section_retention_days_is_silently_ignored() {
+        // Spec scenario: "Log section retention_days is silently ignored"
+        // — legacy field is dropped without a warning, parses cleanly.
+        let p = write_tmp(
+            "logretention",
+            "log:\n  sink: jsonl\n  dir: /var/log/codebus\n  retention_days: 30\n",
+        );
+        let cfg = load_config_from_path(&p);
+        match cfg.log.expect("log parsed") {
+            SinkConfig::Jsonl { dir } => {
+                assert_eq!(dir.as_deref(), Some(Path::new("/var/log/codebus")));
             }
             other => panic!("expected Jsonl, got {other:?}"),
         }

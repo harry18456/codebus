@@ -12,4 +12,4 @@ pub mod sink;
 pub mod sinks;
 
 pub use factory::{SinkConfig, SinkError, build_sink};
-pub use sink::{LogError, LogSink, RunLog, TokenUsage};
+pub use sink::{LogError, LogSink, RunLog, TokenUsage, accumulate_token_usage};
