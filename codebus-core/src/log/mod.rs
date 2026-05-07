@@ -11,5 +11,5 @@ pub mod factory;
 pub mod sink;
 pub mod sinks;
 
-pub use factory::{SinkConfig, SinkError, SinkKind, build_sink};
+pub use factory::{SinkConfig, SinkError, build_sink};
 pub use sink::{LogError, LogSink, RunLog, TokenUsage};

@@ -380,19 +380,21 @@ The system SHALL load `~/.codebus/config.yaml` if present, ignore unknown fields
 The config schema SHALL recognize the following top-level keys, each optional and tolerantly parsed:
 
 - `emoji`: emoji mode preference (one of `auto` | `on` | `off`)
-- `llm`: LLM provider configuration block (provider kind plus provider-specific sub-fields)
-- `pii`: PII scanner configuration block (scanner kind, on-hit behavior, extra patterns)
-- `lint`: lint rule configuration block (rule overrides, disabled rules, custom rules path)
-- `render`: output renderer configuration block (renderer format)
-- `log`: log sink configuration block (sink kind, retention)
+- `llm`: LLM provider configuration block. Discriminator field `provider` selects one of `claude_cli` | `anthropic_api` | `openai` | `ollama_local`; the remaining sub-fields under the `llm` mapping are the variant-specific fields valid for the selected provider.
+- `pii`: PII scanner configuration block. Discriminator field `scanner` selects one of `null` | `regex_basic` | `presidio` | `aws`; the remaining sub-fields are variant-specific fields valid for the selected scanner (every variant accepts `on_hit`).
+- `lint`: lint rule configuration block (rule overrides, disabled rules, custom rules path). Not a tagged-variant section.
+- `render`: output renderer configuration block. Discriminator field `format` selects one of `terminal` | `json_lines` | `tauri`; the remaining sub-fields are variant-specific.
+- `log`: log sink configuration block. Discriminator field `sink` selects one of `null` | `jsonl` | `otel`; the remaining sub-fields are variant-specific.
 
-For each of the five plugin section keys (`llm`, `pii`, `lint`, `render`, `log`), the loader SHALL:
+For each of the four tagged-variant plugin section keys (`llm`, `pii`, `render`, `log`), the loader SHALL:
 
-- Parse the section if present and value is a YAML mapping; produce an empty section if absent or null
-- Within each section, recognize provider/scanner/rule/renderer/sink kind via a `provider` / `scanner` / `format` / `sink` discriminator field as appropriate to the section
-- Silently ignore sub-fields under a section that the loader does not recognize (forward-compat for future plugin additions)
+- Parse the section if present and value is a YAML mapping; produce an empty section (treated as the variant's default) if absent or null
+- Within each section, recognize the variant via its discriminator field (`provider` / `scanner` / `format` / `sink`)
+- Silently ignore sub-fields under a section that the chosen variant does not define (forward-compat for future field additions and tolerance for fields valid in a sibling variant)
 - Warn but not abort when a discriminator field has an unknown value, treating that section as unset (factory falls through to default)
-- Warn but not abort when a sub-field has a type-incompatible value (e.g., `timeout_secs: "thirty"` where number expected), treating that sub-field as unset
+- Warn but not abort when a sub-field has a type-incompatible value (e.g., `timeout_secs: "thirty"` where number expected), treating that sub-field as unset (other valid sub-fields in the same section are preserved)
+
+For the `lint` section, the loader SHALL parse the (non-discriminated) struct as before, ignoring unknown sub-fields and warning on type-incompatible sub-fields.
 
 #### Scenario: Missing config returns empty config
 
@@ -417,7 +419,7 @@ For each of the five plugin section keys (`llm`, `pii`, `lint`, `render`, `log`)
 #### Scenario: LLM section selects provider via discriminator
 
 - **WHEN** `~/.codebus/config.yaml` contains `llm: { provider: claude_cli, binary_path: /usr/local/bin/claude }`
-- **THEN** the loader returns an LLM config with provider kind `claude_cli` and the `binary_path` sub-field populated
+- **THEN** the loader returns an LLM config of variant `claude_cli` with the `binary_path` sub-field populated
 
 #### Scenario: Unknown LLM provider warns and is treated as unset
 
@@ -429,10 +431,15 @@ For each of the five plugin section keys (`llm`, `pii`, `lint`, `render`, `log`)
 - **WHEN** `~/.codebus/config.yaml` contains `llm: { provider: claude_cli, future_unknown_field: 1 }`
 - **THEN** the loader honors `provider: claude_cli` and silently ignores `future_unknown_field`
 
+#### Scenario: Sub-field valid in a sibling variant is silently ignored
+
+- **WHEN** `~/.codebus/config.yaml` contains `llm: { provider: claude_cli, api_key: secret }` (where `api_key` is valid for the `anthropic_api` and `openai` variants but not for `claude_cli`)
+- **THEN** the loader honors `provider: claude_cli` and silently ignores `api_key`, matching the behavior for any unknown sub-field under the chosen variant
+
 #### Scenario: PII section selects scanner via discriminator
 
 - **WHEN** `~/.codebus/config.yaml` contains `pii: { scanner: regex_basic, on_hit: warn, patterns_extra: ["INTERNAL-\\d{6}"] }`
-- **THEN** the loader returns a PII config with scanner kind `regex_basic`, on-hit `warn`, and one extra pattern
+- **THEN** the loader returns a PII config of variant `regex_basic` with on-hit `warn` and one extra pattern
 
 #### Scenario: Lint section overrides recognized
 
@@ -442,22 +449,37 @@ For each of the five plugin section keys (`llm`, `pii`, `lint`, `render`, `log`)
 #### Scenario: Render section selects renderer
 
 - **WHEN** `~/.codebus/config.yaml` contains `render: { format: terminal }`
-- **THEN** the loader returns a render config with format `terminal`
+- **THEN** the loader returns a render config of variant `terminal`
 
 #### Scenario: Log section selects sink
 
-- **WHEN** `~/.codebus/config.yaml` contains `log: { sink: jsonl, retention_days: 30 }`
-- **THEN** the loader returns a log config with sink kind `jsonl` and retention 30 days
+- **WHEN** `~/.codebus/config.yaml` contains `log: { sink: jsonl, dir: /var/log/codebus, retention_days: 30 }`
+- **THEN** the loader returns a log config of variant `jsonl` with directory `/var/log/codebus` and retention 30 days
 
 #### Scenario: Empty plugin section parses as defaults
 
 - **WHEN** `~/.codebus/config.yaml` contains `pii: {}`
-- **THEN** the loader returns a PII config with all fields at their defaults (scanner unset, factory uses `null` scanner)
+- **THEN** the loader returns a PII config at the default variant (`null` scanner with on-hit `warn`)
 
-#### Scenario: Type-mismatched sub-field warns and is treated as unset
 
-- **WHEN** `~/.codebus/config.yaml` contains `llm: { provider: claude_cli, timeout_secs: "thirty" }` (string where number expected)
-- **THEN** the system writes a warning, the `timeout_secs` sub-field is treated as unset, and the rest of the LLM section is honored
+<!-- @trace
+source: config-tagged-enum-refactor
+updated: 2026-05-07
+code:
+  - codebus-core/src/render/renderers/terminal.rs
+  - codebus-core/src/llm/mod.rs
+  - codebus-core/src/log/factory.rs
+  - codebus-core/src/render/factory.rs
+  - codebus-core/src/render/mod.rs
+  - codebus-core/src/config/loader.rs
+  - codebus-core/src/config/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/llm/factory.rs
+  - codebus-core/src/pii/mod.rs
+  - codebus-core/src/pii/factory.rs
+  - codebus-core/src/config/schema.rs
+  - codebus-core/src/log/mod.rs
+-->
 
 ---
 ### Requirement: Render stage banners during goal flow

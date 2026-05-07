@@ -12,5 +12,5 @@ pub mod factory;
 pub mod renderers;
 
 pub use event_renderer::{Banner, EventRenderer};
-pub use factory::{RendererConfig, RendererError, RendererKind, build_renderer};
+pub use factory::{RendererConfig, RendererError, build_renderer};
 pub use renderers::terminal::{RenderOptions, TerminalRenderer};

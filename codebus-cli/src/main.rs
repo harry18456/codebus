@@ -217,38 +217,36 @@ fn resolve_fix_config(
 }
 
 /// Build a [`ProviderConfig`] from a [`GlobalConfig`]. `cfg.llm == None`
-/// (section unset or unknown discriminator) yields the default config,
-/// which the LLM factory maps to `claude_cli` — preserving 0.2.0 behavior
-/// when no `~/.codebus/config.yaml` exists.
+/// (section unset or unknown discriminator) yields the default variant
+/// (`ClaudeCli` with no binary path) — preserving 0.2.0 behavior when no
+/// `~/.codebus/config.yaml` exists.
+///
+/// Post-tagged-enum-refactor this is a one-line clone: the loader has
+/// already produced the correct variant from YAML; main.rs no longer
+/// needs to bridge flat fields.
 fn provider_config_from(cfg: &GlobalConfig) -> ProviderConfig {
-    let mut pc = ProviderConfig::default();
-    if let Some(llm) = &cfg.llm {
-        if let Some(kind) = llm.provider {
-            pc.kind = kind;
-        }
-        pc.binary_path = llm.binary_path.clone();
-        pc.timeout_secs = llm.timeout_secs;
-        pc.api_key = llm.api_key.clone();
-    }
-    pc
+    cfg.llm.clone().unwrap_or_default()
 }
 
 /// Build a [`ScannerConfig`] from a [`GlobalConfig`]. `cfg.pii == None`
-/// (section unset or unknown discriminator) yields the default config,
-/// which maps to `NullScanner` + `OnHit::Warn` — preserving 0.2.0 raw
-/// mirror behavior when no `~/.codebus/config.yaml` exists.
+/// (section unset or unknown discriminator) yields the default variant
+/// (`Null` with `OnHit::Warn`) — preserving 0.2.0 raw mirror behavior
+/// when no `~/.codebus/config.yaml` exists.
 fn scanner_config_from(cfg: &GlobalConfig) -> ScannerConfig {
-    let mut sc = ScannerConfig::default();
-    if let Some(pii) = &cfg.pii {
-        if let Some(kind) = pii.scanner {
-            sc.kind = kind;
-        }
-        if let Some(on_hit) = pii.on_hit {
-            sc.on_hit = on_hit;
-        }
-        sc.patterns_extra = pii.patterns_extra.clone();
+    cfg.pii.clone().unwrap_or_default()
+}
+
+/// Extract the `on_hit` policy from a [`ScannerConfig`] regardless of
+/// variant. Used by goal flow which needs the policy alongside the built
+/// scanner. Centralized here so the goal-call site doesn't carry a match
+/// every time.
+fn on_hit_of(cfg: &ScannerConfig) -> codebus_core::pii::OnHit {
+    match cfg {
+        ScannerConfig::Null { on_hit }
+        | ScannerConfig::RegexBasic { on_hit, .. }
+        | ScannerConfig::Presidio { on_hit }
+        | ScannerConfig::Aws { on_hit } => *on_hit,
     }
-    sc
 }
 
 async fn run_fix_cmd(
@@ -371,7 +369,7 @@ async fn run_goal_cmd(
         }
     };
     let scanner_cfg = scanner_config_from(cfg);
-    let pii_on_hit = scanner_cfg.on_hit;
+    let pii_on_hit = on_hit_of(&scanner_cfg);
     // Fail-fast BEFORE invoking the LLM agent — a malformed `patterns_extra`
     // entry should not silently degrade to NullScanner (per design open
     // question resolution).
@@ -460,51 +458,68 @@ async fn run_query_cmd(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codebus_core::config::{AutoFixConfig, LintConfig, PiiConfig};
-    use codebus_core::pii::{OnHit, ScannerKind};
+    use codebus_core::config::{AutoFixConfig, LintConfig};
+    use codebus_core::pii::OnHit;
 
     #[test]
     fn scanner_config_from_default_when_pii_section_absent() {
         // Default config preserves 0.2.0 behavior in goal flow:
-        // no pii section → ScannerKind::Null + OnHit::Warn (defaults).
+        // no pii section → Null variant with OnHit::Warn (defaults).
         let cfg = GlobalConfig::default();
         let sc = scanner_config_from(&cfg);
-        assert_eq!(sc.kind, ScannerKind::Null);
-        assert_eq!(sc.on_hit, OnHit::Warn);
-        assert!(sc.patterns_extra.is_empty());
+        match sc {
+            ScannerConfig::Null { on_hit } => assert_eq!(on_hit, OnHit::Warn),
+            other => panic!("expected Null default, got {other:?}"),
+        }
     }
 
     #[test]
-    fn scanner_config_from_propagates_kind_on_hit_and_extras() {
+    fn scanner_config_from_propagates_variant_on_hit_and_extras() {
         // Goal command propagates PII config from global config to raw_sync.
-        let pii = PiiConfig {
-            scanner: Some(ScannerKind::RegexBasic),
-            on_hit: Some(OnHit::Skip),
-            patterns_extra: vec![r"INTERNAL-\d{6}".to_string()],
-        };
         let cfg = GlobalConfig {
-            pii: Some(pii),
+            pii: Some(ScannerConfig::RegexBasic {
+                on_hit: OnHit::Skip,
+                patterns_extra: vec![r"INTERNAL-\d{6}".to_string()],
+            }),
             ..GlobalConfig::default()
         };
         let sc = scanner_config_from(&cfg);
-        assert_eq!(sc.kind, ScannerKind::RegexBasic);
-        assert_eq!(sc.on_hit, OnHit::Skip);
-        assert_eq!(sc.patterns_extra, vec![r"INTERNAL-\d{6}".to_string()]);
+        match sc {
+            ScannerConfig::RegexBasic {
+                on_hit,
+                patterns_extra,
+            } => {
+                assert_eq!(on_hit, OnHit::Skip);
+                assert_eq!(patterns_extra, vec![r"INTERNAL-\d{6}".to_string()]);
+            }
+            other => panic!("expected RegexBasic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn on_hit_of_extracts_per_variant() {
+        assert_eq!(
+            on_hit_of(&ScannerConfig::Null { on_hit: OnHit::Skip }),
+            OnHit::Skip
+        );
+        assert_eq!(
+            on_hit_of(&ScannerConfig::RegexBasic {
+                on_hit: OnHit::Mask,
+                patterns_extra: vec![],
+            }),
+            OnHit::Mask
+        );
     }
 
     #[test]
     fn malformed_patterns_extra_fails_build_scanner_so_main_can_abort() {
         // Sharp edge: when patterns_extra contains bad regex, build_scanner
         // returns Err so main can fail-fast before invoking the LLM agent.
-        // This pins the contract that main.rs `match build_scanner(...)`
-        // path receives an Err and exits with code 1.
-        let pii = PiiConfig {
-            scanner: Some(ScannerKind::RegexBasic),
-            on_hit: None,
-            patterns_extra: vec!["[unterminated".to_string()],
-        };
         let cfg = GlobalConfig {
-            pii: Some(pii),
+            pii: Some(ScannerConfig::RegexBasic {
+                on_hit: OnHit::Warn,
+                patterns_extra: vec!["[unterminated".to_string()],
+            }),
             ..GlobalConfig::default()
         };
         let sc = scanner_config_from(&cfg);

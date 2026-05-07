@@ -3,7 +3,7 @@
 //! Day-one wiring lands four pieces:
 //!
 //! - [`provider::PiiScanner`] trait + [`provider::PiiMatch`] / [`provider::PiiSeverity`]
-//! - [`factory::build_scanner`] for explicit `ScannerKind` → `Box<dyn PiiScanner>`
+//! - [`factory::build_scanner`] for explicit `ScannerConfig` → `Box<dyn PiiScanner>`
 //! - [`scanners::null_scanner::NullScanner`] — default, behavior-neutral with 0.2.0
 //! - [`scanners::regex_basic::RegexBasicScanner`] — built-in pattern pack, always available
 //!
@@ -14,5 +14,5 @@ pub mod factory;
 pub mod provider;
 pub mod scanners;
 
-pub use factory::{ScannerConfig, ScannerError, ScannerKind, build_scanner};
+pub use factory::{ScannerConfig, ScannerError, build_scanner};
 pub use provider::{OnHit, PiiMatch, PiiScanner, PiiSeverity};

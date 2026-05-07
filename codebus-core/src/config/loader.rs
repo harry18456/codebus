@@ -13,17 +13,17 @@
 //! 6. Type-mismatched sub-field (e.g. `timeout_secs: "thirty"`) → warning,
 //!    that sub-field is treated as unset, the rest of the section is honored.
 //!
-//! Warnings are written to stderr via `eprintln!`. Tests can assert on the
-//! parsed [`GlobalConfig`] without needing to capture stderr.
+//! Each plugin section's `parse_*` function walks `serde_yaml::Value`
+//! manually so field-level tolerance (rule 6) is preserved, and constructs
+//! the factory-domain tagged enum directly as the output type. Warnings
+//! are written to stderr via `eprintln!`. Tests can assert on the parsed
+//! [`GlobalConfig`] without needing to capture stderr.
 
-use crate::config::schema::{
-    AutoFixConfig, EmojiMode, GlobalConfig, LintConfig, LlmConfig, LogConfig, PiiConfig,
-    RenderConfig,
-};
-use crate::llm::ProviderKind;
-use crate::log::SinkKind;
-use crate::pii::{OnHit, ScannerKind};
-use crate::render::RendererKind;
+use crate::config::schema::{AutoFixConfig, EmojiMode, GlobalConfig, LintConfig};
+use crate::llm::ProviderConfig;
+use crate::log::SinkConfig;
+use crate::pii::{OnHit, ScannerConfig};
+use crate::render::{RenderOptions, RendererConfig};
 use serde_yaml::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -127,24 +127,27 @@ fn parse_emoji(v: &Value) -> Option<EmojiMode> {
     }
 }
 
-fn parse_llm(v: &Value) -> Option<LlmConfig> {
+fn parse_llm(v: &Value) -> Option<ProviderConfig> {
     let Value::Mapping(map) = v else {
         if !matches!(v, Value::Null) {
             warn_type_mismatch("llm", "mapping", v);
         }
-        return Some(LlmConfig::default());
+        return Some(ProviderConfig::default());
     };
-    let mut out = LlmConfig::default();
+
+    let mut provider_str: Option<String> = None;
+    let mut binary_path: Option<String> = None;
+    let mut timeout_secs: Option<u64> = None;
+    let mut api_key: Option<String> = None;
     let mut provider_was_explicitly_invalid = false;
 
     for (k, val) in map {
         let Some(key) = k.as_str() else { continue };
         match key {
             "provider" => match val.as_str() {
-                Some("claude_cli") => out.provider = Some(ProviderKind::ClaudeCli),
-                Some("anthropic_api") => out.provider = Some(ProviderKind::AnthropicApi),
-                Some("openai") => out.provider = Some(ProviderKind::OpenAi),
-                Some("ollama_local") => out.provider = Some(ProviderKind::OllamaLocal),
+                Some(s @ ("claude_cli" | "anthropic_api" | "openai" | "ollama_local")) => {
+                    provider_str = Some(s.to_string());
+                }
                 Some(other) => {
                     eprintln!(
                         "warning: codebus config `llm.provider: {other}` is unknown; treating llm section as unset"
@@ -154,49 +157,68 @@ fn parse_llm(v: &Value) -> Option<LlmConfig> {
                 None => warn_type_mismatch("llm.provider", "string", val),
             },
             "binary_path" => match val.as_str() {
-                Some(s) => out.binary_path = Some(s.to_string()),
+                Some(s) => binary_path = Some(s.to_string()),
                 None => warn_type_mismatch("llm.binary_path", "string", val),
             },
             "timeout_secs" => match val.as_u64() {
-                Some(n) => out.timeout_secs = Some(n),
+                Some(n) => timeout_secs = Some(n),
                 None => warn_type_mismatch("llm.timeout_secs", "non-negative integer", val),
             },
             "api_key" => match val.as_str() {
-                Some(s) => out.api_key = Some(s.to_string()),
+                Some(s) => api_key = Some(s.to_string()),
                 None => warn_type_mismatch("llm.api_key", "string", val),
             },
             // Forward-compat: unknown sub-fields silently ignored.
+            // Sub-fields valid in a sibling variant (e.g. `api_key` under
+            // `provider: claude_cli`) fall into this arm too — silently
+            // dropped, matching the spec scenario "Sub-field valid in a
+            // sibling variant is silently ignored".
             _ => {}
         }
     }
 
     if provider_was_explicitly_invalid {
-        // Spec: "treat that section as unset (factory falls through to
-        // default)". Drop the entire section so consumers get GlobalConfig
-        // defaults for it.
         return None;
     }
-    Some(out)
+
+    // Construct the variant. Missing provider field → default variant.
+    let variant = match provider_str.as_deref() {
+        None | Some("claude_cli") => ProviderConfig::ClaudeCli { binary_path },
+        Some("anthropic_api") => ProviderConfig::AnthropicApi {
+            api_key,
+            timeout_secs,
+        },
+        Some("openai") => ProviderConfig::Openai {
+            api_key,
+            timeout_secs,
+        },
+        Some("ollama_local") => ProviderConfig::OllamaLocal {},
+        _ => unreachable!("provider_str validated above"),
+    };
+
+    Some(variant)
 }
 
-fn parse_pii(v: &Value) -> Option<PiiConfig> {
+fn parse_pii(v: &Value) -> Option<ScannerConfig> {
     let Value::Mapping(map) = v else {
         if !matches!(v, Value::Null) {
             warn_type_mismatch("pii", "mapping", v);
         }
-        return Some(PiiConfig::default());
+        return Some(ScannerConfig::default());
     };
-    let mut out = PiiConfig::default();
+
+    let mut scanner_str: Option<String> = None;
+    let mut on_hit: OnHit = OnHit::Warn;
+    let mut patterns_extra: Vec<String> = Vec::new();
     let mut scanner_was_explicitly_invalid = false;
 
     for (k, val) in map {
         let Some(key) = k.as_str() else { continue };
         match key {
             "scanner" => match val.as_str() {
-                Some("null") => out.scanner = Some(ScannerKind::Null),
-                Some("regex_basic") => out.scanner = Some(ScannerKind::RegexBasic),
-                Some("presidio") => out.scanner = Some(ScannerKind::Presidio),
-                Some("aws") => out.scanner = Some(ScannerKind::Aws),
+                Some(s @ ("null" | "regex_basic" | "presidio" | "aws")) => {
+                    scanner_str = Some(s.to_string());
+                }
                 Some(other) => {
                     eprintln!(
                         "warning: codebus config `pii.scanner: {other}` is unknown; treating pii section as unset"
@@ -206,9 +228,9 @@ fn parse_pii(v: &Value) -> Option<PiiConfig> {
                 None => warn_type_mismatch("pii.scanner", "string", val),
             },
             "on_hit" => match val.as_str() {
-                Some("warn") => out.on_hit = Some(OnHit::Warn),
-                Some("skip") => out.on_hit = Some(OnHit::Skip),
-                Some("mask") => out.on_hit = Some(OnHit::Mask),
+                Some("warn") => on_hit = OnHit::Warn,
+                Some("skip") => on_hit = OnHit::Skip,
+                Some("mask") => on_hit = OnHit::Mask,
                 Some(other) => {
                     eprintln!(
                         "warning: codebus config `pii.on_hit: {other}` is not one of warn|skip|mask; ignoring"
@@ -218,7 +240,7 @@ fn parse_pii(v: &Value) -> Option<PiiConfig> {
             },
             "patterns_extra" => match val {
                 Value::Sequence(seq) => {
-                    out.patterns_extra = seq
+                    patterns_extra = seq
                         .iter()
                         .filter_map(|x| x.as_str().map(|s| s.to_string()))
                         .collect();
@@ -232,7 +254,19 @@ fn parse_pii(v: &Value) -> Option<PiiConfig> {
     if scanner_was_explicitly_invalid {
         return None;
     }
-    Some(out)
+
+    let variant = match scanner_str.as_deref() {
+        None | Some("null") => ScannerConfig::Null { on_hit },
+        Some("regex_basic") => ScannerConfig::RegexBasic {
+            on_hit,
+            patterns_extra,
+        },
+        Some("presidio") => ScannerConfig::Presidio { on_hit },
+        Some("aws") => ScannerConfig::Aws { on_hit },
+        _ => unreachable!("scanner_str validated above"),
+    };
+
+    Some(variant)
 }
 
 fn parse_lint(v: &Value) -> Option<LintConfig> {
@@ -296,23 +330,25 @@ fn parse_auto_fix(v: &Value) -> AutoFixConfig {
     out
 }
 
-fn parse_render(v: &Value) -> Option<RenderConfig> {
+fn parse_render(v: &Value) -> Option<RendererConfig> {
     let Value::Mapping(map) = v else {
         if !matches!(v, Value::Null) {
             warn_type_mismatch("render", "mapping", v);
         }
-        return Some(RenderConfig::default());
+        return Some(RendererConfig::default());
     };
-    let mut out = RenderConfig::default();
+
+    let mut format_str: Option<String> = None;
+    let mut options: RenderOptions = RenderOptions::default();
     let mut format_was_explicitly_invalid = false;
 
     for (k, val) in map {
         let Some(key) = k.as_str() else { continue };
-        if key == "format" {
-            match val.as_str() {
-                Some("terminal") => out.format = Some(RendererKind::Terminal),
-                Some("json_lines") => out.format = Some(RendererKind::JsonLines),
-                Some("tauri") => out.format = Some(RendererKind::Tauri),
+        match key {
+            "format" => match val.as_str() {
+                Some(s @ ("terminal" | "json_lines" | "tauri")) => {
+                    format_str = Some(s.to_string());
+                }
                 Some(other) => {
                     eprintln!(
                         "warning: codebus config `render.format: {other}` is unknown; treating render section as unset"
@@ -320,33 +356,54 @@ fn parse_render(v: &Value) -> Option<RenderConfig> {
                     format_was_explicitly_invalid = true;
                 }
                 None => warn_type_mismatch("render.format", "string", val),
-            }
+            },
+            "options" => match val {
+                Value::Mapping(_) => match serde_yaml::from_value::<RenderOptions>(val.clone()) {
+                    Ok(o) => options = o,
+                    Err(_) => warn_type_mismatch(
+                        "render.options",
+                        "mapping with use_emoji/use_color bools",
+                        val,
+                    ),
+                },
+                _ => warn_type_mismatch("render.options", "mapping", val),
+            },
+            _ => {}
         }
     }
 
     if format_was_explicitly_invalid {
         return None;
     }
-    Some(out)
+
+    let variant = match format_str.as_deref() {
+        None | Some("terminal") => RendererConfig::Terminal { options },
+        Some("json_lines") => RendererConfig::JsonLines {},
+        Some("tauri") => RendererConfig::Tauri {},
+        _ => unreachable!("format_str validated above"),
+    };
+
+    Some(variant)
 }
 
-fn parse_log(v: &Value) -> Option<LogConfig> {
+fn parse_log(v: &Value) -> Option<SinkConfig> {
     let Value::Mapping(map) = v else {
         if !matches!(v, Value::Null) {
             warn_type_mismatch("log", "mapping", v);
         }
-        return Some(LogConfig::default());
+        return Some(SinkConfig::default());
     };
-    let mut out = LogConfig::default();
+
+    let mut sink_str: Option<String> = None;
+    let mut dir: Option<PathBuf> = None;
+    let mut retention_days: Option<u32> = None;
     let mut sink_was_explicitly_invalid = false;
 
     for (k, val) in map {
         let Some(key) = k.as_str() else { continue };
         match key {
             "sink" => match val.as_str() {
-                Some("null") => out.sink = Some(SinkKind::Null),
-                Some("jsonl") => out.sink = Some(SinkKind::Jsonl),
-                Some("otel") => out.sink = Some(SinkKind::Otel),
+                Some(s @ ("null" | "jsonl" | "otel")) => sink_str = Some(s.to_string()),
                 Some(other) => {
                     eprintln!(
                         "warning: codebus config `log.sink: {other}` is unknown; treating log section as unset"
@@ -355,8 +412,12 @@ fn parse_log(v: &Value) -> Option<LogConfig> {
                 }
                 None => warn_type_mismatch("log.sink", "string", val),
             },
+            "dir" => match val.as_str() {
+                Some(s) => dir = Some(PathBuf::from(s)),
+                None => warn_type_mismatch("log.dir", "string", val),
+            },
             "retention_days" => match val.as_u64() {
-                Some(n) => out.retention_days = Some(n as u32),
+                Some(n) => retention_days = Some(n as u32),
                 None => warn_type_mismatch("log.retention_days", "non-negative integer", val),
             },
             _ => {}
@@ -366,7 +427,18 @@ fn parse_log(v: &Value) -> Option<LogConfig> {
     if sink_was_explicitly_invalid {
         return None;
     }
-    Some(out)
+
+    let variant = match sink_str.as_deref() {
+        None | Some("null") => SinkConfig::Null {},
+        Some("jsonl") => SinkConfig::Jsonl {
+            dir,
+            retention_days,
+        },
+        Some("otel") => SinkConfig::Otel {},
+        _ => unreachable!("sink_str validated above"),
+    };
+
+    Some(variant)
 }
 
 fn warn_type_mismatch(field: &str, expected: &str, actual: &Value) {
@@ -419,12 +491,11 @@ mod tests {
         let _ = fs::remove_dir_all(p.parent().unwrap());
     }
 
-    // --- Spec scenarios from `terminal-output/spec.md` ---
+    // --- Spec scenarios from `terminal-output/spec.md` "Load global config tolerantly" ---
 
     #[test]
     fn missing_config_returns_default() {
         let path = std::env::temp_dir().join(format!("codebus-cfg-missing-{}", nanos()));
-        // Path does NOT exist.
         let cfg = load_config_from_path(&path);
         assert_eq!(cfg, GlobalConfig::default());
     }
@@ -464,8 +535,12 @@ mod tests {
         );
         let cfg = load_config_from_path(&p);
         let llm = cfg.llm.expect("llm section parsed");
-        assert_eq!(llm.provider, Some(ProviderKind::ClaudeCli));
-        assert_eq!(llm.binary_path.as_deref(), Some("/usr/local/bin/claude"));
+        match llm {
+            ProviderConfig::ClaudeCli { binary_path } => {
+                assert_eq!(binary_path.as_deref(), Some("/usr/local/bin/claude"));
+            }
+            other => panic!("expected ClaudeCli, got {other:?}"),
+        }
         cleanup(&p);
     }
 
@@ -486,7 +561,27 @@ mod tests {
         );
         let cfg = load_config_from_path(&p);
         let llm = cfg.llm.expect("llm parsed");
-        assert_eq!(llm.provider, Some(ProviderKind::ClaudeCli));
+        assert!(matches!(llm, ProviderConfig::ClaudeCli { .. }));
+        cleanup(&p);
+    }
+
+    #[test]
+    fn sub_field_valid_in_sibling_variant_is_silently_ignored() {
+        // Spec scenario: api_key is valid for anthropic_api / openai variants
+        // but NOT for claude_cli. Loader silently drops it (no warning, no
+        // error) — matches "any unknown sub-field" treatment.
+        let p = write_tmp(
+            "siblingfield",
+            "llm:\n  provider: claude_cli\n  api_key: secret\n",
+        );
+        let cfg = load_config_from_path(&p);
+        let llm = cfg.llm.expect("llm parsed");
+        match llm {
+            ProviderConfig::ClaudeCli { binary_path } => {
+                assert!(binary_path.is_none(), "claude_cli has no api_key field");
+            }
+            other => panic!("expected ClaudeCli, got {other:?}"),
+        }
         cleanup(&p);
     }
 
@@ -498,10 +593,17 @@ mod tests {
         );
         let cfg = load_config_from_path(&p);
         let pii = cfg.pii.expect("pii parsed");
-        assert_eq!(pii.scanner, Some(ScannerKind::RegexBasic));
-        assert_eq!(pii.on_hit, Some(OnHit::Warn));
-        assert_eq!(pii.patterns_extra.len(), 1);
-        assert_eq!(pii.patterns_extra[0], r"INTERNAL-\d{6}");
+        match pii {
+            ScannerConfig::RegexBasic {
+                on_hit,
+                patterns_extra,
+            } => {
+                assert_eq!(on_hit, OnHit::Warn);
+                assert_eq!(patterns_extra.len(), 1);
+                assert_eq!(patterns_extra[0], r"INTERNAL-\d{6}");
+            }
+            other => panic!("expected RegexBasic, got {other:?}"),
+        }
         cleanup(&p);
     }
 
@@ -518,9 +620,6 @@ mod tests {
 
     #[test]
     fn lint_section_without_auto_fix_falls_through_to_default() {
-        // Spec scenario: "Default config enables fix with max iterations five"
-        // — even when the lint section is otherwise present, an absent
-        // auto_fix sub-section yields the agentic default.
         let p = write_tmp(
             "noautofix",
             "lint:\n  disabled_rules:\n    - oversize-page\n",
@@ -534,7 +633,6 @@ mod tests {
 
     #[test]
     fn lint_auto_fix_explicit_values_parse() {
-        // Explicit override: enabled=false, max_iterations=10.
         let p = write_tmp(
             "autofixexplicit",
             "lint:\n  auto_fix:\n    enabled: false\n    max_iterations: 10\n",
@@ -548,8 +646,6 @@ mod tests {
 
     #[test]
     fn lint_auto_fix_type_mismatch_falls_back_to_default_field() {
-        // Tolerance contract: type-mismatched sub-field warns and treats
-        // that field as unset (default kicks in for the bad field).
         let p = write_tmp(
             "autofixbad",
             "lint:\n  auto_fix:\n    enabled: true\n    max_iterations: 'twenty'\n",
@@ -563,8 +659,6 @@ mod tests {
 
     #[test]
     fn lint_auto_fix_unknown_subfield_silently_ignored() {
-        // Forward-compat: future fields like `prompt_style` should not break
-        // existing parsing.
         let p = write_tmp(
             "autofixfut",
             "lint:\n  auto_fix:\n    enabled: false\n    future_unknown: 'x'\n",
@@ -580,41 +674,68 @@ mod tests {
         let p = write_tmp("render", "render:\n  format: terminal\n");
         let cfg = load_config_from_path(&p);
         let render = cfg.render.expect("render parsed");
-        assert_eq!(render.format, Some(RendererKind::Terminal));
+        assert!(matches!(render, RendererConfig::Terminal { .. }));
         cleanup(&p);
     }
 
     #[test]
     fn log_section_selects_sink() {
-        let p = write_tmp("log", "log:\n  sink: jsonl\n  retention_days: 30\n");
+        let p = write_tmp(
+            "log",
+            "log:\n  sink: jsonl\n  dir: /var/log/codebus\n  retention_days: 30\n",
+        );
         let cfg = load_config_from_path(&p);
         let log = cfg.log.expect("log parsed");
-        assert_eq!(log.sink, Some(SinkKind::Jsonl));
-        assert_eq!(log.retention_days, Some(30));
+        match log {
+            SinkConfig::Jsonl {
+                dir,
+                retention_days,
+            } => {
+                assert_eq!(dir.as_deref(), Some(Path::new("/var/log/codebus")));
+                assert_eq!(retention_days, Some(30));
+            }
+            other => panic!("expected Jsonl, got {other:?}"),
+        }
         cleanup(&p);
     }
 
     #[test]
     fn empty_plugin_section_parses_as_defaults() {
+        // Spec scenario: empty pii section parses to default variant
+        // (Null with on_hit=Warn).
         let p = write_tmp("emptypii", "pii: {}\n");
         let cfg = load_config_from_path(&p);
         let pii = cfg.pii.expect("pii parsed as defaults");
-        assert!(pii.scanner.is_none());
-        assert!(pii.on_hit.is_none());
-        assert!(pii.patterns_extra.is_empty());
+        match pii {
+            ScannerConfig::Null { on_hit } => {
+                assert_eq!(on_hit, OnHit::Warn);
+            }
+            other => panic!("expected default Null variant, got {other:?}"),
+        }
         cleanup(&p);
     }
 
     #[test]
     fn type_mismatched_sub_field_is_treated_as_unset() {
+        // Spec scenario: bad timeout_secs only nukes that field, provider
+        // is preserved. This pins **field-level** tolerance — switching to
+        // section-level fallback would erase provider too.
         let p = write_tmp(
             "typemis",
-            "llm:\n  provider: claude_cli\n  timeout_secs: 'thirty'\n",
+            "llm:\n  provider: anthropic_api\n  api_key: ok\n  timeout_secs: 'thirty'\n",
         );
         let cfg = load_config_from_path(&p);
         let llm = cfg.llm.expect("llm parsed despite bad timeout");
-        assert_eq!(llm.provider, Some(ProviderKind::ClaudeCli));
-        assert!(llm.timeout_secs.is_none());
+        match llm {
+            ProviderConfig::AnthropicApi {
+                api_key,
+                timeout_secs,
+            } => {
+                assert_eq!(api_key.as_deref(), Some("ok"));
+                assert!(timeout_secs.is_none(), "bad timeout_secs should be unset");
+            }
+            other => panic!("expected AnthropicApi, got {other:?}"),
+        }
         cleanup(&p);
     }
 
@@ -630,7 +751,6 @@ emoji: off
 llm:
   provider: claude_cli
   binary_path: claude
-  timeout_secs: 1800
 pii:
   scanner: "null"
   on_hit: warn
@@ -640,21 +760,14 @@ render:
   format: terminal
 log:
   sink: "null"
-  retention_days: 30
 "#;
         let p = write_tmp("fullspec", body);
         let cfg = load_config_from_path(&p);
         assert_eq!(cfg.emoji, Some(EmojiMode::Off));
-        assert_eq!(
-            cfg.llm.as_ref().unwrap().provider,
-            Some(ProviderKind::ClaudeCli)
-        );
-        assert_eq!(cfg.pii.as_ref().unwrap().scanner, Some(ScannerKind::Null));
-        assert_eq!(
-            cfg.render.as_ref().unwrap().format,
-            Some(RendererKind::Terminal)
-        );
-        assert_eq!(cfg.log.as_ref().unwrap().sink, Some(SinkKind::Null));
+        assert!(matches!(cfg.llm, Some(ProviderConfig::ClaudeCli { .. })));
+        assert!(matches!(cfg.pii, Some(ScannerConfig::Null { .. })));
+        assert!(matches!(cfg.render, Some(RendererConfig::Terminal { .. })));
+        assert!(matches!(cfg.log, Some(SinkConfig::Null {})));
         cleanup(&p);
     }
 }

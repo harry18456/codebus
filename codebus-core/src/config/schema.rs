@@ -1,15 +1,16 @@
 //! Global config shape — `~/.codebus/config.yaml` deserialized.
 //!
-//! All fields are `Option<…>` and `#[serde(default)]` so a partial or empty
-//! config parses cleanly. Plugin sections each map to one of the five
-//! plugin domain configs in [`crate::llm`], [`crate::pii`], [`crate::wiki::lint`],
-//! [`crate::render`], [`crate::log`].
+//! Plugin sections (`llm`, `pii`, `render`, `log`) hold the factory-domain
+//! tagged enum directly (e.g. [`crate::llm::ProviderConfig`]). The
+//! discriminator field (`provider` / `scanner` / `format` / `sink`) and the
+//! variant-specific sub-fields all live in the same enum value — there are
+//! no intermediate flat structs.
 //!
-//! Forward-compat: unknown top-level keys are silently ignored (serde
-//! default). Unknown sub-fields within a known section are silently
-//! ignored. Unknown discriminator values (e.g. `provider: gibberish`) are
-//! reported as a warning by [`super::loader::load_config`] and the section
-//! is treated as unset.
+//! Forward-compat: unknown top-level keys are silently ignored. Unknown
+//! sub-fields within a known section are silently ignored. Unknown
+//! discriminator values (e.g. `provider: gibberish`) are reported as a
+//! warning by [`super::loader::load_config`] and the section is treated as
+//! unset.
 
 use serde::{Deserialize, Serialize};
 
@@ -19,26 +20,6 @@ pub enum EmojiMode {
     Auto,
     On,
     Off,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LlmConfig {
-    /// Resolved provider kind. `None` when the YAML had no `provider` key
-    /// or the value was unrecognized (warned + dropped by the loader).
-    #[serde(skip)]
-    pub provider: Option<crate::llm::ProviderKind>,
-    pub binary_path: Option<String>,
-    pub timeout_secs: Option<u64>,
-    pub api_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PiiConfig {
-    #[serde(skip)]
-    pub scanner: Option<crate::pii::ScannerKind>,
-    #[serde(skip)]
-    pub on_hit: Option<crate::pii::OnHit>,
-    pub patterns_extra: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,26 +50,13 @@ impl Default for AutoFixConfig {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RenderConfig {
-    #[serde(skip)]
-    pub format: Option<crate::render::RendererKind>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LogConfig {
-    #[serde(skip)]
-    pub sink: Option<crate::log::SinkKind>,
-    pub retention_days: Option<u32>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub emoji: Option<EmojiMode>,
-    pub llm: Option<LlmConfig>,
-    pub pii: Option<PiiConfig>,
+    pub llm: Option<crate::llm::ProviderConfig>,
+    pub pii: Option<crate::pii::ScannerConfig>,
     pub lint: Option<LintConfig>,
-    pub render: Option<RenderConfig>,
-    pub log: Option<LogConfig>,
+    pub render: Option<crate::render::RendererConfig>,
+    pub log: Option<crate::log::SinkConfig>,
 }
 
 #[cfg(test)]

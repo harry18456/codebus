@@ -10,15 +10,18 @@
 use crate::render::event_renderer::{Banner, EventRenderer};
 use crate::stream::StreamEvent;
 use crate::wiki::types::{LintIssue, LintResult, LintSeverity};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 const INDENT: &str = "    ";
 
 /// Renderer-specific options. Field of [`TerminalRenderer`]; not exposed via
 /// the trait because other renderers (`Tauri`, `JsonLines`) don't need it.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderOptions {
+    #[serde(default)]
     pub use_emoji: bool,
+    #[serde(default)]
     pub use_color: bool,
 }
 
