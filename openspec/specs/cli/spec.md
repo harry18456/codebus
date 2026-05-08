@@ -141,7 +141,7 @@ tests:
 ---
 ### Requirement: Init Subcommand Behavior
 
-The `init` subcommand SHALL accept the flags `--repo <PATH>` (default: current working directory) and `--no-obsidian-register` (boolean flag). When invoked, `init` SHALL orchestrate (in order): pre-flight sanity check, vault layout creation, raw mirror, source repo `.gitignore` mutation, per-repo schema file write, manifest write, skill bundle authoring, and Obsidian vault registration. `init` SHALL print one human-readable progress line to stdout per major step in default mode (the line SHALL begin with the marker `✓` followed by a step description). When `--debug` is passed, `init` SHALL also emit additional `[debug]` lines per step describing internal decisions, fs operations, computed source signal values, and target paths. `init` SHALL exit with status zero on success and non-zero only if a sanity-check refusal or unrecoverable filesystem error occurs.
+The `init` subcommand SHALL accept the flags `--repo <PATH>` (default: current working directory) and `--no-obsidian-register` (boolean flag). When invoked, `init` SHALL orchestrate (in order): pre-flight sanity check, vault layout creation, raw mirror, source repo `.gitignore` mutation, per-repo schema file write, manifest write, skill bundle authoring, and Obsidian vault registration. `init` SHALL print one human-readable progress line to stdout per major step in default mode (the line SHALL begin with the marker `✓` followed by a step description). The raw mirror progress line SHALL include the total PII match count observed during the scan. When `--debug` is passed, `init` SHALL also emit additional `[debug]` lines per step describing internal decisions, fs operations, computed source signal values, and target paths. `init` SHALL exit with status zero on success and non-zero only if a sanity-check refusal or unrecoverable filesystem error occurs.
 
 #### Scenario: Init with --repo flag targets the specified directory
 
@@ -158,6 +158,16 @@ The `init` subcommand SHALL accept the flags `--repo <PATH>` (default: current w
 - **WHEN** `codebus init` runs successfully against a fresh git repository on a system without Obsidian, without `--debug`
 - **THEN** stdout SHALL contain at least these distinct progress markers in order, each beginning with `✓`: vault layout, raw mirror, source `.gitignore` mutation, schema file write, manifest write, skill bundle authoring (the Obsidian step SHALL emit a stderr hint instead of a stdout progress line when Obsidian is unavailable). The output SHALL NOT contain any line beginning with `[debug]`.
 
+#### Scenario: Raw mirror progress line includes PII match count
+
+- **WHEN** `codebus init` runs against a repository whose mirrored content yields exactly N PII matches
+- **THEN** the stdout progress line beginning with `✓` and identifying the raw mirror step SHALL contain the substring `<N> PII matches` where `<N>` is the integer total
+
+#### Scenario: Raw mirror progress line includes zero count when no PII present
+
+- **WHEN** `codebus init` runs against a repository whose mirrored content yields zero PII matches
+- **THEN** the stdout progress line for the raw mirror step SHALL contain the substring `0 PII matches`
+
 #### Scenario: Init exits zero on first successful run
 
 - **WHEN** init runs to completion against a fresh repository
@@ -170,29 +180,22 @@ The `init` subcommand SHALL accept the flags `--repo <PATH>` (default: current w
 
 
 <!-- @trace
-source: v3-init
-updated: 2026-05-08
+source: v3-pii
+updated: 2026-05-09
 code:
-  - codebus-core/src/vault/raw_sync.rs
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/schema/mod.rs
-  - Cargo.toml
-  - codebus-core/src/schema/neutral.md
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/Cargo.toml
-  - codebus-core/src/vault/obsidian_register.rs
-  - codebus-core/src/vault/layout.rs
-  - codebus-core/src/lib.rs
+  - codebus-core/src/pii/scanners/null_scanner.rs
+  - codebus-core/src/pii/scanners/mod.rs
   - codebus-core/src/vault/manifest.rs
-  - codebus-core/src/vault/sanity_check.rs
-  - codebus-core/src/vault/mod.rs
-  - codebus-cli/Cargo.toml
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-core/src/lib.rs
+  - codebus-core/Cargo.toml
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/pii/provider.rs
+  - codebus-core/src/pii/mod.rs
+  - codebus-core/src/pii/scanners/regex_basic.rs
 tests:
   - codebus-cli/tests/cli_routing.rs
   - codebus-core/tests/vault_init.rs
-  - codebus-core/tests/schema_neutrality.rs
 -->
 
 ---

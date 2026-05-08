@@ -85,9 +85,9 @@ tests:
 -->
 
 ---
-### Requirement: Raw Mirror with NullScanner
+### Requirement: Raw Mirror with PII Scanner
 
-The system SHALL mirror source files from the repository root into `.codebus/raw/code/` preserving directory structure. The system SHALL skip top-level entries `.codebus/`, `.git/`, and `.env`. The system SHALL honor `<repo>/.gitignore` patterns. The system SHALL skip files larger than 5 mebibytes (5 × 1024 × 1024 bytes). In this change the system SHALL NOT redact PII content; that capability is added in a subsequent change.
+The system SHALL mirror source files from the repository root into `.codebus/raw/code/` preserving directory structure. The system SHALL skip top-level entries `.codebus/`, `.git/`, and `.env`. The system SHALL honor `<repo>/.gitignore` patterns. The system SHALL skip files larger than 5 mebibytes (5 × 1024 × 1024 bytes). The system SHALL invoke a configured `PiiScanner` against the contents of every mirrored regular file. When the scanner reports any match for a file under the default on-hit policy `Warn`, the system SHALL emit one stderr line per match in the format `pii warn: <pattern_name> at <relative_path>:<byte_offset>` and SHALL include that file in the mirror with content unchanged. The system SHALL NOT include the matched substring text in the warning line. The system SHALL aggregate the total count of PII matches observed across all mirrored files and SHALL expose that count through the raw mirror summary value returned to callers.
 
 #### Scenario: Mirror preserves directory structure and skips top-level dot directories
 
@@ -104,31 +104,44 @@ The system SHALL mirror source files from the repository root into `.codebus/raw
 - **WHEN** a source file is larger than 5 × 1024 × 1024 bytes
 - **THEN** the system SHALL skip that file (no mirror entry created) and continue processing remaining files
 
+#### Scenario: PII match emits stderr warning and still mirrors file
+
+- **WHEN** a source file at `src/aws.py` contains the substring `AKIAIOSFODNN7EXAMPLE` (an AWS access key shape) and is mirrored
+- **THEN** stderr SHALL contain a line beginning with `pii warn: aws-access-key at src/aws.py:` AND the file `.codebus/raw/code/src/aws.py` SHALL exist with the original content unchanged
+
+#### Scenario: stderr warning omits matched text
+
+- **WHEN** a mirrored source file contains the substring `alice@example.com`
+- **THEN** the corresponding stderr `pii warn:` line SHALL NOT contain the substring `alice@example.com`
+
+#### Scenario: Multiple matches in one file produce multiple warning lines
+
+- **WHEN** a single mirrored source file contains both `alice@example.com` and `192.168.1.42`
+- **THEN** stderr SHALL contain two distinct `pii warn:` lines whose `<pattern_name>` segments are `email` and `ipv4` respectively
+
+#### Scenario: Raw mirror summary aggregates total PII match count
+
+- **WHEN** the raw mirror processes a repository where exactly N PII matches are reported across all mirrored files combined
+- **THEN** the summary value returned to callers SHALL expose a PII match count field equal to N
+
 
 <!-- @trace
-source: v3-init
-updated: 2026-05-08
+source: v3-pii
+updated: 2026-05-09
 code:
-  - codebus-core/src/vault/raw_sync.rs
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/schema/mod.rs
-  - Cargo.toml
-  - codebus-core/src/schema/neutral.md
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/Cargo.toml
-  - codebus-core/src/vault/obsidian_register.rs
-  - codebus-core/src/vault/layout.rs
-  - codebus-core/src/lib.rs
+  - codebus-core/src/pii/scanners/null_scanner.rs
+  - codebus-core/src/pii/scanners/mod.rs
   - codebus-core/src/vault/manifest.rs
-  - codebus-core/src/vault/sanity_check.rs
-  - codebus-core/src/vault/mod.rs
-  - codebus-cli/Cargo.toml
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-core/src/lib.rs
+  - codebus-core/Cargo.toml
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/pii/provider.rs
+  - codebus-core/src/pii/mod.rs
+  - codebus-core/src/pii/scanners/regex_basic.rs
 tests:
   - codebus-cli/tests/cli_routing.rs
   - codebus-core/tests/vault_init.rs
-  - codebus-core/tests/schema_neutrality.rs
 -->
 
 ---
