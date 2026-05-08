@@ -93,12 +93,12 @@ Lint 邏輯純 deterministic（7 條 rule pattern match）。優點：
 |---|---|---|---|---|
 | 1 | `v3-workspace` | `codebus --help` + 5 verb routing（subcommand mode、no-arg → init at pwd）；含 `codebus-app` placeholder crate | — | — |
 | 2 | `v3-init` | `codebus init [--repo X] [--no-obsidian-register]` 全功能：vault layout / raw_sync (NullScanner) / **obsidian vault register** / `.gitignore` mutation / per-repo `.codebus/CLAUDE.md` / 寫 3 個 skill bundle 骨架；含 `sanity_check::check_repo_is_not_vault` | 3 個 SKILL.md 骨架寫到 `~/.claude/skills/codebus-{goal,query,fix}/`（內容暫定，後續 change 補） | #1 |
-| 3 | `v3-pii` | raw_sync 換 `RegexBasicScanner`（v2 同套 regex：AWS / Anthropic key / email / IPv4 / 自訂 patterns_extra）；init 輸出含 PII redaction count | — | #2 |
+| 3 | `v3-pii` | 接 `pii::PiiScanner` trait + `RegexBasicScanner`（v2 builtin regex：AWS / Anthropic key / email / IPv4）+ `NullScanner`（test fixture）；raw_sync default 切 RegexBasic with `OnHit::Warn`（mirror file + stderr warn 每個 match）；init 輸出含 PII match count。**Hardcode default rules 不開 config 入口** — `patterns_extra` / `on_hit` 覆蓋是 #8 的事 | — | #2 |
 | 4 | `v3-goal` | `codebus goal "..."` spawn `claude -p` 帶 slash command；首次寫 `codebus-core/src/agent/claude_cli.rs` single impl + `--tools/--allowedTools` 雙旗 sandbox | `codebus-goal/SKILL.md` 補完整內容（neutral.md §4 workflow per goal + frontmatter schema reference） | #2 |
 | 5 | `v3-query` | `codebus query "..."` spawn 同上，read-only toolset（Read/Glob/Grep） | `codebus-query/SKILL.md` 補完整內容（neutral.md §11 workflow per query + read-only invariant） | #2 |
 | 6 | `v3-lint` | `codebus lint [--repo X] [--json]` direct 全功能（7 rules：broken_wikilink / frontmatter_integrity / page_size / duplicate_slug / orphaned_page / taxonomy_violation / pii_leak）；human + JSON 雙輸出；exit 0/1 | — | #2 |
 | 7 | `v3-fix` | `codebus fix` spawn 同上，toolset 含 Bash（給 fix skill 跑 `codebus lint --json`） | `codebus-fix/SKILL.md`：用 Bash tool 跑 `codebus lint --json` → 解析 findings → 編輯 wiki page 改正 → 重跑 lint，max 5 iterations（user 可改） | #6 |
-| 8 | `v3-config` | `~/.codebus/config.yaml` 6 條 tolerance（v2 carry：missing file / parse fail / unknown key / unknown discriminator / unknown subfield / type mismatch graceful warn）；`lint` section（disabled_rules + custom_rules_dir + auto_fix.max_iterations）；`pii` section（patterns_extra + on_hit policy） | 反向打通：lint 吃 config disabled_rules；init 吃 pii patterns_extra；fix skill 從 config 讀 max_iterations 寫進 SKILL.md instruction | #3 #6 |
+| 8 | `v3-config` | `~/.codebus/config.yaml` 6 條 tolerance（v2 carry：missing file / parse fail / unknown key / unknown discriminator / unknown subfield / type mismatch graceful warn）；`lint` section（disabled_rules + custom_rules_dir + auto_fix.max_iterations）；`pii` section（`patterns_extra` append 到 #3 builtin rules + `on_hit` 覆蓋 #3 default `Warn`） | 反向打通：lint 吃 config disabled_rules；init 用 config 覆蓋 #3 PII default（`patterns_extra` append、`on_hit` 覆蓋）；fix skill 從 config 讀 max_iterations 寫進 SKILL.md instruction | #3 #6 |
 | 9 | `v3-render-polish` | OSC 8 hyperlink wrap `[[wikilink]]` for `codebus lint` output；terminal color 5-level emoji priority（`--emoji` flag > `--no-emoji` > `NO_EMOJI` env > config.yaml `emoji:` > TTY auto-detect）；`NO_COLOR` env 守 color | — | #6 #8 |
 
 ### 依賴圖
@@ -135,7 +135,7 @@ Lint 邏輯純 deterministic（7 條 rule pattern match）。優點：
 ## 6. Open Questions（每個 change 各自 design.md 處理）
 
 - **#2**：per-repo `.codebus/CLAUDE.md` 寫的時候要不要 `if missing`（v2 phase 1 task 11.1）保 user 客製化？答：應該。
-- **#3**：v2 PII filter 有 3 種 `on_hit` mode（Warn / Skip / Mask）。v3 default 走哪個？v2 default `Warn`（mirror file + stderr warn 每個 match）。建議 carry default。
+- ~~**#3**：v2 PII filter 有 3 種 `on_hit` mode（Warn / Skip / Mask）。v3 default 走哪個？~~ ✅ resolved 2026-05-09：#3 hardcode `OnHit::Warn` default（v2 carry：mirror file + stderr warn 每個 match）；Skip / Mask 切換要等 #8 開 `pii.on_hit` config 入口。
 - **#4 / #5 / #7**：3 個 skill 的 `description:` 字串怎寫（影響 Claude Code 自動 activation）？需驗證。
 - **#4 propose 前剩餘 spike**：2026-05-08 已驗 `claude -p "/skill-name ..."` 認 slash + activate skill bundle（PowerShell；Git Bash 開頭 `/` 會被 MSYS path-mangle，Rust `Command::new` 直接 invoke 不踩）。**還沒驗**：`claude -p --tools Read,Glob,Grep "/skill ..."` 在 slash 觸發 skill 後，skill 內若呼叫 Write / Edit 是否被 `--tools` hard gate 擋。`-p` + slash + skill activation 三者疊加是 v2 沒測過的場景，#4 propose 前要再 spike 一次；如果 toolset gate 在這場景下失效，整個 sandbox 假設要重審。
 - **#7**：fix loop 的 max_iterations 是 hardcoded 5（v2 default）還是必須走 config？建議先 hardcoded，#8 再讓 config 覆蓋。
