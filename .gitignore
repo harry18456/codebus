@@ -1,0 +1,21 @@
+# build / runtime artifacts (kept generic — v3 implementation language TBD)
+node_modules/
+dist/
+coverage/
+target/
+*.log
+.DS_Store
+
+# legacy v2-rust workspace artifacts (reference impl, not active build)
+legacy/v2-rust/target/
+legacy/v2-rust/coverage/
+legacy/v2-rust/dist/
+legacy/v2-rust/node_modules/
+
+# Live spike transcripts may contain external repo source content
+legacy/v2-rust/docs/spikes/*/transcripts/
+
+# spectra / superpowers working state (when re-introduced in v3)
+.spectra/
+.superpowers/
+openspec/.vector-search.db*

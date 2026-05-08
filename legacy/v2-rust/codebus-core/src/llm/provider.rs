@@ -1,0 +1,192 @@
+use crate::stream::StreamEvent;
+use std::pin::Pin;
+
+/// LLM invocation mode.
+///
+/// `Ingest` allows Write/Edit (used by `goal` to produce wiki pages);
+/// `Query` is hard read-only (used by `query` and `check`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LlmMode {
+    Ingest,
+    Query,
+}
+
+#[derive(Debug, Clone)]
+pub struct InvokeOptions {
+    pub system_prompt: String,
+    pub user_message: String,
+    pub mode: LlmMode,
+    /// Working directory for the subprocess. The agent's filesystem reach is
+    /// scoped to this directory under `acceptEdits` mode (system-level
+    /// isolation per spike E).
+    pub cwd: std::path::PathBuf,
+    /// Vault root, kept separately for callers that resolve schema / index
+    /// paths independently of `cwd`.
+    pub vault_root: std::path::PathBuf,
+    /// Optional Claude CLI `--model` value (alias like `sonnet` / `opus` /
+    /// `haiku` or full model id). `None` → omit the flag and let the CLI
+    /// pick its default. Forwarded as opaque string; codebus does not
+    /// validate the value. Other providers may interpret this differently
+    /// (e.g. native `model` field on Anthropic/OpenAI API requests).
+    pub model: Option<String>,
+    /// Optional Claude CLI `--effort` value (`low` / `medium` / `high` /
+    /// `xhigh` / `max`). Same opaque-forward semantics as `model`.
+    pub effort: Option<String>,
+}
+
+/// Stream of [`StreamEvent`]s yielded by the provider until the turn ends.
+/// Pinned + boxed for trait-object compatibility (so [`LlmProvider`] can be
+/// stored in `Box<dyn LlmProvider>` and passed across crate boundaries).
+pub type EventStream = Pin<Box<dyn futures_core::Stream<Item = StreamEvent> + Send>>;
+
+/// Abstract LLM provider. Phase 1 ships a single implementation
+/// (`ClaudeCliProvider`); Phase 2 adds direct API providers (Anthropic,
+/// OpenAI, local models) without touching this trait or any caller in
+/// `commands/` / `core/` / `ui/`.
+///
+/// Errors are surfaced via the stream itself (e.g. provider can yield a
+/// final event then the stream ends). Setup-level failures (e.g. binary
+/// not found, OAuth missing) are reported via `invoke`'s Result return
+/// before the stream begins.
+#[async_trait::async_trait]
+pub trait LlmProvider: Send + Sync {
+    /// Begin a turn. Yields zero or more [`StreamEvent`]s ending with
+    /// [`StreamEvent::Done`] under normal completion.
+    async fn invoke(&self, opts: InvokeOptions) -> Result<EventStream, ProviderError>;
+
+    /// Cancel an in-flight invocation. Idempotent: safe to call when no
+    /// invocation is active. Implementations should send SIGTERM (or the
+    /// platform equivalent) to any spawned subprocess.
+    fn cancel(&self);
+}
+
+#[derive(Debug)]
+pub enum ProviderError {
+    /// The CLI binary or API endpoint could not be reached / authenticated.
+    /// User-facing message in `message` (TS-parity: includes the OAuth hint
+    /// for ClaudeCliProvider).
+    Setup { message: String },
+    /// An internal error (process spawn failure, malformed config, etc.).
+    Internal(String),
+    /// A known provider kind was selected (e.g. via `~/.codebus/config.yaml`
+    /// `llm: { provider: openai }`), but the binary was built without the
+    /// corresponding cargo feature. `feature` names the feature flag and
+    /// `hint` is a user-facing rebuild instruction.
+    FeatureNotCompiled {
+        feature: &'static str,
+        hint: &'static str,
+    },
+}
+
+impl std::fmt::Display for ProviderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProviderError::Setup { message } => write!(f, "{message}"),
+            ProviderError::Internal(msg) => write!(f, "internal provider error: {msg}"),
+            ProviderError::FeatureNotCompiled { feature, hint } => {
+                write!(
+                    f,
+                    "provider requires cargo feature `{feature}` (not compiled). {hint}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProviderError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stream::StreamEvent;
+    use futures_util::StreamExt;
+
+    /// In-memory test-only provider that yields a fixed sequence of events.
+    /// Used by Phase C command tests in lieu of spawning a real `claude` CLI.
+    struct MockProvider {
+        events: Vec<StreamEvent>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for MockProvider {
+        async fn invoke(&self, _opts: InvokeOptions) -> Result<EventStream, ProviderError> {
+            let evts = self.events.clone();
+            Ok(Box::pin(futures_util::stream::iter(evts)))
+        }
+
+        fn cancel(&self) {}
+    }
+
+    #[tokio::test]
+    async fn trait_is_object_safe_and_streams_through_box_dyn() {
+        let provider: Box<dyn LlmProvider> = Box::new(MockProvider {
+            events: vec![
+                StreamEvent::Thought { text: "hi".into() },
+                StreamEvent::Done,
+            ],
+        });
+        let mut stream = provider
+            .invoke(InvokeOptions {
+                system_prompt: String::new(),
+                user_message: String::new(),
+                mode: LlmMode::Query,
+                cwd: std::path::PathBuf::from("."),
+                vault_root: std::path::PathBuf::from("."),
+                model: None,
+                effort: None,
+            })
+            .await
+            .unwrap();
+
+        let mut collected = Vec::new();
+        while let Some(e) = stream.next().await {
+            collected.push(e);
+        }
+        assert_eq!(collected.len(), 2);
+        assert!(matches!(collected[0], StreamEvent::Thought { .. }));
+        assert!(matches!(collected[1], StreamEvent::Done));
+    }
+
+    #[test]
+    fn provider_error_display_includes_message() {
+        let e = ProviderError::Setup {
+            message: "OAuth needed".into(),
+        };
+        assert_eq!(format!("{e}"), "OAuth needed");
+    }
+
+    /// Lock-in: the `LlmProvider` trait surface SHALL stay tight enough
+    /// that adding a field here is a deliberate cross-cutting design move,
+    /// not a drive-by edit. The `lint-feedback-loop` change pinned the
+    /// shape (no `session_id` / `with_history`); the
+    /// `llm-claude-cli-params` change extended it with `model` + `effort`
+    /// because both fields are universal "what to ask the LLM with"
+    /// concepts (every provider needs them, just expressed differently).
+    /// Future field additions must update this assertion to force the same
+    /// re-evaluation.
+    #[test]
+    fn invoke_options_struct_shape_carries_model_and_effort() {
+        // Construct an InvokeOptions using ALL its fields by name. If a
+        // field is added without updating this assertion, the destructure
+        // below will fail with `missing field` / `unknown field` and
+        // surface the trait change as a lock-in violation.
+        let opts = InvokeOptions {
+            system_prompt: String::new(),
+            user_message: String::new(),
+            mode: LlmMode::Ingest,
+            cwd: std::path::PathBuf::from("."),
+            vault_root: std::path::PathBuf::from("."),
+            model: None,
+            effort: None,
+        };
+        let InvokeOptions {
+            system_prompt: _,
+            user_message: _,
+            mode: _,
+            cwd: _,
+            vault_root: _,
+            model: _,
+            effort: _,
+        } = opts;
+    }
+}

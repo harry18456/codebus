@@ -1,0 +1,54 @@
+[package]
+name = "codebus-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Core library for codebus: vault layout, wiki frontmatter, lint, stream parser, LLM provider trait"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# Tier 0 — lean default. Built-in plugins (claude_cli LLM provider,
+# null/regex_basic PII scanners, terminal renderer, null/jsonl log sinks)
+# are always available with zero new deps.
+default = []
+
+# Tier 2 — moderate-dep providers/scanners. Implementations land in
+# follow-up changes; for now each gate just enables a stub branch in the
+# corresponding factory.
+llm-anthropic-api = []
+llm-openai = []
+pii-presidio = []
+
+# Tier 3 — heavy-dep providers/sinks (~50MB+ extra binary footprint).
+pii-aws = []
+log-otel = []
+
+# Convenience aggregates for `cargo install codebus --features <name>`.
+all-llm = ["llm-anthropic-api", "llm-openai"]
+all-pii = ["pii-presidio", "pii-aws"]
+all = ["all-llm", "all-pii", "log-otel"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+async-trait = "0.1"
+dirs = "5"
+futures-core = "0.3"
+futures-util = "0.3"
+regex = "1.10"
+sha2 = "0.10"
+ignore = "0.4"
+tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "time", "macros"] }
+tokio-stream = { version = "0.1", features = ["io-util"] }
+supports-hyperlinks = "3"
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
