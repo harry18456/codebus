@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use tempfile::TempDir;
+
 const BIN: &str = env!("CARGO_BIN_EXE_codebus");
 
 // === Subcommand Registration ===
@@ -16,7 +18,6 @@ fn help_lists_exactly_the_five_subcommands() {
     for verb in ["init", "goal", "query", "lint", "fix"] {
         assert!(combined.contains(verb), "help missing `{verb}`:\n{combined}");
     }
-    // Negative: ensure no stray subcommand leaked in
     for forbidden in ["mcp", "ingest"] {
         assert!(
             !combined.contains(&format!(" {forbidden} ")),
@@ -30,17 +31,13 @@ fn version_flag_prints_cargo_pkg_version() {
     let out = Command::new(BIN).arg("--version").output().expect("run binary");
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let expected = env!("CARGO_PKG_VERSION");
-    assert!(
-        stdout.contains(expected),
-        "version output `{stdout}` missing pkg version `{expected}`"
-    );
+    assert!(stdout.contains(env!("CARGO_PKG_VERSION")));
 }
 
 #[test]
 fn unknown_subcommand_is_rejected_by_clap() {
     let out = Command::new(BIN).arg("randomverb").output().expect("run binary");
-    assert!(!out.status.success(), "unknown subcommand should fail");
+    assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("unrecognized") || stderr.contains("invalid") || stderr.contains("subcommand"),
@@ -50,88 +47,203 @@ fn unknown_subcommand_is_rejected_by_clap() {
 
 #[test]
 fn mcp_subcommand_is_rejected_specifically() {
-    // Strategy memo defers MCP. Path D doesn't reintroduce the subcommand.
     let out = Command::new(BIN).arg("mcp").output().expect("run binary");
-    assert!(!out.status.success(), "`mcp` should not be a registered subcommand");
+    assert!(!out.status.success());
 }
 
 // === No-Arg Defaults to Init Dispatch ===
 
 #[test]
-fn bare_invocation_routes_to_init_handler() {
-    let out = Command::new(BIN).output().expect("run binary");
-    let stderr = String::from_utf8_lossy(&out.stderr);
+fn bare_invocation_routes_to_init_handler_and_creates_per_project_bundles() {
+    let tmp = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["--no-obsidian-register"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run binary bare");
     assert!(
-        stderr.contains("init: not yet implemented"),
-        "bare invocation did not dispatch to init stub. stderr: {stderr}"
+        out.status.success(),
+        "bare invocation should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
-}
-
-#[test]
-fn explicit_init_invocation_produces_identical_behavior_to_bare() {
-    let bare = Command::new(BIN).output().expect("run bare");
-    let explicit = Command::new(BIN).arg("init").output().expect("run init");
-    assert_eq!(
-        bare.status.code(),
-        explicit.status.code(),
-        "exit code differs: bare={:?} explicit={:?}",
-        bare.status.code(),
-        explicit.status.code()
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&bare.stderr),
-        String::from_utf8_lossy(&explicit.stderr),
-        "stderr differs"
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&bare.stdout),
-        String::from_utf8_lossy(&explicit.stdout),
-        "stdout differs"
-    );
-}
-
-// === Stub Verb Exit Behavior ===
-
-#[test]
-fn each_verb_stub_exits_non_zero_with_not_yet_implemented_message() {
-    for verb in ["init", "goal", "query", "lint", "fix"] {
-        let out = Command::new(BIN).arg(verb).output().expect("run binary");
-        assert!(
-            !out.status.success(),
-            "verb `{verb}` should exit non-zero, got status {:?}",
-            out.status.code()
-        );
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            stderr.contains("not yet implemented"),
-            "verb `{verb}` stderr missing `not yet implemented`: {stderr}"
-        );
-        assert!(
-            stderr.contains(verb),
-            "verb `{verb}` stderr missing verb name in message: {stderr}"
-        );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("vault layout"));
+    assert!(stdout.contains("codebus init complete"));
+    assert!(tmp.path().join(".codebus").is_dir());
+    // Vault-internal skill bundle locations: <repo>/.codebus/.claude/skills/codebus-{verb}/
+    for verb in ["goal", "query", "fix"] {
+        let p = tmp
+            .path()
+            .join(".codebus/.claude/skills")
+            .join(format!("codebus-{verb}"))
+            .join("SKILL.md");
+        assert!(p.exists(), "missing vault-internal bundle for {verb}: {p:?}");
     }
+    // And NOT at repo root
+    for verb in ["goal", "query", "fix"] {
+        let wrong = tmp
+            .path()
+            .join(".claude/skills")
+            .join(format!("codebus-{verb}"))
+            .join("SKILL.md");
+        assert!(!wrong.exists(), "skill should not be at repo-root .claude: {wrong:?}");
+    }
+}
+
+#[test]
+fn explicit_init_and_bare_invocation_have_structurally_identical_output() {
+    let tmp_bare = TempDir::new().unwrap();
+    let tmp_explicit = TempDir::new().unwrap();
+    let bare = Command::new(BIN)
+        .arg("--no-obsidian-register")
+        .current_dir(tmp_bare.path())
+        .output()
+        .expect("run bare");
+    let explicit = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .current_dir(tmp_explicit.path())
+        .output()
+        .expect("run init");
+
+    assert_eq!(bare.status.code(), explicit.status.code());
+
+    let bare_stdout = String::from_utf8_lossy(&bare.stdout);
+    let explicit_stdout = String::from_utf8_lossy(&explicit.stdout);
+    let bare_lines: Vec<&str> = bare_stdout.lines().collect();
+    let explicit_lines: Vec<&str> = explicit_stdout.lines().collect();
+    assert_eq!(
+        bare_lines.len(),
+        explicit_lines.len(),
+        "stdout line count differs"
+    );
+    for (b, e) in bare_lines.iter().zip(explicit_lines.iter()) {
+        let b_prefix: String = b.chars().take(12).collect();
+        let e_prefix: String = e.chars().take(12).collect();
+        assert_eq!(b_prefix, e_prefix);
+    }
+}
+
+// === Stub Verb Exit Behavior (4 verbs) ===
+
+#[test]
+fn remaining_stub_verbs_exit_non_zero_with_not_yet_implemented_message() {
+    for verb in ["goal", "query", "lint", "fix"] {
+        let out = Command::new(BIN).arg(verb).output().expect("run binary");
+        assert!(!out.status.success(), "verb `{verb}` should fail");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("not yet implemented"));
+        assert!(stderr.contains(verb));
+    }
+}
+
+#[test]
+fn init_no_longer_matches_stub_behavior() {
+    let tmp = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run init");
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("not yet implemented"));
 }
 
 #[test]
 fn stub_verbs_do_not_panic_or_block() {
-    // No timeout primitive in std::process; instead rely on the command
-    // returning quickly. If a stub blocks (e.g., reads stdin), this test
-    // would hang the test runner — failing CI rather than producing a
-    // misleading green. The non-zero-exit assertion implicitly proves the
-    // process terminated under normal control flow rather than panicking
-    // (which would still terminate but with a panic-shaped stderr we can
-    // detect).
-    for verb in ["init", "goal", "query", "lint", "fix"] {
+    for verb in ["goal", "query", "lint", "fix"] {
         let out = Command::new(BIN).arg(verb).output().expect("run binary");
         let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("panicked at"));
+        assert!(!stderr.contains("RUST_BACKTRACE"));
+    }
+}
+
+#[test]
+fn stub_verbs_accept_debug_flag_silently() {
+    for verb in ["goal", "query", "lint", "fix"] {
+        let out = Command::new(BIN).args([verb, "--debug"]).output().expect("run");
+        assert!(!out.status.success(), "stub verb `{verb}` --debug should still exit non-zero");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("not yet implemented"));
+        // Stub verbs do not emit [debug] content
         assert!(
-            !stderr.contains("panicked at"),
-            "verb `{verb}` panicked: {stderr}"
-        );
-        assert!(
-            !stderr.contains("RUST_BACKTRACE"),
-            "verb `{verb}` produced panic backtrace hint: {stderr}"
+            !stderr.contains("[debug]") && !String::from_utf8_lossy(&out.stdout).contains("[debug]"),
+            "stub verb `{verb}` should not emit [debug] lines: stdout={} stderr={stderr}",
+            String::from_utf8_lossy(&out.stdout)
         );
     }
+}
+
+// === Debug Flag Output ===
+
+#[test]
+fn debug_flag_at_top_level_emits_debug_lines() {
+    let tmp = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["--debug", "init", "--no-obsidian-register"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run");
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("[debug]"),
+        "expected [debug] line in output:\n{combined}"
+    );
+}
+
+#[test]
+fn debug_flag_at_subcommand_position_behaves_identically() {
+    let tmp_a = TempDir::new().unwrap();
+    let tmp_b = TempDir::new().unwrap();
+
+    let top_level = Command::new(BIN)
+        .args(["--debug", "init", "--no-obsidian-register"])
+        .current_dir(tmp_a.path())
+        .output()
+        .expect("top-level");
+    let subcommand = Command::new(BIN)
+        .args(["init", "--debug", "--no-obsidian-register"])
+        .current_dir(tmp_b.path())
+        .output()
+        .expect("subcommand");
+
+    assert_eq!(top_level.status.code(), subcommand.status.code());
+
+    let has_debug = |o: &std::process::Output| {
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        );
+        combined.contains("[debug]")
+    };
+    assert!(has_debug(&top_level), "top-level --debug missing [debug] lines");
+    assert!(has_debug(&subcommand), "subcommand --debug missing [debug] lines");
+}
+
+#[test]
+fn without_debug_no_debug_lines() {
+    let tmp = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stdout.contains("[debug]"),
+        "stdout unexpectedly contains [debug]: {stdout}"
+    );
+    assert!(
+        !stderr.contains("[debug]"),
+        "stderr unexpectedly contains [debug]: {stderr}"
+    );
 }

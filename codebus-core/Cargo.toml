@@ -10,3 +10,17 @@ description = "Core library for codebus: vault primitives, wiki lint, schema con
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+dirs = { workspace = true }
+ignore = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

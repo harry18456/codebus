@@ -1,0 +1,340 @@
+# vault Specification
+
+## Purpose
+
+TBD - created by archiving change 'v3-init'. Update Purpose after archive.
+
+## Requirements
+
+### Requirement: Vault Layout
+
+The system SHALL create a `.codebus/` vault under the source repository root containing the following subdirectories: `wiki/concepts/`, `wiki/entities/`, `wiki/modules/`, `wiki/processes/`, `wiki/synthesis/`, `raw/code/`, and `log/`. The system SHALL NOT create `output/`, `goals.jsonl`, or a nested `.git/` repository inside the vault.
+
+#### Scenario: Init creates the seven required subdirectories under .codebus
+
+- **WHEN** init is invoked against a repository with no existing `.codebus/`
+- **THEN** the system SHALL create `.codebus/wiki/concepts/`, `.codebus/wiki/entities/`, `.codebus/wiki/modules/`, `.codebus/wiki/processes/`, `.codebus/wiki/synthesis/`, `.codebus/raw/code/`, and `.codebus/log/` AND SHALL NOT create `.codebus/output/`, `.codebus/goals.jsonl`, or `.codebus/.git/`
+
+#### Scenario: Re-running init is idempotent for layout
+
+- **WHEN** init is invoked twice in succession against the same repository
+- **THEN** both invocations SHALL succeed AND the second SHALL NOT change the directory listing of the seven required subdirectories beyond what the first established
+
+
+<!-- @trace
+source: v3-init
+updated: 2026-05-08
+code:
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/vault/source_gitignore.rs
+  - codebus-core/src/schema/mod.rs
+  - Cargo.toml
+  - codebus-core/src/schema/neutral.md
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/Cargo.toml
+  - codebus-core/src/vault/obsidian_register.rs
+  - codebus-core/src/vault/layout.rs
+  - codebus-core/src/lib.rs
+  - codebus-core/src/vault/manifest.rs
+  - codebus-core/src/vault/sanity_check.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-cli/Cargo.toml
+tests:
+  - codebus-cli/tests/cli_routing.rs
+  - codebus-core/tests/vault_init.rs
+  - codebus-core/tests/schema_neutrality.rs
+-->
+
+---
+### Requirement: Sanity Check Inside Vault
+
+The system SHALL refuse to initialize a vault when the target repository path resolves to a directory whose name is `.codebus` OR whose immediate parent contains a `manifest.yaml` AND a `wiki/` directory at sibling level. The refusal SHALL print a clear error to stderr and exit with non-zero status before any filesystem mutation occurs.
+
+#### Scenario: Refuses init when target path is itself a .codebus vault
+
+- **WHEN** init is invoked with the target repository path resolving to an existing vault root (a directory whose siblings include `wiki/` and `manifest.yaml`)
+- **THEN** the system SHALL exit with non-zero status BEFORE creating any directory or writing any file AND SHALL emit a stderr message identifying that the path appears to be a codebus vault
+
+
+<!-- @trace
+source: v3-init
+updated: 2026-05-08
+code:
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/vault/source_gitignore.rs
+  - codebus-core/src/schema/mod.rs
+  - Cargo.toml
+  - codebus-core/src/schema/neutral.md
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/Cargo.toml
+  - codebus-core/src/vault/obsidian_register.rs
+  - codebus-core/src/vault/layout.rs
+  - codebus-core/src/lib.rs
+  - codebus-core/src/vault/manifest.rs
+  - codebus-core/src/vault/sanity_check.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-cli/Cargo.toml
+tests:
+  - codebus-cli/tests/cli_routing.rs
+  - codebus-core/tests/vault_init.rs
+  - codebus-core/tests/schema_neutrality.rs
+-->
+
+---
+### Requirement: Raw Mirror with NullScanner
+
+The system SHALL mirror source files from the repository root into `.codebus/raw/code/` preserving directory structure. The system SHALL skip top-level entries `.codebus/`, `.git/`, and `.env`. The system SHALL honor `<repo>/.gitignore` patterns. The system SHALL skip files larger than 5 mebibytes (5 × 1024 × 1024 bytes). In this change the system SHALL NOT redact PII content; that capability is added in a subsequent change.
+
+#### Scenario: Mirror preserves directory structure and skips top-level dot directories
+
+- **WHEN** a repository contains `src/main.rs`, `nested/lib.rs`, `.git/config`, `.env`, and `.codebus/manifest.yaml`
+- **THEN** the system SHALL mirror `src/main.rs` and `nested/lib.rs` into `.codebus/raw/code/src/main.rs` and `.codebus/raw/code/nested/lib.rs` respectively AND SHALL NOT mirror `.git/config`, `.env`, or `.codebus/manifest.yaml`
+
+#### Scenario: Mirror honors source repo .gitignore
+
+- **WHEN** the source repository's `.gitignore` contains `target/` AND a file `target/debug/foo.rs` exists
+- **THEN** the system SHALL NOT mirror `target/debug/foo.rs` into the vault
+
+#### Scenario: Mirror skips files exceeding the size limit
+
+- **WHEN** a source file is larger than 5 × 1024 × 1024 bytes
+- **THEN** the system SHALL skip that file (no mirror entry created) and continue processing remaining files
+
+
+<!-- @trace
+source: v3-init
+updated: 2026-05-08
+code:
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/vault/source_gitignore.rs
+  - codebus-core/src/schema/mod.rs
+  - Cargo.toml
+  - codebus-core/src/schema/neutral.md
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/Cargo.toml
+  - codebus-core/src/vault/obsidian_register.rs
+  - codebus-core/src/vault/layout.rs
+  - codebus-core/src/lib.rs
+  - codebus-core/src/vault/manifest.rs
+  - codebus-core/src/vault/sanity_check.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-cli/Cargo.toml
+tests:
+  - codebus-cli/tests/cli_routing.rs
+  - codebus-core/tests/vault_init.rs
+  - codebus-core/tests/schema_neutrality.rs
+-->
+
+---
+### Requirement: Source Repo .gitignore Mutation
+
+When the source repository contains a `.git/` directory at its root, the system SHALL ensure the literal entry `.codebus/` is present on its own line in the source repository's root `.gitignore` file. If `.gitignore` does not exist, the system SHALL create it. If the entry is already present, the system SHALL NOT modify the file. If the existing file lacks a trailing newline, the system SHALL add one before appending the entry. When the source repository has no `.git/` directory at its root, the system SHALL NOT modify or create `.gitignore`.
+
+#### Scenario: Adds .codebus entry to existing .gitignore
+
+- **WHEN** init runs against a git repository with `.gitignore` containing `node_modules\n` (with trailing newline)
+- **THEN** the resulting `.gitignore` SHALL equal `node_modules\n.codebus/\n` exactly
+
+#### Scenario: Creates .gitignore when missing
+
+- **WHEN** init runs against a git repository without a `.gitignore` file
+- **THEN** the system SHALL create `.gitignore` containing exactly `.codebus/\n`
+
+#### Scenario: Idempotent when entry already present
+
+- **WHEN** init runs against a git repository whose `.gitignore` already contains a line equal to `.codebus/`
+- **THEN** the system SHALL NOT modify the file AND the file SHALL contain exactly one line equal to `.codebus/`
+
+#### Scenario: Skips non-git directory
+
+- **WHEN** init runs against a directory without a `.git/` subdirectory
+- **THEN** the system SHALL NOT create or modify `.gitignore` at the target path
+
+
+<!-- @trace
+source: v3-init
+updated: 2026-05-08
+code:
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/vault/source_gitignore.rs
+  - codebus-core/src/schema/mod.rs
+  - Cargo.toml
+  - codebus-core/src/schema/neutral.md
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/Cargo.toml
+  - codebus-core/src/vault/obsidian_register.rs
+  - codebus-core/src/vault/layout.rs
+  - codebus-core/src/lib.rs
+  - codebus-core/src/vault/manifest.rs
+  - codebus-core/src/vault/sanity_check.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-cli/Cargo.toml
+tests:
+  - codebus-cli/tests/cli_routing.rs
+  - codebus-core/tests/vault_init.rs
+  - codebus-core/tests/schema_neutrality.rs
+-->
+
+---
+### Requirement: Per-Repo Schema File
+
+The system SHALL write `.codebus/CLAUDE.md` containing the path-D-neutral schema (Karpathy 5-folder taxonomy, frontmatter conventions, wikilinks rules, page conflict rules, stopping criteria) when no `CLAUDE.md` exists at that path. When `.codebus/CLAUDE.md` already exists, the system SHALL NOT modify it. The schema content SHALL NOT reference vendor-specific tool names (`claude`, `anthropic`, `stream-json`, `--tools`, `codex`, `gemini`, `cursor`).
+
+#### Scenario: Writes schema when missing
+
+- **WHEN** init runs against a target whose `.codebus/CLAUDE.md` does not exist
+- **THEN** the system SHALL write the schema content to that path AND the written content SHALL contain the substrings `concepts`, `entities`, `modules`, `processes`, `synthesis` (the five taxonomy folder names)
+
+#### Scenario: Preserves existing schema customization
+
+- **WHEN** init runs against a target whose `.codebus/CLAUDE.md` already contains the line `# my customized schema header`
+- **THEN** the system SHALL NOT modify the file AND the file SHALL still contain `# my customized schema header`
+
+#### Scenario: Schema content is vendor-neutral
+
+- **WHEN** the schema content is written to `.codebus/CLAUDE.md`
+- **THEN** the file content SHALL NOT contain any of the substrings `claude`, `anthropic`, `stream-json`, `--tools`, `codex`, `gemini`, `cursor` (case-insensitive)
+
+
+<!-- @trace
+source: v3-init
+updated: 2026-05-08
+code:
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/vault/source_gitignore.rs
+  - codebus-core/src/schema/mod.rs
+  - Cargo.toml
+  - codebus-core/src/schema/neutral.md
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/Cargo.toml
+  - codebus-core/src/vault/obsidian_register.rs
+  - codebus-core/src/vault/layout.rs
+  - codebus-core/src/lib.rs
+  - codebus-core/src/vault/manifest.rs
+  - codebus-core/src/vault/sanity_check.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-cli/Cargo.toml
+tests:
+  - codebus-cli/tests/cli_routing.rs
+  - codebus-core/tests/vault_init.rs
+  - codebus-core/tests/schema_neutrality.rs
+-->
+
+---
+### Requirement: Vault Manifest Records Sync State
+
+The system SHALL write `.codebus/manifest.yaml` containing five top-level fields plus one nested mapping: `codebus_version` (string, cargo package version of `codebus-cli` at first init time), `created_at` (string, UTC ISO 8601 timestamp ending in `Z` at first init time), `repo_root` (string, absolute filesystem path of the source repository at first init time), `last_sync_at` (string, UTC ISO 8601 timestamp updated on every init invocation), and `source_signal` (mapping with three keys: `git_head` (string or null), `file_count` (integer), `total_bytes` (integer)).
+
+On first init (no manifest exists), the system SHALL write all five top-level fields plus `source_signal`. On subsequent init invocations against an existing manifest, the system SHALL preserve `codebus_version`, `created_at`, and `repo_root` unchanged, AND SHALL update `last_sync_at` to the current UTC timestamp, AND SHALL update `source_signal` to reflect the current source state.
+
+The `source_signal.git_head` value SHALL be the verbatim contents of `<repo>/.git/HEAD` (which may be a symbolic ref like `ref: refs/heads/main\n` or a detached SHA) when `<repo>/.git/HEAD` is readable, OR null when no git repo is detected (`<repo>/.git/` absent).
+
+The `source_signal.file_count` and `source_signal.total_bytes` SHALL be the file count and aggregate byte total of files mirrored by `raw_sync` during this init invocation.
+
+#### Scenario: Writes manifest with all required fields on first init
+
+- **WHEN** init runs against a target whose `.codebus/manifest.yaml` does not exist
+- **THEN** the system SHALL create `.codebus/manifest.yaml` AND parsing it as YAML SHALL yield a mapping containing the keys `codebus_version`, `created_at`, `repo_root`, `last_sync_at`, and `source_signal` AND both `created_at` and `last_sync_at` SHALL match the format `YYYY-MM-DDTHH:MM:SSZ` AND `repo_root` SHALL be an absolute path
+
+#### Scenario: source_signal records git_head when target is a git repo
+
+- **WHEN** init runs against a git repository whose `<repo>/.git/HEAD` exists with content `ref: refs/heads/main\n`
+- **THEN** the manifest's `source_signal.git_head` SHALL equal the verbatim content of that HEAD file (preserving the `ref: ` prefix and trailing newline)
+
+#### Scenario: source_signal records null git_head when target is non-git
+
+- **WHEN** init runs against a directory without a `.git/` subdirectory
+- **THEN** the manifest's `source_signal.git_head` SHALL be YAML null
+
+#### Scenario: source_signal records file aggregates from raw mirror
+
+- **WHEN** init runs against a target where `raw_sync` mirrors exactly N files totaling M bytes
+- **THEN** `source_signal.file_count` SHALL equal N AND `source_signal.total_bytes` SHALL equal M
+
+#### Scenario: Re-init preserves write-once fields and updates sync state fields
+
+- **WHEN** init is invoked twice against the same repository, with at least one source file modified between invocations
+- **THEN** the second invocation SHALL leave `codebus_version`, `created_at`, and `repo_root` unchanged from the first invocation AND SHALL update `last_sync_at` to a timestamp newer than (or equal to) the first invocation's `last_sync_at` AND SHALL update `source_signal` to reflect the new file aggregates
+
+
+<!-- @trace
+source: v3-init
+updated: 2026-05-08
+code:
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/vault/source_gitignore.rs
+  - codebus-core/src/schema/mod.rs
+  - Cargo.toml
+  - codebus-core/src/schema/neutral.md
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/Cargo.toml
+  - codebus-core/src/vault/obsidian_register.rs
+  - codebus-core/src/vault/layout.rs
+  - codebus-core/src/lib.rs
+  - codebus-core/src/vault/manifest.rs
+  - codebus-core/src/vault/sanity_check.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-cli/Cargo.toml
+tests:
+  - codebus-cli/tests/cli_routing.rs
+  - codebus-core/tests/vault_init.rs
+  - codebus-core/tests/schema_neutrality.rs
+-->
+
+---
+### Requirement: Obsidian Vault Auto-Registration
+
+When the user has not passed `--no-obsidian-register`, the system SHALL register `.codebus/wiki/` as an Obsidian vault by writing an entry into the platform Obsidian configuration file. Registration SHALL be fail-soft: if the Obsidian config directory does not exist, OR an existing config cannot be parsed, OR write permission is denied, the system SHALL print a stderr hint AND continue init successfully (exit zero). When the user passes `--no-obsidian-register`, the system SHALL NOT touch the Obsidian config file regardless of its state.
+
+#### Scenario: Default flow registers vault
+
+- **WHEN** init runs without `--no-obsidian-register` against a system with an existing Obsidian config directory
+- **THEN** the platform Obsidian config SHALL gain a vault entry referencing the absolute path of `.codebus/wiki/` AND the system SHALL exit with status zero
+
+#### Scenario: --no-obsidian-register skips registration entirely
+
+- **WHEN** init runs with `--no-obsidian-register`
+- **THEN** the system SHALL NOT read or write the Obsidian config file AND init SHALL still exit with status zero
+
+#### Scenario: Obsidian unavailable does not fail init
+
+- **WHEN** init runs without `--no-obsidian-register` against a system where the Obsidian config directory does not exist
+- **THEN** the system SHALL print a stderr hint indicating Obsidian is not detected AND init SHALL still exit with status zero
+
+<!-- @trace
+source: v3-init
+updated: 2026-05-08
+code:
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/vault/source_gitignore.rs
+  - codebus-core/src/schema/mod.rs
+  - Cargo.toml
+  - codebus-core/src/schema/neutral.md
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/Cargo.toml
+  - codebus-core/src/vault/obsidian_register.rs
+  - codebus-core/src/vault/layout.rs
+  - codebus-core/src/lib.rs
+  - codebus-core/src/vault/manifest.rs
+  - codebus-core/src/vault/sanity_check.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-cli/Cargo.toml
+tests:
+  - codebus-cli/tests/cli_routing.rs
+  - codebus-core/tests/vault_init.rs
+  - codebus-core/tests/schema_neutrality.rs
+-->

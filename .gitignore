@@ -19,3 +19,4 @@ legacy/v2-rust/docs/spikes/*/transcripts/
 .spectra/
 .superpowers/
 openspec/.vector-search.db*
+.codebus/

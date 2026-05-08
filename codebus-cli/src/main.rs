@@ -1,8 +1,6 @@
-//! codebus CLI entry — clap subcommand routing only.
-//!
-//! Verbs are registered here but their bodies are stubs in v3-workspace.
-//! Each subsequent change populates one verb (see `docs/v3-roadmap.md` §4).
+//! codebus CLI entry — clap subcommand routing.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -16,6 +14,18 @@ mod commands;
     about = "Build an AI-curated, Obsidian-compatible markdown wiki for any codebase"
 )]
 struct Cli {
+    /// Path to the source repository (default: current directory). Used by `init`.
+    #[arg(long, default_value = ".", global = true)]
+    repo: PathBuf,
+
+    /// Skip auto-registering `.codebus/wiki/` as an Obsidian vault. Used by `init`.
+    #[arg(long = "no-obsidian-register", global = true)]
+    no_obsidian_register: bool,
+
+    /// Verbose output: print internal decisions, fs operations, computed signals.
+    #[arg(long, global = true)]
+    debug: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -38,7 +48,9 @@ enum Command {
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
-        None | Some(Command::Init) => commands::init::run().await,
+        None | Some(Command::Init) => {
+            commands::init::run(&cli.repo, cli.no_obsidian_register, cli.debug).await
+        }
         Some(Command::Goal) => commands::goal::run().await,
         Some(Command::Query) => commands::query::run().await,
         Some(Command::Lint) => commands::lint::run().await,
