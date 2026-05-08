@@ -127,6 +127,7 @@ cargo install codebus --features all
 [x] PII filter (regex_basic / null) wired into raw_sync — 3 OnHit modes (warn / skip / mask) + patterns_extra；防 hardcoded secrets / API keys / 個資進入 LLM context
 [x] Lint feedback loop — 司機自動修 broken wikilink / oversize page / frontmatter 錯誤等；goal flow 自動接 + 獨立 `codebus --fix` mode；`--no-fix` / `lint.auto_fix.enabled` 可關（多回合用 git diff 假記憶撐 trait stateless）
 [x] Token usage & log tracking — `StreamEvent::Usage` 從 Claude CLI stream-json 抽 token；`RunLog` 累加跨 fix-loop iterations；jsonl sink 預設寫 `<repo>/.codebus/logs/runs-YYYY-MM-DD.jsonl`（UTC 輪替 + nested-git ignore）；Multi-LLM cost 對比的資料層已到位
+[x] Obsidian-clickable wikilinks — CLI thought 流 `[[wikilink]]` 染色 + Ctrl+Click 直接跳 Obsidian 開對應頁；init 自動把 `.codebus/wiki/` 註冊為 Obsidian vault（跨 OS path 解析、SHA-256 stable id、idempotent reuse same-path entry、Obsidian 跑著時 skip + hint、`--no-obsidian-register` opt-out、終端不支援 OSC 8 時優雅退化只染色不點）
 ```
 
 ### 🛣️ Next stops（規劃中）

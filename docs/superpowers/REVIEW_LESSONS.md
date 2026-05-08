@@ -85,6 +85,29 @@ cycle.
     擋住。少了 (b) sandbox 可能根本沒成立。寫 spec 時若只能 cite (a)
     的 spike 結果，就應該標明 sandbox 強度未驗證。
 
+## Lessons from obsidian-clickable-wikilinks (2026-05-08)
+
+11. **Obsidian URI `vault=<id>` 認 SHA-256 id 是 undocumented 行為。**
+    Spike during obsidian-clickable-wikilinks 把 `obsidian://open?vault=<sha256-prefix>&file=<rel>`
+    跟 `obsidian://open?path=<abs>` 兩種變體實機點，**兩種都跳對檔**。但官方
+    Obsidian docs 的 `obsidian://` URI 只描述 `vault=<vault-name>`（即 path
+    末段 / user 在介面看到的 display name）。實測認 id 可能是 Obsidian 內部
+    fallback 順序「name → id」造成的，未公開。spec 已標為 Risk + 保留 path
+    變體當逃生口。**lesson**：當實機行為比文件聲明更寬鬆時（特別是「我們
+    依賴一個沒寫進文件的 case」），spec/design 必須記為 risk + 寫好 fallback
+    路徑，不要讓未來 Obsidian 版本變更打死整個 feature。
+
+12. **Race-overwrite 風險寬窄要看「user 是否操作 shared resource」，不是「process 是否在跑」。**
+    Spike 觀察：Obsidian 在跑時 codebus 寫 obsidian.json 後，**user 不主動
+    操作 vault list（切換、增刪 vault）的情況下 Obsidian 不會回寫 obsidian.json**——
+    我們的 entry 安全。但只要 user 動 vault list，整份 in-memory 版本就會回
+    寫覆蓋。**「skip-on-running」是廉價安全網**而非 race-proof 保證；spec
+    寫成「偵測 + skip + hint」採務實取捨，不嘗試在 Obsidian 跑著時 race-safe
+    寫入（複雜度高、收益低）。**lesson**：對「shared mutable state with
+    external owner」的 race，先觀察「common case 是否 race」再決定 mitigation
+    強度——多數時間 common case 安全的話，cheap detection + skip 比 file lock
+    / 重啟 process 等強 mitigation 划算。
+
 ## How to add a lesson
 
 When a review iteration surfaces a process insight (not a content
