@@ -1,4 +1,5 @@
 use codebus_core::git::nested_repo::{auto_commit, init_nested_repo};
+use codebus_core::obsidian::{RegisterOutcome, register_vault};
 use codebus_core::schema::CODEBUS_SCHEMA;
 use codebus_core::vault::layout::{VaultPaths, vault_paths};
 use std::fs;
@@ -8,7 +9,7 @@ use std::path::Path;
 const REQUIRED_INTERNAL_GITIGNORE_LINES: &[&str] =
     &[".lock", "raw/code/", "**/.obsidian/", "logs/"];
 
-pub fn run_init(repo_root: impl AsRef<Path>) -> io::Result<()> {
+pub fn run_init(repo_root: impl AsRef<Path>, no_obsidian_register: bool) -> io::Result<()> {
     let repo_root = repo_root.as_ref();
     let p = vault_paths(repo_root);
 
@@ -36,9 +37,40 @@ pub fn run_init(repo_root: impl AsRef<Path>) -> io::Result<()> {
         ensure_codebus_in_source_gitignore(repo_root)?;
     }
 
+    if !no_obsidian_register {
+        register_vault_step(&p.wiki);
+    }
+
     auto_commit(&p.root, "init: codebus vault").map_err(|e| io::Error::other(e.to_string()))?;
     let _ = p; // p borrowed only above
     Ok(())
+}
+
+/// Register the vault into the user's Obsidian config and emit a status hint.
+///
+/// Failures here are NEVER fatal — Obsidian is an optional integration, and
+/// init must complete successfully even on machines without Obsidian. All
+/// outcomes are logged to stderr and execution continues.
+fn register_vault_step(wiki_path: &Path) {
+    match register_vault(wiki_path) {
+        RegisterOutcome::Registered { vault_id } => {
+            eprintln!(
+                "💡 已將 .codebus/wiki/ 加入 Obsidian vault 列表（id: {vault_id}），重啟 Obsidian 即可看到"
+            );
+        }
+        RegisterOutcome::ObsidianNotInstalled => {
+            // Silent — most users without Obsidian don't want a hint about
+            // a tool they don't use.
+        }
+        RegisterOutcome::ObsidianRunning => {
+            eprintln!(
+                "💡 偵測到 Obsidian 正在執行，跳過自動註冊。請關閉 Obsidian 後重跑 codebus --repo X 或在 Obsidian 內手動加入 .codebus/wiki/ 為 vault"
+            );
+        }
+        RegisterOutcome::IoError { reason } => {
+            eprintln!("warning: 自動註冊 Obsidian vault 失敗：{reason}");
+        }
+    }
 }
 
 fn merge_gitignore_lines(path: &Path, required: &[&str]) -> io::Result<()> {
@@ -121,7 +153,7 @@ mod tests {
     #[test]
     fn init_creates_full_vault_skeleton() {
         let repo = tmp("skeleton");
-        run_init(&repo).unwrap();
+        run_init(&repo, true).unwrap();
         let p = vault_paths(&repo);
         assert!(p.root.is_dir());
         assert!(p.raw.is_dir());
@@ -140,7 +172,7 @@ mod tests {
     #[test]
     fn schema_content_matches_constant() {
         let repo = tmp("schema");
-        run_init(&repo).unwrap();
+        run_init(&repo, true).unwrap();
         let p = vault_paths(&repo);
         let written = fs::read_to_string(&p.schema_md).unwrap();
         assert_eq!(written, CODEBUS_SCHEMA);
@@ -150,10 +182,10 @@ mod tests {
     #[test]
     fn schema_is_not_overwritten_on_reinit() {
         let repo = tmp("preserve");
-        run_init(&repo).unwrap();
+        run_init(&repo, true).unwrap();
         let p = vault_paths(&repo);
         fs::write(&p.schema_md, "USER CUSTOMIZATION").unwrap();
-        run_init(&repo).unwrap();
+        run_init(&repo, true).unwrap();
         assert_eq!(
             fs::read_to_string(&p.schema_md).unwrap(),
             "USER CUSTOMIZATION"
@@ -164,7 +196,7 @@ mod tests {
     #[test]
     fn internal_gitignore_lines_are_merged() {
         let repo = tmp("gimerge");
-        run_init(&repo).unwrap();
+        run_init(&repo, true).unwrap();
         let p = vault_paths(&repo);
         let content = fs::read_to_string(&p.gitignore).unwrap();
         for line in REQUIRED_INTERNAL_GITIGNORE_LINES {
@@ -186,7 +218,7 @@ mod tests {
             .current_dir(&repo)
             .status()
             .unwrap();
-        run_init(&repo).unwrap();
+        run_init(&repo, true).unwrap();
         let gi = fs::read_to_string(repo.join(".gitignore")).unwrap();
         assert!(gi.lines().any(|l| l.trim() == ".codebus"));
         let _ = fs::remove_dir_all(&repo);
@@ -195,7 +227,7 @@ mod tests {
     #[test]
     fn source_gitignore_untouched_when_source_is_not_git() {
         let repo = tmp("nongit");
-        run_init(&repo).unwrap();
+        run_init(&repo, true).unwrap();
         assert!(!repo.join(".gitignore").exists());
         let _ = fs::remove_dir_all(&repo);
     }

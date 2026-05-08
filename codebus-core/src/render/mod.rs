@@ -9,8 +9,9 @@
 
 pub mod event_renderer;
 pub mod factory;
+pub mod markdown_style;
 pub mod renderers;
 
 pub use event_renderer::{Banner, EventRenderer};
 pub use factory::{RendererConfig, RendererError, build_renderer};
-pub use renderers::terminal::{RenderOptions, TerminalRenderer};
+pub use renderers::terminal::{RenderOptions, RenderOptionsConfig, TerminalRenderer};

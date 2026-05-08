@@ -3,6 +3,7 @@ pub mod fix;
 pub mod frontmatter;
 pub mod lint;
 pub mod page_merge;
+pub mod slug_index;
 pub mod stale_detect;
 pub mod types;
 

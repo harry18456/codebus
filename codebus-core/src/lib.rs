@@ -11,6 +11,7 @@ pub mod fs;
 pub mod git;
 pub mod llm;
 pub mod log;
+pub mod obsidian;
 pub mod pii;
 pub mod render;
 pub mod schema;

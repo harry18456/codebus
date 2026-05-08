@@ -62,6 +62,13 @@ struct Cli {
     /// sugar for --emoji off
     #[arg(long = "no-emoji")]
     no_emoji: bool,
+
+    /// Skip auto-registering `.codebus/wiki/` as an Obsidian vault during init.
+    /// Without this flag, codebus writes a vault entry into the user's
+    /// `obsidian.json` so the wiki shows up in Obsidian's vault picker and
+    /// `[[wikilink]]` OSC 8 hyperlinks resolve cleanly.
+    #[arg(long = "no-obsidian-register")]
+    no_obsidian_register: bool,
 }
 
 fn main() -> ExitCode {
@@ -124,38 +131,51 @@ fn resolve_render_opts(cli: &Cli, cfg: &GlobalConfig) -> RenderOptions {
     RenderOptions {
         use_emoji,
         use_color,
+        ..RenderOptions::default()
     }
 }
 
 fn auto_detect_emoji() -> bool {
-    // Conservative auto: on for non-Windows TTYs, off for Windows cmd.
-    #[cfg(windows)]
-    {
-        false
-    }
-    #[cfg(not(windows))]
-    {
-        atty_like_check()
-    }
+    // Cross-platform TTY detection via stdlib `IsTerminal` (Rust 1.70+).
+    // Modern Windows Terminal / PowerShell 7 / VSCode integrated terminal
+    // all report TTY correctly and render emoji + ANSI cleanly. The pre-
+    // 2026 conservative "off on Windows" fallback was for cmd.exe + Win 7
+    // era hosts; on the workspace MSRV (1.85) and Win 10 1607+ ConHost
+    // those are not the common case.
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
 }
 
-#[cfg(not(windows))]
-fn atty_like_check() -> bool {
-    // Use std isatty check via libc on unix; absent from std, settle for
-    // env heuristic: TERM != "" and not "dumb".
-    std::env::var("TERM")
-        .map(|t| !t.is_empty() && t != "dumb")
-        .unwrap_or(false)
+/// Inject vault-derived render context into `render_opts` for runs that
+/// emit thought streams (goal/query/fix). Builds the slug→path index by
+/// scanning the wiki and looks up the vault's effective Obsidian id from
+/// the user's `obsidian.json`. Both lookups are best-effort: any failure
+/// (missing vault, Obsidian not installed, parse error) leaves the
+/// corresponding field as `None`, disabling hyperlink emission gracefully.
+fn enrich_render_opts_for_run(repo: &Path, mut render_opts: RenderOptions) -> RenderOptions {
+    use codebus_core::obsidian;
+    use codebus_core::vault::layout::vault_paths;
+    use codebus_core::wiki::slug_index;
+
+    let p = vault_paths(repo);
+    if let Ok(idx) = slug_index::build(&p) {
+        render_opts.slug_index = Some(std::sync::Arc::new(idx));
+    }
+    if let Ok(Some(id)) = obsidian::lookup_vault_id(&p.wiki) {
+        render_opts.vault_id = Some(id);
+    }
+    render_opts
 }
 
 fn is_color_capable() -> bool {
     if std::env::var_os("NO_COLOR").is_some() {
         return false;
     }
-    // Same heuristic as emoji — color is fine when TERM is set.
-    std::env::var("TERM")
-        .map(|t| !t.is_empty() && t != "dumb")
-        .unwrap_or(false)
+    // Cross-platform TTY detection — same rationale as `auto_detect_emoji`.
+    // Modern terminals (Windows Terminal / PowerShell 7 / VSCode integrated
+    // / iTerm2 / GNOME Terminal) all advertise TTY and accept ANSI colors.
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
 }
 
 async fn dispatch(
@@ -169,13 +189,22 @@ async fn dispatch(
     }
 
     let (fix_disabled, fix_max_iterations) = resolve_fix_config(cli.no_fix, cli.fix_max_iter, &cfg);
+    let no_obsidian_register = cli.no_obsidian_register;
 
     if cli.fix {
-        return run_fix_cmd(&repo, render_opts, &cfg, fix_disabled, fix_max_iterations).await;
+        return run_fix_cmd(
+            &repo,
+            render_opts,
+            &cfg,
+            fix_disabled,
+            fix_max_iterations,
+            no_obsidian_register,
+        )
+        .await;
     }
 
     if cli.goal.is_none() && cli.query.is_none() {
-        return run_init_cmd(&repo, render_opts).await;
+        return run_init_cmd(&repo, render_opts, no_obsidian_register).await;
     }
 
     if let Some(g) = cli.goal {
@@ -186,11 +215,12 @@ async fn dispatch(
             &cfg,
             fix_disabled,
             fix_max_iterations,
+            no_obsidian_register,
         )
         .await;
     }
     if let Some(q) = cli.query {
-        return run_query_cmd(&repo, &q, render_opts, &cfg).await;
+        return run_query_cmd(&repo, &q, render_opts, &cfg, no_obsidian_register).await;
     }
     ExitCode::from(0)
 }
@@ -289,7 +319,9 @@ async fn run_fix_cmd(
     cfg: &GlobalConfig,
     fix_disabled: bool,
     fix_max_iterations: u32,
+    _no_obsidian_register: bool,
 ) -> ExitCode {
+    let render_opts = enrich_render_opts_for_run(repo, render_opts);
     let mut renderer = TerminalRenderer::new(render_opts);
     use codebus_core::render::EventRenderer;
     renderer.render_banner(&Banner::Start {
@@ -368,18 +400,23 @@ async fn run_check_cmd(repo: &PathBuf, render_opts: RenderOptions) -> ExitCode {
     }
 }
 
-async fn run_init_cmd(repo: &PathBuf, render_opts: RenderOptions) -> ExitCode {
+async fn run_init_cmd(
+    repo: &PathBuf,
+    render_opts: RenderOptions,
+    no_obsidian_register: bool,
+) -> ExitCode {
+    let use_emoji = render_opts.use_emoji;
     let mut renderer = TerminalRenderer::new(render_opts);
     use codebus_core::render::EventRenderer;
     renderer.render_banner(&Banner::Start {
         path: &repo.to_string_lossy(),
     });
-    if let Err(e) = init::run_init(repo) {
+    if let Err(e) = init::run_init(repo, no_obsidian_register) {
         eprintln!("error: {e}");
         return ExitCode::from(1);
     }
-    let ok = if render_opts.use_emoji { "✨" } else { "✓" };
-    let tip = if render_opts.use_emoji { "💡" } else { "i" };
+    let ok = if use_emoji { "✨" } else { "✓" };
+    let tip = if use_emoji { "💡" } else { "i" };
     let vault_path = format!("{}/.codebus", repo.display()).replace('\\', "/");
     println!("{ok} Vault 已初始化於 {vault_path}");
     println!("{tip} 下一步：codebus --goal \"<你的探索目標>\"");
@@ -393,7 +430,10 @@ async fn run_goal_cmd(
     cfg: &GlobalConfig,
     fix_disabled: bool,
     fix_max_iterations: u32,
+    no_obsidian_register: bool,
 ) -> ExitCode {
+    let render_opts = enrich_render_opts_for_run(repo, render_opts);
+    let use_emoji = render_opts.use_emoji;
     let mut renderer = TerminalRenderer::new(render_opts);
     use codebus_core::render::EventRenderer;
     renderer.render_banner(&Banner::Start {
@@ -440,6 +480,7 @@ async fn run_goal_cmd(
             fix_max_iterations,
             model: model.as_deref(),
             effort: effort.as_deref(),
+            no_obsidian_register,
         },
         &mut renderer,
         log_sink.as_mut(),
@@ -462,7 +503,7 @@ async fn run_goal_cmd(
         }
         renderer.render_banner(&Banner::Hint { path: &wiki_path });
     } else {
-        let shrug = if render_opts.use_emoji { "🤷" } else { "~" };
+        let shrug = if use_emoji { "🤷" } else { "~" };
         println!("{shrug} Agent 跑完但沒動 wiki — 可能此 goal 不適合（agent 自我判斷拒絕）");
         println!("   raw 已 sync、goals.jsonl 已記錄；wiki 內容無變化");
     }
@@ -474,7 +515,9 @@ async fn run_query_cmd(
     query_text: &str,
     render_opts: RenderOptions,
     cfg: &GlobalConfig,
+    _no_obsidian_register: bool,
 ) -> ExitCode {
+    let render_opts = enrich_render_opts_for_run(repo, render_opts);
     let mut renderer = TerminalRenderer::new(render_opts);
     use codebus_core::render::EventRenderer;
     renderer.render_banner(&Banner::Start {
@@ -648,5 +691,20 @@ mod tests {
         let (disabled, max_iter) = resolve_fix_config(false, None, &cfg);
         assert!(disabled);
         assert_eq!(max_iter, 7);
+    }
+
+    // === obsidian-clickable-wikilinks: --no-obsidian-register flag ===
+
+    #[test]
+    fn no_obsidian_register_defaults_to_false_when_absent() {
+        let cli = Cli::try_parse_from(["codebus", "--repo", "."]).expect("parse");
+        assert!(!cli.no_obsidian_register);
+    }
+
+    #[test]
+    fn no_obsidian_register_flag_sets_true() {
+        let cli =
+            Cli::try_parse_from(["codebus", "--repo", ".", "--no-obsidian-register"]).expect("parse");
+        assert!(cli.no_obsidian_register);
     }
 }

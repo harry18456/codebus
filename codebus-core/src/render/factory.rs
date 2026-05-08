@@ -8,19 +8,24 @@
 //! identical UX to the prior flat `RendererConfig` struct.
 
 use crate::render::event_renderer::EventRenderer;
-use crate::render::renderers::terminal::{RenderOptions, TerminalRenderer};
+use crate::render::renderers::terminal::{RenderOptions, RenderOptionsConfig, TerminalRenderer};
 use serde::{Deserialize, Serialize};
 
 /// Tagged-enum config: discriminator key `format` selects which renderer to
 /// build. `Terminal` is the day-one only implementation; `JsonLines` and
 /// `Tauri` are reserved for follow-up changes (see proposal §"EventRenderer
 /// trait") and currently surface as [`RendererError::NotYetImplemented`].
+///
+/// `Terminal { options }` carries [`RenderOptionsConfig`] (the
+/// YAML-serializable subset of `RenderOptions`). The runtime fields
+/// `vault_id` / `slug_index` / `hyperlinks` are injected by the
+/// goal/query/fix flow at run start, not loaded from disk.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "format", rename_all = "snake_case")]
 pub enum RendererConfig {
     Terminal {
         #[serde(default)]
-        options: RenderOptions,
+        options: RenderOptionsConfig,
     },
     JsonLines {},
     Tauri {},
@@ -29,7 +34,7 @@ pub enum RendererConfig {
 impl Default for RendererConfig {
     fn default() -> Self {
         Self::Terminal {
-            options: RenderOptions::default(),
+            options: RenderOptionsConfig::default(),
         }
     }
 }
@@ -52,9 +57,18 @@ impl std::fmt::Display for RendererError {
 impl std::error::Error for RendererError {}
 
 /// Build a renderer from a [`RendererConfig`].
+///
+/// The `Terminal` variant's `options` carry only the YAML-serializable
+/// subset; runtime fields (`vault_id` / `slug_index` / `hyperlinks`)
+/// fall back to [`RenderOptions`] defaults here. CLI entry points that
+/// need to thread vault context through should construct
+/// `TerminalRenderer::new` directly with a fully-populated
+/// `RenderOptions`.
 pub fn build_renderer(cfg: RendererConfig) -> Result<Box<dyn EventRenderer>, RendererError> {
     match cfg {
-        RendererConfig::Terminal { options } => Ok(Box::new(TerminalRenderer::new(options))),
+        RendererConfig::Terminal { options } => Ok(Box::new(TerminalRenderer::new(
+            RenderOptions::from(options),
+        ))),
         RendererConfig::JsonLines {} => Err(RendererError::NotYetImplemented("json_lines")),
         RendererConfig::Tauri {} => Err(RendererError::NotYetImplemented("tauri")),
     }
@@ -70,7 +84,7 @@ mod tests {
         assert_eq!(
             cfg,
             RendererConfig::Terminal {
-                options: RenderOptions::default()
+                options: RenderOptionsConfig::default()
             }
         );
     }
@@ -84,7 +98,7 @@ mod tests {
         assert_eq!(
             cfg,
             RendererConfig::Terminal {
-                options: RenderOptions::default()
+                options: RenderOptionsConfig::default()
             }
         );
     }
@@ -96,7 +110,7 @@ mod tests {
         assert_eq!(
             cfg,
             RendererConfig::Terminal {
-                options: RenderOptions {
+                options: RenderOptionsConfig {
                     use_emoji: true,
                     use_color: false,
                 }
@@ -117,7 +131,7 @@ mod tests {
         assert_eq!(
             cfg,
             RendererConfig::Terminal {
-                options: RenderOptions {
+                options: RenderOptionsConfig {
                     use_emoji: true,
                     use_color: false,
                 }
@@ -128,10 +142,29 @@ mod tests {
     #[test]
     fn terminal_build_returns_renderer() {
         let cfg = RendererConfig::Terminal {
-            options: RenderOptions::default(),
+            options: RenderOptionsConfig::default(),
         };
         let r = build_renderer(cfg);
         assert!(r.is_ok(), "terminal should build successfully");
+    }
+
+    #[test]
+    fn render_options_config_converts_to_render_options() {
+        // Bridge invariant: the on-disk `RenderOptionsConfig` must
+        // produce a `RenderOptions` that carries the two flags through
+        // and inherits the runtime-only fields from
+        // `RenderOptions::default()` (no vault, no slug index,
+        // hyperlinks enabled).
+        let cfg = RenderOptionsConfig {
+            use_emoji: true,
+            use_color: true,
+        };
+        let opts: RenderOptions = cfg.into();
+        assert!(opts.use_emoji);
+        assert!(opts.use_color);
+        assert!(opts.vault_id.is_none());
+        assert!(opts.slug_index.is_none());
+        assert!(opts.hyperlinks, "hyperlinks default must be true");
     }
 
     #[test]

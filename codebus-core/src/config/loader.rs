@@ -23,7 +23,7 @@ use crate::config::schema::{AutoFixConfig, EmojiMode, GlobalConfig, LintConfig};
 use crate::llm::ProviderConfig;
 use crate::log::SinkConfig;
 use crate::pii::{OnHit, ScannerConfig};
-use crate::render::{RenderOptions, RendererConfig};
+use crate::render::{RenderOptionsConfig, RendererConfig};
 use serde_yaml::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -353,7 +353,7 @@ fn parse_render(v: &Value) -> Option<RendererConfig> {
     };
 
     let mut format_str: Option<String> = None;
-    let mut options: RenderOptions = RenderOptions::default();
+    let mut options: RenderOptionsConfig = RenderOptionsConfig::default();
     let mut format_was_explicitly_invalid = false;
 
     for (k, val) in map {
@@ -372,7 +372,7 @@ fn parse_render(v: &Value) -> Option<RendererConfig> {
                 None => warn_type_mismatch("render.format", "string", val),
             },
             "options" => match val {
-                Value::Mapping(_) => match serde_yaml::from_value::<RenderOptions>(val.clone()) {
+                Value::Mapping(_) => match serde_yaml::from_value::<RenderOptionsConfig>(val.clone()) {
                     Ok(o) => options = o,
                     Err(_) => warn_type_mismatch(
                         "render.options",

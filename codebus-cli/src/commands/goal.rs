@@ -48,6 +48,10 @@ pub struct RunGoalOptions<'a> {
     pub model: Option<&'a str>,
     /// Optional `--effort` override forwarded to the LLM invocation.
     pub effort: Option<&'a str>,
+    /// When the goal flow needs to fall back to a fresh init (vault root
+    /// doesn't exist), forwarded to `init::run_init` so the user's
+    /// `--no-obsidian-register` opt-out is honored.
+    pub no_obsidian_register: bool,
 }
 
 pub struct RunGoalResult {
@@ -69,7 +73,7 @@ pub async fn run_goal(
     let p = vault_paths(opts.repo_root);
 
     if !p.root.exists() {
-        run_init(opts.repo_root)?;
+        run_init(opts.repo_root, opts.no_obsidian_register)?;
     }
 
     let mut lock = acquire_lock(&p.lock)
@@ -585,6 +589,7 @@ mod tests {
                 fix_max_iterations: 5,
                 model: None,
                 effort: None,
+                no_obsidian_register: true,
             },
             &mut renderer,
             &mut sink,
@@ -635,6 +640,7 @@ mod tests {
                 fix_max_iterations: 2, // 1 goal-ingest + 2 fix iters = 3 invokes
                 model: None,
                 effort: None,
+                no_obsidian_register: true,
             },
             &mut renderer,
             &mut sink,
@@ -699,6 +705,7 @@ mod tests {
                 fix_max_iterations: 5,
                 model: None,
                 effort: None,
+                no_obsidian_register: true,
             },
             &mut renderer,
             &mut sink,
@@ -759,6 +766,7 @@ mod tests {
                 fix_max_iterations: 1,
                 model: None,
                 effort: None,
+                no_obsidian_register: true,
             },
             &mut renderer,
             &mut sink,
@@ -857,6 +865,7 @@ mod tests {
                 fix_max_iterations: 1,
                 model: None,
                 effort: None,
+                no_obsidian_register: true,
             },
             &mut renderer,
             &mut sink,
