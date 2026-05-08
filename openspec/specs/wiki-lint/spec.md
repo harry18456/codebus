@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Validate the structure and Obsidian-compatibility of a `.codebus/wiki/` vault. Lint runs in two modes: (1) auto-lint at the end of every `--goal` ingest in soft mode (warnings surface but never block auto-commit or abort the goal), and (2) a standalone `--check` command that runs lint as a read-only operation against an existing vault, exits 1 when any error-severity issue is reported, and never invokes the LLM provider or writes to disk. Lint enforces frontmatter and `related[]` integrity at error severity, flags structural and Obsidian-compatibility violations (folder/type mismatch, duplicate slugs, missing nav files, broken body wikilinks) at warn severity, and validates `[[wikilink]]` references against a catalog that includes the 5 type folders, the three nav specials (`overview.md` / `index.md` / `log.md`), and every `wiki/goals/<slug>.md` reading guide. The result schema reports `pagesScanned` + `navFilesScanned` so a clean run is honest about what was inspected.
+Validate the structure and Obsidian-compatibility of a `.codebus/wiki/` vault. Lint runs in two modes: (1) auto-lint at the end of every `--goal` ingest in soft mode (warnings surface but never block auto-commit or abort the goal), and (2) a standalone `--check` command that runs lint as a read-only operation against an existing vault, exits 1 when any error-severity issue is reported, and never invokes the LLM provider or writes to disk. Lint enforces frontmatter and `related[]` integrity at error severity, flags structural and Obsidian-compatibility violations (folder/type mismatch, duplicate slugs, missing nav files, broken body wikilinks) at warn severity, and validates `[[wikilink]]` references against a catalog that includes the 5 type folders and the two root nav files (`index.md` / `log.md`). Overview-style pages live as `wiki/synthesis/<slug>.md` (the dedicated `wiki/overview.md` was retired) and `wiki/goals/` is no longer a recognized directory. The result schema reports `pagesScanned` + `navFilesScanned` so a clean run is honest about what was inspected.
 
 ## Requirements
 
@@ -102,7 +102,7 @@ For each `.md` file under any of the 5 type folders (`concepts/`, `entities/`, `
 
 #### Scenario: related[] entry referencing a non-existent slug produces an error
 
-- **WHEN** a page's `related` array contains `"[[ghost]]"` and no page named `ghost.md` exists under any of the 5 type folders, special files (overview/index/log), or goal guides
+- **WHEN** a page's `related` array contains `"[[ghost]]"` and no page named `ghost.md` exists under any of the 5 type folders or the root nav files (index/log)
 - **THEN** lint emits one error-severity issue with message containing "broken wikilink in related"
 
 

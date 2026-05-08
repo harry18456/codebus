@@ -1,8 +1,9 @@
 //! Slug → location index for the wiki vault.
 //!
 //! Built once per run by walking `.codebus/wiki/`: 5 typed folders
-//! (concepts/entities/modules/processes/synthesis), 3 special pages at root
-//! (overview/index/log), and `goals/<slug>.md` per-goal reading guides.
+//! (concepts/entities/modules/processes/synthesis), 2 root nav files
+//! (index/log — overview was retired in favor of `synthesis/<slug>.md`),
+//! and `goals/<slug>.md` per-goal reading guides.
 //!
 //! The terminal renderer consults this index to resolve `[[slug]]` wikilinks
 //! to actual on-disk relative paths (without `.md` extension), which it then
@@ -34,7 +35,7 @@ use std::path::{Path, PathBuf};
 pub enum SlugLocation {
     /// One of the 5 typed folders (concepts/entities/modules/processes/synthesis).
     Type(PageType),
-    /// Root special page: overview / index / log.
+    /// Root nav file: `index.md` or `log.md`.
     Special,
     /// `goals/<slug>.md` per-goal reading guide.
     Goal,
@@ -43,7 +44,7 @@ pub enum SlugLocation {
 /// Map from slug → (location, relative path without `.md`).
 ///
 /// Path is forward-slashed and relative to the wiki root (e.g.
-/// `concepts/foo`, `overview`, `goals/explain-x`). This matches the OSC 8
+/// `concepts/foo`, `index`, `goals/explain-x`). This matches the OSC 8
 /// URI `&file=<path>` form — Obsidian accepts forward slash on Windows.
 #[derive(Debug, Clone, Default)]
 pub struct SlugIndex {
@@ -75,7 +76,7 @@ impl SlugIndex {
     }
 }
 
-const SPECIAL_PAGES: [&str; 3] = ["overview", "index", "log"];
+const SPECIAL_PAGES: [&str; 2] = ["index", "log"];
 
 /// Build the slug index by scanning the vault once.
 ///
@@ -109,7 +110,7 @@ pub fn build(vault_paths: &VaultPaths) -> Result<SlugIndex, io::Error> {
         })?;
     }
 
-    // 3 special root files: overview / index / log.
+    // 2 root nav files: index.md, log.md.
     for name in SPECIAL_PAGES {
         let candidate = vault_paths.wiki.join(format!("{name}.md"));
         match candidate.metadata() {
@@ -235,21 +236,39 @@ mod tests {
     }
 
     #[test]
-    fn special_page_overview_resolves_to_special() {
+    fn root_nav_files_resolve_to_special() {
+        // index.md / log.md are the only recognized root-level special pages.
+        // Overview-style content lives under `synthesis/<slug>.md` since the
+        // schema retired the dedicated `wiki/overview.md` slot.
         let repo = tmp("specials");
         scaffold_empty_vault(&repo);
         let vp = vault_paths(&repo);
-        touch(&vp.wiki_overview);
         touch(&vp.wiki_index);
         touch(&vp.wiki_log);
         let idx = build(&vp).unwrap();
-        for name in ["overview", "index", "log"] {
+        for name in ["index", "log"] {
             let (loc, path) = idx
                 .lookup(name)
                 .unwrap_or_else(|| panic!("{name} should be indexed"));
             assert_eq!(*loc, SlugLocation::Special);
             assert_eq!(path, &PathBuf::from(name));
         }
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn overview_md_at_root_is_not_indexed_as_special() {
+        // Overview was retired from the schema. If a stray `wiki/overview.md`
+        // exists at root, it must NOT be indexed as a Special page.
+        let repo = tmp("legacy-overview");
+        scaffold_empty_vault(&repo);
+        let vp = vault_paths(&repo);
+        touch(&vp.wiki_overview);
+        let idx = build(&vp).unwrap();
+        assert!(
+            idx.lookup("overview").is_none(),
+            "stray wiki/overview.md must not be indexed as Special"
+        );
         let _ = fs::remove_dir_all(&repo);
     }
 

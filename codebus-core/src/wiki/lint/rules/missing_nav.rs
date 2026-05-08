@@ -1,8 +1,9 @@
 //! `missing_nav` rule — flag `index.md` / `log.md` absent at `wiki/` root.
 //!
-//! `overview.md` is intentionally NOT required: vault may not have a
-//! curated overview yet, and one will appear inside a type folder when it
-//! does (`wiki/<type>/overview.md`).
+//! Schema retired the previous `wiki/overview.md` special file: overview-
+//! style content now lives as `wiki/synthesis/<slug>.md` (e.g.
+//! `synthesis/repo-overview.md`), so root-level overview is no longer a
+//! recognized concept and is not checked here.
 
 use crate::wiki::lint::rule::{LintRule, VaultContext};
 use crate::wiki::types::{LintIssue, LintSeverity};
