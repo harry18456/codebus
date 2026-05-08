@@ -123,6 +123,71 @@ fn explicit_init_and_bare_invocation_have_structurally_identical_output() {
     }
 }
 
+// === Init Progress Line — PII Match Count ===
+
+#[test]
+fn init_progress_line_includes_zero_pii_count_for_clean_repo() {
+    let tmp = TempDir::new().unwrap();
+    // Repo with one harmless file → no PII matches expected.
+    std::fs::write(tmp.path().join("README.md"), b"# hello\nplain text").unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run init");
+    assert!(
+        out.status.success(),
+        "init should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let raw_line = stdout
+        .lines()
+        .find(|l| l.starts_with("✓ raw mirror:"))
+        .expect("missing raw mirror progress line");
+    assert!(
+        raw_line.contains("0 PII matches"),
+        "raw mirror line should contain '0 PII matches', got: {raw_line}"
+    );
+}
+
+#[test]
+fn init_progress_line_reports_nonzero_pii_count_for_repo_with_secrets() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(
+        tmp.path().join("aws.py"),
+        b"AWS_KEY=AKIAIOSFODNN7EXAMPLE\n",
+    )
+    .unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run init");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let raw_line = stdout
+        .lines()
+        .find(|l| l.starts_with("✓ raw mirror:"))
+        .expect("missing raw mirror progress line");
+    // Expect the count column to be present and non-zero.
+    assert!(
+        raw_line.contains("PII matches"),
+        "raw mirror line missing 'PII matches' label: {raw_line}"
+    );
+    assert!(
+        !raw_line.contains("0 PII matches"),
+        "expected non-zero PII match count, got: {raw_line}"
+    );
+    // stderr should carry at least one warning for the AWS key (does not
+    // include the literal key text — verified separately at the lib level).
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("pii warn:") && stderr.contains("aws-access-key"),
+        "stderr should contain pii warn for aws-access-key, got: {stderr}"
+    );
+}
+
 // === Stub Verb Exit Behavior (4 verbs) ===
 
 #[test]

@@ -118,7 +118,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn dummy_summary(files: usize, bytes: u64) -> SyncSummary {
-        SyncSummary { files, bytes }
+        SyncSummary { files, bytes, pii_matches: 0 }
     }
 
     #[test]

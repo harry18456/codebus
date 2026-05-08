@@ -5,6 +5,8 @@
 use std::fs;
 use std::path::Path;
 
+use codebus_core::pii::scanners::null_scanner::NullScanner;
+use codebus_core::pii::scanners::regex_basic::RegexBasicScanner;
 use codebus_core::schema::NEUTRAL_RULES;
 use codebus_core::skill_bundle::{self, BundleOutcome, VERBS};
 use codebus_core::vault::layout::{create_vault_layout, vault_paths};
@@ -13,7 +15,7 @@ use codebus_core::vault::manifest::{
 };
 use codebus_core::vault::raw_sync::SyncSummary;
 use codebus_core::vault::obsidian_register::{register_at, RegisterOutcome};
-use codebus_core::vault::raw_sync::sync_with_null_scanner;
+use codebus_core::vault::raw_sync::{sync_with_scanner, sync_with_scanner_into};
 use codebus_core::vault::sanity_check::check_repo_is_not_vault;
 use codebus_core::vault::source_gitignore::{ensure_codebus_in_gitignore, GitignoreOutcome};
 use tempfile::TempDir;
@@ -94,7 +96,7 @@ fn raw_mirror_preserves_structure_and_skips_top_level_dot_dirs() {
     write(&tmp.path().join(".env"), b"X=Y");
     write(&tmp.path().join(".codebus/manifest.yaml"), b"v: 1");
 
-    sync_with_null_scanner(tmp.path(), raw.path()).unwrap();
+    sync_with_scanner(tmp.path(), raw.path(), &NullScanner::new()).unwrap();
     assert!(raw.path().join("src/main.rs").exists());
     assert!(raw.path().join("nested/lib.rs").exists());
     assert!(!raw.path().join(".git").exists());
@@ -109,9 +111,97 @@ fn raw_mirror_honors_source_gitignore() {
     write(&tmp.path().join(".gitignore"), b"target/\n");
     write(&tmp.path().join("src/foo.rs"), b"fn foo(){}");
     write(&tmp.path().join("target/debug/foo.rs"), b"// build artifact");
-    sync_with_null_scanner(tmp.path(), raw.path()).unwrap();
+    sync_with_scanner(tmp.path(), raw.path(), &NullScanner::new()).unwrap();
     assert!(raw.path().join("src/foo.rs").exists());
     assert!(!raw.path().join("target").exists());
+}
+
+// ===== Raw Mirror with PII Scanner — integration =====
+
+#[test]
+fn raw_sync_emits_warnings_for_known_pii_patterns() {
+    let src = TempDir::new().unwrap();
+    let raw = TempDir::new().unwrap();
+    write(
+        &src.path().join("src/aws.py"),
+        b"AWS_KEY=AKIAIOSFODNN7EXAMPLE\n",
+    );
+    write(
+        &src.path().join("docs/contact.md"),
+        b"contact alice@example.com please",
+    );
+    write(&src.path().join("docs/net.md"), b"server at 192.168.1.42");
+
+    let scanner = RegexBasicScanner::new(&[]).expect("builtin patterns must compile");
+    let mut warn_buf: Vec<u8> = Vec::new();
+    let summary =
+        sync_with_scanner_into(src.path(), raw.path(), &scanner, &mut warn_buf).unwrap();
+
+    let warn_text = String::from_utf8(warn_buf).expect("warn output should be valid UTF-8");
+    let warn_lines: Vec<&str> = warn_text.lines().filter(|l| !l.is_empty()).collect();
+
+    // Three input matches → three warning lines, all with the canonical prefix.
+    assert_eq!(
+        warn_lines.len(),
+        3,
+        "expected 3 pii warn lines, got: {warn_lines:?}"
+    );
+    for line in &warn_lines {
+        assert!(
+            line.starts_with("pii warn:"),
+            "line should start with 'pii warn:': {line}"
+        );
+    }
+
+    // Each pattern_name appears in at least one line.
+    assert!(
+        warn_lines.iter().any(|l| l.contains("aws-access-key")),
+        "missing aws-access-key in {warn_lines:?}"
+    );
+    assert!(
+        warn_lines.iter().any(|l| l.contains("email")),
+        "missing email in {warn_lines:?}"
+    );
+    assert!(
+        warn_lines.iter().any(|l| l.contains("ipv4")),
+        "missing ipv4 in {warn_lines:?}"
+    );
+
+    // Each path appears in its respective warning line.
+    assert!(
+        warn_lines.iter().any(|l| l.contains("src/aws.py")),
+        "missing src/aws.py path in {warn_lines:?}"
+    );
+    assert!(
+        warn_lines.iter().any(|l| l.contains("docs/contact.md")),
+        "missing docs/contact.md path in {warn_lines:?}"
+    );
+    assert!(
+        warn_lines.iter().any(|l| l.contains("docs/net.md")),
+        "missing docs/net.md path in {warn_lines:?}"
+    );
+
+    // matched_text MUST NOT appear in warning output (redaction intent).
+    assert!(
+        !warn_text.contains("AKIAIOSFODNN7EXAMPLE"),
+        "AWS key literal leaked into warn output: {warn_text}"
+    );
+    assert!(
+        !warn_text.contains("alice@example.com"),
+        "email literal leaked into warn output: {warn_text}"
+    );
+    assert!(
+        !warn_text.contains("192.168.1.42"),
+        "ipv4 literal leaked into warn output: {warn_text}"
+    );
+
+    // Files are still mirrored unchanged (Warn on-hit policy).
+    assert!(raw.path().join("src/aws.py").exists());
+    assert!(raw.path().join("docs/contact.md").exists());
+    assert!(raw.path().join("docs/net.md").exists());
+
+    // Summary aggregates total match count.
+    assert_eq!(summary.pii_matches, 3);
 }
 
 // ===== Source Repo .gitignore Mutation =====
@@ -269,7 +359,7 @@ fn manifest_source_signal_handles_git_repo() {
     let head_content = "ref: refs/heads/main\n";
     fs::write(tmp.path().join(".git/HEAD"), head_content).unwrap();
 
-    let summary = SyncSummary { files: 5, bytes: 500 };
+    let summary = SyncSummary { files: 5, bytes: 500, pii_matches: 0 };
     let signal = compute_source_signal(tmp.path(), &summary);
     assert_eq!(signal.git_head.as_deref(), Some(head_content));
     assert_eq!(signal.file_count, 5);
@@ -279,7 +369,7 @@ fn manifest_source_signal_handles_git_repo() {
 #[test]
 fn manifest_source_signal_handles_non_git_dir() {
     let tmp = TempDir::new().unwrap();
-    let summary = SyncSummary { files: 3, bytes: 100 };
+    let summary = SyncSummary { files: 3, bytes: 100, pii_matches: 0 };
     let signal = compute_source_signal(tmp.path(), &summary);
     assert!(signal.git_head.is_none());
     assert_eq!(signal.file_count, 3);

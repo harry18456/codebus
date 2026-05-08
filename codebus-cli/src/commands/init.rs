@@ -2,12 +2,13 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
+use codebus_core::pii::scanners::regex_basic::RegexBasicScanner;
 use codebus_core::schema::NEUTRAL_RULES;
 use codebus_core::skill_bundle::{self, BundleOutcome};
 use codebus_core::vault::layout::create_vault_layout;
 use codebus_core::vault::manifest::{self, ManifestOutcome};
 use codebus_core::vault::obsidian_register::{self, RegisterOutcome};
-use codebus_core::vault::raw_sync::sync_with_null_scanner;
+use codebus_core::vault::raw_sync::sync_with_scanner;
 use codebus_core::vault::sanity_check::check_repo_is_not_vault;
 use codebus_core::vault::source_gitignore::{self, GitignoreOutcome};
 
@@ -36,7 +37,14 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
     }
     println!("✓ vault layout: {}", paths.root.display());
 
-    let summary = match sync_with_null_scanner(repo, &paths.raw_code) {
+    let scanner = match RegexBasicScanner::new(&[]) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: pii scanner init: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let summary = match sync_with_scanner(repo, &paths.raw_code, &scanner) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: raw mirror: {e}");
@@ -45,16 +53,17 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
     };
     if debug {
         eprintln!(
-            "[debug] raw_sync: walked {} → {}, mirrored {} files / {} bytes",
+            "[debug] raw_sync: walked {} → {}, mirrored {} files / {} bytes / {} PII matches",
             repo.display(),
             paths.raw_code.display(),
             summary.files,
-            summary.bytes
+            summary.bytes,
+            summary.pii_matches
         );
     }
     println!(
-        "✓ raw mirror: {} files, {} bytes",
-        summary.files, summary.bytes
+        "✓ raw mirror: {} files, {} bytes, {} PII matches",
+        summary.files, summary.bytes, summary.pii_matches
     );
 
     match source_gitignore::ensure_codebus_in_gitignore(repo) {
