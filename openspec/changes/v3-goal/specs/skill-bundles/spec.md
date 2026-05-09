@@ -32,3 +32,15 @@ The other two bundles (`codebus-query/SKILL.md`, `codebus-fix/SKILL.md`) SHALL r
 
 - **WHEN** init runs against a repository with no existing skill bundles
 - **THEN** the resulting `<repo>/.codebus/.claude/skills/codebus-query/SKILL.md` SHALL retain stub workflow content (no five-step ingest expansion) AND `<repo>/.codebus/.claude/skills/codebus-fix/SKILL.md` SHALL likewise retain stub workflow content
+
+#### Scenario: codebus-goal workflow body is written in English
+
+- **WHEN** init writes the goal bundle SKILL.md
+- **THEN** the workflow body (everything under the `## Workflow` heading through end of file) SHALL be written in English: it SHALL NOT contain any character in the CJK Unified Ideographs block (Unicode range U+4E00 through U+9FFF), with the exception of file path components or wikilink slugs that remain ASCII anyway
+
+#### Scenario: Step 5 instruction is abstract, not a literal output template
+
+- **WHEN** init writes the goal bundle SKILL.md
+- **THEN** the workflow body's step 5 SHALL describe the desired stdout summary's shape (count of created vs modified pages, language matching the goal text) without including any literal sample summary phrase that the agent could copy verbatim into stdout
+- **AND** the step 5 instruction SHALL reference the cwd `CLAUDE.md` Language Policy as the source of truth for the output language
+- **AND** the step 5 instruction SHALL include an explicit directive that the agent MUST NOT copy phrasing from this SKILL.md verbatim into the stdout summary

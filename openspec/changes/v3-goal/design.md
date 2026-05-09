@@ -159,6 +159,23 @@ When this skill is activated, follow these 5 steps in order:
 - schema rules 仍 by-reference 引用 cwd `CLAUDE.md`（[skill_bundle/mod.rs:73](file:///D:/side_project/codebus/codebus-core/src/skill_bundle/mod.rs) 既有）
 - 不違反 [anti-pattern #2「Schema 不雙投遞」](file:///D:/side_project/codebus/docs/v3-roadmap.md)
 
+### SKILL.md 內容全英 (internal surface)
+
+`codebus-goal/SKILL.md` 的 body 內容（特別是 `## Workflow` 5-step instructions）SHALL 全英文。SKILL.md 是 agent 讀的 instruction context — 是「internal surface」per vault `CLAUDE.md` §0 Language Policy「Internal surfaces (English)」條款；不是 user-facing surface。Step 5 的 instruction SHALL 是 abstract 描述（描述 desired output shape），不寫字面 template 字串可被 agent literal-copy。
+
+**Rationale**（2026-05-09 smoke 4-language 驗證後 ingested）：
+
+- 2026-05-09 smoke 日文 case 暴露 bug：當 step 5 寫字面中文 template「`本次新增 N page、修改 M page`」，agent 對中文 goal 直接 emit literal、對英 / 韓 goal 翻譯成對應語言、**但對日文 goal 偶爾 honor literal、把中文 emit 進 stdout** — 中文 phrase leak 進 user-facing surface
+- 根因不是「日文 specific bug」而是「字面 template + 跨語言推論不一致」的 system-level 問題 — 字面 phrase 給 agent 一個 anchor，某些語言碰到時推論偏向 literal-copy
+- Fix 是 abstract instruction：描述「emit one short stdout line stating count of created vs modified pages, in goal's language per `CLAUDE.md` §0; do NOT copy phrasing from this SKILL.md verbatim」，agent 沒 literal anchor 自然會 follow §0 翻譯
+- 同時把 SKILL.md 整份 workflow body 全英化（既有英文骨架 + workflow body 中文 → 全英），跟 §0 Language Policy 的 internal surface 條款一致，順帶省 token（英文 token 密度高於 CJK）
+
+**Alternatives considered:**
+
+- (A) 對 step 5 加 4 個 language template（中 / 英 / 日 / 韓 各一）：不可擴展、其他語言（西語 / 葡語 / 法語等）仍漏
+- (B) 留中文 SKILL.md + 在 §0 加「internal instruction 可含中文，agent 應 ignore literal language」：依賴 agent 高階推論，不可靠
+- (C) 改全部 SKILL.md template 字面為中文：擴大 leak 而非減少；不省 token
+
 ## Risks / Trade-offs
 
 - [Risk] integration test mock binary 跨平台寫法（Windows .bat vs Unix shebang）→ Mitigation：mock 用 Rust 寫一個 tiny test binary（cargo test 編譯時自動產出），跨平台 portable，不靠 shell script

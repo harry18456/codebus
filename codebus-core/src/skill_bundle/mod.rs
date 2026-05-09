@@ -103,23 +103,33 @@ fn workflow_section(verb: &str) -> String {
     }
 }
 
-/// 5-step ingest workflow for the goal verb. Schema rules deliberately stay
-/// in `CLAUDE.md` (cwd-relative); this section orchestrates the ingest dance
-/// only. Step 2 enumerates the five taxonomy folder names so the agent knows
-/// where pages go, but type definitions are not duplicated here.
-const GOAL_WORKFLOW: &str = "## Workflow (per-goal ingest)\n\
-\n\
-When this skill is activated, follow these 5 steps in order:\n\
-\n\
-1. **探索 raw**：用 Glob / Read 掃 `raw/code/` 找跟 goal 相關的源碼。不需要把所有檔讀完整 — 抓 entry / module 級別的核心結構即可。\n\
-\n\
-2. **規劃 page**：對照 `wiki/` 內現有的 page，規劃哪些要新建、哪些要 update。Page 落點是五個 taxonomy 資料夾：`concepts/`、`entities/`、`modules/`、`processes/`、`synthesis/`；每個資料夾對應的 page type 定義讀 cwd 的 `CLAUDE.md`。\n\
-\n\
-3. **寫 frontmatter + body**：每個新 page 必須含 frontmatter（taxonomy / sources / 等）以及 body 文字內容。Frontmatter 必填欄位與格式讀 `CLAUDE.md`，本 SKILL.md 不重複定義。\n\
-\n\
-4. **建立 wikilinks**：page 之間用 `[[other-page]]` 雙方括號連結。連到既有 page 時用對方的 filename（不含路徑），跨資料夾解析由 schema 規範處理。\n\
-\n\
-5. **結尾摘要**：印一行簡短的 `本次新增 N page、修改 M page` 摘要到 stdout，讓 binary 端的 user 看到結果。\n";
+/// 5-step ingest workflow for the goal verb. SKILL.md is an "internal surface"
+/// (consumed by the agent, not by the user) per the vault `CLAUDE.md` §0
+/// Language Policy → workflow body stays in English to keep token cost
+/// compact and prevent literal phrases from leaking into user-facing
+/// surfaces. Step 5 deliberately avoids any literal sample summary string
+/// the agent could copy verbatim; it describes the desired output shape and
+/// defers the output language to `CLAUDE.md` §0.
+///
+/// Schema rules (taxonomy definitions, frontmatter format, wikilink
+/// resolution) stay in `CLAUDE.md` (cwd-relative); this section
+/// orchestrates the ingest dance only. Step 2 enumerates the five taxonomy
+/// folder names so the agent knows where pages go, but type definitions
+/// are not duplicated here.
+const GOAL_WORKFLOW: &str = "## Workflow (per-goal ingest)
+
+When this skill is activated, follow these 5 steps in order:
+
+1. **Explore raw**: use Glob / Read on `raw/code/` to locate sources relevant to the goal. Do not read every file end-to-end — scan entry / module-level structure.
+
+2. **Plan pages**: cross-reference existing pages under `wiki/`. Decide which pages to create vs update. Page placements live under five taxonomy folders: `concepts/`, `entities/`, `modules/`, `processes/`, `synthesis/`; each folder's page-type definition lives in cwd `CLAUDE.md`.
+
+3. **Write frontmatter + body**: every new page MUST carry frontmatter (taxonomy / sources / etc.) and a body. Frontmatter required fields and format come from `CLAUDE.md`; this SKILL.md does not duplicate them.
+
+4. **Build wikilinks**: link pages with `[[other-page]]`. When linking to an existing page use that page's filename only (no path); cross-folder resolution is handled by the schema convention.
+
+5. **Print closing summary**: emit ONE short stdout line stating how many pages were created vs how many were modified in this run. Phrase the line in the same natural language as the goal text per the §0 Language Policy in cwd `CLAUDE.md` (so a goal in Japanese gets a Japanese summary, a goal in English gets an English one, etc.). The agent MUST NOT copy phrasing from this SKILL.md verbatim into the stdout summary; this paragraph describes the output shape only and is not itself a template.
+";
 
 #[cfg(test)]
 mod tests {
@@ -228,5 +238,63 @@ mod tests {
         assert!(s.contains("skills"));
         assert!(s.contains("codebus-goal"));
         assert!(s.ends_with("SKILL.md"));
+    }
+
+    #[test]
+    fn goal_workflow_body_is_english() {
+        // Spec scenario: codebus-goal workflow body is written in English.
+        // Internal surface per CLAUDE.md §0 Language Policy → no CJK
+        // Unified Ideographs (U+4E00..U+9FFF) anywhere in the body.
+        let body = stub_content("goal");
+        let cjk: Vec<char> = body
+            .chars()
+            .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
+            .collect();
+        assert!(
+            cjk.is_empty(),
+            "goal SKILL.md body must not contain CJK ideographs, found {} (first 10: {:?})",
+            cjk.len(),
+            cjk.iter().take(10).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn goal_step_5_has_no_literal_summary_template() {
+        // Spec scenario: step 5 instruction is abstract, not a literal
+        // output template. The body MUST NOT contain canned summary
+        // phrases the agent could copy verbatim into stdout, MUST
+        // reference CLAUDE.md as the language source-of-truth, AND MUST
+        // include an explicit "do not copy verbatim" directive.
+        let body = stub_content("goal");
+
+        // Forbidden literal sample phrases that the agent could parrot
+        // into the user-facing stdout summary. v3-goal smoke (2026-05-09)
+        // showed that any such literal — Chinese, Japanese, Korean, or
+        // English — leaks to the wrong audience for some goal language.
+        let forbidden_literals = [
+            "Added N pages",
+            "Added 4 pages",
+            "modified 0 pages",
+            "created N pages",
+            "\u{672C}\u{6B21}\u{65B0}\u{589E}",       // 本次新增 (Chinese)
+            "\u{30DA}\u{30FC}\u{30B8}\u{3092}\u{8FFD}\u{52A0}", // ページを追加 (Japanese)
+            "\u{C774}\u{BC88}\u{C5D0}\u{20}\u{C0C8}\u{B85C}",  // 이번에 새로 (Korean)
+        ];
+        for phrase in forbidden_literals {
+            assert!(
+                !body.contains(phrase),
+                "goal SKILL.md body contains literal summary template `{phrase}` — step 5 must be abstract"
+            );
+        }
+
+        // Required references.
+        assert!(
+            body.contains("CLAUDE.md"),
+            "step 5 must reference CLAUDE.md as the language source-of-truth"
+        );
+        assert!(
+            body.contains("verbatim"),
+            "step 5 must include an explicit `verbatim` warning that agents must not copy from this SKILL.md"
+        );
     }
 }
