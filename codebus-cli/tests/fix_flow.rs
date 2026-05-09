@@ -142,7 +142,12 @@ fn fix_inherits_session_id_flag_in_spawn() {
 }
 
 #[test]
-fn fix_spawn_includes_bash_codebus_lint_whitelist() {
+fn fix_spawn_uses_bare_bash_in_tools_and_restricted_in_allowed_tools() {
+    // Per claude --help v2.1.137 spike: --tools needs the bare `Bash`
+    // token (toolset hard-gate) for the agent to have Bash at all; the
+    // fine-grained `Bash(codebus lint *)` pattern belongs in --allowedTools
+    // (auto-approval scope). Mixing them up results in "no Bash tool"
+    // from the agent OR unrestricted Bash auto-approval.
     let tmp = TempDir::new().unwrap();
     assert!(run_init(tmp.path()).status.success());
     write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
@@ -151,14 +156,21 @@ fn fix_spawn_includes_bash_codebus_lint_whitelist() {
     let log = tmp.path().join("mock-claude.log");
     assert!(log.exists(), "agent should have been spawned");
     let body = fs::read_to_string(&log).unwrap();
-    // Toolset CSV must include Bash(codebus lint *) in both --tools and --allowedTools.
     let arg_lines: Vec<String> = body.lines().filter_map(|l| l.strip_prefix("arg=").map(String::from)).collect();
-    let bash_count = arg_lines
-        .iter()
-        .filter(|a| a.contains("Bash(codebus lint *)"))
-        .count();
-    assert!(
-        bash_count >= 2,
-        "expected Bash(codebus lint *) in both --tools and --allowedTools (count >= 2), got {bash_count} in {arg_lines:?}"
-    );
+
+    // Find the value that follows --tools and the value that follows --allowedTools.
+    let tools_idx = arg_lines.iter().position(|a| a == "--tools").expect("--tools flag missing");
+    let allowed_idx = arg_lines.iter().position(|a| a == "--allowedTools").expect("--allowedTools flag missing");
+    let tools_val = arg_lines.get(tools_idx + 1).expect("--tools value missing");
+    let allowed_val = arg_lines.get(allowed_idx + 1).expect("--allowedTools value missing");
+
+    // --tools must contain bare Bash and NOT contain the restriction.
+    assert!(tools_val.contains(",Bash") || tools_val == "Bash" || tools_val.starts_with("Bash,"),
+        "--tools value missing bare `Bash`: `{tools_val}`");
+    assert!(!tools_val.contains("Bash("),
+        "--tools value should not contain the Bash(...) restriction: `{tools_val}`");
+
+    // --allowedTools must contain the restriction pattern.
+    assert!(allowed_val.contains("Bash(codebus lint *)"),
+        "--allowedTools missing Bash(codebus lint *) restriction: `{allowed_val}`");
 }

@@ -65,15 +65,16 @@ pub struct InvokeAgentOptions {
 pub fn invoke(opts: InvokeAgentOptions) -> io::Result<ExitStatus> {
     let claude_bin = std::env::var("CODEBUS_CLAUDE_BIN")
         .unwrap_or_else(|_| "claude".to_string());
-    let toolset_csv = build_toolset_csv(opts.toolset, opts.bash_whitelist);
+    let tools_csv = build_tools_csv(opts.toolset, opts.bash_whitelist);
+    let allowed_tools_csv = build_allowed_tools_csv(opts.toolset, opts.bash_whitelist);
 
     let mut cmd = Command::new(&claude_bin);
     cmd.arg("-p")
         .arg(&opts.slash_command)
         .arg("--tools")
-        .arg(&toolset_csv)
+        .arg(&tools_csv)
         .arg("--allowedTools")
-        .arg(&toolset_csv)
+        .arg(&allowed_tools_csv)
         .arg("--permission-mode")
         .arg("acceptEdits");
 
@@ -95,11 +96,33 @@ pub fn invoke(opts: InvokeAgentOptions) -> io::Result<ExitStatus> {
         .status()
 }
 
-/// Compose the `--tools` / `--allowedTools` value string. Toolset names join
-/// with `,`; if `bash_whitelist` is supplied, append it after a comma so
-/// callers can opt-in to a fine-grained Bash specifier (e.g.
-/// `Bash(codebus lint *)`) without affecting the toolset slice itself.
-pub(crate) fn build_toolset_csv(
+/// Compose the `--tools` value: bare tool names (the toolset hard-gate).
+/// When `bash_whitelist` is supplied, the bare `Bash` token is added to
+/// the toolset so the agent has Bash in its toolset; the restriction
+/// pattern itself goes into `--allowedTools` (see [`build_allowed_tools_csv`]).
+///
+/// Spike-verified 2026-05-09 against `claude --help` v2.1.137: passing
+/// `Bash(codebus lint *)` to `--tools` does NOT grant Bash access — the
+/// agent reports "no Bash tool available". The fine-grained pattern only
+/// belongs in `--allowedTools` (or settings.json `permissions.allow`).
+pub(crate) fn build_tools_csv(
+    toolset: &[&str],
+    bash_whitelist: Option<&str>,
+) -> String {
+    let mut parts: Vec<&str> = toolset.to_vec();
+    if bash_whitelist.is_some() {
+        parts.push("Bash");
+    }
+    parts.join(",")
+}
+
+/// Compose the `--allowedTools` value: bare tool names (auto-approval) plus
+/// any fine-grained permission specifiers. When `bash_whitelist` is supplied,
+/// only the restricted pattern (e.g. `Bash(codebus lint *)`) is included —
+/// not the bare `Bash` — so commands outside the pattern still trigger the
+/// permission prompt (which fails in `-p` non-interactive mode, denying
+/// the unwanted Bash invocation).
+pub(crate) fn build_allowed_tools_csv(
     toolset: &[&str],
     bash_whitelist: Option<&str>,
 ) -> String {
@@ -139,14 +162,34 @@ mod tests {
     }
 
     #[test]
-    fn build_toolset_csv_no_bash_whitelist() {
-        let csv = build_toolset_csv(&["Read", "Glob", "Grep"], None);
+    fn build_tools_csv_no_bash_whitelist() {
+        let csv = build_tools_csv(&["Read", "Glob", "Grep"], None);
         assert_eq!(csv, "Read,Glob,Grep");
     }
 
     #[test]
-    fn build_toolset_csv_appends_bash_whitelist() {
-        let csv = build_toolset_csv(
+    fn build_tools_csv_appends_bare_bash_when_whitelist_supplied() {
+        // Spec: --tools value gets the bare `Bash` token so the agent has
+        // Bash in its toolset; the fine-grained restriction goes in
+        // --allowedTools, not here.
+        let csv = build_tools_csv(
+            &["Read", "Glob", "Grep", "Write", "Edit"],
+            Some("Bash(codebus lint *)"),
+        );
+        assert_eq!(csv, "Read,Glob,Grep,Write,Edit,Bash");
+    }
+
+    #[test]
+    fn build_allowed_tools_csv_no_bash_whitelist() {
+        let csv = build_allowed_tools_csv(&["Read", "Glob", "Grep"], None);
+        assert_eq!(csv, "Read,Glob,Grep");
+    }
+
+    #[test]
+    fn build_allowed_tools_csv_appends_restricted_bash_pattern() {
+        // Spec: --allowedTools gets the fine-grained pattern so
+        // auto-approval is scoped to `codebus lint *` only.
+        let csv = build_allowed_tools_csv(
             &["Read", "Glob", "Grep", "Write", "Edit"],
             Some("Bash(codebus lint *)"),
         );
@@ -154,9 +197,18 @@ mod tests {
     }
 
     #[test]
-    fn build_toolset_csv_bash_whitelist_only() {
-        let csv = build_toolset_csv(&[], Some("Bash(codebus lint *)"));
-        assert_eq!(csv, "Bash(codebus lint *)");
+    fn build_csvs_diverge_on_bash_when_whitelist_supplied() {
+        // Critical invariant: --tools gets bare `Bash`, --allowedTools
+        // gets restricted `Bash(...)`. They MUST differ when a whitelist
+        // is supplied — otherwise either Bash is denied (no bare token in
+        // --tools) or auto-approved unrestrictedly (bare Bash in --allowedTools).
+        let toolset = &["Read", "Glob", "Grep", "Write", "Edit"];
+        let whitelist = Some("Bash(codebus lint *)");
+        let tools = build_tools_csv(toolset, whitelist);
+        let allowed = build_allowed_tools_csv(toolset, whitelist);
+        assert_ne!(tools, allowed);
+        assert!(tools.ends_with(",Bash"));
+        assert!(allowed.ends_with(",Bash(codebus lint *)"));
     }
 
     #[test]
