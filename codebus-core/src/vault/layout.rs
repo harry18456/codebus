@@ -79,9 +79,12 @@ mod tests {
     fn create_vault_layout_does_not_create_v2_legacy_paths() {
         let tmp = TempDir::new().unwrap();
         let p = create_vault_layout(tmp.path()).unwrap();
+        // v2 carved-out paths that v3 still rejects. Note: `.git/` is
+        // intentionally NOT in this list — v3-vault-history (#4) flipped
+        // the policy: nested git is created by init.rs, not by
+        // create_vault_layout. layout itself only owns the 7 subdirs.
         assert!(!p.root.join("output").exists(), "v2 output/ must not exist");
         assert!(!p.root.join("goals.jsonl").exists(), "v2 goals.jsonl must not exist");
-        assert!(!p.root.join(".git").exists(), "nested .git/ must not exist");
     }
 
     #[test]

@@ -1,8 +1,29 @@
-use std::process::Command;
+use std::path::Path;
+use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_codebus");
+
+/// Run `codebus init --no-obsidian-register` against `repo` and return the
+/// captured Output plus the resolved vault root path. Used by v3-vault-history
+/// integration tests to drive end-to-end init and inspect resulting vault.
+fn run_init(repo: &Path) -> Output {
+    Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .current_dir(repo)
+        .output()
+        .expect("run codebus init")
+}
+
+/// Run `git -C <vault> <args>` and return its Output. Caller asserts.
+fn git(vault: &Path, args: &[&str]) -> Output {
+    Command::new("git")
+        .args(args)
+        .current_dir(vault)
+        .output()
+        .expect("run git")
+}
 
 // === Subcommand Registration ===
 
@@ -185,6 +206,151 @@ fn init_progress_line_reports_nonzero_pii_count_for_repo_with_secrets() {
     assert!(
         stderr.contains("pii warn:") && stderr.contains("aws-access-key"),
         "stderr should contain pii warn for aws-access-key, got: {stderr}"
+    );
+}
+
+// === Vault Nested Git + First Commit (v3-vault-history) ===
+
+#[test]
+fn nested_git_repo_present_with_codebus_identity_after_init() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("README.md"), b"hello").unwrap();
+    let out = run_init(tmp.path());
+    assert!(
+        out.status.success(),
+        "init should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let vault = tmp.path().join(".codebus");
+    assert!(vault.join(".git").is_dir(), "missing .codebus/.git/");
+
+    let email = git(&vault, &["config", "--get", "user.email"]);
+    assert!(email.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&email.stdout).trim(),
+        "codebus@local"
+    );
+
+    let name = git(&vault, &["config", "--get", "user.name"]);
+    assert!(name.status.success());
+    assert_eq!(String::from_utf8_lossy(&name.stdout).trim(), "codebus");
+}
+
+#[test]
+fn init_produces_canonical_init_commit() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("README.md"), b"hello").unwrap();
+    let out = run_init(tmp.path());
+    assert!(out.status.success());
+
+    let vault = tmp.path().join(".codebus");
+
+    // Latest commit message exactly matches the canonical init message.
+    let log = git(&vault, &["log", "--pretty=%s", "-1"]);
+    assert!(log.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&log.stdout).trim(),
+        "init: codebus vault"
+    );
+
+    // Working tree clean after init's auto_commit.
+    let porcelain = git(&vault, &["status", "--porcelain"]);
+    assert!(porcelain.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&porcelain.stdout).trim(),
+        "",
+        "expected clean working tree after init auto_commit"
+    );
+
+    // Tree contains CLAUDE.md and manifest.yaml.
+    let ls_tree = git(&vault, &["ls-tree", "-r", "HEAD", "--name-only"]);
+    assert!(ls_tree.status.success());
+    let tree = String::from_utf8_lossy(&ls_tree.stdout);
+    let entries: Vec<&str> = tree.lines().collect();
+    assert!(
+        entries.iter().any(|l| *l == "CLAUDE.md"),
+        "tree missing CLAUDE.md: {entries:?}"
+    );
+    assert!(
+        entries.iter().any(|l| *l == "manifest.yaml"),
+        "tree missing manifest.yaml: {entries:?}"
+    );
+
+    // raw/code/ paths excluded by internal .gitignore.
+    assert!(
+        !entries.iter().any(|l| l.starts_with("raw/code/")),
+        "raw/code/ leaked into nested commit: {entries:?}"
+    );
+}
+
+#[test]
+fn re_init_preserves_user_modified_git_config() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("README.md"), b"hello").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+
+    let vault = tmp.path().join(".codebus");
+
+    // Simulate user override of nested repo identity.
+    let set = git(
+        &vault,
+        &["config", "user.email", "alice@example.com"],
+    );
+    assert!(set.status.success());
+
+    // Re-init: nested repo already exists, init_nested_repo SHALL be a no-op.
+    let out2 = run_init(tmp.path());
+    assert!(out2.status.success(), "re-init should succeed");
+
+    let email = git(&vault, &["config", "--get", "user.email"]);
+    assert_eq!(
+        String::from_utf8_lossy(&email.stdout).trim(),
+        "alice@example.com",
+        "re-init must not overwrite user-modified user.email"
+    );
+}
+
+#[test]
+fn internal_gitignore_appends_missing_required_lines() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("README.md"), b"hello").unwrap();
+    // Pre-seed .codebus/.gitignore with two lines (one required, one user-added).
+    let vault = tmp.path().join(".codebus");
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join(".gitignore"), b".lock\nnotes/\n").unwrap();
+
+    let out = run_init(tmp.path());
+    assert!(
+        out.status.success(),
+        "init should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let body = std::fs::read_to_string(vault.join(".gitignore")).unwrap();
+    let lines: Vec<&str> = body.lines().collect();
+    // Original two lines preserved at front in original order.
+    assert_eq!(lines[0], ".lock", "first line preserved: {body:?}");
+    assert_eq!(lines[1], "notes/", "second line preserved: {body:?}");
+    // Three missing required lines appended in declared order
+    // (raw/code/, **/.obsidian/, logs/).
+    assert!(
+        lines.contains(&"raw/code/"),
+        "missing raw/code/ line: {body:?}"
+    );
+    assert!(
+        lines.contains(&"**/.obsidian/"),
+        "missing **/.obsidian/ line: {body:?}"
+    );
+    assert!(
+        lines.contains(&"logs/"),
+        "missing logs/ line: {body:?}"
+    );
+    // User-added `notes/` not duplicated.
+    assert_eq!(
+        lines.iter().filter(|l| **l == "notes/").count(),
+        1,
+        "notes/ duplicated: {body:?}"
     );
 }
 

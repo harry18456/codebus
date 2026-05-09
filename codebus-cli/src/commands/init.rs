@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
+use codebus_core::git::{auto_commit, init_nested_repo};
 use codebus_core::pii::scanners::regex_basic::RegexBasicScanner;
 use codebus_core::schema::NEUTRAL_RULES;
 use codebus_core::skill_bundle::{self, BundleOutcome};
@@ -11,6 +12,14 @@ use codebus_core::vault::obsidian_register::{self, RegisterOutcome};
 use codebus_core::vault::raw_sync::sync_with_scanner;
 use codebus_core::vault::sanity_check::check_repo_is_not_vault;
 use codebus_core::vault::source_gitignore::{self, GitignoreOutcome};
+
+/// Required lines in the vault-internal `.codebus/.gitignore`. Excluding these
+/// from nested git tracking keeps each `auto_commit` snapshot focused on
+/// wiki evolution: `.lock` is per-process file lock state; `raw/code/` is
+/// already tracked via source repo's git so duplicate-tracking it here
+/// would noise every commit; `**/.obsidian/` is editor-local config user
+/// shouldn't see in vault diff; `logs/` is verb invocation log noise.
+const INTERNAL_GITIGNORE_LINES: &[&str] = &[".lock", "raw/code/", "**/.obsidian/", "logs/"];
 
 pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCode {
     if debug {
@@ -64,6 +73,40 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
     println!(
         "✓ raw mirror: {} files, {} bytes, {} PII matches",
         summary.files, summary.bytes, summary.pii_matches
+    );
+
+    if let Err(e) = merge_internal_gitignore(&paths.root) {
+        eprintln!("error: vault internal .gitignore: {e}");
+        return ExitCode::from(1);
+    }
+    if debug {
+        eprintln!(
+            "[debug] vault internal .gitignore: ensured {} required lines at {}",
+            INTERNAL_GITIGNORE_LINES.len(),
+            paths.root.join(".gitignore").display()
+        );
+    }
+    println!("✓ vault internal .gitignore: ensured");
+
+    let already_initialized = paths.root.join(".git").exists();
+    if let Err(e) = init_nested_repo(&paths.root) {
+        eprintln!("error: vault git init: {e}");
+        return ExitCode::from(1);
+    }
+    if debug {
+        eprintln!(
+            "[debug] vault git: nested repo at {} ({})",
+            paths.root.join(".git").display(),
+            if already_initialized { "preserved" } else { "initialized" }
+        );
+    }
+    println!(
+        "✓ vault git: {}",
+        if already_initialized {
+            "already initialized"
+        } else {
+            "nested repo initialized"
+        }
     );
 
     match source_gitignore::ensure_codebus_in_gitignore(repo) {
@@ -149,8 +192,56 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
         eprintln!("[debug] obsidian: skipped (--no-obsidian-register)");
     }
 
+    let head_sha = match auto_commit(&paths.root, "init: codebus vault") {
+        Ok(sha) => sha,
+        Err(e) => {
+            eprintln!("error: vault git auto-commit: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let sha7: String = head_sha.chars().take(7).collect();
+    if debug {
+        eprintln!("[debug] vault git: HEAD now {head_sha}");
+    }
+    println!("✓ vault git: committed {sha7} \"init: codebus vault\"");
+
     println!("✓ codebus init complete");
     ExitCode::SUCCESS
+}
+
+/// Ensure `.codebus/.gitignore` contains every entry in [`INTERNAL_GITIGNORE_LINES`],
+/// preserving any existing content (including user-added lines). Missing
+/// required lines are appended in declared order.
+fn merge_internal_gitignore(vault_root: &Path) -> std::io::Result<()> {
+    let path = vault_root.join(".gitignore");
+    let existing = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err),
+    };
+
+    let present: std::collections::HashSet<&str> =
+        existing.lines().map(str::trim).collect();
+    let missing: Vec<&&str> = INTERNAL_GITIGNORE_LINES
+        .iter()
+        .filter(|l| !present.contains(*l as &str))
+        .collect();
+
+    // Fast path: file exists and already has every required line — no write.
+    if missing.is_empty() && !existing.is_empty() {
+        return Ok(());
+    }
+
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for line in missing {
+        out.push_str(line);
+        out.push('\n');
+    }
+    fs::write(&path, out)?;
+    Ok(())
 }
 
 fn write_schema_if_missing(schema_md: &Path) -> std::io::Result<bool> {
