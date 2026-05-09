@@ -359,165 +359,72 @@ tests:
 ---
 ### Requirement: Fix SKILL.md Atomic Contract
 
-The `codebus-fix` SKILL.md content authored by `codebus init` SHALL define the agent's task as atomic: receive a set of lint issues (either from invoking `codebus lint --format json` or from prompt context), repair the corresponding `wiki/` files, and exit. The SKILL.md SHALL NOT prescribe a multi-iteration loop; loop control SHALL belong to the caller (the CLI fix subcommand or the user invoking the skill manually).
+The `codebus-fix` SKILL.md content authored by `codebus init` SHALL describe the fix workflow as a self-directed repair flow (the requirement keeps its v3-lint heading for spec stability, but its content is fully rewritten — the original "atomic contract" semantics are removed). The agent is invoked once, has access to `Read`, `Glob`, `Grep`, `Write`, `Edit`, and a restricted `Bash` (only `codebus lint *` permitted by the PreToolUse hook), and SHALL repair the wiki content. The agent SHALL freely invoke `codebus lint --format json` as needed to obtain or re-check the issue list within its session; the SKILL.md SHALL NOT prescribe a maximum iteration count, a single-round atomic contract, or a prohibition on internal lint loops.
 
-The SKILL.md SHALL instruct the agent to invoke `codebus lint --format json` to retrieve issues when no issues are present in the prompt context, AND to use the absolute paths in the JSON `issues[].path` field directly without path translation.
+The SKILL.md SHALL instruct the agent to use the absolute paths returned in the lint JSON `issues[].path` field directly with `Read`, `Write`, and `Edit` tools without path translation.
 
-#### Scenario: Fix SKILL.md does not contain loop control language
+The SKILL.md SHALL acknowledge that loop control belongs to the agent itself within its session, and that the `codebus fix` CLI provides only a final post-session lint check as the authoritative success signal — there is no CLI-side iteration outside the single agent spawn.
+
+#### Scenario: Fix SKILL.md does not prescribe a single-round atomic contract
 
 - **WHEN** init writes the codebus-fix SKILL.md
-- **THEN** the body SHALL NOT contain the words `iteration`, `iterate`, `loop`, `retry`, or `again` in any context that prescribes the agent itself to repeat its own work
+- **THEN** the body SHALL NOT contain phrases that prescribe single-round-only semantics — specifically, it SHALL NOT contain the literal substrings `ONE round of repair`, `atomic contract`, or `MUST NOT spawn nested fix invocations or loop internally`
 
 #### Scenario: Fix SKILL.md instructs absolute path usage
 
 - **WHEN** init writes the codebus-fix SKILL.md
 - **THEN** the body SHALL state that paths returned in the lint JSON `issues[].path` field are absolute and SHALL be used directly with Read, Write, and Edit tools
 
+#### Scenario: Fix SKILL.md mentions CLI is the final-only verifier
 
-<!-- @trace
-source: v3-lint
-updated: 2026-05-09
-code:
-  - codebus-core/src/wiki/fix/mod.rs
-  - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/lib.rs
-  - codebus-core/src/wiki/fix/session.rs
-  - codebus-core/src/wiki/lint/locate.rs
-  - codebus-core/src/wiki/lint/rules/root_page.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/agent/claude_cli.rs
-  - codebus-core/src/wiki/lint/rules/missing_nav.rs
-  - codebus-core/src/wiki/lint/rules/broken_wikilink.rs
-  - codebus-cli/Cargo.toml
-  - codebus-cli/src/commands/fix.rs
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/wiki/mod.rs
-  - codebus-core/src/wiki/fix/prompt.rs
-  - codebus-core/src/wiki/lint/rules/duplicate_slug.rs
-  - codebus-core/src/vault/raw_sync.rs
-  - codebus-core/src/wiki/lint/rules/mod.rs
-  - codebus-core/src/wiki/lint/output.rs
-  - codebus-cli/src/commands/query.rs
-  - codebus-cli/src/commands/goal.rs
-  - codebus-core/src/wiki/lint/rules/frontmatter_integrity.rs
-  - codebus-core/src/config/lint_fix.rs
-  - codebus-cli/src/commands/lint.rs
-  - codebus-core/src/wiki/lint/factory.rs
-  - codebus-core/src/wiki/lint/mod.rs
-  - codebus-core/src/agent/mod.rs
-  - codebus-core/src/wiki/frontmatter.rs
-  - codebus-core/src/wiki/lint/rule.rs
-  - codebus-core/src/wiki/types.rs
-tests:
-  - codebus-cli/tests/fix_flow.rs
-  - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/lint_flow.rs
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/cli_routing.rs
--->
-
----
-### Requirement: Fix CLI Outer Ping Loop
-
-The `codebus fix` subcommand and the lint-and-fix phase of the `codebus goal` subcommand SHALL implement a CLI-controlled outer loop with the following structure:
-
-1. Run lint via in-process call. If zero issues, exit success without spawning any agent.
-2. Generate a UUID for this loop session.
-3. Spawn the agentic CLI with `claude -p "/codebus-fix" --session-id <uuid>` and the sandbox specified in the Fix Loop Agent Sandbox requirement.
-4. After the agent process terminates, run lint again.
-5. If the post-lint reports zero issues, terminate successfully.
-6. Otherwise, if the iteration count is below `outer_ping_max`, spawn the agentic CLI with `claude -p "<follow-up-prompt-with-remaining-issues>" --resume <uuid>` and goto step 4.
-7. If `outer_ping_max` is reached and issues still remain, terminate with non-zero status.
-
-The CLI SHALL NOT use the `--continue` flag; session continuity SHALL be achieved exclusively via `--session-id` on first spawn and `--resume <uuid>` on subsequent spawns. The follow-up prompt SHALL include the current list of remaining lint issues serialized into the prompt body.
-
-#### Scenario: Fix loop skips agent entirely when initial lint is clean
-
-- **WHEN** `codebus fix` is invoked against a vault whose lint reports zero issues
-- **THEN** no agentic CLI process SHALL be spawned AND the subcommand SHALL exit with status zero
-
-#### Scenario: Fix loop spawns agent with --session-id on first iteration
-
-- **WHEN** the fix loop reaches its first agent spawn
-- **THEN** the spawned command line SHALL include the flag pair `--session-id <uuid>` for some valid UUID AND SHALL NOT include `--resume`
-
-#### Scenario: Fix loop uses --resume for outer pings
-
-- **WHEN** the fix loop completes its first agent invocation, runs lint, finds remaining issues, and the iteration counter is below `outer_ping_max`
-- **THEN** the next spawned command line SHALL include the flag pair `--resume <uuid>` matching the UUID from the first spawn AND SHALL NOT include `--session-id`
-
-#### Scenario: Fix loop terminates on clean post-lint
-
-- **WHEN** the fix loop runs an agent iteration and the subsequent lint reports zero issues
-- **THEN** the loop SHALL terminate without spawning further agent iterations
-
-#### Scenario: Fix loop respects outer_ping_max cap
-
-- **WHEN** the fix loop has performed `outer_ping_max + 1` total agent invocations (one initial plus `outer_ping_max` pings) and lint still reports issues
-- **THEN** the loop SHALL terminate without spawning further agents AND the `codebus fix` subcommand SHALL exit with non-zero status
+- **WHEN** init writes the codebus-fix SKILL.md
+- **THEN** the body SHALL state that the CLI runs lint after the agent session terminates and uses that result as the authoritative success signal, AND that the agent itself decides when its in-session repair work is complete
 
 
 <!-- @trace
-source: v3-lint
-updated: 2026-05-09
+source: v3-fix-trust-agent
+updated: 2026-05-10
 code:
-  - codebus-core/src/wiki/fix/mod.rs
-  - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/lib.rs
-  - codebus-core/src/wiki/fix/session.rs
-  - codebus-core/src/wiki/lint/locate.rs
-  - codebus-core/src/wiki/lint/rules/root_page.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/agent/claude_cli.rs
-  - codebus-core/src/wiki/lint/rules/missing_nav.rs
-  - codebus-core/src/wiki/lint/rules/broken_wikilink.rs
-  - codebus-cli/Cargo.toml
-  - codebus-cli/src/commands/fix.rs
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/wiki/mod.rs
-  - codebus-core/src/wiki/fix/prompt.rs
-  - codebus-core/src/wiki/lint/rules/duplicate_slug.rs
-  - codebus-core/src/vault/raw_sync.rs
-  - codebus-core/src/wiki/lint/rules/mod.rs
-  - codebus-core/src/wiki/lint/output.rs
   - codebus-cli/src/commands/query.rs
   - codebus-cli/src/commands/goal.rs
-  - codebus-core/src/wiki/lint/rules/frontmatter_integrity.rs
+  - codebus-cli/src/commands/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/agent/claude_cli.rs
+  - codebus-cli/src/commands/fix.rs
+  - codebus-core/src/wiki/fix/mod.rs
+  - codebus-cli/Cargo.toml
+  - codebus-cli/src/commands/hook.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/commands/init.rs
   - codebus-core/src/config/lint_fix.rs
-  - codebus-cli/src/commands/lint.rs
-  - codebus-core/src/wiki/lint/factory.rs
-  - codebus-core/src/wiki/lint/mod.rs
+  - codebus-core/src/wiki/fix/prompt.rs
   - codebus-core/src/agent/mod.rs
-  - codebus-core/src/wiki/frontmatter.rs
-  - codebus-core/src/wiki/lint/rule.rs
-  - codebus-core/src/wiki/types.rs
+  - codebus-core/src/wiki/fix/session.rs
+  - codebus-core/src/vault/settings.rs
 tests:
+  - codebus-core/tests/vault_init.rs
   - codebus-cli/tests/fix_flow.rs
   - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/lint_flow.rs
-  - codebus-core/tests/vault_init.rs
   - codebus-cli/tests/cli_routing.rs
 -->
 
 ---
 ### Requirement: Fix Loop Configuration
 
-The system SHALL load fix loop configuration from `~/.codebus/config.yaml` under the key path `lint.fix`. The schema SHALL define two fields:
+The system SHALL load fix configuration from `~/.codebus/config.yaml` under the key path `lint.fix`. The schema SHALL define exactly one user-tunable field:
 
 - `lint.fix.enabled` (boolean, default `true`) — when `false`, the lint-and-fix phase of `codebus goal` SHALL be skipped entirely; `codebus fix` standalone invocation SHALL exit with status zero and a stderr message indicating fix is disabled.
-- `lint.fix.outer_ping_max` (positive integer, default `2`) — caps the number of CLI outer ping iterations performed after the initial agent invocation.
 
-The CLI SHALL accept two override flags: `--no-fix` (forces `enabled` to `false` for this invocation) and `--fix-max-iter <N>` (overrides `outer_ping_max` to `N` for this invocation, where `N` SHALL be a positive integer). When both flags are present, `--no-fix` SHALL take precedence and `--fix-max-iter` SHALL have no observable effect.
+The CLI SHALL accept exactly one override flag: `--no-fix` (forces `enabled` to `false` for this invocation). The system SHALL NOT recognize a `--fix-max-iter` flag (removed in v3-fix-trust-agent); attempts to pass it SHALL fail at clap argument parsing.
 
-#### Scenario: Default config enables fix with outer_ping_max two
+The system SHALL silently ignore any `lint.fix.outer_ping_max` key found in the config file (forward-compat; legacy v3-lint config files remain readable). The system SHALL NOT use that value to influence runtime behavior.
+
+#### Scenario: Default config enables fix
 
 - **WHEN** `~/.codebus/config.yaml` is missing or has no `lint.fix` section
 - **AND** the user runs `codebus goal "X"` with no override flags
-- **THEN** the goal flow's fix phase SHALL run with `enabled = true` and `outer_ping_max = 2`
+- **THEN** the goal flow's fix phase SHALL run with `enabled = true`
 
 #### Scenario: --no-fix flag disables fix even when config enables it
 
@@ -525,70 +432,54 @@ The CLI SHALL accept two override flags: `--no-fix` (forces `enabled` to `false`
 - **AND** the user runs `codebus goal "X" --no-fix`
 - **THEN** the goal flow SHALL skip the fix phase entirely AND SHALL NOT spawn any fix agent
 
-#### Scenario: --fix-max-iter overrides config outer_ping_max
+#### Scenario: Legacy outer_ping_max key is silently ignored
 
-- **WHEN** `~/.codebus/config.yaml` has `lint.fix.outer_ping_max: 2`
-- **AND** the user runs `codebus goal "X" --fix-max-iter 5`
-- **THEN** the fix loop SHALL use `outer_ping_max = 5` for that invocation
+- **WHEN** `~/.codebus/config.yaml` contains a `lint.fix.outer_ping_max: 10` entry left over from v3-lint
+- **AND** the user runs any verb
+- **THEN** the system SHALL parse the config without error AND SHALL NOT report the unknown key AND the value SHALL have no observable effect on fix behavior
 
-#### Scenario: --no-fix wins when both override flags are present
+#### Scenario: --fix-max-iter is no longer a recognized flag
 
-- **WHEN** the user runs `codebus goal "X" --no-fix --fix-max-iter 5`
-- **THEN** the fix phase SHALL be skipped AND `--fix-max-iter` SHALL have no observable effect
+- **WHEN** the user runs `codebus fix --fix-max-iter 5`
+- **THEN** clap argument parsing SHALL reject the unknown `--fix-max-iter` flag AND the binary SHALL exit with non-zero status
 
 
 <!-- @trace
-source: v3-lint
-updated: 2026-05-09
+source: v3-fix-trust-agent
+updated: 2026-05-10
 code:
-  - codebus-core/src/wiki/fix/mod.rs
-  - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/lib.rs
-  - codebus-core/src/wiki/fix/session.rs
-  - codebus-core/src/wiki/lint/locate.rs
-  - codebus-core/src/wiki/lint/rules/root_page.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/agent/claude_cli.rs
-  - codebus-core/src/wiki/lint/rules/missing_nav.rs
-  - codebus-core/src/wiki/lint/rules/broken_wikilink.rs
-  - codebus-cli/Cargo.toml
-  - codebus-cli/src/commands/fix.rs
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/wiki/mod.rs
-  - codebus-core/src/wiki/fix/prompt.rs
-  - codebus-core/src/wiki/lint/rules/duplicate_slug.rs
-  - codebus-core/src/vault/raw_sync.rs
-  - codebus-core/src/wiki/lint/rules/mod.rs
-  - codebus-core/src/wiki/lint/output.rs
   - codebus-cli/src/commands/query.rs
   - codebus-cli/src/commands/goal.rs
-  - codebus-core/src/wiki/lint/rules/frontmatter_integrity.rs
+  - codebus-cli/src/commands/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/agent/claude_cli.rs
+  - codebus-cli/src/commands/fix.rs
+  - codebus-core/src/wiki/fix/mod.rs
+  - codebus-cli/Cargo.toml
+  - codebus-cli/src/commands/hook.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/commands/init.rs
   - codebus-core/src/config/lint_fix.rs
-  - codebus-cli/src/commands/lint.rs
-  - codebus-core/src/wiki/lint/factory.rs
-  - codebus-core/src/wiki/lint/mod.rs
+  - codebus-core/src/wiki/fix/prompt.rs
   - codebus-core/src/agent/mod.rs
-  - codebus-core/src/wiki/frontmatter.rs
-  - codebus-core/src/wiki/lint/rule.rs
-  - codebus-core/src/wiki/types.rs
+  - codebus-core/src/wiki/fix/session.rs
+  - codebus-core/src/vault/settings.rs
 tests:
+  - codebus-core/tests/vault_init.rs
   - codebus-cli/tests/fix_flow.rs
   - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/lint_flow.rs
-  - codebus-core/tests/vault_init.rs
   - codebus-cli/tests/cli_routing.rs
 -->
 
 ---
 ### Requirement: Standalone Fix Mode
 
-The `codebus fix` subcommand SHALL be an entry point dedicated to running the fix loop against an existing vault, distinct from the goal-flow integration. Standalone fix mode SHALL NOT trigger source-signal drift detection, SHALL NOT re-sync the raw mirror, SHALL NOT update the vault manifest, AND SHALL NOT modify any source code outside the vault.
+The `codebus fix` subcommand SHALL be an entry point dedicated to running the single-shot fix flow against an existing vault, distinct from the goal-flow integration. Standalone fix mode SHALL NOT trigger source-signal drift detection, SHALL NOT re-sync the raw mirror, SHALL NOT update the vault manifest, AND SHALL NOT modify any source code outside the vault.
 
-After the fix loop terminates (whether successfully or by exhausting the ping budget), the standalone fix SHALL invoke the vault auto-commit operation with commit message `wiki: lint fix loop` against the nested vault git repository. If the loop produced no file changes, the commit SHALL be a no-op (working tree clean, no new commit).
+After the single agent spawn terminates and the final lint check completes, the standalone fix SHALL invoke the vault auto-commit operation with commit message `wiki: lint fix loop` against the nested vault git repository. If no file changes occurred under `<vault_root>/wiki/`, the commit SHALL be a no-op (working tree clean, no new commit recorded).
 
-The standalone fix SHALL exit with status zero when the final post-loop lint reports zero issues, and with status one when issues remain after exhausting the ping budget.
+The standalone fix SHALL exit with status zero when the post-spawn lint reports zero issues, and with status one when one or more issues remain.
 
 #### Scenario: Standalone fix skips ingest
 
@@ -597,17 +488,17 @@ The standalone fix SHALL exit with status zero when the final post-loop lint rep
 
 #### Scenario: Standalone fix commits with lint fix loop message
 
-- **WHEN** standalone fix runs and the loop produces at least one change under `wiki/`
+- **WHEN** standalone fix runs and the agent's in-session work produces at least one change under `wiki/`
 - **THEN** the system SHALL invoke vault auto-commit AND running `git -C <repo>/.codebus log --pretty=%s -1` SHALL print exactly the line `wiki: lint fix loop`
 
-#### Scenario: Standalone fix no-op commit when loop makes no changes
+#### Scenario: Standalone fix no-op commit when agent makes no changes
 
-- **WHEN** standalone fix runs and the loop terminates without any file modification under `wiki/`
+- **WHEN** standalone fix runs and the agent terminates without modifying any file under `wiki/`
 - **THEN** running `git -C <repo>/.codebus rev-list --count HEAD` after fix SHALL equal the count before fix
 
-#### Scenario: Standalone fix exits non-zero when issues remain
+#### Scenario: Standalone fix exits non-zero when post-spawn lint has issues
 
-- **WHEN** standalone fix exhausts `outer_ping_max + 1` total agent invocations and the final lint still reports at least one issue
+- **WHEN** standalone fix completes its single agent spawn and the post-spawn lint still reports at least one issue
 - **THEN** the subcommand SHALL exit with non-zero status AND SHALL still invoke the auto-commit operation
 
 #### Scenario: Standalone fix requires existing vault
@@ -615,46 +506,187 @@ The standalone fix SHALL exit with status zero when the final post-loop lint rep
 - **WHEN** the user runs `codebus fix --repo <repo>` against a path whose `.codebus/` directory does not exist
 - **THEN** the system SHALL exit with status 2 AND stderr SHALL contain a message instructing the user to run `codebus init` first AND no agent process SHALL be spawned
 
+
 <!-- @trace
-source: v3-lint
-updated: 2026-05-09
+source: v3-fix-trust-agent
+updated: 2026-05-10
 code:
-  - codebus-core/src/wiki/fix/mod.rs
-  - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/lib.rs
-  - codebus-core/src/wiki/fix/session.rs
-  - codebus-core/src/wiki/lint/locate.rs
-  - codebus-core/src/wiki/lint/rules/root_page.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/agent/claude_cli.rs
-  - codebus-core/src/wiki/lint/rules/missing_nav.rs
-  - codebus-core/src/wiki/lint/rules/broken_wikilink.rs
-  - codebus-cli/Cargo.toml
-  - codebus-cli/src/commands/fix.rs
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/wiki/mod.rs
-  - codebus-core/src/wiki/fix/prompt.rs
-  - codebus-core/src/wiki/lint/rules/duplicate_slug.rs
-  - codebus-core/src/vault/raw_sync.rs
-  - codebus-core/src/wiki/lint/rules/mod.rs
-  - codebus-core/src/wiki/lint/output.rs
   - codebus-cli/src/commands/query.rs
   - codebus-cli/src/commands/goal.rs
-  - codebus-core/src/wiki/lint/rules/frontmatter_integrity.rs
+  - codebus-cli/src/commands/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/agent/claude_cli.rs
+  - codebus-cli/src/commands/fix.rs
+  - codebus-core/src/wiki/fix/mod.rs
+  - codebus-cli/Cargo.toml
+  - codebus-cli/src/commands/hook.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/commands/init.rs
   - codebus-core/src/config/lint_fix.rs
-  - codebus-cli/src/commands/lint.rs
-  - codebus-core/src/wiki/lint/factory.rs
-  - codebus-core/src/wiki/lint/mod.rs
+  - codebus-core/src/wiki/fix/prompt.rs
   - codebus-core/src/agent/mod.rs
-  - codebus-core/src/wiki/frontmatter.rs
-  - codebus-core/src/wiki/lint/rule.rs
-  - codebus-core/src/wiki/types.rs
+  - codebus-core/src/wiki/fix/session.rs
+  - codebus-core/src/vault/settings.rs
 tests:
+  - codebus-core/tests/vault_init.rs
   - codebus-cli/tests/fix_flow.rs
   - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/lint_flow.rs
+  - codebus-cli/tests/cli_routing.rs
+-->
+
+---
+### Requirement: Fix Single-Shot Verification
+
+The `codebus fix` subcommand and the lint-and-fix phase of the `codebus goal` subcommand SHALL execute exactly the following five steps in order:
+
+1. Run lint via in-process call (lint precheck). If zero issues, exit success without spawning any agent.
+2. Spawn the agentic CLI exactly once with `claude -p "/codebus-fix"`, the sandbox specified in the `Fix Loop Agent Sandbox` requirement, current working directory at the vault root, and stdin closed.
+3. Wait for the agent process to terminate. The CLI SHALL NOT spawn any additional agent processes for this fix run.
+4. Run lint via in-process call (final verification).
+5. Use the final lint result as the authoritative state: zero issues → success exit code; one or more issues → failure exit code.
+
+The CLI SHALL NOT pass `--session-id`, `--resume`, or `--continue` to the spawned agent. The agent operates in a one-shot session and is free to internally invoke `codebus lint` (subject to the Fix Bash Hook Restriction) any number of times within its session; the CLI's authority is limited to the final post-spawn lint check.
+
+#### Scenario: Fix skips agent entirely when initial lint is clean
+
+- **WHEN** `codebus fix` is invoked against a vault whose lint precheck reports zero issues
+- **THEN** no agentic CLI process SHALL be spawned AND the subcommand SHALL exit with status zero AND no auto-commit SHALL be performed (working tree is clean)
+
+#### Scenario: Fix spawns the agent exactly once on dirty vault
+
+- **WHEN** `codebus fix` is invoked against a vault whose lint precheck reports one or more issues
+- **THEN** the system SHALL spawn the agentic CLI exactly one time AND SHALL NOT spawn any subsequent agent processes for this run regardless of post-agent lint state
+
+#### Scenario: Fix spawn arguments contain no session continuity flags
+
+- **WHEN** the system spawns the agentic CLI for a fix run
+- **THEN** the spawned command line SHALL NOT contain `--session-id`, `--resume`, or `--continue`
+
+#### Scenario: Final lint determines exit code
+
+- **WHEN** the agent process terminates and the post-agent lint reports zero issues
+- **THEN** the `codebus fix` subcommand SHALL exit with status zero
+
+#### Scenario: Issues remaining after agent yield non-zero exit
+
+- **WHEN** the agent process terminates and the post-agent lint reports one or more issues
+- **THEN** the `codebus fix` subcommand SHALL exit with non-zero status AND SHALL still invoke the auto-commit operation
+
+
+<!-- @trace
+source: v3-fix-trust-agent
+updated: 2026-05-10
+code:
+  - codebus-cli/src/commands/query.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-cli/src/commands/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/agent/claude_cli.rs
+  - codebus-cli/src/commands/fix.rs
+  - codebus-core/src/wiki/fix/mod.rs
+  - codebus-cli/Cargo.toml
+  - codebus-cli/src/commands/hook.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/config/lint_fix.rs
+  - codebus-core/src/wiki/fix/prompt.rs
+  - codebus-core/src/agent/mod.rs
+  - codebus-core/src/wiki/fix/session.rs
+  - codebus-core/src/vault/settings.rs
+tests:
   - codebus-core/tests/vault_init.rs
+  - codebus-cli/tests/fix_flow.rs
+  - codebus-cli/tests/goal_flow.rs
+  - codebus-cli/tests/cli_routing.rs
+-->
+
+---
+### Requirement: Fix Bash Hook Installation
+
+The `codebus init` subcommand SHALL write a `<vault_root>/.claude/settings.json` file containing a Claude Code `PreToolUse` hook configuration that intercepts every `Bash` tool invocation and routes it through the `codebus hook check-bash` subcommand. The settings file SHALL use the standard Claude Code settings schema with `hooks.PreToolUse` configured to match `Bash` and invoke `codebus hook check-bash` as a `command`-type hook.
+
+The system SHALL apply write-if-missing semantics for this file: if `<vault_root>/.claude/settings.json` already exists, init SHALL NOT modify it (preserving any user-customized hook chain or other settings). The file SHALL NOT be written to `<repo>/.claude/settings.json` (source repository root) — the settings are vault-internal so the hook only applies to agent processes spawned with cwd at the vault root.
+
+The `codebus hook check-bash` subcommand SHALL implement the following stdin/stdout contract:
+
+- **Input** (stdin): a single JSON object matching Claude Code's PreToolUse hook input schema. The relevant fields are `tool_name` (expected `"Bash"`) and `tool_input.command` (the shell command string the agent intends to run).
+- **Allow**: when the command's first argv token resolves to a `codebus` binary (file basename `codebus` or `codebus.exe`, case-insensitive match) AND the second argv token is exactly `lint`, the subcommand SHALL exit with status zero AND SHALL NOT print a decision JSON to stdout.
+- **Block**: in all other cases (different binary, missing `lint` subcommand, malformed input, parse error), the subcommand SHALL exit with status zero AND SHALL print to stdout a single JSON object of the form `{"decision":"block","reason":"<message>"}` where `<message>` describes why the command was blocked.
+- **Cross-platform**: the binary basename match SHALL be case-insensitive on Windows (`codebus.EXE` and `codebus.exe` both allowed) and case-sensitive on Unix.
+
+The `<vault_root>/.gitignore` (vault internal) SHALL include the line `.claude/settings.local.json` so user-added local override settings are not committed to the vault git repository.
+
+#### Scenario: Init writes settings.json on fresh vault
+
+- **WHEN** `codebus init` runs against a repository with no existing `<vault_root>/.claude/settings.json`
+- **THEN** the system SHALL create `<vault_root>/.claude/settings.json` AND the file content SHALL parse as JSON AND SHALL contain a `hooks.PreToolUse` array with a Bash matcher entry whose hook command invokes `codebus hook check-bash`
+
+#### Scenario: Init does not overwrite existing settings.json
+
+- **WHEN** `codebus init` runs against a vault where `<vault_root>/.claude/settings.json` already exists with custom content
+- **THEN** the system SHALL NOT modify the existing file AND its byte-content SHALL be identical before and after init
+
+#### Scenario: Init does not write settings.json to repo root
+
+- **WHEN** `codebus init` runs against `<repo>`
+- **THEN** the system SHALL NOT create or modify `<repo>/.claude/settings.json`
+
+#### Scenario: hook check-bash allows bare codebus lint invocation
+
+- **WHEN** `codebus hook check-bash` receives stdin JSON `{"tool_name":"Bash","tool_input":{"command":"codebus lint --format json"}}`
+- **THEN** the subcommand SHALL exit with status zero AND stdout SHALL NOT contain any `decision` JSON
+
+#### Scenario: hook check-bash allows codebus lint via absolute path
+
+- **WHEN** `codebus hook check-bash` receives stdin JSON whose `tool_input.command` value is `/usr/local/bin/codebus lint --repo /path` OR (on Windows) `D:/dev/codebus.exe lint --format json`
+- **THEN** the subcommand SHALL exit with status zero AND stdout SHALL NOT contain any `decision` JSON
+
+#### Scenario: hook check-bash blocks non-codebus binaries
+
+- **WHEN** `codebus hook check-bash` receives stdin JSON whose `tool_input.command` is `echo MARKER`
+- **THEN** the subcommand SHALL exit with status zero AND stdout SHALL contain a JSON object whose `decision` field equals `"block"` AND whose `reason` field is a non-empty string
+
+#### Scenario: hook check-bash blocks codebus subcommands other than lint
+
+- **WHEN** `codebus hook check-bash` receives stdin JSON whose `tool_input.command` is `codebus fix --no-fix`
+- **THEN** the subcommand SHALL exit with status zero AND stdout SHALL contain a JSON object whose `decision` field equals `"block"`
+
+#### Scenario: hook check-bash fails closed on malformed input
+
+- **WHEN** `codebus hook check-bash` receives stdin that does not parse as JSON
+- **THEN** the subcommand SHALL exit with status zero AND stdout SHALL contain a JSON object whose `decision` field equals `"block"` (fail-closed default — never silently allow on parse failure)
+
+#### Scenario: Vault internal gitignore excludes settings.local.json
+
+- **WHEN** `codebus init` runs against `<repo>` and reaches the vault internal `.gitignore` mutation step
+- **THEN** the file `<vault_root>/.gitignore` SHALL contain a line equal to `.claude/settings.local.json`
+
+<!-- @trace
+source: v3-fix-trust-agent
+updated: 2026-05-10
+code:
+  - codebus-cli/src/commands/query.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-cli/src/commands/mod.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/agent/claude_cli.rs
+  - codebus-cli/src/commands/fix.rs
+  - codebus-core/src/wiki/fix/mod.rs
+  - codebus-cli/Cargo.toml
+  - codebus-cli/src/commands/hook.rs
+  - codebus-core/src/vault/mod.rs
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/config/lint_fix.rs
+  - codebus-core/src/wiki/fix/prompt.rs
+  - codebus-core/src/agent/mod.rs
+  - codebus-core/src/wiki/fix/session.rs
+  - codebus-core/src/vault/settings.rs
+tests:
+  - codebus-core/tests/vault_init.rs
+  - codebus-cli/tests/fix_flow.rs
+  - codebus-cli/tests/goal_flow.rs
   - codebus-cli/tests/cli_routing.rs
 -->
