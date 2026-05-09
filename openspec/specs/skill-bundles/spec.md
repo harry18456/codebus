@@ -8,50 +8,90 @@ TBD - created by archiving change 'v3-init'. Update Purpose after archive.
 
 ### Requirement: Skill Bundle Layout
 
-The system SHALL create three skill bundles **inside the vault directory** at `<repo>/.codebus/.claude/skills/`: one each at `<repo>/.codebus/.claude/skills/codebus-goal/`, `<repo>/.codebus/.claude/skills/codebus-query/`, and `<repo>/.codebus/.claude/skills/codebus-fix/`. Each bundle SHALL contain at minimum a `SKILL.md` file at its root. The system SHALL NOT create a `codebus-lint` skill bundle (lint is a direct CLI subcommand in path D, not a skill). The system SHALL NOT write skill bundles into `~/.claude/skills/codebus-*/` (user-level) NOR `<repo>/.claude/skills/codebus-*/` (repo-root project-scoped).
+The system SHALL create three skill bundles at TWO locations for each verb:
 
-This vault-internal placement makes skills discoverable only when an agentic CLI runs with cwd at the vault root (`<repo>/.codebus/`). Combined with cwd-bounded filesystem access, the agent's read scope is naturally constrained to vault contents (`raw/code/`, `wiki/`, `CLAUDE.md`, `manifest.yaml`, `log/`) — it cannot see source files outside the vault.
+- **Vault-internal location** at `<repo>/.codebus/.claude/skills/codebus-{goal,query,fix}/` — discovered when an agentic CLI runs with cwd at the vault root (`<repo>/.codebus/`). Used by the `codebus goal`, `codebus query`, and `codebus fix` subcommands when they spawn agents.
+- **Repo-root location** at `<repo>/.claude/skills/codebus-{goal,query,fix}/` — discovered when a user opens a Claude Code session with cwd at the source repository root and invokes `/codebus-goal`, `/codebus-query`, or `/codebus-fix` interactively.
 
-#### Scenario: Init creates exactly three skill bundle directories under the vault
+Each bundle directory at each location SHALL contain at minimum a `SKILL.md` file at its root. The SKILL.md content SHALL be byte-identical between the vault-internal and repo-root copies for each verb.
 
-- **WHEN** init runs against `<repo>` and the three target paths under `<repo>/.codebus/.claude/skills/` do not exist
-- **THEN** the system SHALL create `<repo>/.codebus/.claude/skills/codebus-goal/`, `<repo>/.codebus/.claude/skills/codebus-query/`, and `<repo>/.codebus/.claude/skills/codebus-fix/` AND each SHALL contain a `SKILL.md` file AND the system SHALL NOT create `<repo>/.codebus/.claude/skills/codebus-lint/`
+The system SHALL NOT create a `codebus-lint` skill bundle at either location (lint is a direct CLI subcommand and does not require an agentic skill). The system SHALL NOT write skill bundles into `~/.claude/skills/codebus-*/` (user-global location) — bundles remain per-repository to avoid cross-vault version conflicts.
 
-#### Scenario: Init does not write to user-level or repo-root skills directories
+The repo-root skill bundle directories SHALL be added to the source repository's `.gitignore` file by the init source-gitignore mutation step, so the bundles are not accidentally committed to the source repository's history.
+
+#### Scenario: Init creates skill bundle directories at both vault and repo-root locations
+
+- **WHEN** init runs against `<repo>` with no existing skill bundles at either location
+- **THEN** the system SHALL create `<repo>/.codebus/.claude/skills/codebus-goal/`, `<repo>/.codebus/.claude/skills/codebus-query/`, `<repo>/.codebus/.claude/skills/codebus-fix/`, `<repo>/.claude/skills/codebus-goal/`, `<repo>/.claude/skills/codebus-query/`, AND `<repo>/.claude/skills/codebus-fix/` AND each SHALL contain a `SKILL.md` file
+
+#### Scenario: Vault and repo-root SKILL.md content are byte-identical
+
+- **WHEN** init runs against `<repo>` and writes both the vault-internal and repo-root copies of the SKILL.md for any of the three verbs
+- **THEN** for each verb, the bytes of `<repo>/.codebus/.claude/skills/codebus-{verb}/SKILL.md` SHALL equal the bytes of `<repo>/.claude/skills/codebus-{verb}/SKILL.md`
+
+#### Scenario: Init does not create codebus-lint bundle at either location
 
 - **WHEN** init runs against `<repo>`
-- **THEN** the system SHALL NOT create or modify any path under `~/.claude/skills/codebus-*/` AND SHALL NOT create or modify any path under `<repo>/.claude/skills/codebus-*/` (i.e., directly under repo root, outside the vault)
+- **THEN** the system SHALL NOT create `<repo>/.codebus/.claude/skills/codebus-lint/` AND SHALL NOT create `<repo>/.claude/skills/codebus-lint/`
+
+#### Scenario: Init does not write to user-global skills directory
+
+- **WHEN** init runs against `<repo>`
+- **THEN** the system SHALL NOT create or modify any path under `~/.claude/skills/codebus-*/`
+
+#### Scenario: Init adds repo-root skill bundle directories to source gitignore
+
+- **WHEN** init runs against `<repo>` and reaches the source-gitignore mutation step
+- **THEN** the source repository's `.gitignore` SHALL include patterns that exclude `<repo>/.claude/skills/codebus-goal/`, `<repo>/.claude/skills/codebus-query/`, AND `<repo>/.claude/skills/codebus-fix/` from source version control
 
 #### Scenario: Skill bundle directory creation handles missing parents
 
-- **WHEN** init runs against `<repo>` whose `.codebus/.claude/` does not yet exist
-- **THEN** the system SHALL create `<repo>/.codebus/.claude/` and `<repo>/.codebus/.claude/skills/` parent chain as needed
+- **WHEN** init runs against `<repo>` whose `.codebus/.claude/` and `<repo>/.claude/` parent chains do not yet exist
+- **THEN** the system SHALL create both parent chains as needed before writing the SKILL.md files
 
 
 <!-- @trace
-source: v3-init
-updated: 2026-05-08
+source: v3-lint
+updated: 2026-05-09
 code:
-  - codebus-core/src/vault/raw_sync.rs
-  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/wiki/fix/mod.rs
   - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/schema/mod.rs
-  - Cargo.toml
-  - codebus-core/src/schema/neutral.md
   - codebus-core/src/skill_bundle/mod.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/Cargo.toml
-  - codebus-core/src/vault/obsidian_register.rs
-  - codebus-core/src/vault/layout.rs
+  - codebus-core/src/config/mod.rs
   - codebus-core/src/lib.rs
-  - codebus-core/src/vault/manifest.rs
-  - codebus-core/src/vault/sanity_check.rs
-  - codebus-core/src/vault/mod.rs
+  - codebus-core/src/wiki/fix/session.rs
+  - codebus-core/src/wiki/lint/locate.rs
+  - codebus-core/src/wiki/lint/rules/root_page.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/agent/claude_cli.rs
+  - codebus-core/src/wiki/lint/rules/missing_nav.rs
+  - codebus-core/src/wiki/lint/rules/broken_wikilink.rs
   - codebus-cli/Cargo.toml
+  - codebus-cli/src/commands/fix.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/wiki/mod.rs
+  - codebus-core/src/wiki/fix/prompt.rs
+  - codebus-core/src/wiki/lint/rules/duplicate_slug.rs
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-core/src/wiki/lint/rules/mod.rs
+  - codebus-core/src/wiki/lint/output.rs
+  - codebus-cli/src/commands/query.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-core/src/wiki/lint/rules/frontmatter_integrity.rs
+  - codebus-core/src/config/lint_fix.rs
+  - codebus-cli/src/commands/lint.rs
+  - codebus-core/src/wiki/lint/factory.rs
+  - codebus-core/src/wiki/lint/mod.rs
+  - codebus-core/src/agent/mod.rs
+  - codebus-core/src/wiki/frontmatter.rs
+  - codebus-core/src/wiki/lint/rule.rs
+  - codebus-core/src/wiki/types.rs
 tests:
-  - codebus-cli/tests/cli_routing.rs
+  - codebus-cli/tests/fix_flow.rs
+  - codebus-cli/tests/goal_flow.rs
+  - codebus-cli/tests/lint_flow.rs
   - codebus-core/tests/vault_init.rs
-  - codebus-core/tests/schema_neutrality.rs
+  - codebus-cli/tests/cli_routing.rs
 -->
 
 ---
@@ -116,47 +156,68 @@ tests:
 ---
 ### Requirement: Write-If-Missing Semantics
 
-For each skill bundle SKILL.md target path under `<repo>/.codebus/.claude/skills/codebus-{verb}/`, the system SHALL write the stub content ONLY when the file does not exist. When the file already exists, the system SHALL NOT modify it (preserving any user customization or content from a future change that has already populated it).
+For each skill bundle SKILL.md target path — at both the vault-internal location (`<repo>/.codebus/.claude/skills/codebus-{verb}/SKILL.md`) and the repo-root location (`<repo>/.claude/skills/codebus-{verb}/SKILL.md`) — the system SHALL write the bundle content ONLY when the file at that specific location does not exist. When the file already exists at a given location, the system SHALL NOT modify it (preserving any user customization).
 
-#### Scenario: First-time init writes all three SKILL.md files
+The two locations SHALL be evaluated independently — if the vault-internal copy exists but the repo-root copy is missing, the system SHALL write only the missing repo-root copy. The system SHALL NOT propagate content from one location to the other when the target already exists.
 
-- **WHEN** init runs against `<repo>` where none of the three SKILL.md target paths exist
-- **THEN** all three files SHALL be created with stub content
+#### Scenario: Write-if-missing skips existing file at vault location
 
-#### Scenario: Re-init preserves user-modified SKILL.md
+- **WHEN** init runs against `<repo>` and the vault-internal SKILL.md for some verb already exists with custom content
+- **THEN** the system SHALL NOT modify the existing vault-internal SKILL.md AND its content SHALL be byte-identical before and after init
 
-- **WHEN** the user manually edits `<repo>/.codebus/.claude/skills/codebus-goal/SKILL.md` to add custom workflow text and then runs init again
-- **THEN** the system SHALL NOT modify that file AND the user's custom workflow text SHALL be preserved verbatim
+#### Scenario: Write-if-missing skips existing file at repo-root location
 
-#### Scenario: Mixed state writes only missing bundles
+- **WHEN** init runs against `<repo>` and the repo-root SKILL.md for some verb already exists with custom content
+- **THEN** the system SHALL NOT modify the existing repo-root SKILL.md AND its content SHALL be byte-identical before and after init
 
-- **WHEN** init runs against `<repo>` in a state where `codebus-goal/SKILL.md` exists but `codebus-query/SKILL.md` and `codebus-fix/SKILL.md` do not
-- **THEN** the system SHALL leave `codebus-goal/SKILL.md` unchanged AND SHALL create `codebus-query/SKILL.md` and `codebus-fix/SKILL.md` with stub content
+#### Scenario: Write-if-missing fills only missing locations
+
+- **WHEN** init runs against `<repo>` where the vault-internal codebus-goal SKILL.md exists but the repo-root codebus-goal SKILL.md does not exist
+- **THEN** the system SHALL create only the repo-root codebus-goal SKILL.md AND SHALL NOT modify the existing vault-internal one
+
 
 <!-- @trace
-source: v3-init
-updated: 2026-05-08
+source: v3-lint
+updated: 2026-05-09
 code:
-  - codebus-core/src/vault/raw_sync.rs
-  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/wiki/fix/mod.rs
   - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/schema/mod.rs
-  - Cargo.toml
-  - codebus-core/src/schema/neutral.md
   - codebus-core/src/skill_bundle/mod.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/Cargo.toml
-  - codebus-core/src/vault/obsidian_register.rs
-  - codebus-core/src/vault/layout.rs
+  - codebus-core/src/config/mod.rs
   - codebus-core/src/lib.rs
-  - codebus-core/src/vault/manifest.rs
-  - codebus-core/src/vault/sanity_check.rs
-  - codebus-core/src/vault/mod.rs
+  - codebus-core/src/wiki/fix/session.rs
+  - codebus-core/src/wiki/lint/locate.rs
+  - codebus-core/src/wiki/lint/rules/root_page.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/agent/claude_cli.rs
+  - codebus-core/src/wiki/lint/rules/missing_nav.rs
+  - codebus-core/src/wiki/lint/rules/broken_wikilink.rs
   - codebus-cli/Cargo.toml
+  - codebus-cli/src/commands/fix.rs
+  - codebus-cli/src/commands/init.rs
+  - codebus-core/src/wiki/mod.rs
+  - codebus-core/src/wiki/fix/prompt.rs
+  - codebus-core/src/wiki/lint/rules/duplicate_slug.rs
+  - codebus-core/src/vault/raw_sync.rs
+  - codebus-core/src/wiki/lint/rules/mod.rs
+  - codebus-core/src/wiki/lint/output.rs
+  - codebus-cli/src/commands/query.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-core/src/wiki/lint/rules/frontmatter_integrity.rs
+  - codebus-core/src/config/lint_fix.rs
+  - codebus-cli/src/commands/lint.rs
+  - codebus-core/src/wiki/lint/factory.rs
+  - codebus-core/src/wiki/lint/mod.rs
+  - codebus-core/src/agent/mod.rs
+  - codebus-core/src/wiki/frontmatter.rs
+  - codebus-core/src/wiki/lint/rule.rs
+  - codebus-core/src/wiki/types.rs
 tests:
-  - codebus-cli/tests/cli_routing.rs
+  - codebus-cli/tests/fix_flow.rs
+  - codebus-cli/tests/goal_flow.rs
+  - codebus-cli/tests/lint_flow.rs
   - codebus-core/tests/vault_init.rs
-  - codebus-core/tests/schema_neutrality.rs
+  - codebus-cli/tests/cli_routing.rs
 -->
 
 ---

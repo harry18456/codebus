@@ -88,6 +88,6 @@
 
 - [x] 13.1 跑 `cargo test -p codebus-core` 確認所有 lint/fix module 單元測試通過
 - [x] 13.2 跑 `cargo test -p codebus-cli` 確認所有 CLI flow 整合測試通過
-- [ ] 13.3 手動 e2e 對 sample vault 跑 `codebus init` → `codebus goal "..."` → 觀察 lint+fix log → `git -C .codebus log` 確認 commit 摺單顆
+- [x] 13.3 手動 e2e 對 sample vault 跑 `codebus init` → `codebus goal "..."` → 觀察 lint+fix log → `git -C .codebus log` 確認 commit 摺單顆
 - [x] 13.4 手動 e2e 對 dirty vault 跑 `codebus fix` → 確認 agent 修檔 + outer ping 補救 + `wiki: lint fix loop` commit
-- [ ] 13.5 手動 e2e 在 source repo root 開 Claude Code，使用 `/codebus-query`、`/codebus-fix` skill 直觸成功
+- [x] 13.5 手動 e2e 在 source repo root 開 Claude Code，使用 `/codebus-query`、`/codebus-fix` skill 直觸成功
