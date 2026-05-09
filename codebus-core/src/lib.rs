@@ -6,3 +6,4 @@ pub mod pii;
 pub mod schema;
 pub mod skill_bundle;
 pub mod vault;
+pub mod wiki;
