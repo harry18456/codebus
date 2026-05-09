@@ -6,22 +6,14 @@
 //! redundant auto-approval safety net; `--permission-mode acceptEdits` is
 //! mandatory in `-p` mode (without it, all writes silently deny because there
 //! is no terminal to prompt). All three must be set together.
+//!
+//! v3-fix-trust-agent simplification: dropped `SessionAction` + `--session-id`
+//! / `--resume` flags. Single-shot fix model means no caller needs session
+//! continuity helpers; if a future change does, re-introduce them then.
 
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
-
-/// Session continuity mode for the spawned `claude -p` invocation.
-///
-/// - `Start(uuid)` → pass `--session-id <uuid>`. Use on the first spawn of
-///   a multi-round flow; the agent CLI persists session state under this
-///   UUID so subsequent `Resume` calls recover full context.
-/// - `Resume(uuid)` → pass `--resume <uuid>`. Use on follow-up spawns
-///   targeting an existing session previously started with the same UUID.
-pub enum SessionAction {
-    Start(String),
-    Resume(String),
-}
 
 /// Inputs for [`invoke`]. Caller (verb command modules) constructs this with
 /// verb-specific values and a `'static` toolset slice.
@@ -43,11 +35,6 @@ pub struct InvokeAgentOptions {
     /// Spike-verified 2026-05-09 against `claude --help` v2.1.137: the
     /// Tool(specifier) syntax is supported directly on `--allowedTools`.
     pub bash_whitelist: Option<&'static str>,
-    /// Optional session continuity. `None` = one-shot invocation (no
-    /// session flag passed); the default for goal/query. `Some(Start(uuid))`
-    /// or `Some(Resume(uuid))` activates session mode for fix's outer ping
-    /// loop.
-    pub session: Option<SessionAction>,
 }
 
 /// Spawn the configured `claude -p` child process and wait for it to exit.
@@ -68,28 +55,16 @@ pub fn invoke(opts: InvokeAgentOptions) -> io::Result<ExitStatus> {
     let tools_csv = build_tools_csv(opts.toolset, opts.bash_whitelist);
     let allowed_tools_csv = build_allowed_tools_csv(opts.toolset, opts.bash_whitelist);
 
-    let mut cmd = Command::new(&claude_bin);
-    cmd.arg("-p")
+    Command::new(&claude_bin)
+        .arg("-p")
         .arg(&opts.slash_command)
         .arg("--tools")
         .arg(&tools_csv)
         .arg("--allowedTools")
         .arg(&allowed_tools_csv)
         .arg("--permission-mode")
-        .arg("acceptEdits");
-
-    if let Some(action) = &opts.session {
-        match action {
-            SessionAction::Start(uuid) => {
-                cmd.arg("--session-id").arg(uuid);
-            }
-            SessionAction::Resume(uuid) => {
-                cmd.arg("--resume").arg(uuid);
-            }
-        }
-    }
-
-    cmd.current_dir(&opts.vault_root)
+        .arg("acceptEdits")
+        .current_dir(&opts.vault_root)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -145,20 +120,17 @@ mod tests {
             vault_root: PathBuf::from("/tmp/v"),
             toolset: &["Read", "Glob", "Grep"],
             bash_whitelist: None,
-            session: None,
         };
         let InvokeAgentOptions {
             slash_command,
             vault_root,
             toolset,
             bash_whitelist,
-            session,
         } = opts;
         assert_eq!(slash_command, "/codebus-goal \"x\"");
         assert_eq!(vault_root, PathBuf::from("/tmp/v"));
         assert_eq!(toolset, &["Read", "Glob", "Grep"]);
         assert!(bash_whitelist.is_none());
-        assert!(session.is_none());
     }
 
     #[test]
@@ -169,9 +141,6 @@ mod tests {
 
     #[test]
     fn build_tools_csv_appends_bare_bash_when_whitelist_supplied() {
-        // Spec: --tools value gets the bare `Bash` token so the agent has
-        // Bash in its toolset; the fine-grained restriction goes in
-        // --allowedTools, not here.
         let csv = build_tools_csv(
             &["Read", "Glob", "Grep", "Write", "Edit"],
             Some("Bash(codebus lint *)"),
@@ -187,8 +156,6 @@ mod tests {
 
     #[test]
     fn build_allowed_tools_csv_appends_restricted_bash_pattern() {
-        // Spec: --allowedTools gets the fine-grained pattern so
-        // auto-approval is scoped to `codebus lint *` only.
         let csv = build_allowed_tools_csv(
             &["Read", "Glob", "Grep", "Write", "Edit"],
             Some("Bash(codebus lint *)"),
@@ -198,10 +165,6 @@ mod tests {
 
     #[test]
     fn build_csvs_diverge_on_bash_when_whitelist_supplied() {
-        // Critical invariant: --tools gets bare `Bash`, --allowedTools
-        // gets restricted `Bash(...)`. They MUST differ when a whitelist
-        // is supplied — otherwise either Bash is denied (no bare token in
-        // --tools) or auto-approved unrestrictedly (bare Bash in --allowedTools).
         let toolset = &["Read", "Glob", "Grep", "Write", "Edit"];
         let whitelist = Some("Bash(codebus lint *)");
         let tools = build_tools_csv(toolset, whitelist);
@@ -224,7 +187,6 @@ mod tests {
             vault_root: std::env::temp_dir(),
             toolset: &["Read"],
             bash_whitelist: None,
-            session: None,
         });
         unsafe {
             std::env::remove_var("CODEBUS_CLAUDE_BIN");

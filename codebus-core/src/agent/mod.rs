@@ -9,4 +9,4 @@
 
 pub mod claude_cli;
 
-pub use claude_cli::{InvokeAgentOptions, SessionAction, invoke};
+pub use claude_cli::{InvokeAgentOptions, invoke};

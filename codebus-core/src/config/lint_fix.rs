@@ -1,4 +1,4 @@
-//! `lint.fix.*` config loader for v3-lint Fix Loop Configuration.
+//! `lint.fix.*` config loader for v3-fix-trust-agent Fix Loop Configuration.
 //!
 //! Schema:
 //! ```yaml
@@ -6,55 +6,52 @@
 //! lint:
 //!   fix:
 //!     enabled: true            # default: true
-//!     outer_ping_max: 2        # default: 2 (positive integer)
 //! ```
 //!
 //! Defaults apply when the config file is absent OR the `lint.fix` section
 //! is missing OR an individual field is missing. Unknown keys are silently
-//! ignored (forward compat).
+//! ignored (forward compat) — this includes the legacy `outer_ping_max` key
+//! left over from v3-lint configs, which v3-fix-trust-agent has retired.
 //!
-//! CLI flags `--no-fix` and `--fix-max-iter <N>` are merged on top of this
-//! at the call site (see `LintFixConfig::merge_cli_overrides`).
+//! CLI flag `--no-fix` is merged on top of this at the call site (see
+//! `LintFixConfig::merge_cli_overrides`). The previously-recognized
+//! `--fix-max-iter` flag was removed in v3-fix-trust-agent and is no longer
+//! part of any flow.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Effective fix-loop configuration after merging file + CLI overrides.
+///
+/// v3-fix-trust-agent intentionally has only one knob: `enabled`. The
+/// previously-tunable `outer_ping_max` was removed when the multi-spawn
+/// outer ping mechanism was replaced by single-shot `Fix Single-Shot
+/// Verification` (no caps to set when there is no loop).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LintFixConfig {
     pub enabled: bool,
-    pub outer_ping_max: u32,
 }
 
 impl Default for LintFixConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            outer_ping_max: 2,
-        }
+        Self { enabled: true }
     }
 }
 
 impl LintFixConfig {
-    /// Apply CLI flag overrides. `--no-fix` (when present) takes precedence
-    /// over `--fix-max-iter` per Fix Loop Configuration spec scenario
-    /// "--no-fix wins when both override flags are present".
-    pub fn merge_cli_overrides(mut self, no_fix: bool, fix_max_iter: Option<u32>) -> Self {
+    /// Apply CLI flag overrides. `--no-fix` (when present) forces `enabled`
+    /// to `false`.
+    pub fn merge_cli_overrides(mut self, no_fix: bool) -> Self {
         if no_fix {
             self.enabled = false;
-            // `--fix-max-iter` has no observable effect when --no-fix wins.
-            return self;
-        }
-        if let Some(n) = fix_max_iter {
-            self.outer_ping_max = n;
         }
         self
     }
 }
 
 /// Intermediate YAML shapes for parsing — top-level `lint:` mapping with a
-/// nested `fix:` mapping. Both are optional.
+/// nested `fix:` mapping. Both are optional. Unknown keys silently ignored.
 #[derive(Debug, Default, Deserialize)]
 struct ConfigFile {
     #[serde(default)]
@@ -67,10 +64,13 @@ struct LintSection {
     fix: Option<LintFixSection>,
 }
 
+/// Per Fix Loop Configuration spec scenario "Legacy outer_ping_max key is
+/// silently ignored": this struct accepts arbitrary extra keys (including
+/// the retired `outer_ping_max`) without erroring. Serde drops unknown
+/// fields by default.
 #[derive(Debug, Default, Deserialize)]
 struct LintFixSection {
     enabled: Option<bool>,
-    outer_ping_max: Option<u32>,
 }
 
 /// Default config path: `~/.codebus/config.yaml`. Returns `None` if the
@@ -98,9 +98,6 @@ pub fn load_lint_fix_config(path: &Path) -> Result<LintFixConfig, ConfigLoadErro
         if let Some(fix) = lint.fix {
             if let Some(e) = fix.enabled {
                 cfg.enabled = e;
-            }
-            if let Some(n) = fix.outer_ping_max {
-                cfg.outer_ping_max = n;
             }
         }
     }
@@ -135,13 +132,12 @@ mod tests {
         p
     }
 
-    /// Spec: "Default config enables fix with outer_ping_max two"
+    /// Spec: "Default config enables fix"
     #[test]
     fn default_when_file_missing() {
         let tmp = TempDir::new().unwrap();
         let cfg = load_lint_fix_config(&tmp.path().join("nonexistent.yaml")).unwrap();
         assert!(cfg.enabled);
-        assert_eq!(cfg.outer_ping_max, 2);
     }
 
     #[test]
@@ -150,7 +146,6 @@ mod tests {
         let p = write_yaml(tmp.path(), "emoji: on\n");
         let cfg = load_lint_fix_config(&p).unwrap();
         assert!(cfg.enabled);
-        assert_eq!(cfg.outer_ping_max, 2);
     }
 
     #[test]
@@ -159,7 +154,6 @@ mod tests {
         let p = write_yaml(tmp.path(), "lint:\n  disabled_rules: []\n");
         let cfg = load_lint_fix_config(&p).unwrap();
         assert!(cfg.enabled);
-        assert_eq!(cfg.outer_ping_max, 2);
     }
 
     #[test]
@@ -168,17 +162,19 @@ mod tests {
         let p = write_yaml(tmp.path(), "lint:\n  fix:\n    enabled: false\n");
         let cfg = load_lint_fix_config(&p).unwrap();
         assert!(!cfg.enabled);
-        // outer_ping_max stays at default
-        assert_eq!(cfg.outer_ping_max, 2);
     }
 
+    /// Spec: "Legacy outer_ping_max key is silently ignored"
     #[test]
-    fn user_overrides_outer_ping_max() {
+    fn legacy_outer_ping_max_key_silently_ignored() {
         let tmp = TempDir::new().unwrap();
-        let p = write_yaml(tmp.path(), "lint:\n  fix:\n    outer_ping_max: 5\n");
+        let p = write_yaml(
+            tmp.path(),
+            "lint:\n  fix:\n    enabled: true\n    outer_ping_max: 10\n",
+        );
         let cfg = load_lint_fix_config(&p).unwrap();
         assert!(cfg.enabled);
-        assert_eq!(cfg.outer_ping_max, 5);
+        // No public field for outer_ping_max — its value has no observable effect.
     }
 
     #[test]
@@ -186,11 +182,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = write_yaml(
             tmp.path(),
-            "lint:\n  fix:\n    enabled: true\n    outer_ping_max: 3\n    future_field: hello\n",
+            "lint:\n  fix:\n    enabled: true\n    future_field: hello\n",
         );
         let cfg = load_lint_fix_config(&p).unwrap();
         assert!(cfg.enabled);
-        assert_eq!(cfg.outer_ping_max, 3);
     }
 
     #[test]
@@ -204,46 +199,15 @@ mod tests {
     /// Spec: "--no-fix flag disables fix even when config enables it"
     #[test]
     fn no_fix_cli_override_disables_even_when_config_enables() {
-        let cfg = LintFixConfig {
-            enabled: true,
-            outer_ping_max: 2,
-        };
-        let merged = cfg.merge_cli_overrides(true, None);
+        let cfg = LintFixConfig { enabled: true };
+        let merged = cfg.merge_cli_overrides(true);
         assert!(!merged.enabled);
-    }
-
-    /// Spec: "--fix-max-iter overrides config outer_ping_max"
-    #[test]
-    fn fix_max_iter_cli_override_replaces_config_value() {
-        let cfg = LintFixConfig {
-            enabled: true,
-            outer_ping_max: 2,
-        };
-        let merged = cfg.merge_cli_overrides(false, Some(5));
-        assert!(merged.enabled);
-        assert_eq!(merged.outer_ping_max, 5);
-    }
-
-    /// Spec: "--no-fix wins when both override flags are present"
-    #[test]
-    fn no_fix_wins_over_fix_max_iter_when_both_present() {
-        let cfg = LintFixConfig {
-            enabled: true,
-            outer_ping_max: 2,
-        };
-        let merged = cfg.merge_cli_overrides(true, Some(5));
-        assert!(!merged.enabled);
-        // outer_ping_max may or may not change, but `enabled = false`
-        // means the value has no observable effect.
     }
 
     #[test]
     fn merge_with_no_overrides_returns_input_unchanged() {
-        let cfg = LintFixConfig {
-            enabled: false,
-            outer_ping_max: 7,
-        };
-        let merged = cfg.merge_cli_overrides(false, None);
+        let cfg = LintFixConfig { enabled: false };
+        let merged = cfg.merge_cli_overrides(false);
         assert_eq!(merged, cfg);
     }
 }

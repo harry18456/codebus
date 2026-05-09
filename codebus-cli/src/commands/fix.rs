@@ -1,11 +1,11 @@
-//! `codebus fix` subcommand — run the fix loop against an existing vault.
+//! `codebus fix` subcommand — run the single-shot fix flow against a vault.
 //!
-//! Per v3-lint Fix Subcommand Behavior:
+//! Per v3-fix-trust-agent Fix Subcommand Behavior:
 //! - Vault precondition: `<repo>/.codebus/` MUST exist (no auto-init).
 //! - `--no-fix` short-circuit: exit 0 with stderr message, no agent spawn.
 //! - Lint pre-check: 0 issues → exit 0, no agent spawn.
-//! - Else run fix loop, then auto-commit `wiki: lint fix loop`, then exit
-//!   with status reflecting final lint state (0 clean, 1 issues remain).
+//! - Else spawn fix agent exactly once, run lint final check, auto-commit
+//!   `wiki: lint fix loop`, exit 0 if final lint clean / 1 if issues remain.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -18,7 +18,6 @@ use codebus_core::wiki::fix::{TerminationReason, run_fix_loop};
 pub async fn run(
     repo_override: Option<&Path>,
     no_fix: bool,
-    fix_max_iter: Option<u32>,
     debug: bool,
 ) -> ExitCode {
     // Resolve target repo (Some from --repo, else cwd).
@@ -45,7 +44,7 @@ pub async fn run(
 
     if debug {
         eprintln!("[debug] fix: vault = {}", paths.root.display());
-        eprintln!("[debug] fix: --no-fix = {no_fix}, --fix-max-iter = {fix_max_iter:?}");
+        eprintln!("[debug] fix: --no-fix = {no_fix}");
     }
 
     // Load config and merge CLI overrides.
@@ -59,20 +58,16 @@ pub async fn run(
         },
         None => LintFixConfig::default(),
     };
-    let cfg = cfg.merge_cli_overrides(no_fix, fix_max_iter);
+    let cfg = cfg.merge_cli_overrides(no_fix);
 
     if !cfg.enabled {
         eprintln!("fix: disabled by --no-fix or lint.fix.enabled = false");
         return ExitCode::from(0);
     }
 
-    if debug {
-        eprintln!("[debug] fix: outer_ping_max = {}", cfg.outer_ping_max);
-    }
-
-    // Run the loop. The fix module handles initial-clean short-circuit
-    // internally — no spawn on clean vault.
-    let report = match run_fix_loop(paths.root.clone(), cfg.outer_ping_max) {
+    // Run the single-shot flow. The fix module handles initial-clean
+    // short-circuit internally — no spawn on clean vault.
+    let report = match run_fix_loop(paths.root.clone()) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: fix loop: {e}");
@@ -82,8 +77,8 @@ pub async fn run(
 
     if debug {
         eprintln!(
-            "[debug] fix: invocations = {}, termination = {:?}, errors = {}, warns = {}",
-            report.agent_invocations,
+            "[debug] fix: agent_skipped = {}, termination = {:?}, errors = {}, warns = {}",
+            report.agent_skipped,
             report.termination,
             report.final_lint.error_count,
             report.final_lint.warn_count
@@ -113,14 +108,11 @@ pub async fn run(
     }
 
     if report.clean {
-        println!(
-            "✓ fix complete (vault clean, {} agent invocation(s))",
-            report.agent_invocations
-        );
+        println!("✓ fix complete (vault clean)");
         ExitCode::from(0)
     } else {
         eprintln!(
-            "✗ fix exhausted ping budget; {} error(s), {} warning(s) remain",
+            "✗ fix: {} error(s), {} warning(s) remain after agent terminated",
             report.final_lint.error_count, report.final_lint.warn_count
         );
         ExitCode::from(1)

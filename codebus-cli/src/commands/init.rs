@@ -11,6 +11,7 @@ use codebus_core::vault::manifest::{self, ManifestOutcome};
 use codebus_core::vault::obsidian_register::{self, RegisterOutcome};
 use codebus_core::vault::raw_sync::sync_with_scanner;
 use codebus_core::vault::sanity_check::check_repo_is_not_vault;
+use codebus_core::vault::settings::{self, SettingsOutcome};
 use codebus_core::vault::source_gitignore::{self, GitignoreOutcome};
 
 /// Required lines in the vault-internal `.codebus/.gitignore`. Excluding these
@@ -18,8 +19,16 @@ use codebus_core::vault::source_gitignore::{self, GitignoreOutcome};
 /// wiki evolution: `.lock` is per-process file lock state; `raw/code/` is
 /// already tracked via source repo's git so duplicate-tracking it here
 /// would noise every commit; `**/.obsidian/` is editor-local config user
-/// shouldn't see in vault diff; `logs/` is verb invocation log noise.
-const INTERNAL_GITIGNORE_LINES: &[&str] = &[".lock", "raw/code/", "**/.obsidian/", "logs/"];
+/// shouldn't see in vault diff; `logs/` is verb invocation log noise;
+/// `.claude/settings.local.json` is user's personal Claude Code overrides
+/// (per Claude Code convention) and should not be tracked.
+const INTERNAL_GITIGNORE_LINES: &[&str] = &[
+    ".lock",
+    "raw/code/",
+    "**/.obsidian/",
+    "logs/",
+    ".claude/settings.local.json",
+];
 
 pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCode {
     if debug {
@@ -164,6 +173,34 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
     if let Err(e) = write_skill_bundles(&paths.root, repo, debug) {
         eprintln!("error: skill bundles: {e}");
         return ExitCode::from(1);
+    }
+
+    // v3-fix-trust-agent: write the vault-internal Claude Code settings.json
+    // with the PreToolUse Bash hook for the fix sandbox. write-if-missing
+    // preserves user customizations across re-init.
+    match settings::write_settings_if_missing(&paths.root) {
+        Ok(SettingsOutcome::Written) => {
+            if debug {
+                eprintln!(
+                    "[debug] settings.json: wrote {}",
+                    settings::settings_json_path(&paths.root).display()
+                );
+            }
+            println!("✓ vault settings: wrote .codebus/.claude/settings.json");
+        }
+        Ok(SettingsOutcome::AlreadyPresent) => {
+            if debug {
+                eprintln!(
+                    "[debug] settings.json: preserved existing {}",
+                    settings::settings_json_path(&paths.root).display()
+                );
+            }
+            println!("✓ vault settings: .codebus/.claude/settings.json already present");
+        }
+        Err(e) => {
+            eprintln!("error: vault settings.json: {e}");
+            return ExitCode::from(1);
+        }
     }
 
     if !no_obsidian_register {

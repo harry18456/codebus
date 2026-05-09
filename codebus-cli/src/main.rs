@@ -25,14 +25,9 @@ struct Cli {
     no_obsidian_register: bool,
 
     /// Skip the lint-and-fix phase for this invocation (overrides `lint.fix.enabled`).
-    /// Affects both `goal` (post-agent fix phase) and `fix` (whole loop).
+    /// Affects both `goal` (post-agent fix phase) and `fix` (whole flow).
     #[arg(long = "no-fix", global = true)]
     no_fix: bool,
-
-    /// Override the fix loop's `outer_ping_max` for this invocation. Must be a
-    /// positive integer. `--no-fix` takes precedence when both are supplied.
-    #[arg(long = "fix-max-iter", global = true, value_name = "N")]
-    fix_max_iter: Option<u32>,
 
     /// Verbose output: print internal decisions, fs operations, computed signals.
     #[arg(long, global = true)]
@@ -54,6 +49,9 @@ enum Command {
     Lint(commands::lint::LintArgs),
     /// Trigger the codebus-fix skill in the user's agentic AI product.
     Fix,
+    /// Internal: PreToolUse hook for fix sandbox (called by Claude Code, not users).
+    #[command(hide = true, subcommand)]
+    Hook(commands::hook::HookArgs),
 }
 
 #[tokio::main]
@@ -70,7 +68,6 @@ async fn main() -> ExitCode {
                 args,
                 cli.no_obsidian_register,
                 cli.no_fix,
-                cli.fix_max_iter,
                 cli.debug,
             )
             .await
@@ -78,7 +75,8 @@ async fn main() -> ExitCode {
         Some(Command::Query(args)) => commands::query::run(&repo_default, args, cli.debug).await,
         Some(Command::Lint(args)) => commands::lint::run(cli.repo.as_deref(), args, cli.debug).await,
         Some(Command::Fix) => {
-            commands::fix::run(cli.repo.as_deref(), cli.no_fix, cli.fix_max_iter, cli.debug).await
+            commands::fix::run(cli.repo.as_deref(), cli.no_fix, cli.debug).await
         }
+        Some(Command::Hook(args)) => commands::hook::run(args).await,
     }
 }

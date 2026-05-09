@@ -212,10 +212,12 @@ fn source_gitignore_creates_when_missing_in_git_repo() {
     fs::create_dir_all(tmp.path().join(".git")).unwrap();
     let outcome = ensure_codebus_in_gitignore(tmp.path()).unwrap();
     assert_eq!(outcome, GitignoreOutcome::Created);
-    assert_eq!(
-        fs::read_to_string(tmp.path().join(".gitignore")).unwrap(),
-        ".codebus/\n"
-    );
+    let body = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
+    // v3-lint added 4 required lines: .codebus/ + 3 skill bundle paths
+    assert!(body.contains(".codebus/\n"));
+    assert!(body.contains(".claude/skills/codebus-goal/"));
+    assert!(body.contains(".claude/skills/codebus-query/"));
+    assert!(body.contains(".claude/skills/codebus-fix/"));
 }
 
 #[test]
@@ -224,10 +226,10 @@ fn source_gitignore_appends_to_existing() {
     fs::create_dir_all(tmp.path().join(".git")).unwrap();
     fs::write(tmp.path().join(".gitignore"), "node_modules\n").unwrap();
     ensure_codebus_in_gitignore(tmp.path()).unwrap();
-    assert_eq!(
-        fs::read_to_string(tmp.path().join(".gitignore")).unwrap(),
-        "node_modules\n.codebus/\n"
-    );
+    let body = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
+    assert!(body.starts_with("node_modules\n"));
+    assert!(body.contains(".codebus/\n"));
+    assert!(body.contains(".claude/skills/codebus-goal/"));
 }
 
 #[test]
@@ -530,4 +532,45 @@ fn vault_paths_resolves_consistently_with_create_layout() {
     assert_eq!(p1.raw_code, p2.raw_code);
     assert_eq!(p1.schema_md, p2.schema_md);
     assert_eq!(p1.manifest_yaml, p2.manifest_yaml);
+}
+
+// ===== v3-fix-trust-agent: settings.json + hook installation =====
+
+use codebus_core::vault::settings::{self, SettingsOutcome};
+
+#[test]
+fn settings_json_writer_creates_at_vault_internal_path() {
+    let tmp = TempDir::new().unwrap();
+    let outcome = settings::write_settings_if_missing(tmp.path()).unwrap();
+    assert_eq!(outcome, SettingsOutcome::Written);
+    let p = settings::settings_json_path(tmp.path());
+    assert!(p.exists(), "settings.json missing at {p:?}");
+}
+
+#[test]
+fn settings_json_content_has_pretooluse_bash_hook_invoking_codebus_hook_check_bash() {
+    let tmp = TempDir::new().unwrap();
+    settings::write_settings_if_missing(tmp.path()).unwrap();
+    let body = fs::read_to_string(settings::settings_json_path(tmp.path())).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("settings.json must parse");
+    let entries = parsed["hooks"]["PreToolUse"]
+        .as_array()
+        .expect("PreToolUse must be array");
+    assert!(!entries.is_empty(), "PreToolUse must have entries");
+    assert_eq!(entries[0]["matcher"], "Bash");
+    let nested = entries[0]["hooks"].as_array().unwrap();
+    assert_eq!(nested[0]["type"], "command");
+    assert_eq!(nested[0]["command"], "codebus hook check-bash");
+}
+
+#[test]
+fn settings_json_writer_preserves_existing_user_customization() {
+    let tmp = TempDir::new().unwrap();
+    let custom = r#"{"hooks":{"PreToolUse":[]},"my_field":"keep me"}"#;
+    let p = settings::settings_json_path(tmp.path());
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(&p, custom).unwrap();
+    let outcome = settings::write_settings_if_missing(tmp.path()).unwrap();
+    assert_eq!(outcome, SettingsOutcome::AlreadyPresent);
+    assert_eq!(fs::read_to_string(&p).unwrap(), custom, "byte-identical");
 }

@@ -102,42 +102,67 @@ fn fix_no_fix_flag_short_circuits() {
     assert!(!log.exists(), "agent should not spawn under --no-fix");
 }
 
+/// v3-fix-trust-agent: --fix-max-iter is no longer a recognized flag.
 #[test]
-fn fix_max_iter_flag_overrides_default() {
+fn fix_max_iter_flag_rejected_by_clap() {
     let tmp = TempDir::new().unwrap();
-    assert!(run_init(tmp.path()).status.success());
-    // Plant an unrepairable issue so the loop pings until budget exhausted.
-    let fm = "title: foo\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-09'\nupdated: '2026-05-09'\nrelated:\n  - '[[ghost]]'\nstale: false\n";
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm, "# foo");
-    // mock-claude success-noop: agent exits 0 without modifying anything.
-    // With --fix-max-iter 0, the loop spawns once initially, then since
-    // ping cap is 0 it terminates immediately on next lint check.
-    let out = run_fix(tmp.path(), &["--fix-max-iter", "0"], "success-noop");
-    // Issues remain → exit 1
-    assert_eq!(out.status.code(), Some(1));
+    let out = Command::new(BIN)
+        .args(["fix", "--fix-max-iter", "5"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run codebus fix");
+    assert!(!out.status.success(), "--fix-max-iter should be rejected");
     let stderr = String::from_utf8_lossy(&out.stderr);
+    // clap emits "unexpected argument" or similar for unknown flags
     assert!(
-        stderr.contains("exhausted ping budget"),
-        "expected ping-budget exhaustion message, got: {stderr}"
+        stderr.contains("unexpected") || stderr.contains("unrecognized") || stderr.contains("error"),
+        "expected clap rejection of --fix-max-iter; stderr: {stderr}"
     );
 }
 
+/// v3-fix-trust-agent Fix Single-Shot Verification scenario:
+/// "Fix spawn arguments contain no session continuity flags"
 #[test]
-fn fix_inherits_session_id_flag_in_spawn() {
+fn fix_spawn_does_not_pass_session_continuity_flags() {
     let tmp = TempDir::new().unwrap();
     assert!(run_init(tmp.path()).status.success());
-    // Plant a lint issue → triggers agent spawn.
     write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
-    let out = run_fix(tmp.path(), &["--fix-max-iter", "0"], "success-noop");
-    let _ = out;
+    let _ = run_fix(tmp.path(), &[], "success-noop");
     let log = tmp.path().join("mock-claude.log");
     assert!(log.exists(), "agent should have been spawned");
     let body = fs::read_to_string(&log).unwrap();
     let arg_lines: Vec<&str> = body.lines().filter_map(|l| l.strip_prefix("arg=")).collect();
-    // First spawn passes --session-id (Start session).
     assert!(
-        arg_lines.contains(&"--session-id"),
-        "fix initial spawn missing --session-id; args: {arg_lines:?}"
+        !arg_lines.contains(&"--session-id"),
+        "fix spawn must not pass --session-id; args: {arg_lines:?}"
+    );
+    assert!(
+        !arg_lines.contains(&"--resume"),
+        "fix spawn must not pass --resume; args: {arg_lines:?}"
+    );
+    assert!(
+        !arg_lines.contains(&"--continue"),
+        "fix spawn must not pass --continue; args: {arg_lines:?}"
+    );
+}
+
+/// v3-fix-trust-agent Fix Single-Shot Verification scenario:
+/// "Fix spawns the agent exactly once on dirty vault"
+#[test]
+fn fix_spawns_agent_exactly_once() {
+    let tmp = TempDir::new().unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    // Plant lint issue → triggers spawn. mock-claude success-noop won't
+    // repair anything → final lint still has issue. Verify single spawn.
+    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    let _ = run_fix(tmp.path(), &[], "success-noop");
+    let log = tmp.path().join("mock-claude.log");
+    let body = fs::read_to_string(&log).unwrap();
+    // mock-claude.log uses one block per invocation; count distinct cwd= lines.
+    let cwd_count = body.lines().filter(|l| l.starts_with("cwd=")).count();
+    assert_eq!(
+        cwd_count, 1,
+        "fix should spawn agent exactly once; mock log has {cwd_count} invocations:\n{body}"
     );
 }
 
@@ -151,8 +176,7 @@ fn fix_spawn_uses_bare_bash_in_tools_and_restricted_in_allowed_tools() {
     let tmp = TempDir::new().unwrap();
     assert!(run_init(tmp.path()).status.success());
     write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
-    let out = run_fix(tmp.path(), &["--fix-max-iter", "0"], "success-noop");
-    let _ = out;
+    let _ = run_fix(tmp.path(), &[], "success-noop");
     let log = tmp.path().join("mock-claude.log");
     assert!(log.exists(), "agent should have been spawned");
     let body = fs::read_to_string(&log).unwrap();

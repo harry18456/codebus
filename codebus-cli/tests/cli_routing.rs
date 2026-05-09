@@ -108,6 +108,24 @@ fn bare_invocation_routes_to_init_handler_and_creates_per_project_bundles() {
             .join("SKILL.md");
         assert!(repo_path.exists(), "missing repo-root bundle for {verb}: {repo_path:?}");
     }
+    // v3-fix-trust-agent: vault-internal settings.json with PreToolUse Bash hook.
+    let settings_path = tmp.path().join(".codebus/.claude/settings.json");
+    assert!(settings_path.exists(), "missing vault-internal settings.json");
+    let body = std::fs::read_to_string(&settings_path).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&body).expect("settings.json must parse as JSON");
+    let entries = parsed["hooks"]["PreToolUse"].as_array().unwrap();
+    assert!(!entries.is_empty(), "PreToolUse hook must be configured");
+    assert_eq!(entries[0]["matcher"], "Bash");
+    // v3-fix-trust-agent: settings.json NOT written to source repo root.
+    let bad = tmp.path().join(".claude/settings.json");
+    assert!(!bad.exists(), "settings.json must not be written to repo root: {bad:?}");
+    // v3-fix-trust-agent: vault internal .gitignore includes settings.local.json.
+    let internal_gi = std::fs::read_to_string(tmp.path().join(".codebus/.gitignore")).unwrap();
+    assert!(
+        internal_gi.lines().any(|l| l == ".claude/settings.local.json"),
+        "vault internal .gitignore missing `.claude/settings.local.json` line:\n{internal_gi}"
+    );
 }
 
 #[test]

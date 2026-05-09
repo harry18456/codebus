@@ -257,17 +257,16 @@ fn goal_runs_lint_and_fix_phase_between_agent_and_commit() {
     fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
     assert!(run_init(tmp.path()).status.success());
 
-    // Pre-create nav files so post-agent lint isn't dirty for nav-missing.
+    // Pre-create nav files so post-agent lint isn't dirty for nav-missing —
+    // single-shot fix model means agent gets one chance; mock-claude noop
+    // can't repair so we must start with a vault that's already clean to
+    // verify the lint-and-fix phase ran without making the test flaky.
     let vault = tmp.path().join(".codebus");
     fs::write(vault.join("wiki/index.md"), "# index\n").unwrap();
     fs::write(vault.join("wiki/log.md"), "# log\n").unwrap();
     let init_commits_before = git(&vault, &["rev-list", "--count", "HEAD"]).stdout;
 
-    // With --fix-max-iter 0 the loop spawns initial fix agent only, then
-    // terminates at first post-lint check. Mock-claude success-noop returns
-    // 0 without modifying anything → for a clean vault the fix loop never
-    // even spawns.
-    let out = run_goal_with_fix(tmp.path(), "test-fix-phase", &["--fix-max-iter", "0"], "success-noop");
+    let out = run_goal_with_fix(tmp.path(), "test-fix-phase", &[], "success-noop");
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -323,19 +322,19 @@ fn goal_with_no_fix_skips_lint_fix_phase() {
 }
 
 #[test]
-fn goal_propagates_fix_exit_one_when_ping_budget_exhausts_with_remaining_issues() {
+fn goal_propagates_fix_exit_one_when_post_spawn_lint_has_issues() {
     let tmp = TempDir::new().unwrap();
     fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
     assert!(run_init(tmp.path()).status.success());
-    // Vault is dirty (no nav files) — fix loop will run but mock-claude
-    // success-noop won't repair anything → ping budget exhausts.
-    let out = run_goal_with_fix(tmp.path(), "willfail", &["--fix-max-iter", "0"], "success-noop");
-    // Goal agent succeeded (mock returns 0) but fix exhausted → goal
-    // exits 1 propagating the fix failure.
+    // Vault is dirty (no nav files) — fix flow will run but mock-claude
+    // success-noop won't repair anything → post-spawn lint still has issues.
+    let out = run_goal_with_fix(tmp.path(), "willfail", &[], "success-noop");
+    // Goal agent succeeded (mock returns 0) but fix's final lint reports
+    // issues → goal exits 1 propagating the fix failure.
     assert_eq!(
         out.status.code(),
         Some(1),
-        "expected exit 1 from fix budget exhaust; stderr: {}",
+        "expected exit 1 from fix issues remaining; stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let stderr = String::from_utf8_lossy(&out.stderr);

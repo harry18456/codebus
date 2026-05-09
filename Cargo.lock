@@ -193,6 +193,7 @@ dependencies = [
  "clap",
  "codebus-core",
  "dirs",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

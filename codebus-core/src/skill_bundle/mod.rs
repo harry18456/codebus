@@ -200,26 +200,28 @@ The query text's language SHALL override the natural language of any wiki conten
 
 ";
 
-/// Fix workflow: atomic contract per v3-lint Fix SKILL.md Atomic Contract
-/// requirement. The agent's task is one round of repair: receive lint issues
-/// (either pre-supplied in prompt context, or fetched via `codebus lint
-/// --format json`), edit the corresponding `wiki/` files to resolve them,
-/// then exit. Loop control belongs to the caller — the codebus binary's
-/// `fix` subcommand wraps this with an outer ping mechanism; a user
-/// invoking `/codebus-fix` interactively decides themselves whether to
-/// re-run after this round.
+/// Fix workflow per v3-fix-trust-agent Fix SKILL.md Atomic Contract
+/// requirement (heading kept for spec stability, content rewritten).
 ///
-/// Critically, the body avoids loop-control language (`iterate`, `retry`,
-/// `again`, `loop`) in any self-prescriptive sense — keeping the agent
-/// from acting as its own controller and oscillating against the outer
-/// loop.
-const FIX_WORKFLOW: &str = "## Workflow (per-fix repair round)
+/// Trust-agent model: the agent is invoked once per `codebus fix` call
+/// (or per user `/codebus-fix`) and decides itself when its repair work
+/// is complete. The agent has access to `Bash(codebus lint *)` (gated by
+/// the PreToolUse hook installed by `codebus init`) so it can query lint
+/// state freely within its session. The codebus CLI does not orchestrate
+/// internal iterations — it runs lint once after the agent terminates and
+/// uses that as the authoritative success signal.
+///
+/// The body deliberately avoids the prior v3-lint atomic-contract
+/// language ("ONE round of repair", "Loop control belongs to the caller",
+/// "MUST NOT spawn nested fix invocations or loop internally") — those
+/// constraints are released in v3-fix-trust-agent.
+const FIX_WORKFLOW: &str = "## Workflow (self-directed repair)
 
-When this skill is activated, follow these 4 steps in order:
+When this skill is activated, follow these steps:
 
-1. **Acquire lint issues**: if the prompt context already supplies a list of lint issues (the codebus binary injects them on outer-ping invocations), use that list directly. Otherwise, run `codebus lint --format json` via Bash and parse its single JSON object. The JSON's `issues[].path` field carries an absolute filesystem path — use that path verbatim with Read / Write / Edit; do not prepend or strip any prefix.
+1. **Acquire lint issues**: run `codebus lint --format json` via Bash and parse its single JSON object. The PreToolUse hook installed by `codebus init` permits `codebus lint *` and blocks any other Bash invocation, so this is the only shell command available — and it is enough. The JSON's `issues[].path` field carries an absolute filesystem path — use that path verbatim with Read / Write / Edit; do not prepend or strip any prefix.
 
-2. **Group by file**: aggregate issues by their absolute path. Reading and editing the same file once per round is more efficient than per-issue file reopens.
+2. **Group by file**: aggregate issues by their absolute path. Reading and editing the same file once is more efficient than per-issue file reopens.
 
 3. **Apply repairs**: for each file, Read its current content, then use Edit to apply the minimum changes that resolve every issue grouped under that path. Issue `rule_id` selects the repair shape:
    - `frontmatter-parse` → fix YAML syntax in the `---` block.
@@ -231,16 +233,13 @@ When this skill is activated, follow these 4 steps in order:
    - `duplicate-slug` → rename one of the colliding files (and update incoming wikilinks); preserve content.
    - `misplaced-root-page` → move the root-level `.md` into its correct type folder under `wiki/`.
 
-4. **Report**: emit ONE concise stdout line stating how many issues were resolved and how many remain unresolved (e.g., issues you could not auto-fix because they require human judgment about content). Do not re-run lint inside this round — the caller verifies after you exit. Phrase the line in the natural language of the prompt context per `CLAUDE.md` §0 Language Policy.
+4. **Re-check freely if helpful**: after a batch of edits, you MAY re-run `codebus lint --format json` to see what remains. There is no fixed iteration count. Continue editing as long as you are making productive progress; stop when you cannot meaningfully improve the situation further (issues require human judgment about content, target pages don't exist and you don't have enough context to author them, etc.).
 
-## Atomic Contract
+5. **Report**: emit one concise stdout line summarising what was repaired and what remains unresolved. Phrase the line in the natural language of the prompt context per `CLAUDE.md` §0 Language Policy.
 
-This workflow handles ONE round of repair. The agent MUST NOT spawn nested fix invocations or loop internally to re-check lint after editing. Loop control belongs to the caller:
+## CLI is the final-only verifier
 
-- When invoked by `codebus fix` (CLI) or `codebus goal` (CLI auto-fix), the binary verifies post-edit by running lint again, and on remaining issues invokes a follow-up round via `--resume <session-id>`.
-- When invoked directly by a user via `/codebus-fix` in an interactive Claude Code session, the user decides whether to invoke another round; this skill does not auto-commit and does not chain.
-
-The agent SHALL exit cleanly after step 4 in either mode.
+The codebus CLI runs lint after this session terminates and uses that result as the authoritative success signal — agent self-reports do not influence the CLI exit code. Loop control within a session is the agent's; the CLI does not iterate by spawning additional `--resume` follow-ups. The agent itself decides when its in-session repair work is complete and exits.
 
 ## Trust the absolute paths
 
@@ -487,60 +486,29 @@ mod tests {
         );
     }
 
-    /// v3-lint Fix SKILL.md Atomic Contract scenario: workflow body has
-    /// no self-prescriptive loop language. The atomic contract is the
-    /// agent does ONE round of repair and exits — loop control belongs
-    /// to the CLI caller (or user in interactive mode). Allowing the
-    /// agent to think in iterate/retry/loop/again imperatives invites
-    /// oscillation against the outer ping mechanism.
-    ///
-    /// We scope the check to the imperative step instructions inside the
-    /// workflow body. The frontmatter description is allowed to reference
-    /// the system name (e.g. "fix loop") since that's a noun, not an
-    /// instruction.
+    /// v3-fix-trust-agent Fix SKILL.md Atomic Contract scenario: body MUST
+    /// NOT contain the v3-lint atomic-contract phrasing — those constraints
+    /// are released in the trust-agent model. (The requirement heading is
+    /// kept for spec stability; the content is fully rewritten.)
     #[test]
-    fn fix_workflow_body_has_no_loop_control_imperatives() {
+    fn fix_workflow_body_does_not_prescribe_atomic_single_round() {
         let body = stub_content("fix");
-        let workflow_start = body
-            .find("## Workflow (per-fix repair round)")
-            .expect("fix SKILL.md missing workflow header");
-        let workflow_end = body
-            .find("## Trust the absolute paths")
-            .unwrap_or(body.len());
-        // Scope to the numbered-steps + Atomic Contract section, where
-        // imperative language about loop semantics would actually
-        // mis-direct the agent.
-        let workflow = &body[workflow_start..workflow_end];
-
-        // Phrases that would direct the agent to repeat its own work.
-        // Descriptive text about what the CLI caller does ("running lint
-        // again, ...") is fine — narrow to imperative agent-instructions.
-        let forbidden = [
-            "Iterate over",
-            "iterate over",
-            "Retry the",
-            "retry until",
-            "Loop until",
-            "loop until",
-            "Run again",
-            "run again",
-            "this iteration",
+        let forbidden_literal_phrases = [
+            "ONE round of repair",
+            "atomic contract",
+            "MUST NOT spawn nested fix invocations or loop internally",
+            "Loop control belongs to the caller",
         ];
-        for phrase in forbidden {
+        for phrase in forbidden_literal_phrases {
             assert!(
-                !workflow.contains(phrase),
-                "fix SKILL.md workflow contains imperative loop phrase `{phrase}` — atomic contract requires single-round semantics. Workflow:\n{workflow}"
+                !body.contains(phrase),
+                "fix SKILL.md still contains v3-lint atomic-contract phrase `{phrase}` — should be removed in v3-fix-trust-agent"
             );
         }
-        // Positive: workflow MUST explicitly say loop control is caller's.
-        assert!(
-            workflow.contains("Loop control belongs to the caller"),
-            "fix SKILL.md workflow missing explicit loop-ownership disclaimer"
-        );
     }
 
-    /// v3-lint Fix SKILL.md Atomic Contract scenario: body instructs
-    /// agent to use absolute paths from lint JSON `issues[].path`
+    /// v3-fix-trust-agent Fix SKILL.md Atomic Contract scenario: body
+    /// instructs agent to use absolute paths from lint JSON `issues[].path`
     /// directly with Read/Write/Edit, no path translation.
     #[test]
     fn fix_workflow_instructs_absolute_path_use_from_lint_json() {
@@ -563,20 +531,23 @@ mod tests {
         );
     }
 
+    /// v3-fix-trust-agent Fix SKILL.md Atomic Contract scenario: body
+    /// states that the CLI is the final-only verifier (not iterating),
+    /// and the agent itself decides when its in-session work is complete.
     #[test]
-    fn fix_workflow_documents_atomic_contract_section() {
+    fn fix_workflow_states_cli_is_final_only_verifier() {
         let body = stub_content("fix");
+        // The workflow MUST have a section explicitly explaining the
+        // CLI's authority is post-session lint only.
         assert!(
-            body.contains("## Atomic Contract"),
-            "fix SKILL.md missing `## Atomic Contract` section header"
+            body.contains("CLI is the final-only verifier")
+                || body.contains("final-only verifier"),
+            "fix SKILL.md missing `final-only verifier` framing"
         );
+        // And the agent decides its own completion.
         assert!(
-            body.contains("ONE round of repair"),
-            "fix SKILL.md atomic contract section missing single-round assertion"
-        );
-        assert!(
-            body.contains("MUST NOT spawn nested"),
-            "fix SKILL.md missing nested-spawn prohibition"
+            body.contains("agent itself decides when") || body.contains("agent's"),
+            "fix SKILL.md missing agent-self-determination language"
         );
     }
 

@@ -42,7 +42,6 @@ pub async fn run(
     args: GoalArgs,
     no_obsidian_register: bool,
     no_fix: bool,
-    fix_max_iter: Option<u32>,
     debug: bool,
 ) -> ExitCode {
     let paths = vault_paths(repo);
@@ -86,7 +85,7 @@ pub async fn run(
         },
         None => LintFixConfig::default(),
     };
-    let fix_cfg = fix_cfg.merge_cli_overrides(no_fix, fix_max_iter);
+    let fix_cfg = fix_cfg.merge_cli_overrides(no_fix);
 
     // Step 3: source-signal detection + conditional re-sync.
     let current_signal = match compute_current_signal(repo) {
@@ -162,7 +161,6 @@ pub async fn run(
         vault_root: paths.root.clone(),
         toolset: GOAL_TOOLSET,
         bash_whitelist: None,
-        session: None,
     }) {
         Ok(status) => status,
         Err(e) => {
@@ -183,36 +181,33 @@ pub async fn run(
     }
 
     // Step 5: lint-and-fix phase between goal agent and auto-commit.
-    // Per v3-lint Goal Subcommand Behavior: insert this phase after the
-    // goal agent terminates and BEFORE auto-commit, so wiki writes from
-    // the goal agent and any repair edits land in the same single commit.
+    // v3-fix-trust-agent: single-shot — spawn fix agent at most once, then
+    // CLI runs final lint as authoritative state. Per Goal Subcommand
+    // Behavior: insert this phase after the goal agent terminates and
+    // BEFORE auto-commit, so wiki writes from the goal agent and any
+    // repair edits land in the same single commit.
     let mut fix_exit: u8 = 0;
     if fix_cfg.enabled {
         if debug {
-            eprintln!(
-                "[debug] goal: running lint-and-fix phase (outer_ping_max={})",
-                fix_cfg.outer_ping_max
-            );
+            eprintln!("[debug] goal: running lint-and-fix phase (single-shot)");
         }
-        match run_fix_loop(paths.root.clone(), fix_cfg.outer_ping_max) {
+        match run_fix_loop(paths.root.clone()) {
             Ok(report) => {
                 if debug {
                     eprintln!(
-                        "[debug] goal: fix invocations={}, termination={:?}, errors={}, warns={}",
-                        report.agent_invocations,
+                        "[debug] goal: fix agent_skipped={}, termination={:?}, errors={}, warns={}",
+                        report.agent_skipped,
                         report.termination,
                         report.final_lint.error_count,
                         report.final_lint.warn_count
                     );
                 }
                 if !report.clean
-                    && report.termination == TerminationReason::PingBudgetExhausted
+                    && report.termination == TerminationReason::PostLintIssuesRemain
                 {
                     eprintln!(
-                        "✗ fix: {} error(s), {} warning(s) remain after {} agent invocation(s)",
-                        report.final_lint.error_count,
-                        report.final_lint.warn_count,
-                        report.agent_invocations
+                        "✗ fix: {} error(s), {} warning(s) remain after agent terminated",
+                        report.final_lint.error_count, report.final_lint.warn_count
                     );
                     fix_exit = 1;
                 }
