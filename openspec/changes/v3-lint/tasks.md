@@ -41,10 +41,10 @@
 
 ## 6. Fix SKILL.md content
 
-- [ ] 6.1 在 `codebus-core/src/skill_bundle/mod.rs` 撰寫 Fix SKILL.md Atomic Contract 內容 — 描述 agent 任務為「拿 lint issues、修對應 wiki/ 檔、結束」；不含 loop / iterate / retry 等自我控制語彙
-- [ ] 6.2 替換既有 fix stub workflow placeholder（`workflow_section("fix")` 那段），改為新的 fix workflow 字串常數
-- [ ] 6.3 加測試 assert Fix SKILL.md Atomic Contract — body 不含 "iteration" / "iterate" / "loop" / "retry" / "again" 等 loop 詞彙在自我控制語境
-- [ ] 6.4 加測試 assert fix SKILL.md 教 agent 用 `codebus lint --format json` 取得 issues 且使用絕對路徑（`issues[].path`）直接餵給 Read/Write/Edit
+- [x] 6.1 在 `codebus-core/src/skill_bundle/mod.rs` 撰寫 Fix SKILL.md Atomic Contract 內容 — 描述 agent 任務為「拿 lint issues、修對應 wiki/ 檔、結束」；不含 loop / iterate / retry 等自我控制語彙
+- [x] 6.2 替換既有 fix stub workflow placeholder（`workflow_section("fix")` 那段），改為新的 fix workflow 字串常數
+- [x] 6.3 加測試 assert Fix SKILL.md Atomic Contract — body 不含 "iteration" / "iterate" / "loop" / "retry" / "again" 等 loop 詞彙在自我控制語境
+- [x] 6.4 加測試 assert fix SKILL.md 教 agent 用 `codebus lint --format json` 取得 issues 且使用絕對路徑（`issues[].path`）直接餵給 Read/Write/Edit
 
 ## 7. Skill bundle 雙位址寫入
 
@@ -81,8 +81,8 @@
 
 ## 12. /codebus-fix 使用者直觸 模式驗證
 
-- [ ] 12.1 加測試模擬 /codebus-fix 使用者直觸（無 CLI 外層）— 直接呼叫 fix SKILL.md 載入後的 atomic 契約、assert agent self-loop 在無 outer ping 下也能跑（loop 控制權在 agent，不依賴 CLI）
-- [ ] 12.2 在 fix SKILL.md 撰寫文末註記說明：互動模式（user direct）與 CLI spawn 模式共用同一 SKILL.md，但 CLI 模式才有 outer ping 與 auto-commit 強保證
+- [x] 12.1 加測試模擬 /codebus-fix 使用者直觸（無 CLI 外層）— 直接呼叫 fix SKILL.md 載入後的 atomic 契約、assert agent self-loop 在無 outer ping 下也能跑（loop 控制權在 agent，不依賴 CLI）
+- [x] 12.2 在 fix SKILL.md 撰寫文末註記說明：互動模式（user direct）與 CLI spawn 模式共用同一 SKILL.md，但 CLI 模式才有 outer ping 與 auto-commit 強保證
 
 ## 13. Verification
 

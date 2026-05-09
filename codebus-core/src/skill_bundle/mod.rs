@@ -120,12 +120,13 @@ fn stub_content(verb: &str) -> String {
 }
 
 /// `## Workflow` section per verb. Goal carries the 5-step ingest content
-/// (v3-goal #5); query carries the 4-step read-only lookup content
-/// (v3-query #6); fix retains its stub placeholder until v3-fix #8 lands.
+/// (v3-goal); query carries the 4-step read-only lookup content (v3-query);
+/// fix carries the v3-lint atomic-contract repair workflow.
 fn workflow_section(verb: &str) -> String {
     match verb {
         "goal" => GOAL_WORKFLOW.to_string(),
         "query" => QUERY_WORKFLOW.to_string(),
+        "fix" => FIX_WORKFLOW.to_string(),
         _ => format!(
             "## Workflow\n\
              \n\
@@ -196,6 +197,54 @@ This workflow is strictly read-only. The agent MUST NOT use Write or Edit to mut
 ## Language Override
 
 The query text's language SHALL override the natural language of any wiki content read in steps 2-3. When matched pages are authored in a different language than the query, the answer in step 4 SHALL match the query's language regardless. The agent reads `wiki/` to retrieve information, not to imitate the wiki's writing language.
+
+";
+
+/// Fix workflow: atomic contract per v3-lint Fix SKILL.md Atomic Contract
+/// requirement. The agent's task is one round of repair: receive lint issues
+/// (either pre-supplied in prompt context, or fetched via `codebus lint
+/// --format json`), edit the corresponding `wiki/` files to resolve them,
+/// then exit. Loop control belongs to the caller — the codebus binary's
+/// `fix` subcommand wraps this with an outer ping mechanism; a user
+/// invoking `/codebus-fix` interactively decides themselves whether to
+/// re-run after this round.
+///
+/// Critically, the body avoids loop-control language (`iterate`, `retry`,
+/// `again`, `loop`) in any self-prescriptive sense — keeping the agent
+/// from acting as its own controller and oscillating against the outer
+/// loop.
+const FIX_WORKFLOW: &str = "## Workflow (per-fix repair round)
+
+When this skill is activated, follow these 4 steps in order:
+
+1. **Acquire lint issues**: if the prompt context already supplies a list of lint issues (the codebus binary injects them on outer-ping invocations), use that list directly. Otherwise, run `codebus lint --format json` via Bash and parse its single JSON object. The JSON's `issues[].path` field carries an absolute filesystem path — use that path verbatim with Read / Write / Edit; do not prepend or strip any prefix.
+
+2. **Group by file**: aggregate issues by their absolute path. Reading and editing the same file once per round is more efficient than per-issue file reopens.
+
+3. **Apply repairs**: for each file, Read its current content, then use Edit to apply the minimum changes that resolve every issue grouped under that path. Issue `rule_id` selects the repair shape:
+   - `frontmatter-parse` → fix YAML syntax in the `---` block.
+   - `related-format` → wrap each `related[]` entry as a `[[wikilink]]`.
+   - `broken-wikilink-related` → either add the missing target page or change the related entry to point at an existing slug.
+   - `broken-wikilink-body` → either add the missing target page, change the body link, or remove it if the reference was speculative.
+   - `broken-wikilink-nav` → same as body, but in `index.md` / `log.md`.
+   - `nav-missing` → create the missing nav file with a stub heading.
+   - `duplicate-slug` → rename one of the colliding files (and update incoming wikilinks); preserve content.
+   - `misplaced-root-page` → move the root-level `.md` into its correct type folder under `wiki/`.
+
+4. **Report**: emit ONE concise stdout line stating how many issues were resolved and how many remain unresolved (e.g., issues you could not auto-fix because they require human judgment about content). Do not re-run lint inside this round — the caller verifies after you exit. Phrase the line in the natural language of the prompt context per `CLAUDE.md` §0 Language Policy.
+
+## Atomic Contract
+
+This workflow handles ONE round of repair. The agent MUST NOT spawn nested fix invocations or loop internally to re-check lint after editing. Loop control belongs to the caller:
+
+- When invoked by `codebus fix` (CLI) or `codebus goal` (CLI auto-fix), the binary verifies post-edit by running lint again, and on remaining issues invokes a follow-up round via `--resume <session-id>`.
+- When invoked directly by a user via `/codebus-fix` in an interactive Claude Code session, the user decides whether to invoke another round; this skill does not auto-commit and does not chain.
+
+The agent SHALL exit cleanly after step 4 in either mode.
+
+## Trust the absolute paths
+
+The lint JSON's `issues[].path` is the canonical absolute path. The agent MUST use these paths verbatim with file tools. Do not derive alternative paths from `cwd` or relative slugs — lint already resolved the absolute location and trusting it avoids drift between agent's view and lint's view of the vault.
 
 ";
 
@@ -435,6 +484,115 @@ mod tests {
         assert!(
             body.contains("gated at the binary layer"),
             "query SKILL.md body must note that toolset gating is a binary-layer mechanism (defense-in-depth context)"
+        );
+    }
+
+    /// v3-lint Fix SKILL.md Atomic Contract scenario: workflow body has
+    /// no self-prescriptive loop language. The atomic contract is the
+    /// agent does ONE round of repair and exits — loop control belongs
+    /// to the CLI caller (or user in interactive mode). Allowing the
+    /// agent to think in iterate/retry/loop/again imperatives invites
+    /// oscillation against the outer ping mechanism.
+    ///
+    /// We scope the check to the imperative step instructions inside the
+    /// workflow body. The frontmatter description is allowed to reference
+    /// the system name (e.g. "fix loop") since that's a noun, not an
+    /// instruction.
+    #[test]
+    fn fix_workflow_body_has_no_loop_control_imperatives() {
+        let body = stub_content("fix");
+        let workflow_start = body
+            .find("## Workflow (per-fix repair round)")
+            .expect("fix SKILL.md missing workflow header");
+        let workflow_end = body
+            .find("## Trust the absolute paths")
+            .unwrap_or(body.len());
+        // Scope to the numbered-steps + Atomic Contract section, where
+        // imperative language about loop semantics would actually
+        // mis-direct the agent.
+        let workflow = &body[workflow_start..workflow_end];
+
+        // Phrases that would direct the agent to repeat its own work.
+        // Descriptive text about what the CLI caller does ("running lint
+        // again, ...") is fine — narrow to imperative agent-instructions.
+        let forbidden = [
+            "Iterate over",
+            "iterate over",
+            "Retry the",
+            "retry until",
+            "Loop until",
+            "loop until",
+            "Run again",
+            "run again",
+            "this iteration",
+        ];
+        for phrase in forbidden {
+            assert!(
+                !workflow.contains(phrase),
+                "fix SKILL.md workflow contains imperative loop phrase `{phrase}` — atomic contract requires single-round semantics. Workflow:\n{workflow}"
+            );
+        }
+        // Positive: workflow MUST explicitly say loop control is caller's.
+        assert!(
+            workflow.contains("Loop control belongs to the caller"),
+            "fix SKILL.md workflow missing explicit loop-ownership disclaimer"
+        );
+    }
+
+    /// v3-lint Fix SKILL.md Atomic Contract scenario: body instructs
+    /// agent to use absolute paths from lint JSON `issues[].path`
+    /// directly with Read/Write/Edit, no path translation.
+    #[test]
+    fn fix_workflow_instructs_absolute_path_use_from_lint_json() {
+        let body = stub_content("fix");
+        assert!(
+            body.contains("absolute filesystem path") || body.contains("absolute path"),
+            "fix SKILL.md missing absolute-path instruction"
+        );
+        assert!(
+            body.contains("issues[].path"),
+            "fix SKILL.md missing reference to JSON `issues[].path` field"
+        );
+        assert!(
+            body.contains("verbatim"),
+            "fix SKILL.md missing `verbatim` directive on path use"
+        );
+        assert!(
+            body.contains("--format json"),
+            "fix SKILL.md missing `codebus lint --format json` invocation hint"
+        );
+    }
+
+    #[test]
+    fn fix_workflow_documents_atomic_contract_section() {
+        let body = stub_content("fix");
+        assert!(
+            body.contains("## Atomic Contract"),
+            "fix SKILL.md missing `## Atomic Contract` section header"
+        );
+        assert!(
+            body.contains("ONE round of repair"),
+            "fix SKILL.md atomic contract section missing single-round assertion"
+        );
+        assert!(
+            body.contains("MUST NOT spawn nested"),
+            "fix SKILL.md missing nested-spawn prohibition"
+        );
+    }
+
+    #[test]
+    fn fix_workflow_body_is_english() {
+        // Same internal-surface English-only invariant as goal/query.
+        let body = stub_content("fix");
+        let cjk: Vec<char> = body
+            .chars()
+            .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
+            .collect();
+        assert!(
+            cjk.is_empty(),
+            "fix SKILL.md body must not contain CJK ideographs, found {} (first 10: {:?})",
+            cjk.len(),
+            cjk.iter().take(10).collect::<Vec<_>>()
         );
     }
 
