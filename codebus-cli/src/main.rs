@@ -24,6 +24,16 @@ struct Cli {
     #[arg(long = "no-obsidian-register", global = true)]
     no_obsidian_register: bool,
 
+    /// Skip the lint-and-fix phase for this invocation (overrides `lint.fix.enabled`).
+    /// Affects both `goal` (post-agent fix phase) and `fix` (whole loop).
+    #[arg(long = "no-fix", global = true)]
+    no_fix: bool,
+
+    /// Override the fix loop's `outer_ping_max` for this invocation. Must be a
+    /// positive integer. `--no-fix` takes precedence when both are supplied.
+    #[arg(long = "fix-max-iter", global = true, value_name = "N")]
+    fix_max_iter: Option<u32>,
+
     /// Verbose output: print internal decisions, fs operations, computed signals.
     #[arg(long, global = true)]
     debug: bool,
@@ -55,10 +65,20 @@ async fn main() -> ExitCode {
             commands::init::run(&repo_default, cli.no_obsidian_register, cli.debug).await
         }
         Some(Command::Goal(args)) => {
-            commands::goal::run(&repo_default, args, cli.no_obsidian_register, cli.debug).await
+            commands::goal::run(
+                &repo_default,
+                args,
+                cli.no_obsidian_register,
+                cli.no_fix,
+                cli.fix_max_iter,
+                cli.debug,
+            )
+            .await
         }
         Some(Command::Query(args)) => commands::query::run(&repo_default, args, cli.debug).await,
         Some(Command::Lint(args)) => commands::lint::run(cli.repo.as_deref(), args, cli.debug).await,
-        Some(Command::Fix) => commands::fix::run().await,
+        Some(Command::Fix) => {
+            commands::fix::run(cli.repo.as_deref(), cli.no_fix, cli.fix_max_iter, cli.debug).await
+        }
     }
 }

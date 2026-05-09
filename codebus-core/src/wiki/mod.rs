@@ -5,6 +5,7 @@
 //! consumers like the fix agent), and vault root auto-detection so the
 //! lint subcommand can run from either source repo cwd or vault cwd.
 
+pub mod fix;
 pub mod frontmatter;
 pub mod lint;
 pub mod types;

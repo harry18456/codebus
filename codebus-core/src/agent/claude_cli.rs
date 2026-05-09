@@ -11,9 +11,20 @@ use std::io;
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 
+/// Session continuity mode for the spawned `claude -p` invocation.
+///
+/// - `Start(uuid)` → pass `--session-id <uuid>`. Use on the first spawn of
+///   a multi-round flow; the agent CLI persists session state under this
+///   UUID so subsequent `Resume` calls recover full context.
+/// - `Resume(uuid)` → pass `--resume <uuid>`. Use on follow-up spawns
+///   targeting an existing session previously started with the same UUID.
+pub enum SessionAction {
+    Start(String),
+    Resume(String),
+}
+
 /// Inputs for [`invoke`]. Caller (verb command modules) constructs this with
-/// verb-specific values and a `'static` toolset slice; for v3-goal the
-/// toolset is `&["Read","Glob","Grep","Write","Edit"]`.
+/// verb-specific values and a `'static` toolset slice.
 pub struct InvokeAgentOptions {
     /// The slash command + arguments string passed to `claude -p`. Example
     /// for goal: `/codebus-goal "make a wiki for X"`.
@@ -26,6 +37,17 @@ pub struct InvokeAgentOptions {
     /// `--allowedTools` (redundant safety net). Comma-joined when forming
     /// the args. `'static` because verbs hardcode the list at compile time.
     pub toolset: &'static [&'static str],
+    /// Optional Bash permission specifier appended to the toolset CSV.
+    /// Format: `Bash(<command-pattern>)` — e.g. `Bash(codebus lint *)` for
+    /// the fix verb. `None` means no Bash access (goal / query default).
+    /// Spike-verified 2026-05-09 against `claude --help` v2.1.137: the
+    /// Tool(specifier) syntax is supported directly on `--allowedTools`.
+    pub bash_whitelist: Option<&'static str>,
+    /// Optional session continuity. `None` = one-shot invocation (no
+    /// session flag passed); the default for goal/query. `Some(Start(uuid))`
+    /// or `Some(Resume(uuid))` activates session mode for fix's outer ping
+    /// loop.
+    pub session: Option<SessionAction>,
 }
 
 /// Spawn the configured `claude -p` child process and wait for it to exit.
@@ -43,22 +65,49 @@ pub struct InvokeAgentOptions {
 pub fn invoke(opts: InvokeAgentOptions) -> io::Result<ExitStatus> {
     let claude_bin = std::env::var("CODEBUS_CLAUDE_BIN")
         .unwrap_or_else(|_| "claude".to_string());
-    let toolset_csv = opts.toolset.join(",");
+    let toolset_csv = build_toolset_csv(opts.toolset, opts.bash_whitelist);
 
-    Command::new(&claude_bin)
-        .arg("-p")
+    let mut cmd = Command::new(&claude_bin);
+    cmd.arg("-p")
         .arg(&opts.slash_command)
         .arg("--tools")
         .arg(&toolset_csv)
         .arg("--allowedTools")
         .arg(&toolset_csv)
         .arg("--permission-mode")
-        .arg("acceptEdits")
-        .current_dir(&opts.vault_root)
+        .arg("acceptEdits");
+
+    if let Some(action) = &opts.session {
+        match action {
+            SessionAction::Start(uuid) => {
+                cmd.arg("--session-id").arg(uuid);
+            }
+            SessionAction::Resume(uuid) => {
+                cmd.arg("--resume").arg(uuid);
+            }
+        }
+    }
+
+    cmd.current_dir(&opts.vault_root)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
+}
+
+/// Compose the `--tools` / `--allowedTools` value string. Toolset names join
+/// with `,`; if `bash_whitelist` is supplied, append it after a comma so
+/// callers can opt-in to a fine-grained Bash specifier (e.g.
+/// `Bash(codebus lint *)`) without affecting the toolset slice itself.
+pub(crate) fn build_toolset_csv(
+    toolset: &[&str],
+    bash_whitelist: Option<&str>,
+) -> String {
+    match bash_whitelist {
+        None => toolset.join(","),
+        Some(spec) if toolset.is_empty() => spec.to_string(),
+        Some(spec) => format!("{},{}", toolset.join(","), spec),
+    }
 }
 
 #[cfg(test)]
@@ -68,29 +117,50 @@ mod tests {
 
     #[test]
     fn invoke_options_struct_carries_required_fields() {
-        // Lock-in: the struct shape MUST stay tight enough that adding a
-        // field is a deliberate cross-cutting design move (per design.md
-        // "Module 形狀" — toolset stays `&'static`, no model/effort yet).
         let opts = InvokeAgentOptions {
             slash_command: "/codebus-goal \"x\"".into(),
             vault_root: PathBuf::from("/tmp/v"),
             toolset: &["Read", "Glob", "Grep"],
+            bash_whitelist: None,
+            session: None,
         };
         let InvokeAgentOptions {
             slash_command,
             vault_root,
             toolset,
+            bash_whitelist,
+            session,
         } = opts;
         assert_eq!(slash_command, "/codebus-goal \"x\"");
         assert_eq!(vault_root, PathBuf::from("/tmp/v"));
         assert_eq!(toolset, &["Read", "Glob", "Grep"]);
+        assert!(bash_whitelist.is_none());
+        assert!(session.is_none());
+    }
+
+    #[test]
+    fn build_toolset_csv_no_bash_whitelist() {
+        let csv = build_toolset_csv(&["Read", "Glob", "Grep"], None);
+        assert_eq!(csv, "Read,Glob,Grep");
+    }
+
+    #[test]
+    fn build_toolset_csv_appends_bash_whitelist() {
+        let csv = build_toolset_csv(
+            &["Read", "Glob", "Grep", "Write", "Edit"],
+            Some("Bash(codebus lint *)"),
+        );
+        assert_eq!(csv, "Read,Glob,Grep,Write,Edit,Bash(codebus lint *)");
+    }
+
+    #[test]
+    fn build_toolset_csv_bash_whitelist_only() {
+        let csv = build_toolset_csv(&[], Some("Bash(codebus lint *)"));
+        assert_eq!(csv, "Bash(codebus lint *)");
     }
 
     #[test]
     fn invoke_returns_io_error_when_binary_missing() {
-        // Spawn against a deliberately-nonexistent binary. The exact error
-        // kind varies by platform (NotFound on Unix, kind 0 on Windows
-        // sometimes), but invoke MUST return Err — never silently succeed.
         unsafe {
             std::env::set_var(
                 "CODEBUS_CLAUDE_BIN",
@@ -101,6 +171,8 @@ mod tests {
             slash_command: "/x".into(),
             vault_root: std::env::temp_dir(),
             toolset: &["Read"],
+            bash_whitelist: None,
+            session: None,
         });
         unsafe {
             std::env::remove_var("CODEBUS_CLAUDE_BIN");

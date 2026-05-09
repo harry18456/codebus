@@ -7,12 +7,14 @@ use std::process::ExitCode;
 
 use clap::Args;
 use codebus_core::agent::{InvokeAgentOptions, invoke};
+use codebus_core::config::{LintFixConfig, default_config_path, load_lint_fix_config};
 use codebus_core::git::auto_commit;
 use codebus_core::pii::scanners::regex_basic::RegexBasicScanner;
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::vault::manifest::{self, ManifestOutcome, SourceSignal};
 use codebus_core::vault::raw_sync::{sync_with_scanner, walk_source_for_signal, SyncSummary};
 use codebus_core::vault::source_signal_detect::detect_drift;
+use codebus_core::wiki::fix::{TerminationReason, run_fix_loop};
 
 use crate::commands::init;
 
@@ -39,6 +41,8 @@ pub async fn run(
     repo: &Path,
     args: GoalArgs,
     no_obsidian_register: bool,
+    no_fix: bool,
+    fix_max_iter: Option<u32>,
     debug: bool,
 ) -> ExitCode {
     let paths = vault_paths(repo);
@@ -70,6 +74,19 @@ pub async fn run(
             return init_exit;
         }
     }
+
+    // Load fix loop config (used by Step 5 lint-and-fix phase).
+    let fix_cfg = match default_config_path() {
+        Some(p) => match load_lint_fix_config(&p) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("warning: lint.fix config load failed (using defaults): {e}");
+                LintFixConfig::default()
+            }
+        },
+        None => LintFixConfig::default(),
+    };
+    let fix_cfg = fix_cfg.merge_cli_overrides(no_fix, fix_max_iter);
 
     // Step 3: source-signal detection + conditional re-sync.
     let current_signal = match compute_current_signal(repo) {
@@ -144,6 +161,8 @@ pub async fn run(
         slash_command,
         vault_root: paths.root.clone(),
         toolset: GOAL_TOOLSET,
+        bash_whitelist: None,
+        session: None,
     }) {
         Ok(status) => status,
         Err(e) => {
@@ -163,9 +182,53 @@ pub async fn run(
         );
     }
 
-    // Step 5: auto-commit unconditionally (v2 carry behavior). Clean working
-    // tree → no-op; dirty → commit "wiki: <goal>" preserving partial work
-    // even when agent failed mid-flight.
+    // Step 5: lint-and-fix phase between goal agent and auto-commit.
+    // Per v3-lint Goal Subcommand Behavior: insert this phase after the
+    // goal agent terminates and BEFORE auto-commit, so wiki writes from
+    // the goal agent and any repair edits land in the same single commit.
+    let mut fix_exit: u8 = 0;
+    if fix_cfg.enabled {
+        if debug {
+            eprintln!(
+                "[debug] goal: running lint-and-fix phase (outer_ping_max={})",
+                fix_cfg.outer_ping_max
+            );
+        }
+        match run_fix_loop(paths.root.clone(), fix_cfg.outer_ping_max) {
+            Ok(report) => {
+                if debug {
+                    eprintln!(
+                        "[debug] goal: fix invocations={}, termination={:?}, errors={}, warns={}",
+                        report.agent_invocations,
+                        report.termination,
+                        report.final_lint.error_count,
+                        report.final_lint.warn_count
+                    );
+                }
+                if !report.clean
+                    && report.termination == TerminationReason::PingBudgetExhausted
+                {
+                    eprintln!(
+                        "✗ fix: {} error(s), {} warning(s) remain after {} agent invocation(s)",
+                        report.final_lint.error_count,
+                        report.final_lint.warn_count,
+                        report.agent_invocations
+                    );
+                    fix_exit = 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("error: lint-and-fix phase: {e}");
+                fix_exit = 1;
+            }
+        }
+    } else if debug {
+        eprintln!("[debug] goal: lint-and-fix phase skipped (--no-fix or config disabled)");
+    }
+
+    // Step 6: auto-commit (v2 carry behavior — fold ingest + fix edits
+    // into ONE commit). Clean working tree → no-op; dirty → commit
+    // "wiki: <goal>" preserving partial work even when agent / fix failed.
     let commit_msg = format!("wiki: {}", args.text);
     match auto_commit(&paths.root, &commit_msg) {
         Ok(sha) => {
@@ -178,8 +241,13 @@ pub async fn run(
         }
     }
 
-    // Propagate child exit code (auto_commit success path).
-    ExitCode::from(child_exit_code)
+    // Exit code precedence: goal agent failure preempts fix exit.
+    // Auto-commit failure (above) preempts both.
+    if child_exit_code != 0 {
+        ExitCode::from(child_exit_code)
+    } else {
+        ExitCode::from(fix_exit)
+    }
 }
 
 /// Compute the current source signal: walk source for file_count/total_bytes,

@@ -353,20 +353,11 @@ fn internal_gitignore_appends_missing_required_lines() {
     );
 }
 
-// === Stub Verb Exit Behavior (fix only; lint implemented in v3-lint) ===
-// Note: v3-lint removes the catch-all stub spec. `lint` now has its own
-// Lint Subcommand Behavior; `fix` remains stub until v3-lint task 9.x lands.
-
-#[test]
-fn remaining_stub_verbs_exit_non_zero_with_not_yet_implemented_message() {
-    for verb in ["fix"] {
-        let out = Command::new(BIN).arg(verb).output().expect("run binary");
-        assert!(!out.status.success(), "verb `{verb}` should fail");
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("not yet implemented"));
-        assert!(stderr.contains(verb));
-    }
-}
+// === Stub Verb Exit Behavior (REMOVED: all verbs implemented as of v3-lint) ===
+// v3-lint REMOVES the catch-all "Stub Verb Exit Behavior" spec. All four
+// subcommands (goal, query, lint, fix) now have explicit Subcommand
+// Behavior requirements. This block previously asserted lint/fix were
+// stubs; that assertion is now obsolete.
 
 #[test]
 fn init_no_longer_matches_stub_behavior() {
@@ -381,31 +372,9 @@ fn init_no_longer_matches_stub_behavior() {
     assert!(!stderr.contains("not yet implemented"));
 }
 
-#[test]
-fn stub_verbs_do_not_panic_or_block() {
-    for verb in ["fix"] {
-        let out = Command::new(BIN).arg(verb).output().expect("run binary");
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(!stderr.contains("panicked at"));
-        assert!(!stderr.contains("RUST_BACKTRACE"));
-    }
-}
-
-#[test]
-fn stub_verbs_accept_debug_flag_silently() {
-    for verb in ["fix"] {
-        let out = Command::new(BIN).args([verb, "--debug"]).output().expect("run");
-        assert!(!out.status.success(), "stub verb `{verb}` --debug should still exit non-zero");
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("not yet implemented"));
-        // Stub verbs do not emit [debug] content
-        assert!(
-            !stderr.contains("[debug]") && !String::from_utf8_lossy(&out.stdout).contains("[debug]"),
-            "stub verb `{verb}` should not emit [debug] lines: stdout={} stderr={stderr}",
-            String::from_utf8_lossy(&out.stdout)
-        );
-    }
-}
+// `stub_verbs_do_not_panic_or_block` and `stub_verbs_accept_debug_flag_silently`
+// removed — all four verbs now have explicit non-stub behavior with their own
+// dedicated tests under tests/{init,goal,query,lint,fix}_flow.rs.
 
 // === Debug Flag Output ===
 

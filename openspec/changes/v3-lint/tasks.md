@@ -27,17 +27,17 @@
 
 ## 4. Fix Loop Configuration & flags
 
-- [ ] 4.1 在 `codebus-core/src/config/lint_fix.rs` 實作 Fix Loop Configuration schema — `lint.fix.{enabled, outer_ping_max}` 預設 `true / 2`，從 `~/.codebus/config.yaml` 載入
-- [ ] 4.2 在 `codebus-cli/src/main.rs` 加 `--no-fix`（boolean）與 `--fix-max-iter <N>`（positive int）CLI flag 定義，goal 與 fix 子命令共用
-- [ ] 4.3 實作 config 與 flag merge 規則 — `--no-fix` 取代 `enabled`、`--fix-max-iter` 覆寫 `outer_ping_max`，兩者並存時 `--no-fix` 贏
+- [x] 4.1 在 `codebus-core/src/config/lint_fix.rs` 實作 Fix Loop Configuration schema — `lint.fix.{enabled, outer_ping_max}` 預設 `true / 2`，從 `~/.codebus/config.yaml` 載入
+- [x] 4.2 在 `codebus-cli/src/main.rs` 加 `--no-fix`（boolean）與 `--fix-max-iter <N>`（positive int）CLI flag 定義，goal 與 fix 子命令共用
+- [x] 4.3 實作 config 與 flag merge 規則 — `--no-fix` 取代 `enabled`、`--fix-max-iter` 覆寫 `outer_ping_max`，兩者並存時 `--no-fix` 贏
 
 ## 5. Fix loop foundation (codebus-core/src/wiki/fix/)
 
-- [ ] 5.1 在 `codebus-core/src/wiki/fix/session.rs` 實作 Session continuity 工具 — UUID v4 產生、`--session-id <uuid>` 與 `--resume <uuid>` argument builder
-- [ ] 5.2 在 `wiki/fix/mod.rs` 內實作 Fix Loop Agent Sandbox argument builder（Bash whitelist 細粒度）— 拼出 `Read,Glob,Grep,Write,Edit,Bash(codebus lint *)` 字串、`--tools` 與 `--allowedTools` 兩處同步
-- [ ] 5.3 [P] 實作 Fix CLI Outer Ping Loop 的 agent-driven self-loop 控制流（CLI 外層 ping 機制）— initial spawn、lint check、ping with `--resume`、依 `outer_ping_max` 終止
-- [ ] 5.4 [P] 在 `wiki/fix/prompt.rs` 實作 follow-up prompt 組裝器 — 把剩餘 lint issues serialize 進 prompt body，給外層 ping 用
-- [ ] 5.5 加測試覆蓋 Fix CLI Outer Ping Loop 場景：initial lint 乾淨直接退出、post-lint 乾淨終止、`outer_ping_max + 1` 次後仍有 issue 終止
+- [x] 5.1 在 `codebus-core/src/wiki/fix/session.rs` 實作 Session continuity 工具 — UUID v4 產生、`--session-id <uuid>` 與 `--resume <uuid>` argument builder
+- [x] 5.2 在 `wiki/fix/mod.rs` 內實作 Fix Loop Agent Sandbox argument builder（Bash whitelist 細粒度）— 拼出 `Read,Glob,Grep,Write,Edit,Bash(codebus lint *)` 字串、`--tools` 與 `--allowedTools` 兩處同步
+- [x] 5.3 [P] 實作 Fix CLI Outer Ping Loop 的 agent-driven self-loop 控制流（CLI 外層 ping 機制）— initial spawn、lint check、ping with `--resume`、依 `outer_ping_max` 終止
+- [x] 5.4 [P] 在 `wiki/fix/prompt.rs` 實作 follow-up prompt 組裝器 — 把剩餘 lint issues serialize 進 prompt body，給外層 ping 用
+- [x] 5.5 加測試覆蓋 Fix CLI Outer Ping Loop 場景：initial lint 乾淨直接退出、post-lint 乾淨終止、`outer_ping_max + 1` 次後仍有 issue 終止
 
 ## 6. Fix SKILL.md content
 
@@ -61,22 +61,22 @@
 
 ## 9. Fix CLI verb (codebus-cli/src/commands/fix.rs)
 
-- [ ] 9.1 從 stub 改寫 `fix.rs` 落地 Fix Subcommand Behavior — vault precondition (exit 2 if missing)、`--no-fix` short-circuit (exit 0 + stderr message)、lint pre-check (skip loop if clean)、call fix loop、auto-commit
-- [ ] 9.2 實作 Standalone Fix Mode 的 `wiki: lint fix loop` commit message 與「無變動 = no-op commit」行為
-- [ ] 9.3 加 CLI 整合測試 `codebus-cli/tests/fix_flow.rs`：vault-missing exit 2、clean vault 跳過 agent、`--no-fix` short-circuit、ping budget 用完後 commit + exit 1
-- [ ] 9.4 [P] 加測試驗證 Fix Subcommand Behavior 用 `--fix-max-iter 5` 覆寫 config 的 `outer_ping_max: 2`
+- [x] 9.1 從 stub 改寫 `fix.rs` 落地 Fix Subcommand Behavior — vault precondition (exit 2 if missing)、`--no-fix` short-circuit (exit 0 + stderr message)、lint pre-check (skip loop if clean)、call fix loop、auto-commit
+- [x] 9.2 實作 Standalone Fix Mode 的 `wiki: lint fix loop` commit message 與「無變動 = no-op commit」行為
+- [x] 9.3 加 CLI 整合測試 `codebus-cli/tests/fix_flow.rs`：vault-missing exit 2、clean vault 跳過 agent、`--no-fix` short-circuit、ping budget 用完後 commit + exit 1
+- [x] 9.4 [P] 加測試驗證 Fix Subcommand Behavior 用 `--fix-max-iter 5` 覆寫 config 的 `outer_ping_max: 2`
 
 ## 10. Goal flow integration
 
-- [ ] 10.1 修改 Goal Subcommand Behavior 步驟序列 — 在 goal agent 結束與 auto-commit 之間插入 lint-and-fix phase；變更 step count 從 5 → 6
-- [ ] 10.2 將 `--no-fix` / `--fix-max-iter` 從 goal CLI flags 轉發進 fix loop call
-- [ ] 10.3 實作 Goal commit 摺單顆 — 單一 `auto_commit("wiki: <goal-text>")` 涵蓋 goal agent 寫入 + fix loop 修改
-- [ ] 10.4 更新 Goal Subcommand Behavior 退出碼優先序 — goal agent 失敗優先於 fix exit code，但 auto-commit 失敗最高優先
-- [ ] 10.5 加 / 改 `codebus-cli/tests/goal_flow.rs` 測試：lint-and-fix 跑在 agent 結束與 commit 之間、`--no-fix` 跳過 fix phase、fix edits 跟 ingest 寫入摺進同一 commit
+- [x] 10.1 修改 Goal Subcommand Behavior 步驟序列 — 在 goal agent 結束與 auto-commit 之間插入 lint-and-fix phase；變更 step count 從 5 → 6
+- [x] 10.2 將 `--no-fix` / `--fix-max-iter` 從 goal CLI flags 轉發進 fix loop call
+- [x] 10.3 實作 Goal commit 摺單顆 — 單一 `auto_commit("wiki: <goal-text>")` 涵蓋 goal agent 寫入 + fix loop 修改
+- [x] 10.4 更新 Goal Subcommand Behavior 退出碼優先序 — goal agent 失敗優先於 fix exit code，但 auto-commit 失敗最高優先
+- [x] 10.5 加 / 改 `codebus-cli/tests/goal_flow.rs` 測試：lint-and-fix 跑在 agent 結束與 commit 之間、`--no-fix` 跳過 fix phase、fix edits 跟 ingest 寫入摺進同一 commit
 
 ## 11. cli spec 一致性 (existing openspec/specs/cli/spec.md sync)
 
-- [ ] 11.1 修改 Debug Flag Output 既有 spec 文字 — 移除「stub verbs 接受 --debug 但不發 [debug] line」段落，改為 per-verb 行為定義
+- [x] 11.1 修改 Debug Flag Output 既有 spec 文字 — 移除「stub verbs 接受 --debug 但不發 [debug] line」段落，改為 per-verb 行為定義
 - [x] 11.2 確認 `Stub Verb Exit Behavior` requirement 移除後無任何 runtime check 或測試還在引用該語義
 
 ## 12. /codebus-fix 使用者直觸 模式驗證

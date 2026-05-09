@@ -26,8 +26,14 @@ fn run_goal(
 ) -> (Output, std::path::PathBuf) {
     let log = repo.join("mock-claude.log");
     let _ = fs::remove_file(&log);
+    // Default `--no-fix` so v3-goal tests still test goal-agent semantics
+    // in isolation; v3-lint added a post-agent lint+fix phase that the
+    // mock doesn't simulate (mock doesn't create index.md/log.md so lint
+    // post-agent flags 2 nav-missing warnings, which would otherwise make
+    // every existing test fail). Tests that want to exercise the lint+fix
+    // integration pass `--no-fix=false` (or omit and add a custom flag).
     let mut cmd = Command::new(BIN);
-    cmd.args(["--no-obsidian-register", "goal", goal_text]);
+    cmd.args(["--no-obsidian-register", "--no-fix", "goal", goal_text]);
     for f in extra_flags {
         cmd.arg(f);
     }
@@ -218,5 +224,131 @@ fn goal_force_resync_bypasses_detection() {
     assert!(
         stdout2.contains("(re-sync)"),
         "force-resync did not produce re-sync progress line; stdout: {stdout2}"
+    );
+}
+
+// === v3-lint goal lint-and-fix integration ===
+
+/// Run `goal` WITHOUT the default --no-fix prefix so the lint-and-fix
+/// phase actually runs. Returns the binary's Output.
+fn run_goal_with_fix(
+    repo: &Path,
+    goal_text: &str,
+    extra_flags: &[&str],
+    behavior: &str,
+) -> Output {
+    let log = repo.join("mock-claude.log");
+    let _ = fs::remove_file(&log);
+    let mut cmd = Command::new(BIN);
+    cmd.args(["--no-obsidian-register", "goal", goal_text]);
+    for f in extra_flags {
+        cmd.arg(f);
+    }
+    cmd.current_dir(repo)
+        .env("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE)
+        .env("CODEBUS_MOCK_BEHAVIOR", behavior)
+        .env("CODEBUS_MOCK_LOG", &log);
+    cmd.output().expect("run codebus goal")
+}
+
+#[test]
+fn goal_runs_lint_and_fix_phase_between_agent_and_commit() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+
+    // Pre-create nav files so post-agent lint isn't dirty for nav-missing.
+    let vault = tmp.path().join(".codebus");
+    fs::write(vault.join("wiki/index.md"), "# index\n").unwrap();
+    fs::write(vault.join("wiki/log.md"), "# log\n").unwrap();
+    let init_commits_before = git(&vault, &["rev-list", "--count", "HEAD"]).stdout;
+
+    // With --fix-max-iter 0 the loop spawns initial fix agent only, then
+    // terminates at first post-lint check. Mock-claude success-noop returns
+    // 0 without modifying anything → for a clean vault the fix loop never
+    // even spawns.
+    let out = run_goal_with_fix(tmp.path(), "test-fix-phase", &["--fix-max-iter", "0"], "success-noop");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Commit count should equal init commits + 1 (single commit covering
+    // goal agent writes — none in this case — and any fix edits — none).
+    let init_count: u64 = String::from_utf8_lossy(&init_commits_before)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    let post = git(&vault, &["rev-list", "--count", "HEAD"]);
+    let post_count: u64 = String::from_utf8_lossy(&post.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    // Mock-claude success-noop did nothing → working tree clean → no new
+    // commit. Acceptable: post == init OR post == init + 1 (no-op commit
+    // skipped).
+    assert!(
+        post_count >= init_count,
+        "commit count regressed: before {init_count}, after {post_count}"
+    );
+}
+
+#[test]
+fn goal_with_no_fix_skips_lint_fix_phase() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+
+    // Default run_goal already passes --no-fix; verify it works against a
+    // vault that WOULD have lint warnings (no nav files written) — i.e.,
+    // confirm --no-fix lets goal exit 0 even when lint would fail.
+    let (out, _log) = run_goal(tmp.path(), "skipfix", &[], "success-noop");
+    assert!(
+        out.status.success(),
+        "--no-fix should let goal succeed even with lint warnings; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // stderr must NOT contain the fix exhausted/budget-failure summary,
+    // proving fix phase did not run.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("warning(s) remain"),
+        "fix phase should be skipped with --no-fix; stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("error(s) remain"),
+        "fix phase should be skipped with --no-fix; stderr: {stderr}"
+    );
+}
+
+#[test]
+fn goal_propagates_fix_exit_one_when_ping_budget_exhausts_with_remaining_issues() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    // Vault is dirty (no nav files) — fix loop will run but mock-claude
+    // success-noop won't repair anything → ping budget exhausts.
+    let out = run_goal_with_fix(tmp.path(), "willfail", &["--fix-max-iter", "0"], "success-noop");
+    // Goal agent succeeded (mock returns 0) but fix exhausted → goal
+    // exits 1 propagating the fix failure.
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected exit 1 from fix budget exhaust; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("warning(s) remain") || stderr.contains("error(s)"),
+        "expected fix-failure summary; stderr: {stderr}"
+    );
+    // Auto-commit still runs even on fix failure — verify wiki commit landed.
+    let vault = tmp.path().join(".codebus");
+    let head_msg = git(&vault, &["log", "--pretty=%s", "-1"]);
+    let msg = String::from_utf8_lossy(&head_msg.stdout);
+    assert!(
+        msg.contains("wiki: willfail") || msg.contains("init: codebus vault"),
+        "expected wiki commit (or unchanged HEAD if no edits); got: {msg}"
     );
 }

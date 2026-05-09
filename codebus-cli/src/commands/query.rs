@@ -58,6 +58,8 @@ pub async fn run(repo: &Path, args: QueryArgs, debug: bool) -> ExitCode {
         slash_command,
         vault_root: paths.root.clone(),
         toolset: QUERY_TOOLSET,
+        bash_whitelist: None,
+        session: None,
     }) {
         Ok(status) => status,
         Err(e) => {
