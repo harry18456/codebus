@@ -1,12 +1,17 @@
-//! Write 3 skill bundle stubs to `<vault_root>/.claude/skills/codebus-{goal,query,fix}/`.
-//! Vault-internal: skills live UNDER the `.codebus/` directory so that an
-//! agentic CLI invoked with cwd=`<vault_root>` discovers them via standard
-//! `<cwd>/.claude/skills/` lookup. This keeps agent's read scope naturally
-//! constrained to the vault (cwd-bounded) — paths inside SKILL.md are
-//! cwd-relative (`raw/code/`, `wiki/`, `CLAUDE.md`), NOT `.codebus/`-prefixed.
+//! Write 3 skill bundle stubs to TWO locations per v3-lint Skill Bundle Layout:
+//! - vault-internal: `<repo>/.codebus/.claude/skills/codebus-{goal,query,fix}/`
+//!   (used when CLI spawns agent with cwd=vault root)
+//! - repo-root: `<repo>/.claude/skills/codebus-{goal,query,fix}/`
+//!   (used when user opens Claude Code at source repo root and invokes
+//!    `/codebus-{verb}` directly)
 //!
-//! Full per-verb workflow lands in #4 / #5 / #7. Write-if-missing semantics
-//! preserve user customization across re-inits.
+//! Both copies have byte-identical SKILL.md content. SKILL.md paths are
+//! cwd-relative (`raw/code/`, `wiki/`, `CLAUDE.md`) — vault auto-detection
+//! in lint/fix handles cwd disambiguation rather than pre-baking absolute
+//! paths into SKILL.md.
+//!
+//! Write-if-missing semantics preserve user customization across re-inits;
+//! each location is checked independently.
 
 use std::fs;
 use std::io;
@@ -20,34 +25,59 @@ pub enum BundleOutcome {
 
 pub const VERBS: &[&str] = &["goal", "query", "fix"];
 
-/// Materialize the three skill bundle stubs under `<vault_root>/.claude/skills/`.
-/// `vault_root` is the `.codebus/` directory (NOT the source repo root).
-/// Returns one outcome per verb in `VERBS` order.
-pub fn write_bundles_if_missing(vault_root: &Path) -> io::Result<Vec<BundleOutcome>> {
-    let mut outcomes = Vec::with_capacity(VERBS.len());
+/// Materialize the three skill bundle stubs at BOTH the vault-internal and
+/// the source repo-root locations.
+///
+/// - `vault_root`: the `.codebus/` directory (e.g. `<repo>/.codebus`). Stubs
+///   land at `<vault_root>/.claude/skills/codebus-{verb}/SKILL.md`.
+/// - `repo_root`: the source repository root (e.g. `<repo>`). Stubs ALSO land
+///   at `<repo_root>/.claude/skills/codebus-{verb}/SKILL.md` so users opening
+///   Claude Code at repo root discover the skill via `<cwd>/.claude/skills/`.
+///
+/// Each location is checked independently for write-if-missing — preserving
+/// user customizations at one location doesn't block writing the missing
+/// peer at the other location.
+///
+/// Returns 6 outcomes: 3 for vault-internal followed by 3 for repo-root, in
+/// `VERBS` order at each location.
+pub fn write_bundles_if_missing(
+    vault_root: &Path,
+    repo_root: &Path,
+) -> io::Result<Vec<BundleOutcome>> {
+    let mut outcomes = Vec::with_capacity(VERBS.len() * 2);
     for verb in VERBS {
-        outcomes.push(write_bundle_if_missing(vault_root, verb)?);
+        outcomes.push(write_bundle_if_missing(
+            &skill_bundle_path(vault_root, verb),
+            verb,
+        )?);
+    }
+    for verb in VERBS {
+        outcomes.push(write_bundle_if_missing(
+            &skill_bundle_path(repo_root, verb),
+            verb,
+        )?);
     }
     Ok(outcomes)
 }
 
-pub fn skill_bundle_path(vault_root: &Path, verb: &str) -> PathBuf {
-    vault_root
-        .join(".claude")
+/// `<base>/.claude/skills/codebus-<verb>/SKILL.md`. `base` is the location
+/// root — vault-internal callers pass the `.codebus/` path; repo-root
+/// callers pass the source repository root.
+pub fn skill_bundle_path(base: &Path, verb: &str) -> PathBuf {
+    base.join(".claude")
         .join("skills")
         .join(format!("codebus-{verb}"))
         .join("SKILL.md")
 }
 
-fn write_bundle_if_missing(vault_root: &Path, verb: &str) -> io::Result<BundleOutcome> {
-    let path = skill_bundle_path(vault_root, verb);
+fn write_bundle_if_missing(path: &Path, verb: &str) -> io::Result<BundleOutcome> {
     if path.exists() {
         return Ok(BundleOutcome::AlreadyPresent);
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&path, stub_content(verb))?;
+    fs::write(path, stub_content(verb))?;
     Ok(BundleOutcome::Written)
 }
 
@@ -174,67 +204,108 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Helper: build a (vault_root, repo_root) pair under a single TempDir
+    /// so tests assert dual-location behavior (vault-internal under
+    /// `<tmp>/.codebus`, repo-root at `<tmp>` itself).
+    fn dual_layout(tmp: &TempDir) -> (PathBuf, PathBuf) {
+        let repo_root = tmp.path().to_path_buf();
+        let vault_root = repo_root.join(".codebus");
+        (vault_root, repo_root)
+    }
+
     #[test]
-    fn first_time_writes_three_bundles_under_vault_dot_claude() {
+    fn first_time_writes_three_bundles_at_both_locations() {
         let tmp = TempDir::new().unwrap();
-        let outcomes = write_bundles_if_missing(tmp.path()).unwrap();
-        assert_eq!(outcomes, vec![BundleOutcome::Written; 3]);
+        let (vault, repo) = dual_layout(&tmp);
+        let outcomes = write_bundles_if_missing(&vault, &repo).unwrap();
+        // 6 outcomes: 3 vault-internal + 3 repo-root, all Written
+        assert_eq!(outcomes, vec![BundleOutcome::Written; 6]);
         for verb in VERBS {
-            let p = skill_bundle_path(tmp.path(), verb);
-            assert!(p.exists(), "missing bundle for verb `{verb}`");
-            // Path is `<vault_root>/.claude/skills/codebus-{verb}/SKILL.md`
-            let s = p.to_string_lossy();
-            assert!(s.contains(".claude") && s.contains("skills") && s.contains(&format!("codebus-{verb}")));
-            let body = fs::read_to_string(&p).unwrap();
-            assert!(body.starts_with("---\n"));
-            assert!(body.contains(&format!("name: codebus-{verb}")));
-            assert!(body.lines().count() <= 80);
+            for base in [&vault, &repo] {
+                let p = skill_bundle_path(base, verb);
+                assert!(p.exists(), "missing bundle for verb `{verb}` at {base:?}");
+                let s = p.to_string_lossy();
+                assert!(s.contains(".claude") && s.contains("skills") && s.contains(&format!("codebus-{verb}")));
+                let body = fs::read_to_string(&p).unwrap();
+                assert!(body.starts_with("---\n"));
+                assert!(body.contains(&format!("name: codebus-{verb}")));
+                assert!(body.lines().count() <= 80);
+            }
         }
     }
 
     #[test]
-    fn does_not_create_codebus_lint_bundle() {
+    fn vault_and_repo_root_skill_md_byte_identical() {
         let tmp = TempDir::new().unwrap();
-        write_bundles_if_missing(tmp.path()).unwrap();
-        let lint_dir = tmp.path().join(".claude/skills/codebus-lint");
-        assert!(!lint_dir.exists());
+        let (vault, repo) = dual_layout(&tmp);
+        write_bundles_if_missing(&vault, &repo).unwrap();
+        for verb in VERBS {
+            let vault_body = fs::read(skill_bundle_path(&vault, verb)).unwrap();
+            let repo_body = fs::read(skill_bundle_path(&repo, verb)).unwrap();
+            assert_eq!(
+                vault_body, repo_body,
+                "verb `{verb}` SKILL.md must be byte-identical at both locations"
+            );
+        }
     }
 
     #[test]
-    fn preserves_user_modified_bundle() {
+    fn does_not_create_codebus_lint_bundle_at_either_location() {
         let tmp = TempDir::new().unwrap();
-        let goal_path = skill_bundle_path(tmp.path(), "goal");
-        fs::create_dir_all(goal_path.parent().unwrap()).unwrap();
+        let (vault, repo) = dual_layout(&tmp);
+        write_bundles_if_missing(&vault, &repo).unwrap();
+        assert!(!vault.join(".claude/skills/codebus-lint").exists());
+        assert!(!repo.join(".claude/skills/codebus-lint").exists());
+    }
+
+    #[test]
+    fn write_if_missing_skips_existing_at_vault_only() {
+        let tmp = TempDir::new().unwrap();
+        let (vault, repo) = dual_layout(&tmp);
+        let goal_vault = skill_bundle_path(&vault, "goal");
+        fs::create_dir_all(goal_vault.parent().unwrap()).unwrap();
         let custom = "---\nname: codebus-goal\ndescription: my custom\n---\n\n# my workflow\n";
-        fs::write(&goal_path, custom).unwrap();
+        fs::write(&goal_vault, custom).unwrap();
 
-        let outcomes = write_bundles_if_missing(tmp.path()).unwrap();
+        let outcomes = write_bundles_if_missing(&vault, &repo).unwrap();
+        // Vault: goal AlreadyPresent, query/fix Written
         assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent);
         assert_eq!(outcomes[1], BundleOutcome::Written);
         assert_eq!(outcomes[2], BundleOutcome::Written);
-        assert_eq!(fs::read_to_string(&goal_path).unwrap(), custom);
+        // Repo-root: all Written (independent check)
+        assert_eq!(outcomes[3], BundleOutcome::Written);
+        assert_eq!(outcomes[4], BundleOutcome::Written);
+        assert_eq!(outcomes[5], BundleOutcome::Written);
+        // Custom vault content preserved
+        assert_eq!(fs::read_to_string(&goal_vault).unwrap(), custom);
     }
 
     #[test]
-    fn mixed_state_writes_only_missing() {
+    fn write_if_missing_only_fills_missing_repo_root_when_vault_exists() {
         let tmp = TempDir::new().unwrap();
-        let goal_path = skill_bundle_path(tmp.path(), "goal");
-        fs::create_dir_all(goal_path.parent().unwrap()).unwrap();
-        fs::write(&goal_path, "preserved").unwrap();
-
-        let outcomes = write_bundles_if_missing(tmp.path()).unwrap();
-        assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent);
-        assert_eq!(outcomes[1], BundleOutcome::Written);
-        assert_eq!(outcomes[2], BundleOutcome::Written);
-        assert_eq!(fs::read_to_string(&goal_path).unwrap(), "preserved");
+        let (vault, repo) = dual_layout(&tmp);
+        // Pre-populate full vault (all 3 verbs)
+        write_bundles_if_missing(&vault, &repo).unwrap();
+        // Wipe repo-root copy of one verb
+        fs::remove_file(skill_bundle_path(&repo, "query")).unwrap();
+        // Re-run: vault all AlreadyPresent, repo-root: query Written, others
+        // AlreadyPresent
+        let outcomes = write_bundles_if_missing(&vault, &repo).unwrap();
+        assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent); // vault goal
+        assert_eq!(outcomes[1], BundleOutcome::AlreadyPresent); // vault query
+        assert_eq!(outcomes[2], BundleOutcome::AlreadyPresent); // vault fix
+        assert_eq!(outcomes[3], BundleOutcome::AlreadyPresent); // repo goal
+        assert_eq!(outcomes[4], BundleOutcome::Written);        // repo query (refilled)
+        assert_eq!(outcomes[5], BundleOutcome::AlreadyPresent); // repo fix
     }
 
     #[test]
     fn each_stub_body_uses_cwd_relative_paths_not_dot_codebus_prefixed() {
         let tmp = TempDir::new().unwrap();
-        write_bundles_if_missing(tmp.path()).unwrap();
+        let (vault, repo) = dual_layout(&tmp);
+        write_bundles_if_missing(&vault, &repo).unwrap();
         for verb in VERBS {
-            let body = fs::read_to_string(skill_bundle_path(tmp.path(), verb)).unwrap();
+            let body = fs::read_to_string(skill_bundle_path(&vault, verb)).unwrap();
             // Hard-scope must reference cwd-relative paths, NOT `.codebus/`-prefixed
             // (the agent's cwd IS the vault root, so `.codebus/` prefix is wrong)
             assert!(
@@ -259,9 +330,10 @@ mod tests {
     #[test]
     fn each_stub_body_declares_path_translation_rule() {
         let tmp = TempDir::new().unwrap();
-        write_bundles_if_missing(tmp.path()).unwrap();
+        let (vault, repo) = dual_layout(&tmp);
+        write_bundles_if_missing(&vault, &repo).unwrap();
         for verb in VERBS {
-            let body = fs::read_to_string(skill_bundle_path(tmp.path(), verb)).unwrap();
+            let body = fs::read_to_string(skill_bundle_path(&vault, verb)).unwrap();
             assert!(body.contains("repo-relative logical path"));
             assert!(body.contains("NOT the mirrored path"));
         }

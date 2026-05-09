@@ -14,6 +14,25 @@ use ignore::WalkBuilder;
 use crate::pii::PiiScanner;
 
 const ALWAYS_SKIP_AT_ROOT: &[&str] = &[".codebus", ".git", ".env"];
+
+/// Multi-segment paths (relative to repo root) the source-signal walk
+/// MUST skip regardless of `.gitignore` state. These are codebus-managed
+/// — written by `codebus init` itself — and including them in the source
+/// signal would falsely trigger drift detection on every subsequent verb
+/// invocation. The patterns cover the v3-lint repo-root skill bundle
+/// dual-write locations.
+const ALWAYS_SKIP_PATH_PREFIXES: &[&str] = &[
+    ".claude/skills/codebus-goal",
+    ".claude/skills/codebus-query",
+    ".claude/skills/codebus-fix",
+];
+
+fn skip_codebus_managed(rel_path: &std::path::Path) -> bool {
+    let s = rel_path.to_string_lossy().replace('\\', "/");
+    ALWAYS_SKIP_PATH_PREFIXES
+        .iter()
+        .any(|prefix| s == *prefix || s.starts_with(&format!("{prefix}/")))
+}
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -60,6 +79,9 @@ pub fn walk_source_for_signal(repo_root: &Path) -> io::Result<(usize, u64)> {
         };
         let first_seg = rel.iter().next().and_then(|s| s.to_str()).unwrap_or("");
         if ALWAYS_SKIP_AT_ROOT.contains(&first_seg) {
+            continue;
+        }
+        if skip_codebus_managed(rel) {
             continue;
         }
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
@@ -151,6 +173,9 @@ pub fn sync_with_scanner_into<W: io::Write>(
 
         let first_seg = rel.iter().next().and_then(|s| s.to_str()).unwrap_or("");
         if ALWAYS_SKIP_AT_ROOT.contains(&first_seg) {
+            continue;
+        }
+        if skip_codebus_managed(&rel) {
             continue;
         }
 

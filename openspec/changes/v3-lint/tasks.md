@@ -48,16 +48,16 @@
 
 ## 7. Skill bundle 雙位址寫入
 
-- [ ] 7.1 修改 Skill Bundle Layout — 擴充 `write_bundles_if_missing` 簽名接受 `vault_root` 與 `repo_root` 兩個路徑參數，雙位址寫入 `<vault>/.codebus/.claude/skills/codebus-{verb}/` 與 `<repo>/.claude/skills/codebus-{verb}/`
-- [ ] 7.2 確認 Write-If-Missing Semantics 在兩個位址各自獨立判斷 — 不跨位址 propagate 內容、各自 skip 既有檔
-- [ ] 7.3 加測試：vault-internal SKILL.md 已存在但 repo-root 缺，只寫 repo-root 那份
-- [ ] 7.4 加測試：vault 與 repo-root 兩份 SKILL.md 對同一 verb 內容 byte-identical
+- [x] 7.1 修改 Skill Bundle Layout — 擴充 `write_bundles_if_missing` 簽名接受 `vault_root` 與 `repo_root` 兩個路徑參數，雙位址寫入 `<vault>/.codebus/.claude/skills/codebus-{verb}/` 與 `<repo>/.claude/skills/codebus-{verb}/`
+- [x] 7.2 確認 Write-If-Missing Semantics 在兩個位址各自獨立判斷 — 不跨位址 propagate 內容、各自 skip 既有檔
+- [x] 7.3 加測試：vault-internal SKILL.md 已存在但 repo-root 缺，只寫 repo-root 那份
+- [x] 7.4 加測試：vault 與 repo-root 兩份 SKILL.md 對同一 verb 內容 byte-identical
 
 ## 8. Init wiring
 
-- [ ] 8.1 修改 `codebus-cli/src/commands/init.rs` 呼叫 `write_bundles_if_missing` 帶入 `<vault_root>` 與 `<repo>` 兩參數
-- [ ] 8.2 修改 init 的 source `.gitignore` mutation 步驟 — 加 `.claude/skills/codebus-goal/`、`codebus-query/`、`codebus-fix/` 三條 ignore pattern
-- [ ] 8.3 加測試：init 後既不在 vault 也不在 repo-root 創 `codebus-lint/` skill bundle
+- [x] 8.1 修改 `codebus-cli/src/commands/init.rs` 呼叫 `write_bundles_if_missing` 帶入 `<vault_root>` 與 `<repo>` 兩參數
+- [x] 8.2 修改 init 的 source `.gitignore` mutation 步驟 — 加 `.claude/skills/codebus-goal/`、`codebus-query/`、`codebus-fix/` 三條 ignore pattern
+- [x] 8.3 加測試：init 後既不在 vault 也不在 repo-root 創 `codebus-lint/` skill bundle
 
 ## 9. Fix CLI verb (codebus-cli/src/commands/fix.rs)
 

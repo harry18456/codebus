@@ -161,7 +161,7 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
         }
     }
 
-    if let Err(e) = write_skill_bundles(&paths.root, debug) {
+    if let Err(e) = write_skill_bundles(&paths.root, repo, debug) {
         eprintln!("error: skill bundles: {e}");
         return ExitCode::from(1);
     }
@@ -255,8 +255,8 @@ fn write_schema_if_missing(schema_md: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
-fn write_skill_bundles(vault_root: &Path, debug: bool) -> std::io::Result<()> {
-    let outcomes = skill_bundle::write_bundles_if_missing(vault_root)?;
+fn write_skill_bundles(vault_root: &Path, repo_root: &Path, debug: bool) -> std::io::Result<()> {
+    let outcomes = skill_bundle::write_bundles_if_missing(vault_root, repo_root)?;
     let written = outcomes.iter().filter(|o| **o == BundleOutcome::Written).count();
     let preserved = outcomes
         .iter()
@@ -264,12 +264,14 @@ fn write_skill_bundles(vault_root: &Path, debug: bool) -> std::io::Result<()> {
         .count();
     if debug {
         for verb in skill_bundle::VERBS {
-            let p = skill_bundle::skill_bundle_path(vault_root, verb);
-            eprintln!("[debug] skill bundle target: {}", p.display());
+            let vp = skill_bundle::skill_bundle_path(vault_root, verb);
+            let rp = skill_bundle::skill_bundle_path(repo_root, verb);
+            eprintln!("[debug] skill bundle vault target: {}", vp.display());
+            eprintln!("[debug] skill bundle repo  target: {}", rp.display());
         }
     }
     println!(
-        "✓ skill bundles: {} written, {} already present",
+        "✓ skill bundles: {} written, {} already present (across vault and repo locations)",
         written, preserved
     );
     Ok(())

@@ -91,23 +91,22 @@ fn bare_invocation_routes_to_init_handler_and_creates_per_project_bundles() {
     assert!(stdout.contains("vault layout"));
     assert!(stdout.contains("codebus init complete"));
     assert!(tmp.path().join(".codebus").is_dir());
-    // Vault-internal skill bundle locations: <repo>/.codebus/.claude/skills/codebus-{verb}/
+    // v3-lint: skill bundles are written at BOTH locations (vault-internal
+    // + repo-root) so both CLI-spawn-with-cwd-vault AND user-direct-from-
+    // repo-root paths discover the skill.
     for verb in ["goal", "query", "fix"] {
-        let p = tmp
+        let vault_path = tmp
             .path()
             .join(".codebus/.claude/skills")
             .join(format!("codebus-{verb}"))
             .join("SKILL.md");
-        assert!(p.exists(), "missing vault-internal bundle for {verb}: {p:?}");
-    }
-    // And NOT at repo root
-    for verb in ["goal", "query", "fix"] {
-        let wrong = tmp
+        assert!(vault_path.exists(), "missing vault-internal bundle for {verb}: {vault_path:?}");
+        let repo_path = tmp
             .path()
             .join(".claude/skills")
             .join(format!("codebus-{verb}"))
             .join("SKILL.md");
-        assert!(!wrong.exists(), "skill should not be at repo-root .claude: {wrong:?}");
+        assert!(repo_path.exists(), "missing repo-root bundle for {verb}: {repo_path:?}");
     }
 }
 

@@ -1,5 +1,9 @@
-//! Append `.codebus/` to source repo's root `.gitignore` when init runs
-//! against a git repo. Idempotent; non-git repos are skipped.
+//! Append `.codebus/` and the repo-root skill bundle directories to source
+//! repo's root `.gitignore` when init runs against a git repo. Idempotent;
+//! non-git repos are skipped.
+//!
+//! v3-lint adds `.claude/skills/codebus-{goal,query,fix}/` so the dual-write
+//! skill bundles at the source repo root don't pollute source git history.
 
 use std::fs;
 use std::io;
@@ -13,7 +17,16 @@ pub enum GitignoreOutcome {
     AlreadyPresent,
 }
 
-const CODEBUS_IGNORE_LINE: &str = ".codebus/";
+/// Lines codebus init ensures are present in the source repo's `.gitignore`.
+/// Order is the canonical declaration order — used both for first-time
+/// creation and for appending missing lines while preserving existing
+/// non-codebus entries.
+pub const REQUIRED_IGNORE_LINES: &[&str] = &[
+    ".codebus/",
+    ".claude/skills/codebus-goal/",
+    ".claude/skills/codebus-query/",
+    ".claude/skills/codebus-fix/",
+];
 
 pub fn ensure_codebus_in_gitignore(repo_root: &Path) -> io::Result<GitignoreOutcome> {
     if !repo_root.join(".git").exists() {
@@ -29,19 +42,31 @@ pub fn ensure_codebus_in_gitignore(repo_root: &Path) -> io::Result<GitignoreOutc
 
     match existing {
         None => {
-            fs::write(&gi_path, format!("{CODEBUS_IGNORE_LINE}\n"))?;
+            let mut body = String::new();
+            for line in REQUIRED_IGNORE_LINES {
+                body.push_str(line);
+                body.push('\n');
+            }
+            fs::write(&gi_path, body)?;
             Ok(GitignoreOutcome::Created)
         }
         Some(body) => {
-            if body.lines().any(|line| line == CODEBUS_IGNORE_LINE) {
+            let present: std::collections::HashSet<&str> = body.lines().collect();
+            let missing: Vec<&&str> = REQUIRED_IGNORE_LINES
+                .iter()
+                .filter(|l| !present.contains(*l as &str))
+                .collect();
+            if missing.is_empty() {
                 Ok(GitignoreOutcome::AlreadyPresent)
             } else {
                 let mut next = body;
                 if !next.ends_with('\n') {
                     next.push('\n');
                 }
-                next.push_str(CODEBUS_IGNORE_LINE);
-                next.push('\n');
+                for line in missing {
+                    next.push_str(line);
+                    next.push('\n');
+                }
                 fs::write(&gi_path, next)?;
                 Ok(GitignoreOutcome::Appended)
             }
@@ -58,33 +83,48 @@ mod tests {
         fs::create_dir_all(root.join(".git")).unwrap();
     }
 
+    fn assert_all_required_present(body: &str) {
+        for line in REQUIRED_IGNORE_LINES {
+            assert!(
+                body.lines().any(|l| l == *line),
+                ".gitignore missing required line `{line}`:\n{body}"
+            );
+        }
+    }
+
     #[test]
-    fn creates_gitignore_when_missing() {
+    fn creates_gitignore_with_all_required_lines_when_missing() {
         let tmp = TempDir::new().unwrap();
         make_git_repo(tmp.path());
         let outcome = ensure_codebus_in_gitignore(tmp.path()).unwrap();
         assert_eq!(outcome, GitignoreOutcome::Created);
         let body = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
-        assert_eq!(body, ".codebus/\n");
+        assert_all_required_present(&body);
     }
 
     #[test]
-    fn appends_when_entry_missing() {
+    fn appends_missing_required_lines_preserving_existing_entries() {
         let tmp = TempDir::new().unwrap();
         make_git_repo(tmp.path());
         fs::write(tmp.path().join(".gitignore"), "node_modules\n").unwrap();
         let outcome = ensure_codebus_in_gitignore(tmp.path()).unwrap();
         assert_eq!(outcome, GitignoreOutcome::Appended);
         let body = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
-        assert_eq!(body, "node_modules\n.codebus/\n");
+        assert!(body.starts_with("node_modules\n"));
+        assert_all_required_present(&body);
     }
 
     #[test]
-    fn idempotent_when_entry_present() {
+    fn idempotent_when_all_required_present() {
         let tmp = TempDir::new().unwrap();
         make_git_repo(tmp.path());
-        let initial = "node_modules\n.codebus/\ntarget/\n";
-        fs::write(tmp.path().join(".gitignore"), initial).unwrap();
+        let mut initial = String::from("node_modules\n");
+        for line in REQUIRED_IGNORE_LINES {
+            initial.push_str(line);
+            initial.push('\n');
+        }
+        initial.push_str("target/\n");
+        fs::write(tmp.path().join(".gitignore"), &initial).unwrap();
         let outcome = ensure_codebus_in_gitignore(tmp.path()).unwrap();
         assert_eq!(outcome, GitignoreOutcome::AlreadyPresent);
         assert_eq!(
@@ -109,6 +149,22 @@ mod tests {
         let outcome = ensure_codebus_in_gitignore(tmp.path()).unwrap();
         assert_eq!(outcome, GitignoreOutcome::Appended);
         let body = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
-        assert_eq!(body, "node_modules\n.codebus/\n");
+        assert!(body.starts_with("node_modules\n"));
+        assert_all_required_present(&body);
+    }
+
+    #[test]
+    fn partial_appends_only_missing_required_lines() {
+        let tmp = TempDir::new().unwrap();
+        make_git_repo(tmp.path());
+        // Existing has .codebus/ but lacks the .claude/skills/codebus-* trio
+        fs::write(tmp.path().join(".gitignore"), ".codebus/\n").unwrap();
+        let outcome = ensure_codebus_in_gitignore(tmp.path()).unwrap();
+        assert_eq!(outcome, GitignoreOutcome::Appended);
+        let body = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
+        assert_all_required_present(&body);
+        // .codebus/ should not appear twice
+        let count = body.lines().filter(|l| *l == ".codebus/").count();
+        assert_eq!(count, 1);
     }
 }

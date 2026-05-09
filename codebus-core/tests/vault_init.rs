@@ -409,52 +409,64 @@ fn obsidian_register_fail_soft_handles_missing_config_dir() {
 
 // ===== Skill Bundle Layout / Content / Write-If-Missing =====
 
+/// Helper: build distinct (vault, repo) paths under one TempDir for v3-lint
+/// dual-location skill bundle write semantics.
+fn dual_layout(tmp: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+    let repo = tmp.path().to_path_buf();
+    let vault = repo.join(".codebus");
+    (vault, repo)
+}
+
 #[test]
-fn skill_bundles_creates_three_dirs_no_lint() {
+fn skill_bundles_creates_six_outcomes_no_lint_at_either_location() {
     let tmp = TempDir::new().unwrap();
-    let outcomes = skill_bundle::write_bundles_if_missing(tmp.path()).unwrap();
-    assert_eq!(outcomes.len(), 3);
+    let (vault, repo) = dual_layout(&tmp);
+    let outcomes = skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
+    assert_eq!(outcomes.len(), 6);
     for outcome in &outcomes {
         assert_eq!(*outcome, BundleOutcome::Written);
     }
     for verb in VERBS {
         assert!(
-            tmp.path()
-                .join(format!(".claude/skills/codebus-{verb}/SKILL.md"))
-                .exists(),
-            "missing bundle for {verb}"
+            vault.join(format!(".claude/skills/codebus-{verb}/SKILL.md")).exists(),
+            "missing vault bundle for {verb}"
+        );
+        assert!(
+            repo.join(format!(".claude/skills/codebus-{verb}/SKILL.md")).exists(),
+            "missing repo-root bundle for {verb}"
         );
     }
-    assert!(!tmp.path().join(".claude/skills/codebus-lint").exists());
+    assert!(!vault.join(".claude/skills/codebus-lint").exists());
+    assert!(!repo.join(".claude/skills/codebus-lint").exists());
 }
 
 #[test]
-fn skill_bundle_stub_content_has_required_format() {
+fn skill_bundle_stub_content_has_required_format_at_both_locations() {
     let tmp = TempDir::new().unwrap();
-    skill_bundle::write_bundles_if_missing(tmp.path()).unwrap();
+    let (vault, repo) = dual_layout(&tmp);
+    skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
     for verb in VERBS {
-        let path = tmp
-            .path()
-            .join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
-        let body = fs::read_to_string(&path).unwrap();
-        assert!(body.starts_with("---\n"));
-        assert!(body.contains(&format!("name: codebus-{verb}")));
-        assert!(body.contains("description:"));
-        // cwd-relative reference: `CLAUDE.md` (not `.codebus/CLAUDE.md`)
-        assert!(body.contains("CLAUDE.md"));
-        assert!(!body.contains(".codebus/CLAUDE.md"));
-        assert!(body.lines().count() <= 80);
+        for base in [&vault, &repo] {
+            let path = base.join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
+            let body = fs::read_to_string(&path).unwrap();
+            assert!(body.starts_with("---\n"));
+            assert!(body.contains(&format!("name: codebus-{verb}")));
+            assert!(body.contains("description:"));
+            assert!(body.contains("CLAUDE.md"));
+            assert!(!body.contains(".codebus/CLAUDE.md"));
+            assert!(body.lines().count() <= 80);
+        }
     }
 }
 
 #[test]
 fn skill_bundle_stub_body_declares_hard_scope() {
     let tmp = TempDir::new().unwrap();
-    skill_bundle::write_bundles_if_missing(tmp.path()).unwrap();
+    let (vault, repo) = dual_layout(&tmp);
+    skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
     for verb in VERBS {
-        let path = tmp.path().join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
+        let path = vault.join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
         let body = fs::read_to_string(&path).unwrap();
-        // Cwd-relative paths (not `.codebus/`-prefixed)
         assert!(
             body.contains("`raw/code/`"),
             "verb `{verb}` missing cwd-relative read scope `raw/code/`"
@@ -477,9 +489,10 @@ fn skill_bundle_stub_body_declares_hard_scope() {
 #[test]
 fn skill_bundle_stub_body_declares_path_translation_rule() {
     let tmp = TempDir::new().unwrap();
-    skill_bundle::write_bundles_if_missing(tmp.path()).unwrap();
+    let (vault, repo) = dual_layout(&tmp);
+    skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
     for verb in VERBS {
-        let path = tmp.path().join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
+        let path = vault.join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
         let body = fs::read_to_string(&path).unwrap();
         assert!(body.contains("repo-relative logical path"));
         assert!(body.contains("NOT the mirrored path"));
@@ -487,18 +500,22 @@ fn skill_bundle_stub_body_declares_path_translation_rule() {
 }
 
 #[test]
-fn skill_bundle_write_if_missing_preserves_existing() {
+fn skill_bundle_write_if_missing_preserves_existing_at_each_location() {
     let tmp = TempDir::new().unwrap();
-    let goal_path = tmp
-        .path()
-        .join(".claude/skills/codebus-goal/SKILL.md");
-    fs::create_dir_all(goal_path.parent().unwrap()).unwrap();
-    fs::write(&goal_path, "---\nname: codebus-goal\n---\nuser custom").unwrap();
-    let outcomes = skill_bundle::write_bundles_if_missing(tmp.path()).unwrap();
+    let (vault, repo) = dual_layout(&tmp);
+    let goal_vault_path = vault.join(".claude/skills/codebus-goal/SKILL.md");
+    fs::create_dir_all(goal_vault_path.parent().unwrap()).unwrap();
+    fs::write(&goal_vault_path, "---\nname: codebus-goal\n---\nuser custom").unwrap();
+    let outcomes = skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
+    // Vault: goal preserved (idx 0), query/fix written (idx 1, 2)
     assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent);
     assert_eq!(outcomes[1], BundleOutcome::Written);
     assert_eq!(outcomes[2], BundleOutcome::Written);
-    assert!(fs::read_to_string(&goal_path).unwrap().contains("user custom"));
+    // Repo-root: all written independently (idx 3, 4, 5)
+    assert_eq!(outcomes[3], BundleOutcome::Written);
+    assert_eq!(outcomes[4], BundleOutcome::Written);
+    assert_eq!(outcomes[5], BundleOutcome::Written);
+    assert!(fs::read_to_string(&goal_vault_path).unwrap().contains("user custom"));
 }
 
 // ===== Sanity wiring: vault_paths agrees with create_vault_layout =====
