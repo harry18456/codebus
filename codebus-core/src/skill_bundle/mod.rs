@@ -90,11 +90,12 @@ fn stub_content(verb: &str) -> String {
 }
 
 /// `## Workflow` section per verb. Goal carries the 5-step ingest content
-/// landed by v3-goal #5; query / fix retain their stub placeholder until
-/// #6 / #8 land.
+/// (v3-goal #5); query carries the 4-step read-only lookup content
+/// (v3-query #6); fix retains its stub placeholder until v3-fix #8 lands.
 fn workflow_section(verb: &str) -> String {
     match verb {
         "goal" => GOAL_WORKFLOW.to_string(),
+        "query" => QUERY_WORKFLOW.to_string(),
         _ => format!(
             "## Workflow\n\
              \n\
@@ -129,6 +130,33 @@ When this skill is activated, follow these 5 steps in order:
 4. **Build wikilinks**: link pages with `[[other-page]]`. When linking to an existing page use that page's filename only (no path); cross-folder resolution is handled by the schema convention.
 
 5. **Print closing summary**: emit ONE short stdout line stating how many pages were created vs how many were modified in this run. Phrase the line in the same natural language as the goal text per the §0 Language Policy in cwd `CLAUDE.md` (so a goal in Japanese gets a Japanese summary, a goal in English gets an English one, etc.). The agent MUST NOT copy phrasing from this SKILL.md verbatim into the stdout summary; this paragraph describes the output shape only and is not itself a template.
+";
+
+
+/// 4-step read-only lookup workflow for the query verb. SKILL.md is an
+/// "internal surface" per cwd `CLAUDE.md` §0 Language Policy → workflow
+/// body stays in English. Step 4 deliberately avoids any literal sample
+/// answer phrase the agent could copy verbatim; it describes the output
+/// shape and defers the answer language to `CLAUDE.md` §0.
+///
+/// The workflow restates the read-only invariant (no Write/Edit) for
+/// defense-in-depth even though the binary layer's `--tools Read,Glob,Grep`
+/// already gates Write/Edit out of the toolset at runtime.
+const QUERY_WORKFLOW: &str = "## Workflow (per-query lookup)
+
+When this skill is activated, follow these 4 steps in order:
+
+1. **Parse the query**: parse the user's question text. Identify which taxonomy folders under `wiki/` (`concepts/`, `entities/`, `modules/`, `processes/`, `synthesis/`) are most likely relevant given the question's subject.
+
+2. **Find candidate pages**: use Glob and Read to scan `wiki/` for pages whose frontmatter (title, sources, related) matches the query. Read frontmatter first as a lightweight relevance filter; only read body when the frontmatter signals a match.
+
+3. **Follow wikilinks**: from matched pages, follow `[[other-page]]` references to assemble cross-page context. Bound the traversal to 1-2 hops so the lookup does not drift across the whole vault.
+
+4. **Print the answer**: emit ONE coherent answer to stdout. Phrase the answer in the same natural language as the query text per the §0 Language Policy in cwd `CLAUDE.md` (so a Japanese query gets a Japanese answer, an English query gets an English one, etc.). The agent MUST NOT copy phrasing from this SKILL.md verbatim into the stdout answer; this paragraph describes the output shape only and is not itself a template.
+
+## Read-Only Invariant
+
+This workflow is strictly read-only. The agent MUST NOT use Write or Edit to mutate any file inside `wiki/`, `raw/`, or anywhere else inside the vault. Note that the toolset is also gated at the binary layer (`--tools Read,Glob,Grep` was passed when this agent was spawned, so Write and Edit attempts will fail at runtime), but this SKILL.md restates the invariant for defense-in-depth.
 ";
 
 #[cfg(test)]
@@ -255,6 +283,76 @@ mod tests {
             "goal SKILL.md body must not contain CJK ideographs, found {} (first 10: {:?})",
             cjk.len(),
             cjk.iter().take(10).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn query_workflow_body_is_english() {
+        // Spec scenario: codebus-query workflow body is written in English.
+        // Internal surface per CLAUDE.md §0 Language Policy → no CJK
+        // Unified Ideographs (U+4E00..U+9FFF) anywhere in the body.
+        let body = stub_content("query");
+        let cjk: Vec<char> = body
+            .chars()
+            .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
+            .collect();
+        assert!(
+            cjk.is_empty(),
+            "query SKILL.md body must not contain CJK ideographs, found {} (first 10: {:?})",
+            cjk.len(),
+            cjk.iter().take(10).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn query_step_4_has_no_literal_template() {
+        // Spec scenario: step 4 is abstract, not a literal output template.
+        // Body MUST NOT contain canned answer phrases, MUST reference
+        // CLAUDE.md, AND MUST include explicit "do not copy verbatim"
+        // directive.
+        let body = stub_content("query");
+
+        let forbidden_literals = [
+            "Here is the answer",
+            "The answer is",
+            "Found N pages",
+            "\u{67E5}\u{5230}",                  // 查到 (Chinese)
+            "\u{56DE}\u{7B54}\u{5982}\u{4E0B}",  // 回答如下 (Chinese)
+            "\u{7B54}\u{3048}\u{306F}",          // 答えは (Japanese)
+            "\u{B2F5}\u{C740}",                  // 답은 (Korean)
+        ];
+        for phrase in forbidden_literals {
+            assert!(
+                !body.contains(phrase),
+                "query SKILL.md body contains literal answer template `{phrase}` — step 4 must be abstract"
+            );
+        }
+
+        assert!(
+            body.contains("CLAUDE.md"),
+            "step 4 must reference CLAUDE.md as the language source-of-truth"
+        );
+        assert!(
+            body.contains("verbatim"),
+            "step 4 must include an explicit `verbatim` warning that agents must not copy from this SKILL.md"
+        );
+    }
+
+    #[test]
+    fn query_workflow_declares_read_only_invariant() {
+        // Spec scenario: codebus-query workflow declares read-only invariant.
+        // Defense-in-depth — the binary layer already gates Write/Edit via
+        // `--tools Read,Glob,Grep`, but SKILL.md restates the invariant so
+        // a hypothetical future toolset-mechanism change does not silently
+        // unlock writes.
+        let body = stub_content("query");
+        assert!(
+            body.contains("MUST NOT use Write"),
+            "query SKILL.md body must explicitly forbid Write/Edit"
+        );
+        assert!(
+            body.contains("gated at the binary layer"),
+            "query SKILL.md body must note that toolset gating is a binary-layer mechanism (defense-in-depth context)"
         );
     }
 

@@ -36,8 +36,8 @@ enum Command {
     Init,
     /// Spawn the codebus-goal agent flow against the vault.
     Goal(commands::goal::GoalArgs),
-    /// Trigger the codebus-query skill in the user's agentic AI product.
-    Query,
+    /// Spawn the codebus-query agent flow (read-only) against the vault.
+    Query(commands::query::QueryArgs),
     /// Run wiki lint and report findings.
     Lint,
     /// Trigger the codebus-fix skill in the user's agentic AI product.
@@ -54,7 +54,7 @@ async fn main() -> ExitCode {
         Some(Command::Goal(args)) => {
             commands::goal::run(&cli.repo, args, cli.no_obsidian_register, cli.debug).await
         }
-        Some(Command::Query) => commands::query::run().await,
+        Some(Command::Query(args)) => commands::query::run(&cli.repo, args, cli.debug).await,
         Some(Command::Lint) => commands::lint::run().await,
         Some(Command::Fix) => commands::fix::run().await,
     }
