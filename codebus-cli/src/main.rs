@@ -34,8 +34,8 @@ struct Cli {
 enum Command {
     /// Initialize a `.codebus/` vault under the target repository.
     Init,
-    /// Trigger the codebus-goal skill in the user's agentic AI product.
-    Goal,
+    /// Spawn the codebus-goal agent flow against the vault.
+    Goal(commands::goal::GoalArgs),
     /// Trigger the codebus-query skill in the user's agentic AI product.
     Query,
     /// Run wiki lint and report findings.
@@ -51,7 +51,9 @@ async fn main() -> ExitCode {
         None | Some(Command::Init) => {
             commands::init::run(&cli.repo, cli.no_obsidian_register, cli.debug).await
         }
-        Some(Command::Goal) => commands::goal::run().await,
+        Some(Command::Goal(args)) => {
+            commands::goal::run(&cli.repo, args, cli.no_obsidian_register, cli.debug).await
+        }
         Some(Command::Query) => commands::query::run().await,
         Some(Command::Lint) => commands::lint::run().await,
         Some(Command::Fix) => commands::fix::run().await,

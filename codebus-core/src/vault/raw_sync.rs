@@ -23,6 +23,62 @@ pub struct SyncSummary {
     pub pii_matches: usize,
 }
 
+/// Walk the source repository under the same rules as [`sync_with_scanner`]
+/// (gitignore-aware, root dot-dirs skipped, files over 5 MiB skipped) but
+/// without copying or scanning content. Returns `(file_count, total_bytes)`.
+/// Used by verb commands (e.g., `goal`) to compute the current source signal
+/// for drift detection without paying the cost of a full re-mirror.
+pub fn walk_source_for_signal(repo_root: &Path) -> io::Result<(usize, u64)> {
+    let mut builder = WalkBuilder::new(repo_root);
+    builder
+        .standard_filters(true)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(false)
+        .git_exclude(false)
+        .parents(false);
+    let gi = repo_root.join(".gitignore");
+    if gi.exists() {
+        let _ = builder.add_ignore(&gi);
+    }
+
+    let mut files: usize = 0;
+    let mut bytes: u64 = 0;
+
+    for entry in builder.build() {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if path == repo_root {
+            continue;
+        }
+        let rel = match path.strip_prefix(repo_root) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let first_seg = rel.iter().next().and_then(|s| s.to_str()).unwrap_or("");
+        if ALWAYS_SKIP_AT_ROOT.contains(&first_seg) {
+            continue;
+        }
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let meta = match fs::metadata(path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.len() > MAX_FILE_BYTES {
+            continue;
+        }
+        files += 1;
+        bytes += meta.len();
+    }
+
+    Ok((files, bytes))
+}
+
 /// Mirror `repo_root` into `raw_code_dir` using gitignore-aware traversal,
 /// invoking `scanner` against each mirrored file's UTF-8 content. Skips the
 /// always-skip root entries, oversize files, and any entry the source

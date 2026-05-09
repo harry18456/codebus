@@ -12,6 +12,15 @@ description = "Command-line interface for codebus"
 name = "codebus"
 path = "src/main.rs"
 
+# Test-only mock binary for v3-goal integration tests. The codebus binary's
+# `agent::claude_cli::invoke` reads `CODEBUS_CLAUDE_BIN` env override; tests
+# point that at the path of this mock to drive deterministic agent flows
+# without depending on a real claude install / network / token quota.
+# Cargo provides `CARGO_BIN_EXE_mock-claude` env to test code at compile time.
+[[bin]]
+name = "mock-claude"
+path = "tests/bins/mock_claude.rs"
+
 [dependencies]
 codebus-core.workspace = true
 clap = { workspace = true }

@@ -58,6 +58,7 @@ fn stub_content(verb: &str) -> String {
         "fix" => "Trigger codebus lint-feedback fix loop on the active codebus vault",
         _ => "codebus skill",
     };
+    let workflow = workflow_section(verb);
     format!(
         "---\n\
          name: codebus-{verb}\n\
@@ -84,11 +85,41 @@ fn stub_content(verb: &str) -> String {
          \n\
          When citing source files in wiki page frontmatter `sources[].path`, use the **repo-relative logical path** (e.g. `src/services/payment.py`), NOT the mirrored path (e.g. `raw/code/src/services/payment.py`). Wikilinks resolve by filename across folders, so the path naming has to be logical/source-relative for cross-vault link conventions to hold.\n\
          \n\
-         ## Workflow\n\
-         \n\
-         Detailed workflow content lands in a subsequent codebus release. For now, follow the schema rules in `CLAUDE.md` and apply common sense for the `{verb}` action while respecting the hard scope above.\n"
+         {workflow}"
     )
 }
+
+/// `## Workflow` section per verb. Goal carries the 5-step ingest content
+/// landed by v3-goal #5; query / fix retain their stub placeholder until
+/// #6 / #8 land.
+fn workflow_section(verb: &str) -> String {
+    match verb {
+        "goal" => GOAL_WORKFLOW.to_string(),
+        _ => format!(
+            "## Workflow\n\
+             \n\
+             Detailed workflow content lands in a subsequent codebus release. For now, follow the schema rules in `CLAUDE.md` and apply common sense for the `{verb}` action while respecting the hard scope above.\n"
+        ),
+    }
+}
+
+/// 5-step ingest workflow for the goal verb. Schema rules deliberately stay
+/// in `CLAUDE.md` (cwd-relative); this section orchestrates the ingest dance
+/// only. Step 2 enumerates the five taxonomy folder names so the agent knows
+/// where pages go, but type definitions are not duplicated here.
+const GOAL_WORKFLOW: &str = "## Workflow (per-goal ingest)\n\
+\n\
+When this skill is activated, follow these 5 steps in order:\n\
+\n\
+1. **探索 raw**：用 Glob / Read 掃 `raw/code/` 找跟 goal 相關的源碼。不需要把所有檔讀完整 — 抓 entry / module 級別的核心結構即可。\n\
+\n\
+2. **規劃 page**：對照 `wiki/` 內現有的 page，規劃哪些要新建、哪些要 update。Page 落點是五個 taxonomy 資料夾：`concepts/`、`entities/`、`modules/`、`processes/`、`synthesis/`；每個資料夾對應的 page type 定義讀 cwd 的 `CLAUDE.md`。\n\
+\n\
+3. **寫 frontmatter + body**：每個新 page 必須含 frontmatter（taxonomy / sources / 等）以及 body 文字內容。Frontmatter 必填欄位與格式讀 `CLAUDE.md`，本 SKILL.md 不重複定義。\n\
+\n\
+4. **建立 wikilinks**：page 之間用 `[[other-page]]` 雙方括號連結。連到既有 page 時用對方的 filename（不含路徑），跨資料夾解析由 schema 規範處理。\n\
+\n\
+5. **結尾摘要**：印一行簡短的 `本次新增 N page、修改 M page` 摘要到 stdout，讓 binary 端的 user 看到結果。\n";
 
 #[cfg(test)]
 mod tests {

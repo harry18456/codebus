@@ -1,0 +1,38 @@
+## 1. agent::claude_cli 模組
+
+- [x] 1.1 在 `codebus-core/src/agent/mod.rs` 建立模組入口，宣告 `pub mod claude_cli;` 並 re-export 對外 API；落實 design.md「Module 形狀：`codebus-core/src/agent/claude_cli.rs` single impl」決策
+- [x] 1.2 在 `codebus-core/src/agent/claude_cli.rs` 定義 `pub struct InvokeAgentOptions { slash_command: String, vault_root: PathBuf, toolset: &'static [&'static str] }` 與 `pub fn invoke(opts: InvokeAgentOptions) -> io::Result<ExitStatus>`；invoke 內部讀 `CODEBUS_CLAUDE_BIN` env var fallback `claude`，呼應 design.md「Mock binary 注入：`CODEBUS_CLAUDE_BIN` env override」決策
+- [x] 1.3 在 `codebus-core/src/agent/claude_cli.rs` invoke 內構造 `Command::new(claude_bin)`：args `-p <slash_command>` + `--tools <toolset_csv>` + `--allowedTools <toolset_csv>` + `--permission-mode acceptEdits`、`current_dir(vault_root)`、`stdin(Stdio::null())`、`stdout/stderr(Stdio::inherit())`、回 `.status()`；落實 design.md「Spawn args + stdio：三旗 + cwd + inherit」決策（toolset 由 caller 傳 const slice 例如 `&["Read","Glob","Grep","Write","Edit"]`）
+- [x] 1.4 在 `codebus-core/src/lib.rs` 加 `pub mod agent;` export 模組
+
+## 2. source_signal 偵測 helper
+
+- [x] 2.1 在 `codebus-core/src/vault/source_signal_detect.rs` 實作 `pub fn detect_drift(repo: &Path, paths: &VaultPaths, current: &SourceSignal) -> bool`：讀 `paths.manifest_yaml` 解析既存 source_signal、與 current 比對 git_head/file_count/total_bytes 三欄位、任一 differ 回 true；read/parse 任何 step 失敗一律回 true；落實 Source-Signal Detection on Verb Invocation requirement 與 design.md「Source-signal detection：fail-safe 視為 drifted」決策
+- [x] 2.2 在 `codebus-core/src/vault/source_signal_detect.rs` 補 unit tests：unchanged 三欄位皆同 / drift on git_head / drift on file_count / drift on total_bytes / fail-safe missing manifest / fail-safe malformed YAML — 每條對應 spec scenario，使用 tempfile 構造假 manifest.yaml
+- [x] 2.3 在 `codebus-core/src/vault/mod.rs` export `source_signal_detect` 子模組
+
+## 3. goal.rs 5-step 流程 wire
+
+- [x] 3.1 改寫 `codebus-cli/src/commands/goal.rs`：新 clap-derive struct 含 `goal_text: String` (positional)、`repo: Option<PathBuf>` (--repo)、`force_resync: bool`、`no_obsidian_register: bool`、繼承 global `--debug`；提供 `pub async fn run(args: GoalArgs) -> ExitCode` 入口；落實 Goal Subcommand Behavior requirement 的 5 步流程 step 1（resolve repo）
+- [x] 3.2 在 `codebus-cli/src/commands/goal.rs` 內若 `paths.root` 不存在 → 呼叫 `init::run(repo, args.no_obsidian_register, args.debug)`；init exit non-zero 即 propagate；落實 Goal Subcommand Behavior 的「invokes auto-init when vault is missing」scenario 與 design.md「auto-init carry」決策
+- [x] 3.3 在 `codebus-cli/src/commands/goal.rs` 內呼叫 detection：先用 `manifest::compute_source_signal(repo, &SyncSummary{ files: 0, bytes: 0, pii_matches: 0 })` 拿 git_head（file_count/bytes 還沒算），再拆出 walk 計 file_count/total_bytes 的 reusable helper（從 `sync_with_scanner` 的 walk 邏輯抽出 `walk_source_for_signal` 純讀模式）；用 `vault::source_signal_detect::detect_drift` 判斷；drift 或 `args.force_resync == true` → 跑 `sync_with_scanner` + `manifest::write_or_update_manifest`；落實 design.md「`--force-resync` flag：唯一 escape hatch」決策與 Source-Signal Detection requirement 的「Re-sync after drift updates the manifest signal」scenario
+- [x] 3.4 在 `codebus-cli/src/commands/goal.rs` 構造 `InvokeAgentOptions { slash_command: format!("/codebus-goal \"{}\"", args.goal_text), vault_root: paths.root.clone(), toolset: &["Read","Glob","Grep","Write","Edit"] }` 並呼叫 `agent::claude_cli::invoke`；保留 child `ExitStatus`；不論 status zero/non-zero 一律繼續 step 5；落實 Goal Subcommand Behavior 的「spawns agent with cwd at vault root」+「passes the canonical triple-flag sandbox」scenario
+- [x] 3.5 在 `codebus-cli/src/commands/goal.rs` spawn 收尾呼叫 `git::auto_commit(&paths.root, &format!("wiki: {}", args.goal_text))`；auto_commit 失敗 → eprintln + `ExitCode::from(1)`（覆蓋 child exit code）；auto_commit 成功 → propagate child exit code；落實 design.md「Commit on failure：一律 commit（v2 carry）」決策與 Goal Subcommand Behavior 的 commit-on-success / commit-on-failure / no-op-when-clean / propagate-exit-code 4 條 scenario
+- [x] 3.6 在 `codebus-cli/src/main.rs` 把 goal subcommand 路由從 `goal::run()` 改為 `goal::run(GoalArgs::from_clap(...))`，傳遞 parsed args；確認 routing 不破壞既有 stub verbs
+
+## 4. SKILL.md goal workflow content
+
+- [x] 4.1 修改 `codebus-core/src/skill_bundle/mod.rs::stub_content` 函數：goal 分支回傳含 `## Workflow` heading + 5 個 numbered list items（探索 raw → 規劃 page → frontmatter+body → wikilinks → 摘要）的字串，5 步皆引用 cwd-relative paths（`raw/code/` / `wiki/`，**不**前綴 `.codebus/`），結尾指向 `CLAUDE.md` 為 schema source-of-truth；落實 design.md「SKILL.md 5-step workflow（goal verb only）」決策與 Goal Bundle Workflow Content requirement 的「five-step workflow markers」+「references raw/code and wiki cwd-relatively」+「defers schema rules to CLAUDE.md」+「mentions all five taxonomy folder names」scenario
+- [x] 4.2 修改既有 `codebus-core/tests/vault_init.rs` 內對 codebus-goal stub 的 size assertion（既 v3-init 寫的 `body.lines().count() <= 80` 之類）：goal 分支放寬到 ~150 lines 上限或移除單一上限（query / fix 仍 ≤ 80）；確認 query / fix bundle 的 stub workflow 仍符合舊 spec，落實 Goal Bundle Workflow Content requirement 的「codebus-query 與 codebus-fix 仍 stub」scenario
+
+## 5. Integration tests with mock claude binary
+
+- [x] 5.1 在 `codebus-cli/Cargo.toml` 加 `[[bin]] name = "mock-claude" path = "tests/bins/mock_claude.rs"` entry（test-only mock binary）；mock_claude.rs 解析 `--tools` / `--allowedTools` / `--permission-mode` / `-p <prompt>` args，並把 received args 寫到 `$CODEBUS_MOCK_LOG` env 指向的檔案；行為由 `$CODEBUS_MOCK_BEHAVIOR` env 控（`success-noop` / `success-write-page` / `failure-write-then-exit-1` 三個 mode）；呼應 design.md「Mock binary 注入：CODEBUS_CLAUDE_BIN env override」決策的 mock binary 形狀
+- [x] 5.2 在 `codebus-cli/tests/cli_routing.rs`（或新檔 `goal_flow.rs`）新增整合 test `goal_spawns_agent_with_canonical_sandbox_args`：set CODEBUS_CLAUDE_BIN 指向 mock-claude 二進位 + CODEBUS_MOCK_BEHAVIOR=success-noop + CODEBUS_MOCK_LOG 指向 tempfile，跑 `codebus goal "test"` 對 init 過 vault 的 repo，斷言 mock log 檔內含 `--tools Read,Glob,Grep,Write,Edit` + `--allowedTools Read,Glob,Grep,Write,Edit` + `--permission-mode acceptEdits` + cwd 是 vault root + slash command 是 `/codebus-goal "test"`，落實 Goal Subcommand Behavior 的「spawns agent with cwd at vault root」+「passes the canonical triple-flag sandbox」scenario
+- [x] 5.3 在 `codebus-cli/tests/cli_routing.rs` 新增整合 test `goal_auto_inits_when_vault_missing`：repo 無 `.codebus/`，跑 goal、斷言 init 流程已先跑（`.codebus/` 與 `.codebus/.git/` 出現、git log 含 `init: codebus vault`）後才 spawn mock agent；落實 Goal Subcommand Behavior 的「invokes auto-init when vault is missing」scenario
+- [x] 5.4 在 `codebus-cli/tests/cli_routing.rs` 新增整合 test `goal_auto_commits_partial_writes_on_agent_failure`：用 `CODEBUS_MOCK_BEHAVIOR=failure-write-then-exit-1`（mock 寫一個 `wiki/concepts/test.md` 後 exit 1），跑 goal、斷言 codebus 自身 exit non-zero + nested git log 第二個 commit message 為 `wiki: test`（第一個是 init: codebus vault）+ wiki 內檔案存在；落實 Goal Subcommand Behavior 的「auto-commits on agent failure with partial writes」+「propagates agent exit code」scenario
+- [x] 5.5 在 `codebus-cli/tests/cli_routing.rs` 新增整合 test `goal_force_resync_bypasses_detection`：跑兩次 goal，第二次帶 `--force-resync` flag 且 source 沒變，斷言第二次的 manifest `last_sync_at` timestamp 比第一次新（即 raw mirror 真的重跑了）；落實 Goal Subcommand Behavior 的「force-resync flag bypasses detection」scenario
+
+## 6. workspace 全綠
+
+- [x] 6.1 跑 `cargo test --workspace` 全綠，含本 change 新增 6 unit tests + 4 integration tests，與既有 v3-init / v3-pii / v3-vault-history tests 全部通過
