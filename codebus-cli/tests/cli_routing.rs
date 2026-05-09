@@ -354,11 +354,13 @@ fn internal_gitignore_appends_missing_required_lines() {
     );
 }
 
-// === Stub Verb Exit Behavior (4 verbs) ===
+// === Stub Verb Exit Behavior (fix only; lint implemented in v3-lint) ===
+// Note: v3-lint removes the catch-all stub spec. `lint` now has its own
+// Lint Subcommand Behavior; `fix` remains stub until v3-lint task 9.x lands.
 
 #[test]
 fn remaining_stub_verbs_exit_non_zero_with_not_yet_implemented_message() {
-    for verb in ["lint", "fix"] {
+    for verb in ["fix"] {
         let out = Command::new(BIN).arg(verb).output().expect("run binary");
         assert!(!out.status.success(), "verb `{verb}` should fail");
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -382,7 +384,7 @@ fn init_no_longer_matches_stub_behavior() {
 
 #[test]
 fn stub_verbs_do_not_panic_or_block() {
-    for verb in ["lint", "fix"] {
+    for verb in ["fix"] {
         let out = Command::new(BIN).arg(verb).output().expect("run binary");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(!stderr.contains("panicked at"));
@@ -392,7 +394,7 @@ fn stub_verbs_do_not_panic_or_block() {
 
 #[test]
 fn stub_verbs_accept_debug_flag_silently() {
-    for verb in ["lint", "fix"] {
+    for verb in ["fix"] {
         let out = Command::new(BIN).args([verb, "--debug"]).output().expect("run");
         assert!(!out.status.success(), "stub verb `{verb}` --debug should still exit non-zero");
         let stderr = String::from_utf8_lossy(&out.stderr);

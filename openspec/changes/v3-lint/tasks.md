@@ -4,26 +4,26 @@
 
 - [x] 1.1 在 `codebus-core/src/wiki/` 新增 `types.rs`（或擴充既有處）定義 `PageType`、`LintIssue`、`LintSeverity`、`LintResult` 型別 — 從 `legacy/v2-rust/codebus-core/src/wiki/types.rs` 移植，並補上 `rule_id` 欄位（kebab-case 規則識別字串）支援 Lint Output Formats 的 JSON 輸出
 - [x] 1.2 [P] 實作 Vault 自動偵測 / Vault Root Auto-Detection 在 `codebus-core/src/wiki/lint/locate.rs` — 4 步優先序（cwd 有 wiki/、cwd 有 .codebus/wiki/、--repo 顯式、報錯）
-- [ ] 1.3 [P] 實作 Lint Rule Set 規則 1（frontmatter parse failure）— 套用既有 `parsePage` 等價邏輯，parse 失敗回 error
-- [ ] 1.4 [P] 實作 Lint Rule Set 規則 2（cross-folder slug collision）— 在 `lint/rules.rs` 內掃描全 5 個 folder 的 slug 衝突
-- [ ] 1.5 [P] 實作 Lint Rule Set 規則 3（misplaced root page）— 排除 `index.md`、`log.md`，其餘 `wiki/*.md` 為 warn
-- [ ] 1.6 [P] 實作 Lint Rule Set 規則 4 與 5（frontmatter related[] 格式驗證 + slug 解析）— 解析 `[[wikilink]]` 格式、檢查 slug 存在
-- [ ] 1.7 [P] 實作 Lint Rule Set 規則 6（body wikilink resolution）— 含 fenced 跟 inline code 區塊 strip 預處理
-- [ ] 1.8 [P] 實作 Lint Rule Set 規則 7（nav file presence and integrity）— `index.md`、`log.md` 缺檔 warn + body wikilink 掃描
-- [ ] 1.9 在 `codebus-core/src/wiki/lint/mod.rs::lint_wiki()` 串接所有規則，回傳 `LintResult` 含 `pages_scanned`、`nav_files_scanned`、`issues`、`error_count`、`warn_count`
-- [ ] 1.10 加測試驗證 Lint Read-Only Invariant — 在 dirty vault 跑 lint，assert vault 所有檔 byte-identical before/after
+- [x] 1.3 [P] 實作 Lint Rule Set 規則 1（frontmatter parse failure）— 套用既有 `parsePage` 等價邏輯，parse 失敗回 error
+- [x] 1.4 [P] 實作 Lint Rule Set 規則 2（cross-folder slug collision）— 在 `lint/rules.rs` 內掃描全 5 個 folder 的 slug 衝突
+- [x] 1.5 [P] 實作 Lint Rule Set 規則 3（misplaced root page）— 排除 `index.md`、`log.md`，其餘 `wiki/*.md` 為 warn
+- [x] 1.6 [P] 實作 Lint Rule Set 規則 4 與 5（frontmatter related[] 格式驗證 + slug 解析）— 解析 `[[wikilink]]` 格式、檢查 slug 存在
+- [x] 1.7 [P] 實作 Lint Rule Set 規則 6（body wikilink resolution）— 含 fenced 跟 inline code 區塊 strip 預處理
+- [x] 1.8 [P] 實作 Lint Rule Set 規則 7（nav file presence and integrity）— `index.md`、`log.md` 缺檔 warn + body wikilink 掃描
+- [x] 1.9 在 `codebus-core/src/wiki/lint/mod.rs::lint_wiki()` 串接所有規則，回傳 `LintResult` 含 `pages_scanned`、`nav_files_scanned`、`issues`、`error_count`、`warn_count`
+- [x] 1.10 加測試驗證 Lint Read-Only Invariant — 在 dirty vault 跑 lint，assert vault 所有檔 byte-identical before/after
 
 ## 2. Lint Output Formats (codebus-core/src/wiki/lint/output.rs)
 
-- [ ] 2.1 [P] 實作 text 格式器（雙格式輸出之一）— vault-relative path、依檔分組、含 coverage 摘要行（pages + nav files scanned + error/warn counts）
-- [ ] 2.2 [P] 實作 JSON 格式器（雙格式輸出之二）— 絕對路徑、`vault_root` 欄位、單一 JSON 物件不含人類文字 / emoji / ANSI
-- [ ] 2.3 加測試驗證 Lint Output Formats — text 格式不洩漏絕對路徑前綴、JSON 格式 `stdout` 可被 `serde_json` 完整 parse
+- [x] 2.1 [P] 實作 text 格式器（雙格式輸出之一）— vault-relative path、依檔分組、含 coverage 摘要行（pages + nav files scanned + error/warn counts）
+- [x] 2.2 [P] 實作 JSON 格式器（雙格式輸出之二）— 絕對路徑、`vault_root` 欄位、單一 JSON 物件不含人類文字 / emoji / ANSI
+- [x] 2.3 加測試驗證 Lint Output Formats — text 格式不洩漏絕對路徑前綴、JSON 格式 `stdout` 可被 `serde_json` 完整 parse
 
 ## 3. Lint CLI verb (codebus-cli/src/commands/lint.rs)
 
-- [ ] 3.1 從 stub 改寫 `lint.rs` 落地 Lint Subcommand Behavior — 接 `--repo` / `--format` / `--debug`、呼叫 Vault 自動偵測 / Vault Root Auto-Detection、跑 `lint_wiki()`、emit 選定格式
-- [ ] 3.2 實作 Lint Subcommand Behavior 退出碼邏輯 — 0（無 error）/ 1（有 error）/ 2（無 vault）；warning 不影響退出碼
-- [ ] 3.3 加 CLI 整合測試 `codebus-cli/tests/lint_flow.rs` — 涵蓋 `codebus lint`、`codebus lint --format json`、`codebus lint --repo <path>`、vault 缺檔情境
+- [x] 3.1 從 stub 改寫 `lint.rs` 落地 Lint Subcommand Behavior — 接 `--repo` / `--format` / `--debug`、呼叫 Vault 自動偵測 / Vault Root Auto-Detection、跑 `lint_wiki()`、emit 選定格式
+- [x] 3.2 實作 Lint Subcommand Behavior 退出碼邏輯 — 0（無 error）/ 1（有 error）/ 2（無 vault）；warning 不影響退出碼
+- [x] 3.3 加 CLI 整合測試 `codebus-cli/tests/lint_flow.rs` — 涵蓋 `codebus lint`、`codebus lint --format json`、`codebus lint --repo <path>`、vault 缺檔情境
 
 ## 4. Fix Loop Configuration & flags
 
