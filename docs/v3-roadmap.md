@@ -87,50 +87,51 @@ Lint 邏輯純 deterministic（7 條 rule pattern match）。優點：
 
 ## 4. Change Decomposition
 
-9 個 change，序列做。每個 ≤ 14 tasks。
+10 個 change，序列做。每個 ≤ 14 tasks。
 
 | # | Change | CLI 完成什麼 | Skill 完成什麼 | 依賴 |
 |---|---|---|---|---|
 | 1 | `v3-workspace` | `codebus --help` + 5 verb routing（subcommand mode、no-arg → init at pwd）；含 `codebus-app` placeholder crate | — | — |
 | 2 | `v3-init` | `codebus init [--repo X] [--no-obsidian-register]` 全功能：vault layout / raw_sync (NullScanner) / **obsidian vault register** / `.gitignore` mutation / per-repo `.codebus/CLAUDE.md` / 寫 3 個 skill bundle 骨架；含 `sanity_check::check_repo_is_not_vault` | 3 個 SKILL.md 骨架寫到 `~/.claude/skills/codebus-{goal,query,fix}/`（內容暫定，後續 change 補） | #1 |
-| 3 | `v3-pii` | 接 `pii::PiiScanner` trait + `RegexBasicScanner`（v2 builtin regex：AWS / Anthropic key / email / IPv4）+ `NullScanner`（test fixture）；raw_sync default 切 RegexBasic with `OnHit::Warn`（mirror file + stderr warn 每個 match）；init 輸出含 PII match count。**Hardcode default rules 不開 config 入口** — `patterns_extra` / `on_hit` 覆蓋是 #8 的事 | — | #2 |
-| 4 | `v3-goal` | `codebus goal "..."` spawn `claude -p` 帶 slash command；首次寫 `codebus-core/src/agent/claude_cli.rs` single impl + `--tools/--allowedTools` 雙旗 sandbox | `codebus-goal/SKILL.md` 補完整內容（neutral.md §4 workflow per goal + frontmatter schema reference） | #2 |
-| 5 | `v3-query` | `codebus query "..."` spawn 同上，read-only toolset（Read/Glob/Grep） | `codebus-query/SKILL.md` 補完整內容（neutral.md §11 workflow per query + read-only invariant） | #2 |
-| 6 | `v3-lint` | `codebus lint [--repo X] [--json]` direct 全功能（7 rules：broken_wikilink / frontmatter_integrity / page_size / duplicate_slug / orphaned_page / taxonomy_violation / pii_leak）；human + JSON 雙輸出；exit 0/1 | — | #2 |
-| 7 | `v3-fix` | `codebus fix` spawn 同上，toolset 含 Bash（給 fix skill 跑 `codebus lint --json`） | `codebus-fix/SKILL.md`：用 Bash tool 跑 `codebus lint --json` → 解析 findings → 編輯 wiki page 改正 → 重跑 lint，max 5 iterations（user 可改） | #6 |
-| 8 | `v3-config` | `~/.codebus/config.yaml` 6 條 tolerance（v2 carry：missing file / parse fail / unknown key / unknown discriminator / unknown subfield / type mismatch graceful warn）；`lint` section（disabled_rules + custom_rules_dir + auto_fix.max_iterations）；`pii` section（`patterns_extra` append 到 #3 builtin rules + `on_hit` 覆蓋 #3 default `Warn`） | 反向打通：lint 吃 config disabled_rules；init 用 config 覆蓋 #3 PII default（`patterns_extra` append、`on_hit` 覆蓋）；fix skill 從 config 讀 max_iterations 寫進 SKILL.md instruction | #3 #6 |
-| 9 | `v3-render-polish` | OSC 8 hyperlink wrap `[[wikilink]]` for `codebus lint` output；terminal color 5-level emoji priority（`--emoji` flag > `--no-emoji` > `NO_EMOJI` env > config.yaml `emoji:` > TTY auto-detect）；`NO_COLOR` env 守 color | — | #6 #8 |
+| 3 | `v3-pii` | 接 `pii::PiiScanner` trait + `RegexBasicScanner`（v2 builtin regex：AWS / Anthropic key / email / IPv4）+ `NullScanner`（test fixture）；raw_sync default 切 RegexBasic with `OnHit::Warn`（mirror file + stderr warn 每個 match）；init 輸出含 PII match count。**Hardcode default rules 不開 config 入口** — `patterns_extra` / `on_hit` 覆蓋是 #9 的事 | — | #2 |
+| 4 | `v3-vault-history` | 接 `core::git::nested_repo` 模組（v2 carry：`legacy/v2-rust/codebus-core/src/git/nested_repo.rs`）；init.rs 在 raw_sync 之後 obsidian-register 之前 init nested repo + 收尾 `auto_commit "init: codebus vault"`；`.codebus/.gitignore` 內含 `.lock` / `raw/code/` / `**/.obsidian/` / `logs/`（v2 carry）；公開 `auto_commit` API 給 #5 #8 wire；vault spec 反轉「SHALL NOT create `.codebus/.git/`」requirement | — | #3 |
+| 5 | `v3-goal` | `codebus goal "..." [--force-resync] [--no-obsidian-register]` spawn `claude -p` 帶 slash command；首次寫 `codebus-core/src/agent/claude_cli.rs` single impl + `--tools/--allowedTools/--permission-mode acceptEdits` 三旗 sandbox（[2026-05-09 spike verified](#)）；vault 不存在 → auto-init（v2 carry）；source-signal detection 偵測 source drift 才 re-sync（manifest.git_head/file_count/total_bytes 比對）；spawn 收尾 `auto_commit "wiki: {goal}"` | `codebus-goal/SKILL.md` 補完整內容（neutral.md §4 workflow per goal + frontmatter schema reference；schema 仍 by-reference 引用 cwd `CLAUDE.md` 不 inline 重複） | #4 |
+| 6 | `v3-query` | `codebus query "..."` spawn 同 #5 模式，read-only toolset（Read/Glob/Grep）；不 auto_commit | `codebus-query/SKILL.md` 補完整內容（neutral.md §11 workflow per query + read-only invariant） | #2 |
+| 7 | `v3-lint` | `codebus lint [--repo X] [--json]` direct 全功能（7 rules：broken_wikilink / frontmatter_integrity / page_size / duplicate_slug / orphaned_page / taxonomy_violation / pii_leak）；human + JSON 雙輸出；exit 0/1 | — | #2 |
+| 8 | `v3-fix` | `codebus fix` spawn 同 #5 模式，toolset 含 Bash（給 fix skill 跑 `codebus lint --json`）；spawn 收尾 `auto_commit "wiki: lint fix loop"` | `codebus-fix/SKILL.md`：用 Bash tool 跑 `codebus lint --json` → 解析 findings → 編輯 wiki page 改正 → 重跑 lint，max 5 iterations（user 可改） | #4 #7 |
+| 9 | `v3-config` | `~/.codebus/config.yaml` 6 條 tolerance（v2 carry：missing file / parse fail / unknown key / unknown discriminator / unknown subfield / type mismatch graceful warn）；`lint` section（disabled_rules + custom_rules_dir + auto_fix.max_iterations）；`pii` section（`patterns_extra` append 到 #3 builtin rules + `on_hit` 覆蓋 #3 default `Warn`） | 反向打通：lint 吃 config disabled_rules；init 用 config 覆蓋 #3 PII default（`patterns_extra` append、`on_hit` 覆蓋）；fix skill 從 config 讀 max_iterations 寫進 SKILL.md instruction | #3 #7 |
+| 10 | `v3-render-polish` | OSC 8 hyperlink wrap `[[wikilink]]` for `codebus lint` output；terminal color 5-level emoji priority（`--emoji` flag > `--no-emoji` > `NO_EMOJI` env > config.yaml `emoji:` > TTY auto-detect）；`NO_COLOR` env 守 color | — | #7 #9 |
 
 ### 依賴圖
 
 ```
-#1 ─┬─ #2 ─┬─ #3
-    │      ├─ #4
-    │      ├─ #5
-    │      └─ #6 ─┬─ #7
-    │             └─ #9 ─ (after #8)
+#1 ─┬─ #2 ─┬─ #3 ─ #4 (vault-history) ─┬─ #5 (goal)
+    │      │                            └─ #8 (fix) ← + #7
+    │      ├─ #6 (query)
+    │      └─ #7 (lint) ─┬─ #8 (fix)
+    │                    └─ #10 (render-polish) ← + #9
     │
-    └─ #8（其實 #3 #6 都齊後就能 propose，#9 再吃 #8）
+    └─ #9 (config，吃 #3 #7)
 ```
 
-實務：1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 一條過。
+實務：1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 一條過。
 
-### Follow-up changes（非主 9 條序列）
+### Follow-up changes（非主 10 條序列）
 
 下面這些 nice-to-have 不在 ship-blocking path 上，等主序列推進到對應 trigger 點再開：
 
 | Change | 觸發點 | 內容 |
 |---|---|---|
-| `v3-vault-history` | #4 v3-goal 落地後 | `.codebus/` nested git init + `auto_commit` 在 spawn 收尾觸發（v2 carry：`legacy/v2-rust/codebus-core/src/git/nested_repo.rs`）。Vault diff 歷史；不 ship-blocking、與 spawn pattern orthogonal。`.codebus/.gitignore` 內含 `.lock` / `raw/code/` / `**/.obsidian/` / `logs/`（v2 carry）。|
 | `v3-multi-agentic-provider` | §9 trigger（real user 反映 / Anthropic 出事 / 贊助 / Tauri demo 想 multi-vendor） | 第二個 provider impl（codex / gemini / 其他）真的要進來時，先 spike：對方 CLI 有沒有 user-invocable slash command 機制？toolset gate 機制是什麼（Claude=`--tools`、Codex=docker/chroot 等）？驗完才設計 trait surface 或 enum dispatch。在那之前 provider 模組保持 single impl。|
 
 ## 5. 累積里程碑
 
 - **#1 結束**：CLI shell 通；3-crate workspace 編譯
 - **#2 結束**：可以對任何 git repo 跑 `codebus`（no-arg）→ vault 立刻成形 + Obsidian app 看得到 + `~/.claude/skills/codebus-*/` 出現 3 個 skill 骨架（內容空）
-- **#5 結束**：goal / query 兩個 skill 內容完整，可以在 Claude Code 用 `/codebus-goal "..."` / `/codebus-query "..."` 對 vault 做事；`init` + 2 個有用 skill = 第一個能對外展示的版本
-- **#7 結束**：`fix` skill 也通；`lint` direct CLI 配 `fix` skill = 完整 wiki 維護 loop
-- **#9 結束**：UX polish 到位（color + clickable wikilink），可發 v3.0.0
+- **#4 結束**：`.codebus/` 含 nested git；init 結束有第一個 commit「init: codebus vault」；`auto_commit` API 公開可被後續 verb 收尾 wire
+- **#6 結束**：goal / query 兩個 skill 內容完整，可以在 Claude Code 用 `/codebus-goal "..."` / `/codebus-query "..."` 對 vault 做事；goal 收尾 commit 進 nested git；`init` + 2 個有用 skill = 第一個能對外展示的版本
+- **#8 結束**：`fix` skill 也通；`lint` direct CLI 配 `fix` skill = 完整 wiki 維護 loop；fix 收尾 commit 進 nested git
+- **#10 結束**：UX polish 到位（color + clickable wikilink），可發 v3.0.0
 
 ## 6. Open Questions（每個 change 各自 design.md 處理）
 
