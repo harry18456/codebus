@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change 'v3-pii'. Update Purpose after archive.
+The PII detection scanner trait surface used by `vault`'s raw-mirror sync — the `PiiScanner` interface, match output shape (`pattern_name` identifier, `severity` classification of `Critical`/`Warn`, byte-offset ordering), built-in `RegexBasicScanner` with credential / contact / network pattern coverage, `NullScanner` for tests and opt-out flows, and the warn-by-default on-hit policy (matches surface as warnings; mirroring still proceeds). Does NOT cover the file-walk / mirror logic itself (lives in `vault` Raw Mirror with PII Scanner), nor any Obsidian / vault metadata processing.
 
 ## Requirements
 

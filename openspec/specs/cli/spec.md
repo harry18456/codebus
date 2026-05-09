@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change 'v3-workspace'. Update Purpose after archive.
+The command-line entry surface — the `codebus` binary's subcommand registry, global flags, and per-verb invocation contracts. Five subcommands: `init` (vault bootstrap), `goal` (ingest with auto-fix), `query` (read-only Q&A), `lint` (vault validation), `fix` (auto-repair). Each verb's behavior — sandbox flags passed to the spawned agent, exit code policy, auto-commit timing — is normatively specified here. Cross-cuts: spawn-pattern internals (sandbox composition, hook installation) live in `lint-feedback-loop`; vault structure init writes lives in `vault`; skill bundle materialization lives in `skill-bundles`.
 
 ## Requirements
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change 'v3-init'. Update Purpose after archive.
+The on-disk structure of the `.codebus/` directory `codebus init` creates and subsequent verbs read or write — directory layout (5 wiki taxonomy folders + raw mirror + nested git), `manifest.yaml` source-signal record, internal `.gitignore` rules, source repo `.gitignore` mutation, Obsidian vault registration, sanity check (init refuses to run inside an existing vault), nested git repository initialization with the canonical `init: codebus vault` first commit, and source-signal drift detection that gates raw-mirror re-sync on subsequent verb invocations. Does NOT cover wiki content rules (those live in `lint-feedback-loop`), PII redaction of raw mirror contents (`pii-filter`), or skill bundle SKILL.md authoring (`skill-bundles`).
 
 ## Requirements
 

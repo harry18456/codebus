@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change 'v3-lint'. Update Purpose after archive.
+The wiki-content validation rule set, lint output formats, fix-loop spawn pattern, and Bash sandbox hook installation — 7 deterministic lint rules over `<vault>/wiki/` (frontmatter integrity, slug uniqueness, body wikilink resolution, nav file integrity, related-format, root-page placement), text and JSON output formats with vault-relative / absolute path conventions, single-shot fix flow that spawns the codebus-fix agent at most once per CLI invocation with CLI as final-only verifier, the `lint.fix.*` configuration schema, and the PreToolUse hook installed via `<vault>/.claude/settings.json` that hard-gates the agent's Bash tool to `codebus lint *` only. Does NOT cover the SKILL.md content the agent loads (lives in `skill-bundles` per-verb workflow content), nor source-repo or vault structural concerns (live in `vault`).
 
 ## Requirements
 
