@@ -130,6 +130,11 @@ When this skill is activated, follow these 5 steps in order:
 4. **Build wikilinks**: link pages with `[[other-page]]`. When linking to an existing page use that page's filename only (no path); cross-folder resolution is handled by the schema convention.
 
 5. **Print closing summary**: emit ONE short stdout line stating how many pages were created vs how many were modified in this run. Phrase the line in the same natural language as the goal text per the §0 Language Policy in cwd `CLAUDE.md` (so a goal in Japanese gets a Japanese summary, a goal in English gets an English one, etc.). The agent MUST NOT copy phrasing from this SKILL.md verbatim into the stdout summary; this paragraph describes the output shape only and is not itself a template.
+
+## Language Override
+
+The goal text's language SHALL override the natural language of any existing wiki page or raw source content read in steps 1-2. When appending a `## from goal: ...` section to an existing page authored in a different language, the new section's body language follows the goal text, not the existing page's language. The agent reads existing pages to know what already exists, not to imitate their writing language.
+
 ";
 
 
@@ -157,6 +162,11 @@ When this skill is activated, follow these 4 steps in order:
 ## Read-Only Invariant
 
 This workflow is strictly read-only. The agent MUST NOT use Write or Edit to mutate any file inside `wiki/`, `raw/`, or anywhere else inside the vault. Note that the toolset is also gated at the binary layer (`--tools Read,Glob,Grep` was passed when this agent was spawned, so Write and Edit attempts will fail at runtime), but this SKILL.md restates the invariant for defense-in-depth.
+
+## Language Override
+
+The query text's language SHALL override the natural language of any wiki content read in steps 2-3. When matched pages are authored in a different language than the query, the answer in step 4 SHALL match the query's language regardless. The agent reads `wiki/` to retrieve information, not to imitate the wiki's writing language.
+
 ";
 
 #[cfg(test)]
