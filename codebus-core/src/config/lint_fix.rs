@@ -20,7 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Effective fix-loop configuration after merging file + CLI overrides.
 ///
@@ -73,26 +73,20 @@ struct LintFixSection {
     enabled: Option<bool>,
 }
 
-/// Default config path: `~/.codebus/config.yaml`. Returns `None` if the
-/// home directory cannot be resolved.
-pub fn default_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".codebus").join("config.yaml"))
-}
-
 /// Load `lint.fix` config from `path`. Returns defaults when the file does
 /// not exist OR the `lint.fix` section is absent. Returns an Err only when
 /// the file exists but cannot be read (IO error) or is structurally
 /// invalid YAML — callers SHALL fall back to defaults on Err to keep the
 /// CLI resilient against config-file mistakes.
-pub fn load_lint_fix_config(path: &Path) -> Result<LintFixConfig, ConfigLoadError> {
+pub fn load_lint_fix_config(path: &Path) -> Result<LintFixConfig, super::ConfigLoadError> {
     let body = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(LintFixConfig::default());
         }
-        Err(err) => return Err(ConfigLoadError::Io(err)),
+        Err(err) => return Err(super::ConfigLoadError::Io(err)),
     };
-    let file: ConfigFile = serde_yaml::from_str(&body).map_err(ConfigLoadError::YamlParse)?;
+    let file: ConfigFile = serde_yaml::from_str(&body).map_err(super::ConfigLoadError::YamlParse)?;
     let mut cfg = LintFixConfig::default();
     if let Some(lint) = file.lint {
         if let Some(fix) = lint.fix {
@@ -104,29 +98,12 @@ pub fn load_lint_fix_config(path: &Path) -> Result<LintFixConfig, ConfigLoadErro
     Ok(cfg)
 }
 
-#[derive(Debug)]
-pub enum ConfigLoadError {
-    Io(std::io::Error),
-    YamlParse(serde_yaml::Error),
-}
-
-impl std::fmt::Display for ConfigLoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigLoadError::Io(e) => write!(f, "config file io: {e}"),
-            ConfigLoadError::YamlParse(e) => write!(f, "config file yaml parse: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for ConfigLoadError {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn write_yaml(dir: &Path, body: &str) -> PathBuf {
+    fn write_yaml(dir: &Path, body: &str) -> std::path::PathBuf {
         let p = dir.join("config.yaml");
         fs::write(&p, body).unwrap();
         p
@@ -193,7 +170,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = write_yaml(tmp.path(), "lint:\n  fix:\n    : :: not yaml\n");
         let result = load_lint_fix_config(&p);
-        assert!(matches!(result, Err(ConfigLoadError::YamlParse(_))));
+        assert!(matches!(result, Err(super::super::ConfigLoadError::YamlParse(_))));
     }
 
     /// Spec: "--no-fix flag disables fix even when config enables it"

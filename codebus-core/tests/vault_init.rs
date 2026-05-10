@@ -5,6 +5,7 @@
 use std::fs;
 use std::path::Path;
 
+use codebus_core::pii::provider::OnHit;
 use codebus_core::pii::scanners::null_scanner::NullScanner;
 use codebus_core::pii::scanners::regex_basic::RegexBasicScanner;
 use codebus_core::schema::NEUTRAL_RULES;
@@ -96,7 +97,7 @@ fn raw_mirror_preserves_structure_and_skips_top_level_dot_dirs() {
     write(&tmp.path().join(".env"), b"X=Y");
     write(&tmp.path().join(".codebus/manifest.yaml"), b"v: 1");
 
-    sync_with_scanner(tmp.path(), raw.path(), &NullScanner::new()).unwrap();
+    sync_with_scanner(tmp.path(), raw.path(), &NullScanner::new(), OnHit::Warn).unwrap();
     assert!(raw.path().join("src/main.rs").exists());
     assert!(raw.path().join("nested/lib.rs").exists());
     assert!(!raw.path().join(".git").exists());
@@ -111,7 +112,7 @@ fn raw_mirror_honors_source_gitignore() {
     write(&tmp.path().join(".gitignore"), b"target/\n");
     write(&tmp.path().join("src/foo.rs"), b"fn foo(){}");
     write(&tmp.path().join("target/debug/foo.rs"), b"// build artifact");
-    sync_with_scanner(tmp.path(), raw.path(), &NullScanner::new()).unwrap();
+    sync_with_scanner(tmp.path(), raw.path(), &NullScanner::new(), OnHit::Warn).unwrap();
     assert!(raw.path().join("src/foo.rs").exists());
     assert!(!raw.path().join("target").exists());
 }
@@ -135,7 +136,7 @@ fn raw_sync_emits_warnings_for_known_pii_patterns() {
     let scanner = RegexBasicScanner::new(&[]).expect("builtin patterns must compile");
     let mut warn_buf: Vec<u8> = Vec::new();
     let summary =
-        sync_with_scanner_into(src.path(), raw.path(), &scanner, &mut warn_buf).unwrap();
+        sync_with_scanner_into(src.path(), raw.path(), &scanner, OnHit::Warn, &mut warn_buf).unwrap();
 
     let warn_text = String::from_utf8(warn_buf).expect("warn output should be valid UTF-8");
     let warn_lines: Vec<&str> = warn_text.lines().filter(|l| !l.is_empty()).collect();
@@ -361,7 +362,13 @@ fn manifest_source_signal_handles_git_repo() {
     let head_content = "ref: refs/heads/main\n";
     fs::write(tmp.path().join(".git/HEAD"), head_content).unwrap();
 
-    let summary = SyncSummary { files: 5, bytes: 500, pii_matches: 0 };
+    let summary = SyncSummary {
+        files: 5,
+        bytes: 500,
+        pii_matches: 0,
+        pii_skipped_files: 0,
+        pii_masked_matches: 0,
+    };
     let signal = compute_source_signal(tmp.path(), &summary);
     assert_eq!(signal.git_head.as_deref(), Some(head_content));
     assert_eq!(signal.file_count, 5);
@@ -371,7 +378,13 @@ fn manifest_source_signal_handles_git_repo() {
 #[test]
 fn manifest_source_signal_handles_non_git_dir() {
     let tmp = TempDir::new().unwrap();
-    let summary = SyncSummary { files: 3, bytes: 100, pii_matches: 0 };
+    let summary = SyncSummary {
+        files: 3,
+        bytes: 100,
+        pii_matches: 0,
+        pii_skipped_files: 0,
+        pii_masked_matches: 0,
+    };
     let signal = compute_source_signal(tmp.path(), &summary);
     assert!(signal.git_head.is_none());
     assert_eq!(signal.file_count, 3);

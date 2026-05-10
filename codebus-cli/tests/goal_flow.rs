@@ -26,6 +26,7 @@ fn run_goal(
 ) -> (Output, std::path::PathBuf) {
     let log = repo.join("mock-claude.log");
     let _ = fs::remove_file(&log);
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
     // Default `--no-fix` so v3-goal tests still test goal-agent semantics
     // in isolation; v3-lint added a post-agent lint+fix phase that the
     // mock doesn't simulate (mock doesn't create index.md/log.md so lint
@@ -39,6 +40,7 @@ fn run_goal(
     }
     cmd.current_dir(repo)
         .env("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE)
+        .env("CODEBUS_HOME", home.path())
         .env("CODEBUS_MOCK_BEHAVIOR", behavior)
         .env("CODEBUS_MOCK_LOG", &log);
     let out = cmd.output().expect("run codebus goal");
@@ -46,8 +48,10 @@ fn run_goal(
 }
 
 fn run_init(repo: &Path) -> Output {
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
     Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
         .current_dir(repo)
         .output()
         .expect("run codebus init")
@@ -239,6 +243,7 @@ fn run_goal_with_fix(
 ) -> Output {
     let log = repo.join("mock-claude.log");
     let _ = fs::remove_file(&log);
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
     let mut cmd = Command::new(BIN);
     cmd.args(["--no-obsidian-register", "goal", goal_text]);
     for f in extra_flags {
@@ -246,6 +251,7 @@ fn run_goal_with_fix(
     }
     cmd.current_dir(repo)
         .env("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE)
+        .env("CODEBUS_HOME", home.path())
         .env("CODEBUS_MOCK_BEHAVIOR", behavior)
         .env("CODEBUS_MOCK_LOG", &log);
     cmd.output().expect("run codebus goal")
@@ -349,5 +355,74 @@ fn goal_propagates_fix_exit_one_when_post_spawn_lint_has_issues() {
     assert!(
         msg.contains("wiki: willfail") || msg.contains("init: codebus vault"),
         "expected wiki commit (or unchanged HEAD if no edits); got: {msg}"
+    );
+}
+
+/// Spec: "Goal subcommand forwards configured model and effort" — default
+/// `claude_code.goal` is `{ model: opus, effort: high }`, both flags appear
+/// on the spawned argv.
+#[test]
+fn goal_spawn_includes_default_model_and_effort_flags() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success(), "setup init");
+
+    let (_out, log) = run_goal(tmp.path(), "test", &[], "success-noop");
+    let dump = fs::read_to_string(&log).expect("mock-claude log");
+    assert!(
+        dump.contains("arg=--model") && dump.contains("arg=opus"),
+        "expected --model opus in spawn argv; dump:\n{dump}"
+    );
+    assert!(
+        dump.contains("arg=--effort") && dump.contains("arg=high"),
+        "expected --effort high in spawn argv; dump:\n{dump}"
+    );
+}
+
+/// Spec: "User-provided non-default values flow through" — config override
+/// of `claude_code.goal.model` reaches the spawned argv.
+#[test]
+fn goal_spawn_forwards_user_configured_model() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    let home = TempDir::new().unwrap();
+    let cfg_dir = home.path().join(".codebus");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::write(
+        cfg_dir.join("config.yaml"),
+        "claude_code:\n  goal:\n    model: claude-opus-4-7\n    effort: max\n",
+    )
+    .unwrap();
+
+    // Run init first against the SAME isolated home so the goal step sees it.
+    let init_out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(tmp.path())
+        .output()
+        .expect("run codebus init");
+    assert!(init_out.status.success());
+
+    let log = tmp.path().join("mock-claude.log");
+    let _ = fs::remove_file(&log);
+    let goal_out = Command::new(BIN)
+        .args(["--no-obsidian-register", "--no-fix", "goal", "test"])
+        .env("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE)
+        .env("CODEBUS_HOME", home.path())
+        .env("CODEBUS_MOCK_BEHAVIOR", "success-noop")
+        .env("CODEBUS_MOCK_LOG", &log)
+        .current_dir(tmp.path())
+        .output()
+        .expect("run codebus goal");
+    assert!(goal_out.status.success());
+
+    let dump = fs::read_to_string(&log).expect("mock-claude log");
+    assert!(
+        dump.contains("arg=claude-opus-4-7"),
+        "expected user-configured model in argv; dump:\n{dump}"
+    );
+    assert!(
+        dump.contains("arg=max"),
+        "expected user-configured effort in argv; dump:\n{dump}"
     );
 }

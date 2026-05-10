@@ -2,7 +2,13 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
+use codebus_core::config::{
+    PiiConfig, PiiScannerKind, StarterOutcome, default_config_path, load_pii_config,
+    write_starter_config_if_missing,
+};
 use codebus_core::git::{auto_commit, init_nested_repo};
+use codebus_core::pii::PiiScanner;
+use codebus_core::pii::scanners::null_scanner::NullScanner;
 use codebus_core::pii::scanners::regex_basic::RegexBasicScanner;
 use codebus_core::schema::NEUTRAL_RULES;
 use codebus_core::skill_bundle::{self, BundleOutcome};
@@ -55,14 +61,9 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
     }
     println!("✓ vault layout: {}", paths.root.display());
 
-    let scanner = match RegexBasicScanner::new(&[]) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: pii scanner init: {e}");
-            return ExitCode::from(1);
-        }
-    };
-    let summary = match sync_with_scanner(repo, &paths.raw_code, &scanner) {
+    let pii_cfg = load_pii_config_with_warning();
+    let scanner = build_pii_scanner(&pii_cfg);
+    let summary = match sync_with_scanner(repo, &paths.raw_code, scanner.as_ref(), pii_cfg.on_hit) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: raw mirror: {e}");
@@ -242,8 +243,86 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
     }
     println!("✓ vault git: committed {sha7} \"init: codebus vault\"");
 
+    // v3-config: write starter `~/.codebus/config.yaml` if missing. Failure
+    // is non-fatal — the rest of init succeeded and the per-vault state is
+    // usable; the user just won't have a discoverable global config file.
+    write_global_config_starter(debug);
+
     println!("✓ codebus init complete");
     ExitCode::SUCCESS
+}
+
+/// Load `pii.*` config from the default path, surfacing parse errors as a
+/// stderr warning prefixed with `warning: pii config` and falling back to
+/// `PiiConfig::default()` so init does not abort on a malformed config.
+fn load_pii_config_with_warning() -> PiiConfig {
+    let path = match default_config_path() {
+        Some(p) => p,
+        None => return PiiConfig::default(),
+    };
+    match load_pii_config(&path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("warning: pii config load failed (using defaults): {e}");
+            PiiConfig::default()
+        }
+    }
+}
+
+/// Construct the active PII scanner per the `pii.scanner` discriminator.
+/// On `RegexBasic` with bad `patterns_extra` regex, emits a stderr warning
+/// and falls back to the built-in pattern set only (no NullScanner — built-in
+/// 4 patterns are still useful even when user regex is malformed).
+fn build_pii_scanner(cfg: &PiiConfig) -> Box<dyn PiiScanner> {
+    match cfg.scanner {
+        PiiScannerKind::Null => Box::new(NullScanner::new()),
+        PiiScannerKind::RegexBasic => match RegexBasicScanner::new(&cfg.patterns_extra) {
+            Ok(s) => Box::new(s),
+            Err(e) => {
+                eprintln!(
+                    "warning: pii config patterns_extra failed to compile (using built-in patterns only): {e}"
+                );
+                Box::new(
+                    RegexBasicScanner::new(&[])
+                        .expect("built-in patterns must compile"),
+                )
+            }
+        },
+    }
+}
+
+/// Write the global config starter to `~/.codebus/config.yaml` if missing.
+/// Emits one progress line on success (Written / AlreadyPresent) or a
+/// `warning: global config` stderr message on failure. Non-fatal — caller
+/// continues regardless.
+fn write_global_config_starter(debug: bool) {
+    let path = match default_config_path() {
+        Some(p) => p,
+        None => {
+            if debug {
+                eprintln!("[debug] global config: home dir unavailable, skipping starter write");
+            }
+            return;
+        }
+    };
+    let display = path.display();
+    match write_starter_config_if_missing(&path) {
+        Ok(StarterOutcome::Written) => {
+            if debug {
+                eprintln!("[debug] global config: wrote starter at {display}");
+            }
+            println!("✓ global config: wrote {display}");
+        }
+        Ok(StarterOutcome::AlreadyPresent) => {
+            if debug {
+                eprintln!("[debug] global config: preserved existing {display}");
+            }
+            println!("✓ global config: {display} already present");
+        }
+        Err(e) => {
+            eprintln!("warning: global config write at {display} failed (non-fatal): {e}");
+        }
+    }
 }
 
 /// Ensure `.codebus/.gitignore` contains every entry in [`INTERNAL_GITIGNORE_LINES`],

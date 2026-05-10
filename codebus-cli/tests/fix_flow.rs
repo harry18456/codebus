@@ -14,8 +14,10 @@ const BIN: &str = env!("CARGO_BIN_EXE_codebus");
 const MOCK_CLAUDE: &str = env!("CARGO_BIN_EXE_mock-claude");
 
 fn run_init(repo: &Path) -> Output {
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
     Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
         .current_dir(repo)
         .output()
         .expect("run init")
@@ -24,6 +26,7 @@ fn run_init(repo: &Path) -> Output {
 fn run_fix(repo: &Path, extra_flags: &[&str], behavior: &str) -> Output {
     let log = repo.join("mock-claude.log");
     let _ = fs::remove_file(&log);
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
     let mut cmd = Command::new(BIN);
     cmd.arg("fix");
     for f in extra_flags {
@@ -31,6 +34,7 @@ fn run_fix(repo: &Path, extra_flags: &[&str], behavior: &str) -> Output {
     }
     cmd.current_dir(repo)
         .env("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE)
+        .env("CODEBUS_HOME", home.path())
         .env("CODEBUS_MOCK_BEHAVIOR", behavior)
         .env("CODEBUS_MOCK_LOG", &log);
     cmd.output().expect("run codebus fix")
@@ -197,4 +201,25 @@ fn fix_spawn_uses_bare_bash_in_tools_and_restricted_in_allowed_tools() {
     // --allowedTools must contain the restriction pattern.
     assert!(allowed_val.contains("Bash(codebus lint *)"),
         "--allowedTools missing Bash(codebus lint *) restriction: `{allowed_val}`");
+}
+
+/// Spec: "Fix subcommand forwards configured model and effort" — default
+/// `claude_code.fix` is `{ model: sonnet, effort: medium }`.
+#[test]
+fn fix_spawn_includes_default_model_and_effort_flags() {
+    let tmp = TempDir::new().unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    // Plant lint issue → triggers fix spawn (clean vault would short-circuit).
+    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    let _ = run_fix(tmp.path(), &[], "success-noop");
+    let log = tmp.path().join("mock-claude.log");
+    let body = fs::read_to_string(&log).expect("mock-claude log");
+    assert!(
+        body.contains("arg=--model") && body.contains("arg=sonnet"),
+        "expected --model sonnet in fix spawn argv:\n{body}"
+    );
+    assert!(
+        body.contains("arg=--effort") && body.contains("arg=medium"),
+        "expected --effort medium in fix spawn argv:\n{body}"
+    );
 }

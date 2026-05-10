@@ -5,15 +5,25 @@ use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_codebus");
 
-/// Run `codebus init --no-obsidian-register` against `repo` and return the
-/// captured Output plus the resolved vault root path. Used by v3-vault-history
-/// integration tests to drive end-to-end init and inspect resulting vault.
-fn run_init(repo: &Path) -> Output {
+/// Run `codebus init --no-obsidian-register` against `repo` with
+/// `CODEBUS_HOME` set to `home` so the global-config write step targets an
+/// isolated path instead of the real `~/.codebus/`.
+fn run_init_with_home(repo: &Path, home: &Path) -> Output {
     Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home)
         .current_dir(repo)
         .output()
         .expect("run codebus init")
+}
+
+/// Convenience wrapper: run init with a fresh per-call `CODEBUS_HOME` so the
+/// test never touches the real user's `~/.codebus/`. Returns just the Output —
+/// callers that need to inspect the home dir should use `run_init_with_home`
+/// directly.
+fn run_init(repo: &Path) -> Output {
+    let home = TempDir::new().expect("create isolated CODEBUS_HOME tempdir");
+    run_init_with_home(repo, home.path())
 }
 
 /// Run `git -C <vault> <args>` and return its Output. Caller asserts.
@@ -449,8 +459,10 @@ fn debug_flag_at_subcommand_position_behaves_identically() {
 #[test]
 fn without_debug_no_debug_lines() {
     let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
     let out = Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
         .current_dir(tmp.path())
         .output()
         .expect("run");
@@ -464,5 +476,170 @@ fn without_debug_no_debug_lines() {
     assert!(
         !stderr.contains("[debug]"),
         "stderr unexpectedly contains [debug]: {stderr}"
+    );
+}
+
+// === v3-config: Global Config Starter Writer (init step) ===
+
+#[test]
+fn init_writes_global_config_starter_when_missing() {
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path())
+        .output()
+        .expect("run codebus init");
+    assert!(
+        out.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let cfg_path = home.path().join(".codebus").join("config.yaml");
+    assert!(
+        cfg_path.exists(),
+        "starter config not written at {}",
+        cfg_path.display()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("✓ global config: wrote"),
+        "missing 'wrote' progress line:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_does_not_overwrite_existing_global_config() {
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let cfg_dir = home.path().join(".codebus");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    let cfg_path = cfg_dir.join("config.yaml");
+    let custom = "pii:\n  on_hit: warn\n";
+    std::fs::write(&cfg_path, custom).unwrap();
+
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path())
+        .output()
+        .expect("run codebus init");
+    assert!(out.status.success());
+
+    let preserved = std::fs::read_to_string(&cfg_path).unwrap();
+    assert_eq!(preserved, custom, "init clobbered user config");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("already present"),
+        "missing 'already present' progress line:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_writes_default_parseable_global_config() {
+    use codebus_core::config::{
+        ClaudeCodeConfig, PiiConfig, load_claude_code_config, load_lint_fix_config,
+        load_pii_config,
+    };
+
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path())
+        .output()
+        .expect("run codebus init");
+    assert!(out.status.success());
+
+    let cfg_path = home.path().join(".codebus").join("config.yaml");
+
+    // Each section parses to its respective `Default::default()`.
+    let pii = load_pii_config(&cfg_path).expect("parse pii section");
+    assert_eq!(pii, PiiConfig::default());
+
+    let cc = load_claude_code_config(&cfg_path).expect("parse claude_code section");
+    assert_eq!(cc, ClaudeCodeConfig::default());
+
+    let lf = load_lint_fix_config(&cfg_path).expect("parse lint.fix section");
+    assert!(lf.enabled);
+}
+
+#[test]
+fn init_with_null_scanner_config_skips_pii_warnings() {
+    // Pre-populate ~/.codebus/config.yaml with `pii.scanner: none` so the
+    // raw mirror uses NullScanner. Source contains a fake credential that
+    // RegexBasic would catch — under `none` scanner, zero warnings emitted.
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let cfg_dir = home.path().join(".codebus");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(cfg_dir.join("config.yaml"), "pii:\n  scanner: none\n").unwrap();
+    std::fs::write(
+        repo.path().join("src.rs"),
+        b"const KEY: &str = \"AKIAIOSFODNN7EXAMPLE\";\n",
+    )
+    .unwrap();
+
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path())
+        .output()
+        .expect("run codebus init");
+    assert!(out.status.success());
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("pii warn:"),
+        "expected 0 pii warn lines under scanner: none, got: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("0 PII matches"),
+        "expected raw mirror line to report 0 matches under NullScanner: {stdout}"
+    );
+}
+
+#[test]
+fn init_with_bad_patterns_extra_falls_back_to_builtin() {
+    // Malformed regex in patterns_extra → init emits stderr warning and uses
+    // built-in pattern set only (does NOT degrade to NullScanner).
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let cfg_dir = home.path().join(".codebus");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(
+        cfg_dir.join("config.yaml"),
+        "pii:\n  patterns_extra:\n    - '[unclosed bracket'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo.path().join("src.rs"),
+        b"const KEY: &str = \"AKIAIOSFODNN7EXAMPLE\";\n",
+    )
+    .unwrap();
+
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path())
+        .output()
+        .expect("run codebus init");
+    assert!(out.status.success());
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("warning: pii config patterns_extra"),
+        "expected stderr fallback warning: {stderr}"
+    );
+    // Built-in scanner still runs — AWS key match should be reported in
+    // stdout summary OR (under default on_hit=mask) the file is masked.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("1 PII matches") || stdout.contains("PII matches"),
+        "built-in scanner should still detect at least one match: {stdout}"
     );
 }

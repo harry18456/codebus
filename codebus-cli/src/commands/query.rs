@@ -9,6 +9,9 @@ use std::process::ExitCode;
 
 use clap::Args;
 use codebus_core::agent::{InvokeAgentOptions, invoke};
+use codebus_core::config::{
+    ClaudeCodeConfig, default_config_path, load_claude_code_config,
+};
 use codebus_core::vault::layout::vault_paths;
 
 /// Read-only toolset for the query verb. Excludes Write/Edit/Bash. v2
@@ -45,13 +48,16 @@ pub async fn run(repo: &Path, args: QueryArgs, debug: bool) -> ExitCode {
     }
 
     // Step 3: spawn agent with read-only triple-flag sandbox.
+    let cc_cfg = load_claude_code_config_with_warning();
     let slash_command = format!("/codebus-query \"{}\"", args.text);
     if debug {
         eprintln!(
-            "[debug] query: spawn claude with cwd={} slash={:?} toolset={:?}",
+            "[debug] query: spawn claude with cwd={} slash={:?} toolset={:?} model={:?} effort={:?}",
             paths.root.display(),
             slash_command,
-            QUERY_TOOLSET
+            QUERY_TOOLSET,
+            cc_cfg.query.model,
+            cc_cfg.query.effort,
         );
     }
     let child_status = match invoke(InvokeAgentOptions {
@@ -59,6 +65,8 @@ pub async fn run(repo: &Path, args: QueryArgs, debug: bool) -> ExitCode {
         vault_root: paths.root.clone(),
         toolset: QUERY_TOOLSET,
         bash_whitelist: None,
+        model: cc_cfg.query.model,
+        effort: cc_cfg.query.effort,
     }) {
         Ok(status) => status,
         Err(e) => {
@@ -81,4 +89,20 @@ pub async fn run(repo: &Path, args: QueryArgs, debug: bool) -> ExitCode {
     }
 
     ExitCode::from(child_exit_code)
+}
+
+/// Load `claude_code.*` config with stderr warning + default fallback on
+/// parse failure. Same shape as init.rs / goal.rs / fix.rs PII config helper.
+fn load_claude_code_config_with_warning() -> ClaudeCodeConfig {
+    let path = match default_config_path() {
+        Some(p) => p,
+        None => return ClaudeCodeConfig::default(),
+    };
+    match load_claude_code_config(&path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("warning: claude_code config load failed (using defaults): {e}");
+            ClaudeCodeConfig::default()
+        }
+    }
 }

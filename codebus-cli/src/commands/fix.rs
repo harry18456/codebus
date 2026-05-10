@@ -10,7 +10,10 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use codebus_core::config::{LintFixConfig, default_config_path, load_lint_fix_config};
+use codebus_core::config::{
+    ClaudeCodeConfig, LintFixConfig, default_config_path, load_claude_code_config,
+    load_lint_fix_config,
+};
 use codebus_core::git::auto_commit;
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::wiki::fix::{TerminationReason, run_fix_loop};
@@ -65,9 +68,26 @@ pub async fn run(
         return ExitCode::from(0);
     }
 
+    // Load claude_code.fix config so the spawned agent gets the configured
+    // model/effort flags. Failure → defaults (sonnet/medium) per spec.
+    let cc_cfg = match default_config_path() {
+        Some(p) => match load_claude_code_config(&p) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("warning: claude_code config load failed (using defaults): {e}");
+                ClaudeCodeConfig::default()
+            }
+        },
+        None => ClaudeCodeConfig::default(),
+    };
+
     // Run the single-shot flow. The fix module handles initial-clean
     // short-circuit internally — no spawn on clean vault.
-    let report = match run_fix_loop(paths.root.clone()) {
+    let report = match run_fix_loop(
+        paths.root.clone(),
+        cc_cfg.fix.model,
+        cc_cfg.fix.effort,
+    ) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: fix loop: {e}");

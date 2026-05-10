@@ -35,6 +35,16 @@ pub struct InvokeAgentOptions {
     /// Spike-verified 2026-05-09 against `claude --help` v2.1.137: the
     /// Tool(specifier) syntax is supported directly on `--allowedTools`.
     pub bash_whitelist: Option<&'static str>,
+    /// Optional Claude CLI `--model` value forwarded as `--model <X>` in
+    /// the spawned argv. Accepts an alias (e.g. `"sonnet"`, `"opus"`,
+    /// `"haiku"`) or a full identifier (e.g. `"claude-opus-4-7"`); codebus
+    /// does NOT validate against an enum so model upgrades require no code
+    /// change. `None` omits the flag entirely (Claude CLI uses its default).
+    pub model: Option<String>,
+    /// Optional Claude CLI `--effort` value forwarded as `--effort <Y>`.
+    /// Accepts strings the Claude CLI knows (`low` / `medium` / `high` /
+    /// `xhigh` / `max` as of v2.1.137). `None` omits the flag.
+    pub effort: Option<String>,
 }
 
 /// Spawn the configured `claude -p` child process and wait for it to exit.
@@ -55,16 +65,27 @@ pub fn invoke(opts: InvokeAgentOptions) -> io::Result<ExitStatus> {
     let tools_csv = build_tools_csv(opts.toolset, opts.bash_whitelist);
     let allowed_tools_csv = build_allowed_tools_csv(opts.toolset, opts.bash_whitelist);
 
-    Command::new(&claude_bin)
-        .arg("-p")
+    let mut cmd = Command::new(&claude_bin);
+    cmd.arg("-p")
         .arg(&opts.slash_command)
         .arg("--tools")
         .arg(&tools_csv)
         .arg("--allowedTools")
         .arg(&allowed_tools_csv)
         .arg("--permission-mode")
-        .arg("acceptEdits")
-        .current_dir(&opts.vault_root)
+        .arg("acceptEdits");
+
+    // Per Agent Spawn Model and Effort Forwarding: append --model / --effort
+    // when the corresponding config field has a value. None → flag omitted
+    // entirely so Claude CLI applies its own default.
+    if let Some(model) = opts.model.as_deref() {
+        cmd.arg("--model").arg(model);
+    }
+    if let Some(effort) = opts.effort.as_deref() {
+        cmd.arg("--effort").arg(effort);
+    }
+
+    cmd.current_dir(&opts.vault_root)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -120,17 +141,23 @@ mod tests {
             vault_root: PathBuf::from("/tmp/v"),
             toolset: &["Read", "Glob", "Grep"],
             bash_whitelist: None,
+            model: None,
+            effort: None,
         };
         let InvokeAgentOptions {
             slash_command,
             vault_root,
             toolset,
             bash_whitelist,
+            model,
+            effort,
         } = opts;
         assert_eq!(slash_command, "/codebus-goal \"x\"");
         assert_eq!(vault_root, PathBuf::from("/tmp/v"));
         assert_eq!(toolset, &["Read", "Glob", "Grep"]);
         assert!(bash_whitelist.is_none());
+        assert!(model.is_none());
+        assert!(effort.is_none());
     }
 
     #[test]
@@ -187,10 +214,40 @@ mod tests {
             vault_root: std::env::temp_dir(),
             toolset: &["Read"],
             bash_whitelist: None,
+            model: None,
+            effort: None,
         });
         unsafe {
             std::env::remove_var("CODEBUS_CLAUDE_BIN");
         }
         assert!(r.is_err(), "expected spawn err, got {r:?}");
+    }
+
+    /// Spec: "Agent Spawn Model and Effort Forwarding" — when both fields
+    /// are Some, both flags appear on argv. We use a binary that prints argv
+    /// to capture-friendly stderr (printenv-like). Cross-platform-safe path:
+    /// invoke a deliberately-missing binary and rely on the fact that even
+    /// though spawn fails, the Command construction has already happened —
+    /// so we instead test the argv-construction logic at the unit level by
+    /// calling the helper function that builds it. But invoke() doesn't
+    /// expose that. Pragmatic alternative: smoke-test via a real binary
+    /// proxy is outside this unit test's scope. Here we structurally assert
+    /// the field plumbing through the spawn path by setting CODEBUS_CLAUDE_BIN
+    /// to an executable echo wrapper if available, otherwise skip.
+    /// For now we assert the struct shape; argv-content verification lives
+    /// in the CLI integration tests (goal_flow / query_flow / fix_flow)
+    /// which have access to a real wrapper binary.
+    #[test]
+    fn invoke_options_accepts_model_and_effort_some() {
+        let opts = InvokeAgentOptions {
+            slash_command: "/x".into(),
+            vault_root: PathBuf::from("/tmp/v"),
+            toolset: &["Read"],
+            bash_whitelist: None,
+            model: Some("opus".into()),
+            effort: Some("high".into()),
+        };
+        assert_eq!(opts.model.as_deref(), Some("opus"));
+        assert_eq!(opts.effort.as_deref(), Some("high"));
     }
 }

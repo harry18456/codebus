@@ -70,13 +70,20 @@ impl std::error::Error for FixError {}
 ///
 /// Per Fix Single-Shot Verification:
 ///   1. Run lint (precheck). If 0 issues → InitialClean, no spawn.
-///   2. Spawn `claude -p "/codebus-fix"` exactly once.
+///   2. Spawn `claude -p "/codebus-fix"` exactly once with the configured
+///      `--model` / `--effort` from `claude_code.fix.*` (or omitted when None).
 ///   3. Wait for agent termination.
 ///   4. Run lint (final verification).
 ///   5. Use final lint state to decide TerminationReason.
 ///
-/// `vault_root` is the `.codebus/` directory.
-pub fn run_fix_loop(vault_root: PathBuf) -> Result<FixReport, FixError> {
+/// `vault_root` is the `.codebus/` directory. `model` / `effort` are the
+/// pass-through values from `~/.codebus/config.yaml`'s `claude_code.fix`
+/// section, or `None` to omit the flags from the spawned command line.
+pub fn run_fix_loop(
+    vault_root: PathBuf,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<FixReport, FixError> {
     let initial = lint_wiki(&vault_root);
     if initial.error_count == 0 && initial.warn_count == 0 {
         return Ok(FixReport {
@@ -87,7 +94,7 @@ pub fn run_fix_loop(vault_root: PathBuf) -> Result<FixReport, FixError> {
         });
     }
 
-    invoke_fix_agent(&vault_root, prompt::initial_prompt())
+    invoke_fix_agent(&vault_root, prompt::initial_prompt(), model, effort)
         .map_err(FixError::Spawn)?;
 
     let post = lint_wiki(&vault_root);
@@ -107,12 +114,16 @@ pub fn run_fix_loop(vault_root: PathBuf) -> Result<FixReport, FixError> {
 fn invoke_fix_agent(
     vault_root: &std::path::Path,
     slash_command: String,
+    model: Option<String>,
+    effort: Option<String>,
 ) -> io::Result<()> {
     let status = invoke(InvokeAgentOptions {
         slash_command,
         vault_root: vault_root.to_path_buf(),
         toolset: FIX_TOOLSET,
         bash_whitelist: Some(FIX_BASH_WHITELIST),
+        model,
+        effort,
     })?;
     // We don't propagate non-zero exit: the agent's "I'm done" or "I gave up"
     // signal flows back via the post-spawn lint check. Spawn-level IO errors
@@ -146,7 +157,7 @@ mod tests {
         unsafe {
             std::env::set_var("CODEBUS_CLAUDE_BIN", "/no/such/claude/bin/test-clean-skip");
         }
-        let result = run_fix_loop(tmp.path().to_path_buf());
+        let result = run_fix_loop(tmp.path().to_path_buf(), None, None);
         unsafe {
             std::env::remove_var("CODEBUS_CLAUDE_BIN");
         }
@@ -174,6 +185,8 @@ mod tests {
             vault_root: PathBuf::from("/tmp"),
             toolset: FIX_TOOLSET,
             bash_whitelist: Some(FIX_BASH_WHITELIST),
+            model: None,
+            effort: None,
         };
         // Destructuring asserts the struct has exactly these fields and no
         // session-related fields. Compile fails if a session field is added.
@@ -182,6 +195,8 @@ mod tests {
             vault_root: _,
             toolset: _,
             bash_whitelist: _,
+            model: _,
+            effort: _,
         } = opts;
     }
 }

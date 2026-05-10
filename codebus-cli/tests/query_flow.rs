@@ -20,10 +20,12 @@ const MOCK_CLAUDE: &str = env!("CARGO_BIN_EXE_mock-claude");
 fn run_query(repo: &Path, query_text: &str, behavior: &str) -> (Output, std::path::PathBuf) {
     let log = repo.join("mock-claude.log");
     let _ = fs::remove_file(&log);
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
     let out = Command::new(BIN)
         .args(["query", query_text])
         .current_dir(repo)
         .env("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE)
+        .env("CODEBUS_HOME", home.path())
         .env("CODEBUS_MOCK_BEHAVIOR", behavior)
         .env("CODEBUS_MOCK_LOG", &log)
         .output()
@@ -32,8 +34,10 @@ fn run_query(repo: &Path, query_text: &str, behavior: &str) -> (Output, std::pat
 }
 
 fn run_init(repo: &Path) -> Output {
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
     Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
         .current_dir(repo)
         .output()
         .expect("run codebus init")
@@ -216,4 +220,24 @@ fn query_propagates_agent_exit_code() {
         String::from_utf8_lossy(&out.stdout)
     );
     assert_eq!(out.status.code(), Some(1));
+}
+
+/// Spec: "Query subcommand forwards configured model and effort" — default
+/// `claude_code.query` is `{ model: haiku, effort: low }`.
+#[test]
+fn query_spawn_includes_default_model_and_effort_flags() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+
+    let (_out, log) = run_query(tmp.path(), "test", "success-noop");
+    let dump = fs::read_to_string(&log).expect("mock-claude log");
+    assert!(
+        dump.contains("arg=--model") && dump.contains("arg=haiku"),
+        "expected --model haiku in spawn argv; dump:\n{dump}"
+    );
+    assert!(
+        dump.contains("arg=--effort") && dump.contains("arg=low"),
+        "expected --effort low in spawn argv; dump:\n{dump}"
+    );
 }

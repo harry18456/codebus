@@ -7,8 +7,13 @@ use std::process::ExitCode;
 
 use clap::Args;
 use codebus_core::agent::{InvokeAgentOptions, invoke};
-use codebus_core::config::{LintFixConfig, default_config_path, load_lint_fix_config};
+use codebus_core::config::{
+    ClaudeCodeConfig, LintFixConfig, PiiConfig, PiiScannerKind, default_config_path,
+    load_claude_code_config, load_lint_fix_config, load_pii_config,
+};
 use codebus_core::git::auto_commit;
+use codebus_core::pii::PiiScanner;
+use codebus_core::pii::scanners::null_scanner::NullScanner;
 use codebus_core::pii::scanners::regex_basic::RegexBasicScanner;
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::vault::manifest::{self, ManifestOutcome, SourceSignal};
@@ -106,15 +111,19 @@ pub async fn run(
         );
     }
 
+    // Load pii + claude_code config once; scanner dispatch + agent flag
+    // forwarding both use them.
+    let pii_cfg = load_pii_config_with_warning();
+    let cc_cfg = load_claude_code_config_with_warning();
+
     if needs_resync {
-        let scanner = match RegexBasicScanner::new(&[]) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("error: pii scanner init: {e}");
-                return ExitCode::from(1);
-            }
-        };
-        let summary = match sync_with_scanner(repo, &paths.raw_code, &scanner) {
+        let scanner = build_pii_scanner(&pii_cfg);
+        let summary = match sync_with_scanner(
+            repo,
+            &paths.raw_code,
+            scanner.as_ref(),
+            pii_cfg.on_hit,
+        ) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("error: raw mirror re-sync: {e}");
@@ -161,6 +170,8 @@ pub async fn run(
         vault_root: paths.root.clone(),
         toolset: GOAL_TOOLSET,
         bash_whitelist: None,
+        model: cc_cfg.goal.model.clone(),
+        effort: cc_cfg.goal.effort.clone(),
     }) {
         Ok(status) => status,
         Err(e) => {
@@ -191,7 +202,11 @@ pub async fn run(
         if debug {
             eprintln!("[debug] goal: running lint-and-fix phase (single-shot)");
         }
-        match run_fix_loop(paths.root.clone()) {
+        match run_fix_loop(
+            paths.root.clone(),
+            cc_cfg.fix.model.clone(),
+            cc_cfg.fix.effort.clone(),
+        ) {
             Ok(report) => {
                 if debug {
                     eprintln!(
@@ -245,6 +260,57 @@ pub async fn run(
     }
 }
 
+/// Load `pii.*` config from default path with warn-and-default on parse failure.
+fn load_pii_config_with_warning() -> PiiConfig {
+    let path = match default_config_path() {
+        Some(p) => p,
+        None => return PiiConfig::default(),
+    };
+    match load_pii_config(&path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("warning: pii config load failed (using defaults): {e}");
+            PiiConfig::default()
+        }
+    }
+}
+
+/// Load `claude_code.*` config from default path with warn-and-default on parse failure.
+fn load_claude_code_config_with_warning() -> ClaudeCodeConfig {
+    let path = match default_config_path() {
+        Some(p) => p,
+        None => return ClaudeCodeConfig::default(),
+    };
+    match load_claude_code_config(&path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("warning: claude_code config load failed (using defaults): {e}");
+            ClaudeCodeConfig::default()
+        }
+    }
+}
+
+/// Construct the active PII scanner from `pii.scanner` discriminator.
+/// On `RegexBasic` with malformed `patterns_extra`, falls back to the built-in
+/// pattern set only after emitting a stderr warning.
+fn build_pii_scanner(cfg: &PiiConfig) -> Box<dyn PiiScanner> {
+    match cfg.scanner {
+        PiiScannerKind::Null => Box::new(NullScanner::new()),
+        PiiScannerKind::RegexBasic => match RegexBasicScanner::new(&cfg.patterns_extra) {
+            Ok(s) => Box::new(s),
+            Err(e) => {
+                eprintln!(
+                    "warning: pii config patterns_extra failed to compile (using built-in patterns only): {e}"
+                );
+                Box::new(
+                    RegexBasicScanner::new(&[])
+                        .expect("built-in patterns must compile"),
+                )
+            }
+        },
+    }
+}
+
 /// Compute the current source signal: walk source for file_count/total_bytes,
 /// read git_head from `<repo>/.git/HEAD`. Reuses the manifest module's
 /// `compute_source_signal` after replacing the SyncSummary's file/bytes with
@@ -255,6 +321,8 @@ fn compute_current_signal(repo: &Path) -> std::io::Result<SourceSignal> {
         files,
         bytes,
         pii_matches: 0,
+        pii_skipped_files: 0,
+        pii_masked_matches: 0,
     };
     Ok(manifest::compute_source_signal(repo, &stub_summary))
 }

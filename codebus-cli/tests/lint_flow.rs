@@ -21,8 +21,10 @@ fn lint(cwd: &Path, args: &[&str]) -> Output {
 }
 
 fn init_vault(repo: &Path) {
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
     let out = Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
         .current_dir(repo)
         .output()
         .expect("run init");
