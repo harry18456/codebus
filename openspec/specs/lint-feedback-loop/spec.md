@@ -80,7 +80,7 @@ tests:
 
 The lint subsystem SHALL determine the vault root using the following precedence on each invocation:
 
-1. If the `--repo <PATH>` flag is provided, the system SHALL use `<PATH>/.codebus/` as the vault root.
+1. If the `--repo <PATH>` flag is provided, the system SHALL inspect `<PATH>` to disambiguate the user's intent: when `<PATH>/wiki/` is a directory the system SHALL treat `<PATH>` itself as the vault root (the user passed the `.codebus/` directory directly); otherwise the system SHALL treat `<PATH>` as the source repository root and use `<PATH>/.codebus/` as the vault root.
 2. Otherwise, if the current working directory contains a `wiki/` subdirectory, the system SHALL treat the current working directory itself as the vault root.
 3. Otherwise, if the current working directory contains a `.codebus/wiki/` path, the system SHALL treat the current working directory as the source repository root and `<cwd>/.codebus/` as the vault root.
 4. Otherwise, the system SHALL exit with status 2 and emit a stderr hint instructing the user to run `codebus init` first.
@@ -102,53 +102,37 @@ The auto-detection SHALL apply only to the lint subcommand and the lint phase of
 - **WHEN** `codebus lint` is invoked from a directory containing neither `wiki/` nor `.codebus/wiki/`, with no `--repo` flag
 - **THEN** the system SHALL exit with status 2 AND stderr SHALL contain a message instructing the user to run `codebus init`
 
-#### Scenario: Explicit --repo flag overrides cwd-based detection
+#### Scenario: Explicit --repo flag pointing at source repo uses joined path
 
-- **WHEN** `codebus lint --repo /path/to/other-repo` is invoked
-- **THEN** the system SHALL use `/path/to/other-repo/.codebus/` as the vault root regardless of the cwd contents
+- **WHEN** `codebus lint --repo /path/to/source-repo` is invoked, where `/path/to/source-repo` does NOT contain a `wiki/` subdirectory but its `.codebus/wiki/` path exists
+- **THEN** the system SHALL use `/path/to/source-repo/.codebus/` as the vault root
+
+#### Scenario: Explicit --repo flag pointing at vault root uses path directly
+
+- **WHEN** `codebus lint --repo /path/to/source-repo/.codebus` is invoked, where the path itself contains a `wiki/` subdirectory
+- **THEN** the system SHALL use `/path/to/source-repo/.codebus/` as the vault root (no second `.codebus` join) AND lint SHALL produce identical output to invoking `codebus lint --repo /path/to/source-repo`
+
+##### Example: same vault, two --repo argument forms
+
+- **GIVEN** an initialized vault at `/repo/.codebus/wiki/` with one broken wikilink in `concepts/foo.md`
+- **WHEN** the user runs `codebus lint --repo /repo` and separately `codebus lint --repo /repo/.codebus`
+- **THEN** both invocations SHALL emit the same stdout report containing the broken-wikilink warning for `wiki/concepts/foo.md`
+
+#### Scenario: Explicit --repo flag with non-existent path falls back to joined form
+
+- **WHEN** `codebus lint --repo /nonexistent/path` is invoked, where neither `/nonexistent/path/wiki/` nor `/nonexistent/path/.codebus/wiki/` exists
+- **THEN** the system SHALL use `/nonexistent/path/.codebus/` as the vault root (preserving the prior contract that `--repo` does not validate existence — the lint phase that follows will surface the absence of any wiki content)
 
 
 <!-- @trace
-source: v3-lint
-updated: 2026-05-09
+source: v3-bug-fixes
+updated: 2026-05-10
 code:
-  - codebus-core/src/wiki/fix/mod.rs
-  - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/lib.rs
-  - codebus-core/src/wiki/fix/session.rs
   - codebus-core/src/wiki/lint/locate.rs
-  - codebus-core/src/wiki/lint/rules/root_page.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/agent/claude_cli.rs
-  - codebus-core/src/wiki/lint/rules/missing_nav.rs
-  - codebus-core/src/wiki/lint/rules/broken_wikilink.rs
-  - codebus-cli/Cargo.toml
-  - codebus-cli/src/commands/fix.rs
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/wiki/mod.rs
-  - codebus-core/src/wiki/fix/prompt.rs
-  - codebus-core/src/wiki/lint/rules/duplicate_slug.rs
   - codebus-core/src/vault/raw_sync.rs
-  - codebus-core/src/wiki/lint/rules/mod.rs
-  - codebus-core/src/wiki/lint/output.rs
-  - codebus-cli/src/commands/query.rs
-  - codebus-cli/src/commands/goal.rs
-  - codebus-core/src/wiki/lint/rules/frontmatter_integrity.rs
-  - codebus-core/src/config/lint_fix.rs
-  - codebus-cli/src/commands/lint.rs
-  - codebus-core/src/wiki/lint/factory.rs
-  - codebus-core/src/wiki/lint/mod.rs
-  - codebus-core/src/agent/mod.rs
-  - codebus-core/src/wiki/frontmatter.rs
-  - codebus-core/src/wiki/lint/rule.rs
-  - codebus-core/src/wiki/types.rs
+  - codebus-cli/src/commands/init.rs
 tests:
-  - codebus-cli/tests/fix_flow.rs
-  - codebus-cli/tests/goal_flow.rs
   - codebus-cli/tests/lint_flow.rs
-  - codebus-core/tests/vault_init.rs
   - codebus-cli/tests/cli_routing.rs
 -->
 

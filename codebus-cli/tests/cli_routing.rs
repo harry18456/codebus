@@ -764,3 +764,70 @@ fn init_no_color_produces_no_ansi() {
         "ANSI escape leaked under NO_COLOR: {stdout}"
     );
 }
+
+// === v3-bug-fixes: source-signal stability across init invocations ===
+
+/// v3-bug-fixes Bug 1 — `init` SHALL write a manifest signal whose
+/// `total_bytes` matches a fresh `walk_source_for_signal` immediately after
+/// init terminates. Otherwise subsequent verb invocations (`goal` / `query`)
+/// would falsely conclude that source has drifted and trigger a redundant
+/// raw_sync re-sync.
+///
+/// We verify by running init twice in a row against the same repo: the
+/// second run's manifest must report identical `total_bytes` to the first.
+/// If the source `.gitignore` mutation sat AFTER raw_sync (the pre-fix
+/// state), the first init's signal would lag the post-mutation state and
+/// the second init would record a different number — exposing the drift.
+#[test]
+fn init_followed_by_repeat_init_does_not_drift() {
+    use std::fs;
+
+    let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello\n").unwrap();
+    // Make the source a real git repo so the source `.gitignore` mutation
+    // path is actually triggered (it short-circuits when not a git repo).
+    let git_init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success());
+
+    let first = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(tmp.path())
+        .output()
+        .expect("first init");
+    assert!(first.status.success(), "first init stderr: {}", String::from_utf8_lossy(&first.stderr));
+
+    let manifest_path = tmp.path().join(".codebus").join("manifest.yaml");
+    let manifest_after_first = fs::read_to_string(&manifest_path).expect("manifest exists");
+    let bytes_first = extract_total_bytes(&manifest_after_first);
+
+    let second = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(tmp.path())
+        .output()
+        .expect("second init");
+    assert!(second.status.success(), "second init stderr: {}", String::from_utf8_lossy(&second.stderr));
+
+    let manifest_after_second = fs::read_to_string(&manifest_path).expect("manifest exists");
+    let bytes_second = extract_total_bytes(&manifest_after_second);
+
+    assert_eq!(
+        bytes_first, bytes_second,
+        "manifest total_bytes drifted between identical init runs: {bytes_first} → {bytes_second}"
+    );
+}
+
+fn extract_total_bytes(manifest_yaml: &str) -> u64 {
+    for line in manifest_yaml.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("total_bytes:") {
+            return rest.trim().parse().expect("total_bytes parses as u64");
+        }
+    }
+    panic!("manifest missing total_bytes field:\n{manifest_yaml}")
+}

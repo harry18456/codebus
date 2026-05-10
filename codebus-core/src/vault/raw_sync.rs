@@ -234,21 +234,28 @@ pub fn sync_with_scanner_into<W: io::Write>(
         }
         summary.pii_matches += matches.len();
 
+        // v3-bug-fixes: `summary.bytes` SHALL track source-side bytes
+        // (`meta.len()`) regardless of on_hit mode. The walk used by
+        // `walk_source_for_signal` (consumed by drift detection in `goal`)
+        // counts source-side bytes the same way, so accumulating them
+        // identically here keeps the manifest's `total_bytes` field in
+        // sync with what subsequent verb invocations re-compute. Mixing
+        // source-bytes (walk) with destination-bytes (Mask `masked.len()` /
+        // Skip omitted) caused init→goal drift detection to fire spuriously.
+        summary.bytes += meta.len();
+
         // Decide what to write to dst based on on_hit + match presence.
         if matches.is_empty() {
-            // No matches (or non-UTF-8): byte-identical copy. Bytes counter
-            // tracks fs::copy's reported written length.
-            let written = fs::copy(path, &dst)?;
+            // No matches (or non-UTF-8): byte-identical copy.
+            fs::copy(path, &dst)?;
             summary.files += 1;
-            summary.bytes += written;
             continue;
         }
 
         match on_hit {
             OnHit::Warn => {
-                let written = fs::copy(path, &dst)?;
+                fs::copy(path, &dst)?;
                 summary.files += 1;
-                summary.bytes += written;
             }
             OnHit::Skip => {
                 summary.pii_skipped_files += 1;
@@ -259,10 +266,8 @@ pub fn sync_with_scanner_into<W: io::Write>(
                 // implies a successful scan, which only runs on Some).
                 let original = utf8_content.expect("matches non-empty implies UTF-8 content");
                 let masked = mask_matches(&original, &matches);
-                let bytes_written = masked.len() as u64;
                 fs::write(&dst, masked.as_bytes())?;
                 summary.files += 1;
-                summary.bytes += bytes_written;
                 summary.pii_masked_matches += matches.len();
             }
         }

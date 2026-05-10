@@ -38,8 +38,14 @@ impl std::error::Error for LocateError {}
 
 /// Resolve the vault root path (the `.codebus/` directory).
 ///
-/// - If `repo_override` is `Some(path)`, returns `<path>/.codebus/` regardless
-///   of cwd contents (the explicit `--repo` flag wins).
+/// - If `repo_override` is `Some(path)`:
+///   - When `<path>/wiki/` is a directory → return `path` itself (the user
+///     passed the vault root directly, e.g. `--repo .../.codebus`). This
+///     avoids the v3-bug-fixes case where `path.join(".codebus")` produced
+///     `.codebus/.codebus` (non-existent) and lint silently scanned 0 pages.
+///   - Otherwise → return `<path>/.codebus/` (assume `path` is the source
+///     repo). Existence is NOT checked at this layer; callers see absence
+///     of wiki content during the lint phase.
 /// - Otherwise, inspects `cwd`:
 ///   - If `<cwd>/wiki/` exists → returns `cwd` itself (agent-from-vault case).
 ///   - Else if `<cwd>/.codebus/wiki/` exists → returns `<cwd>/.codebus`.
@@ -49,6 +55,13 @@ pub fn locate_vault_root(
     repo_override: Option<&Path>,
 ) -> Result<PathBuf, LocateError> {
     if let Some(repo) = repo_override {
+        // v3-bug-fixes: detect when the user passed the vault root directly
+        // (`--repo .../.codebus`). Without this check, `repo.join(".codebus")`
+        // would produce `.codebus/.codebus` and lint would silently scan 0
+        // pages instead of finding the user's intended vault.
+        if repo.join("wiki").is_dir() {
+            return Ok(repo.to_path_buf());
+        }
         return Ok(repo.join(".codebus"));
     }
 
@@ -107,6 +120,31 @@ mod tests {
         let nonexistent = Path::new("/this/path/definitely/does/not/exist");
         let resolved = locate_vault_root(".", Some(nonexistent)).unwrap();
         assert_eq!(resolved, nonexistent.join(".codebus"));
+    }
+
+    /// v3-bug-fixes: `--repo` pointing at a vault root (a `.codebus/`
+    /// directory containing `wiki/`) SHALL be used directly, not joined
+    /// again.
+    #[test]
+    fn explicit_repo_override_with_wiki_subdir_uses_path_directly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path().join(".codebus");
+        fs::create_dir_all(vault.join("wiki")).unwrap();
+        let resolved = locate_vault_root(tmp.path(), Some(&vault)).unwrap();
+        assert_eq!(resolved, vault);
+    }
+
+    /// v3-bug-fixes: `--repo` pointing at a source repo root (no `wiki/`
+    /// subdirectory directly under it) SHALL fall back to the legacy
+    /// `path.join(".codebus")` form.
+    #[test]
+    fn explicit_repo_override_without_wiki_subdir_joins_dot_codebus() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source_repo = tmp.path().join("source");
+        fs::create_dir_all(source_repo.join(".codebus").join("wiki")).unwrap();
+        // source_repo has no `wiki/` directly — so we expect `.codebus` join.
+        let resolved = locate_vault_root(tmp.path(), Some(&source_repo)).unwrap();
+        assert_eq!(resolved, source_repo.join(".codebus"));
     }
 
     #[test]

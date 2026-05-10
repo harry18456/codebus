@@ -89,7 +89,7 @@ tests:
 ---
 ### Requirement: Init Subcommand Behavior
 
-The `init` subcommand SHALL accept the flags `--repo <PATH>` (default: current working directory) and `--no-obsidian-register` (boolean flag). When invoked, `init` SHALL orchestrate (in order): pre-flight sanity check, vault layout creation, raw mirror, source repo `.gitignore` mutation, per-repo schema file write, manifest write, skill bundle authoring, Obsidian vault registration, and global config starter write. The global config starter write step SHALL invoke the `write_starter_config_if_missing` primitive against `~/.codebus/config.yaml`; when the file is absent the system SHALL create the parent directory if necessary and write the starter content; when the file already exists the system SHALL NOT read or overwrite it. In default output mode `init` SHALL emit a sequence of banners (defined by the `Banner Output for Verb Commands` requirement) covering at minimum the `Start`, `SyncDone`, `PiiSummary`, `CommitDone`, and `Done` banner variants. Default mode SHALL NOT emit per-step `✓ <internal-detail>` progress lines (these are reserved for `--debug` mode). When `--debug` is passed, `init` SHALL emit the same banner sequence AND additionally emit the per-step `✓ <internal-detail>` progress lines (vault layout, source `.gitignore` mutation, schema file write, manifest write, skill bundle authoring, vault settings write, global config starter, and any others implementation chooses) AND the `[debug]` lines describing internal decisions, fs operations, computed source signal values, and target paths. `init` SHALL exit with status zero on success and non-zero only if a sanity-check refusal or unrecoverable filesystem error occurs. A failure of the global config starter write step SHALL emit a stderr warning prefixed with `warning: global config` AND SHALL NOT cause `init` to exit non-zero (the rest of init having succeeded means the per-vault state is usable).
+The `init` subcommand SHALL accept the flags `--repo <PATH>` (default: current working directory) and `--no-obsidian-register` (boolean flag). When invoked, `init` SHALL orchestrate (in order): pre-flight sanity check, vault layout creation, **source repo `.gitignore` mutation**, raw mirror, per-repo schema file write, manifest write, skill bundle authoring, Obsidian vault registration, and global config starter write. The source repo `.gitignore` mutation step SHALL precede the raw mirror so the byte-count signal recorded in the manifest reflects the post-init source state — otherwise subsequent verb invocations (`goal` / `query`) would compute a different source signal from a fresh walk and falsely conclude that drift has occurred. The global config starter write step SHALL invoke the `write_starter_config_if_missing` primitive against `~/.codebus/config.yaml`; when the file is absent the system SHALL create the parent directory if necessary and write the starter content; when the file already exists the system SHALL NOT read or overwrite it. In default output mode `init` SHALL emit a sequence of banners (defined by the `Banner Output for Verb Commands` requirement) covering at minimum the `Start`, `SyncDone`, `PiiSummary`, `CommitDone`, and `Done` banner variants. Default mode SHALL NOT emit per-step `✓ <internal-detail>` progress lines (these are reserved for `--debug` mode). When `--debug` is passed, `init` SHALL emit the same banner sequence AND additionally emit the per-step `✓ <internal-detail>` progress lines (vault layout, source `.gitignore` mutation, schema file write, manifest write, skill bundle authoring, vault settings write, global config starter, and any others implementation chooses) AND the `[debug]` lines describing internal decisions, fs operations, computed source signal values, and target paths. `init` SHALL exit with status zero on success and non-zero only if a sanity-check refusal or unrecoverable filesystem error occurs. A failure of the global config starter write step SHALL emit a stderr warning prefixed with `warning: global config` AND SHALL NOT cause `init` to exit non-zero (the rest of init having succeeded means the per-vault state is usable).
 
 #### Scenario: Init with --repo flag targets the specified directory
 
@@ -141,31 +141,22 @@ The `init` subcommand SHALL accept the flags `--repo <PATH>` (default: current w
 - **WHEN** `codebus init` runs against a system where the parent directory of `~/.codebus/config.yaml` cannot be created (for example due to filesystem permissions)
 - **THEN** the global config write step SHALL emit a stderr warning prefixed with `warning: global config` AND init SHALL exit with status zero AND all other init steps SHALL complete successfully
 
+#### Scenario: Subsequent goal invocation does not trigger redundant re-sync
+
+- **WHEN** `codebus init --repo <repo>` runs to completion against a fresh git repository, immediately followed by `codebus goal "..." --repo <repo>` with no intervening source mutation
+- **THEN** the goal invocation SHALL NOT emit the `SyncStart` or `SyncDone` banner (the source-signal drift detection SHALL conclude no drift exists, skipping raw mirror re-sync)
+
 
 <!-- @trace
-source: v3-render-polish
+source: v3-bug-fixes
 updated: 2026-05-10
 code:
-  - codebus-core/src/render/lint_text.rs
-  - docs/v3-roadmap.md
-  - codebus-cli/src/commands/lint.rs
-  - codebus-core/src/render/banner.rs
-  - codebus-cli/src/commands/goal.rs
-  - codebus-cli/src/main.rs
-  - codebus-cli/src/commands/fix.rs
-  - codebus-core/src/render/mod.rs
+  - codebus-core/src/wiki/lint/locate.rs
+  - codebus-core/src/vault/raw_sync.rs
   - codebus-cli/src/commands/init.rs
-  - codebus-core/src/render/options.rs
-  - codebus-cli/src/commands/query.rs
-  - Cargo.toml
-  - codebus-core/src/vault/obsidian_register.rs
-  - codebus-core/Cargo.toml
-  - codebus-core/src/lib.rs
-  - codebus-core/src/wiki/lint/output.rs
 tests:
+  - codebus-cli/tests/lint_flow.rs
   - codebus-cli/tests/cli_routing.rs
-  - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/fix_flow.rs
 -->
 
 ---

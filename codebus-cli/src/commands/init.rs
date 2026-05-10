@@ -74,6 +74,38 @@ pub async fn run(
         println!("✓ vault layout: {}", paths.root.display());
     }
 
+    // v3-bug-fixes: source `.gitignore` mutation must precede raw_sync so the
+    // raw_sync summary's byte count reflects the post-mutation source state.
+    // Otherwise the manifest writes a pre-mutation byte count and subsequent
+    // verb invocations (goal/query) computing a fresh signal see drift even
+    // though the user changed nothing.
+    match source_gitignore::ensure_codebus_in_gitignore(repo) {
+        Ok(GitignoreOutcome::Created) => {
+            if debug {
+                println!("✓ source .gitignore: created with .codebus/");
+            }
+        }
+        Ok(GitignoreOutcome::Appended) => {
+            if debug {
+                println!("✓ source .gitignore: appended .codebus/");
+            }
+        }
+        Ok(GitignoreOutcome::AlreadyPresent) => {
+            if debug {
+                println!("✓ source .gitignore: already contains .codebus/");
+            }
+        }
+        Ok(GitignoreOutcome::NotAGitRepo) => {
+            if debug {
+                eprintln!("[debug] source .gitignore: skipped (not a git repo)");
+            }
+        }
+        Err(e) => {
+            eprintln!("error: source .gitignore: {e}");
+            return ExitCode::from(1);
+        }
+    }
+
     let pii_cfg = load_pii_config_with_warning();
     let scanner = build_pii_scanner(&pii_cfg);
     let sync_started = Instant::now();
@@ -149,33 +181,6 @@ pub async fn run(
                 "nested repo initialized"
             }
         );
-    }
-
-    match source_gitignore::ensure_codebus_in_gitignore(repo) {
-        Ok(GitignoreOutcome::Created) => {
-            if debug {
-                println!("✓ source .gitignore: created with .codebus/");
-            }
-        }
-        Ok(GitignoreOutcome::Appended) => {
-            if debug {
-                println!("✓ source .gitignore: appended .codebus/");
-            }
-        }
-        Ok(GitignoreOutcome::AlreadyPresent) => {
-            if debug {
-                println!("✓ source .gitignore: already contains .codebus/");
-            }
-        }
-        Ok(GitignoreOutcome::NotAGitRepo) => {
-            if debug {
-                eprintln!("[debug] source .gitignore: skipped (not a git repo)");
-            }
-        }
-        Err(e) => {
-            eprintln!("error: source .gitignore: {e}");
-            return ExitCode::from(1);
-        }
     }
 
     match write_schema_if_missing(&paths.schema_md) {

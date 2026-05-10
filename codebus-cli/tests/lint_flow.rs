@@ -167,3 +167,44 @@ fn snapshot(dir: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
     snap.sort_by(|a, b| a.0.cmp(&b.0));
     snap
 }
+
+/// v3-bug-fixes Bug 2: `lint --repo <vault-root>` and `lint --repo <source-repo>`
+/// SHALL produce identical stdout against the same vault. Pre-fix the
+/// `<vault-root>` form silently scanned 0 pages because `locate_vault_root`
+/// joined `.codebus` again, producing `.codebus/.codebus` (non-existent).
+#[test]
+fn lint_repo_pointing_at_vault_root_works_same_as_source_repo() {
+    let tmp = TempDir::new().unwrap();
+    init_vault(tmp.path());
+
+    // Plant a broken-wikilink warning so both invocations have a real
+    // finding to surface (not just the empty "no issues" baseline).
+    let vault = tmp.path().join(".codebus");
+    write_page(&vault, "concepts/foo.md", fm_clean(), "see [[ghost-page]]\n");
+
+    let source_form = lint(tmp.path(), &["--repo", tmp.path().to_str().unwrap()]);
+    let vault_form = lint(
+        tmp.path(),
+        &["--repo", vault.to_str().unwrap()],
+    );
+
+    assert_eq!(
+        source_form.status.code(),
+        vault_form.status.code(),
+        "exit codes differ; source stdout: {:?} vault stdout: {:?}",
+        String::from_utf8_lossy(&source_form.stdout),
+        String::from_utf8_lossy(&vault_form.stdout),
+    );
+
+    let source_stdout = String::from_utf8_lossy(&source_form.stdout);
+    let vault_stdout = String::from_utf8_lossy(&vault_form.stdout);
+    assert_eq!(
+        source_stdout, vault_stdout,
+        "lint stdout differs between --repo <source> and --repo <vault-root>"
+    );
+    // Both forms must surface the planted broken-wikilink warning.
+    assert!(
+        source_stdout.contains("ghost-page"),
+        "expected broken-wikilink warning in stdout, got: {source_stdout}"
+    );
+}
