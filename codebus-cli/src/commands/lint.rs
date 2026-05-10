@@ -11,6 +11,9 @@
 //! - 2: no vault locatable
 
 use clap::{Args, ValueEnum};
+use codebus_core::render::{RenderOptions, format_lint_text};
+use codebus_core::vault::layout::vault_paths;
+use codebus_core::vault::obsidian_register::lookup_vault_id;
 use codebus_core::wiki::lint::{format_json, format_text, lint_wiki, locate_vault_root, LocateError};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -29,7 +32,12 @@ pub struct LintArgs {
     pub format: OutputFormat,
 }
 
-pub async fn run(repo_override: Option<&Path>, args: LintArgs, debug: bool) -> ExitCode {
+pub async fn run(
+    repo_override: Option<&Path>,
+    args: LintArgs,
+    debug: bool,
+    render_opts: &RenderOptions,
+) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(p) => p,
         Err(e) => {
@@ -52,11 +60,30 @@ pub async fn run(repo_override: Option<&Path>, args: LintArgs, debug: bool) -> E
         println!("[debug] lint: vault_root = {}", vault_root.display());
     }
 
+    // For text format only: re-derive RenderOptions to enrich `vault_id`
+    // from Obsidian config so the OSC 8 hyperlink emitter can build
+    // `obsidian://open?vault=<id>&file=<rel>` URLs. JSON format intentionally
+    // skips this — `format_json` MUST stay machine-readable.
+    let wiki_root = vault_paths(&vault_root.parent().unwrap_or(Path::new(""))).wiki;
     let result = lint_wiki(&vault_root);
 
     match args.format {
         OutputFormat::Text => {
-            print!("{}", format_text(&result));
+            let lint_opts = if render_opts.use_hyperlinks {
+                let vault_id = lookup_vault_id(&wiki_root).ok().flatten();
+                RenderOptions::explicit(
+                    render_opts.use_emoji,
+                    render_opts.use_color,
+                    render_opts.use_hyperlinks,
+                    vault_id,
+                )
+            } else {
+                render_opts.clone()
+            };
+            // Use the styled formatter directly to pick up the lint-specific
+            // vault_id; the legacy `format_text` wrapper would lose it.
+            let _ = format_text; // keep the import live for backwards-compat callers
+            print!("{}", format_lint_text(&result, &lint_opts, &wiki_root));
         }
         OutputFormat::Json => match format_json(&result, &vault_root) {
             Ok(json) => println!("{json}"),

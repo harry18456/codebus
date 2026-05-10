@@ -15,11 +15,13 @@ use codebus_core::git::auto_commit;
 use codebus_core::pii::PiiScanner;
 use codebus_core::pii::scanners::null_scanner::NullScanner;
 use codebus_core::pii::scanners::regex_basic::RegexBasicScanner;
+use codebus_core::render::{Banner, RenderOptions, print_banner};
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::vault::manifest::{self, ManifestOutcome, SourceSignal};
 use codebus_core::vault::raw_sync::{sync_with_scanner, walk_source_for_signal, SyncSummary};
 use codebus_core::vault::source_signal_detect::detect_drift;
 use codebus_core::wiki::fix::{TerminationReason, run_fix_loop};
+use std::time::Instant;
 
 use crate::commands::init;
 
@@ -48,6 +50,7 @@ pub async fn run(
     no_obsidian_register: bool,
     no_fix: bool,
     debug: bool,
+    render_opts: &RenderOptions,
 ) -> ExitCode {
     let paths = vault_paths(repo);
 
@@ -60,6 +63,12 @@ pub async fn run(
         );
     }
 
+    // Banner: 駛入 + 任務目標 — emitted before any per-step work so the user
+    // sees the codebus brand identity (the bus / boarding metaphor) plus
+    // the goal text echo at the top of every run.
+    print_banner(Banner::Start { repo_path: repo }, render_opts);
+    print_banner(Banner::Goal { goal_text: &args.text }, render_opts);
+
     // Step 1+2: vault precondition. v2 carry: missing vault → auto-init.
     if !paths.root.exists() {
         if debug {
@@ -68,7 +77,7 @@ pub async fn run(
                 paths.root.display()
             );
         }
-        let init_exit = init::run(repo, no_obsidian_register, debug).await;
+        let init_exit = init::run(repo, no_obsidian_register, debug, render_opts).await;
         if !paths.root.exists() {
             // ExitCode is opaque (no PartialEq); detect failure by post-condition.
             eprintln!(
@@ -118,6 +127,8 @@ pub async fn run(
 
     if needs_resync {
         let scanner = build_pii_scanner(&pii_cfg);
+        print_banner(Banner::SyncStart, render_opts);
+        let sync_started = Instant::now();
         let summary = match sync_with_scanner(
             repo,
             &paths.raw_code,
@@ -130,9 +141,20 @@ pub async fn run(
                 return ExitCode::from(1);
             }
         };
-        println!(
-            "✓ raw mirror: {} files, {} bytes, {} PII matches (re-sync)",
-            summary.files, summary.bytes, summary.pii_matches
+        let sync_elapsed_ms = sync_started.elapsed().as_millis();
+        if debug {
+            println!(
+                "✓ raw mirror: {} files, {} bytes, {} PII matches (re-sync)",
+                summary.files, summary.bytes, summary.pii_matches
+            );
+        }
+        print_banner(
+            Banner::SyncDone {
+                files: summary.files,
+                mib: (summary.bytes as f64) / (1024.0 * 1024.0),
+                elapsed_ms: sync_elapsed_ms,
+            },
+            render_opts,
         );
         let signal = manifest::compute_source_signal(repo, &summary);
         match manifest::write_or_update_manifest(
@@ -202,12 +224,15 @@ pub async fn run(
         if debug {
             eprintln!("[debug] goal: running lint-and-fix phase (single-shot)");
         }
+        print_banner(Banner::LintStart, render_opts);
+        let lint_started = Instant::now();
         match run_fix_loop(
             paths.root.clone(),
             cc_cfg.fix.model.clone(),
             cc_cfg.fix.effort.clone(),
         ) {
             Ok(report) => {
+                let lint_elapsed_ms = lint_started.elapsed().as_millis();
                 if debug {
                     eprintln!(
                         "[debug] goal: fix agent_skipped={}, termination={:?}, errors={}, warns={}",
@@ -217,6 +242,14 @@ pub async fn run(
                         report.final_lint.warn_count
                     );
                 }
+                print_banner(
+                    Banner::LintDone {
+                        errors: report.final_lint.error_count,
+                        warns: report.final_lint.warn_count,
+                        elapsed_ms: lint_elapsed_ms,
+                    },
+                    render_opts,
+                );
                 if !report.clean
                     && report.termination == TerminationReason::PostLintIssuesRemain
                 {
@@ -243,13 +276,22 @@ pub async fn run(
     match auto_commit(&paths.root, &commit_msg) {
         Ok(sha) => {
             let sha7: String = sha.chars().take(7).collect();
-            println!("✓ vault git: committed {sha7} \"{commit_msg}\"");
+            if debug {
+                println!("✓ vault git: committed {sha7} \"{commit_msg}\"");
+            }
+            // Banner only fires when auto_commit produced a real commit;
+            // on a clean working tree the sha7 still resolves to HEAD so we
+            // emit the banner unconditionally (HEAD identifies the wiki
+            // snapshot the user just produced or carried forward).
+            print_banner(Banner::CommitDone { sha7: &sha7 }, render_opts);
         }
         Err(e) => {
             eprintln!("error: vault git auto-commit: {e}");
             return ExitCode::from(1);
         }
     }
+
+    print_banner(Banner::Done { wiki_path: &paths.wiki }, render_opts);
 
     // Exit code precedence: goal agent failure preempts fix exit.
     // Auto-commit failure (above) preempts both.

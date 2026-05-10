@@ -225,9 +225,12 @@ fn goal_force_resync_bypasses_detection() {
         String::from_utf8_lossy(&out2.stderr)
     );
     let stdout2 = String::from_utf8_lossy(&out2.stdout);
+    // v3-render-polish: detail line `(re-sync)` is debug-mode-only.
+    // Default mode shows the SyncStart + SyncDone banner pair when the
+    // goal flow performs a re-sync.
     assert!(
-        stdout2.contains("(re-sync)"),
-        "force-resync did not produce re-sync progress line; stdout: {stdout2}"
+        stdout2.contains("同步 source") && stdout2.contains("同步完成"),
+        "force-resync did not emit Sync banners; stdout: {stdout2}"
     );
 }
 

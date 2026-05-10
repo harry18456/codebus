@@ -15,13 +15,16 @@ use codebus_core::config::{
     load_lint_fix_config,
 };
 use codebus_core::git::auto_commit;
+use codebus_core::render::{Banner, RenderOptions, print_banner};
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::wiki::fix::{TerminationReason, run_fix_loop};
+use std::time::Instant;
 
 pub async fn run(
     repo_override: Option<&Path>,
     no_fix: bool,
     debug: bool,
+    render_opts: &RenderOptions,
 ) -> ExitCode {
     // Resolve target repo (Some from --repo, else cwd).
     let repo = match repo_override {
@@ -44,6 +47,8 @@ pub async fn run(
         );
         return ExitCode::from(2);
     }
+
+    print_banner(Banner::Start { repo_path: &repo }, render_opts);
 
     if debug {
         eprintln!("[debug] fix: vault = {}", paths.root.display());
@@ -83,6 +88,8 @@ pub async fn run(
 
     // Run the single-shot flow. The fix module handles initial-clean
     // short-circuit internally — no spawn on clean vault.
+    print_banner(Banner::LintStart, render_opts);
+    let lint_started = Instant::now();
     let report = match run_fix_loop(
         paths.root.clone(),
         cc_cfg.fix.model,
@@ -94,6 +101,7 @@ pub async fn run(
             return ExitCode::from(1);
         }
     };
+    let lint_elapsed_ms = lint_started.elapsed().as_millis();
 
     if debug {
         eprintln!(
@@ -105,9 +113,20 @@ pub async fn run(
         );
     }
 
+    print_banner(
+        Banner::LintDone {
+            errors: report.final_lint.error_count,
+            warns: report.final_lint.warn_count,
+            elapsed_ms: lint_elapsed_ms,
+        },
+        render_opts,
+    );
+
     // Initial-clean termination: nothing to commit, exit 0.
     if report.termination == TerminationReason::InitialClean {
-        println!("✓ fix: vault already clean, no agent spawned");
+        if debug {
+            println!("✓ fix: vault already clean, no agent spawned");
+        }
         return ExitCode::from(0);
     }
 
@@ -115,10 +134,15 @@ pub async fn run(
     match auto_commit(&paths.root, "wiki: lint fix loop") {
         Ok(sha) => {
             let sha7: String = sha.chars().take(7).collect();
+            if debug {
+                if !sha.is_empty() {
+                    println!("✓ fix: committed {sha7} \"wiki: lint fix loop\"");
+                } else {
+                    println!("✓ fix: no changes to commit");
+                }
+            }
             if !sha.is_empty() {
-                println!("✓ fix: committed {sha7} \"wiki: lint fix loop\"");
-            } else {
-                println!("✓ fix: no changes to commit");
+                print_banner(Banner::CommitDone { sha7: &sha7 }, render_opts);
             }
         }
         Err(e) => {
@@ -128,7 +152,9 @@ pub async fn run(
     }
 
     if report.clean {
-        println!("✓ fix complete (vault clean)");
+        if debug {
+            println!("✓ fix complete (vault clean)");
+        }
         ExitCode::from(0)
     } else {
         eprintln!(

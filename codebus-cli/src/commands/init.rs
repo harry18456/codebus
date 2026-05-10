@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use codebus_core::config::{
     PiiConfig, PiiScannerKind, StarterOutcome, default_config_path, load_pii_config,
@@ -8,8 +9,10 @@ use codebus_core::config::{
 };
 use codebus_core::git::{auto_commit, init_nested_repo};
 use codebus_core::pii::PiiScanner;
+use codebus_core::pii::provider::OnHit;
 use codebus_core::pii::scanners::null_scanner::NullScanner;
 use codebus_core::pii::scanners::regex_basic::RegexBasicScanner;
+use codebus_core::render::{Banner, RenderOptions, print_banner};
 use codebus_core::schema::NEUTRAL_RULES;
 use codebus_core::skill_bundle::{self, BundleOutcome};
 use codebus_core::vault::layout::create_vault_layout;
@@ -36,7 +39,12 @@ const INTERNAL_GITIGNORE_LINES: &[&str] = &[
     ".claude/settings.local.json",
 ];
 
-pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCode {
+pub async fn run(
+    repo: &Path,
+    no_obsidian_register: bool,
+    debug: bool,
+    render_opts: &RenderOptions,
+) -> ExitCode {
     if debug {
         eprintln!("[debug] init: repo={}, no_obsidian_register={no_obsidian_register}", repo.display());
     }
@@ -49,6 +57,11 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
         eprintln!("[debug] sanity_check: target is not a vault root → ok");
     }
 
+    // Banner: 駛入 — emitted before any per-step orchestration so the user
+    // sees the codebus brand identity (the bus / boarding metaphor) at the
+    // top of every run.
+    print_banner(Banner::Start { repo_path: repo }, render_opts);
+
     let paths = match create_vault_layout(repo) {
         Ok(p) => p,
         Err(e) => {
@@ -58,11 +71,12 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
     };
     if debug {
         eprintln!("[debug] layout: created 7 dirs under {}", paths.root.display());
+        println!("✓ vault layout: {}", paths.root.display());
     }
-    println!("✓ vault layout: {}", paths.root.display());
 
     let pii_cfg = load_pii_config_with_warning();
     let scanner = build_pii_scanner(&pii_cfg);
+    let sync_started = Instant::now();
     let summary = match sync_with_scanner(repo, &paths.raw_code, scanner.as_ref(), pii_cfg.on_hit) {
         Ok(s) => s,
         Err(e) => {
@@ -70,6 +84,7 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
             return ExitCode::from(1);
         }
     };
+    let sync_elapsed_ms = sync_started.elapsed().as_millis();
     if debug {
         eprintln!(
             "[debug] raw_sync: walked {} → {}, mirrored {} files / {} bytes / {} PII matches",
@@ -79,10 +94,27 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
             summary.bytes,
             summary.pii_matches
         );
+        println!(
+            "✓ raw mirror: {} files, {} bytes, {} PII matches",
+            summary.files, summary.bytes, summary.pii_matches
+        );
     }
-    println!(
-        "✓ raw mirror: {} files, {} bytes, {} PII matches",
-        summary.files, summary.bytes, summary.pii_matches
+    print_banner(
+        Banner::SyncDone {
+            files: summary.files,
+            mib: bytes_to_mib(summary.bytes),
+            elapsed_ms: sync_elapsed_ms,
+        },
+        render_opts,
+    );
+    print_banner(
+        Banner::PiiSummary {
+            scanner: pii_scanner_label(&pii_cfg.scanner),
+            scanned: summary.files,
+            hits: summary.pii_matches,
+            action: on_hit_label(pii_cfg.on_hit),
+        },
+        render_opts,
     );
 
     if let Err(e) = merge_internal_gitignore(&paths.root) {
@@ -95,8 +127,8 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
             INTERNAL_GITIGNORE_LINES.len(),
             paths.root.join(".gitignore").display()
         );
+        println!("✓ vault internal .gitignore: ensured");
     }
-    println!("✓ vault internal .gitignore: ensured");
 
     let already_initialized = paths.root.join(".git").exists();
     if let Err(e) = init_nested_repo(&paths.root) {
@@ -109,21 +141,31 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
             paths.root.join(".git").display(),
             if already_initialized { "preserved" } else { "initialized" }
         );
+        println!(
+            "✓ vault git: {}",
+            if already_initialized {
+                "already initialized"
+            } else {
+                "nested repo initialized"
+            }
+        );
     }
-    println!(
-        "✓ vault git: {}",
-        if already_initialized {
-            "already initialized"
-        } else {
-            "nested repo initialized"
-        }
-    );
 
     match source_gitignore::ensure_codebus_in_gitignore(repo) {
-        Ok(GitignoreOutcome::Created) => println!("✓ source .gitignore: created with .codebus/"),
-        Ok(GitignoreOutcome::Appended) => println!("✓ source .gitignore: appended .codebus/"),
+        Ok(GitignoreOutcome::Created) => {
+            if debug {
+                println!("✓ source .gitignore: created with .codebus/");
+            }
+        }
+        Ok(GitignoreOutcome::Appended) => {
+            if debug {
+                println!("✓ source .gitignore: appended .codebus/");
+            }
+        }
         Ok(GitignoreOutcome::AlreadyPresent) => {
-            println!("✓ source .gitignore: already contains .codebus/")
+            if debug {
+                println!("✓ source .gitignore: already contains .codebus/");
+            }
         }
         Ok(GitignoreOutcome::NotAGitRepo) => {
             if debug {
@@ -140,10 +182,14 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
         Ok(true) => {
             if debug {
                 eprintln!("[debug] schema: wrote {} bytes", NEUTRAL_RULES.len());
+                println!("✓ schema file: wrote .codebus/CLAUDE.md");
             }
-            println!("✓ schema file: wrote .codebus/CLAUDE.md")
         }
-        Ok(false) => println!("✓ schema file: .codebus/CLAUDE.md already present"),
+        Ok(false) => {
+            if debug {
+                println!("✓ schema file: .codebus/CLAUDE.md already present");
+            }
+        }
         Err(e) => {
             eprintln!("error: schema file: {e}");
             return ExitCode::from(1);
@@ -163,8 +209,16 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
         );
     }
     match manifest::write_or_update_manifest(repo, &paths.root, env!("CARGO_PKG_VERSION"), signal) {
-        Ok(ManifestOutcome::Written) => println!("✓ manifest: wrote .codebus/manifest.yaml"),
-        Ok(ManifestOutcome::Updated) => println!("✓ manifest: updated sync state in .codebus/manifest.yaml"),
+        Ok(ManifestOutcome::Written) => {
+            if debug {
+                println!("✓ manifest: wrote .codebus/manifest.yaml");
+            }
+        }
+        Ok(ManifestOutcome::Updated) => {
+            if debug {
+                println!("✓ manifest: updated sync state in .codebus/manifest.yaml");
+            }
+        }
         Err(e) => {
             eprintln!("error: manifest: {e}");
             return ExitCode::from(1);
@@ -186,8 +240,8 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
                     "[debug] settings.json: wrote {}",
                     settings::settings_json_path(&paths.root).display()
                 );
+                println!("✓ vault settings: wrote .codebus/.claude/settings.json");
             }
-            println!("✓ vault settings: wrote .codebus/.claude/settings.json");
         }
         Ok(SettingsOutcome::AlreadyPresent) => {
             if debug {
@@ -195,8 +249,8 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
                     "[debug] settings.json: preserved existing {}",
                     settings::settings_json_path(&paths.root).display()
                 );
+                println!("✓ vault settings: .codebus/.claude/settings.json already present");
             }
-            println!("✓ vault settings: .codebus/.claude/settings.json already present");
         }
         Err(e) => {
             eprintln!("error: vault settings.json: {e}");
@@ -204,6 +258,7 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
         }
     }
 
+    let mut obsidian_registered = false;
     if !no_obsidian_register {
         match obsidian_register::register_vault(&paths.wiki) {
             RegisterOutcome::Registered { vault_id, was_new } => {
@@ -213,11 +268,12 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
                         if was_new { "inserted" } else { "refreshed" },
                         paths.wiki.display()
                     );
+                    println!(
+                        "✓ obsidian: vault {} (id={vault_id})",
+                        if was_new { "registered" } else { "refreshed" }
+                    );
                 }
-                println!(
-                    "✓ obsidian: vault {} (id={vault_id})",
-                    if was_new { "registered" } else { "refreshed" }
-                );
+                obsidian_registered = true;
             }
             RegisterOutcome::ObsidianNotInstalled => {
                 eprintln!("hint: Obsidian config dir not found; skipping vault registration");
@@ -240,16 +296,42 @@ pub async fn run(repo: &Path, no_obsidian_register: bool, debug: bool) -> ExitCo
     let sha7: String = head_sha.chars().take(7).collect();
     if debug {
         eprintln!("[debug] vault git: HEAD now {head_sha}");
+        println!("✓ vault git: committed {sha7} \"init: codebus vault\"");
     }
-    println!("✓ vault git: committed {sha7} \"init: codebus vault\"");
+    print_banner(Banner::CommitDone { sha7: &sha7 }, render_opts);
 
     // v3-config: write starter `~/.codebus/config.yaml` if missing. Failure
     // is non-fatal — the rest of init succeeded and the per-vault state is
     // usable; the user just won't have a discoverable global config file.
     write_global_config_starter(debug);
 
-    println!("✓ codebus init complete");
+    print_banner(Banner::Done { wiki_path: &paths.wiki }, render_opts);
+    if obsidian_registered {
+        print_banner(Banner::Hint { wiki_path: &paths.wiki }, render_opts);
+    }
     ExitCode::SUCCESS
+}
+
+/// Convert raw byte count to MiB (1024-based) for banner display.
+fn bytes_to_mib(bytes: u64) -> f64 {
+    (bytes as f64) / (1024.0 * 1024.0)
+}
+
+/// Map [`PiiScannerKind`] to its human-readable label for the PiiSummary banner.
+fn pii_scanner_label(kind: &PiiScannerKind) -> &'static str {
+    match kind {
+        PiiScannerKind::RegexBasic => "regex_basic",
+        PiiScannerKind::Null => "none",
+    }
+}
+
+/// Map [`OnHit`] to its lowercase label for the PiiSummary banner.
+fn on_hit_label(action: OnHit) -> &'static str {
+    match action {
+        OnHit::Warn => "warn",
+        OnHit::Skip => "skip",
+        OnHit::Mask => "mask",
+    }
 }
 
 /// Load `pii.*` config from the default path, surfacing parse errors as a
@@ -310,14 +392,14 @@ fn write_global_config_starter(debug: bool) {
         Ok(StarterOutcome::Written) => {
             if debug {
                 eprintln!("[debug] global config: wrote starter at {display}");
+                println!("✓ global config: wrote {display}");
             }
-            println!("✓ global config: wrote {display}");
         }
         Ok(StarterOutcome::AlreadyPresent) => {
             if debug {
                 eprintln!("[debug] global config: preserved existing {display}");
+                println!("✓ global config: {display} already present");
             }
-            println!("✓ global config: {display} already present");
         }
         Err(e) => {
             eprintln!("warning: global config write at {display} failed (non-fatal): {e}");
@@ -385,10 +467,10 @@ fn write_skill_bundles(vault_root: &Path, repo_root: &Path, debug: bool) -> std:
             eprintln!("[debug] skill bundle vault target: {}", vp.display());
             eprintln!("[debug] skill bundle repo  target: {}", rp.display());
         }
+        println!(
+            "✓ skill bundles: {} written, {} already present (across vault and repo locations)",
+            written, preserved
+        );
     }
-    println!(
-        "✓ skill bundles: {} written, {} already present (across vault and repo locations)",
-        written, preserved
-    );
     Ok(())
 }

@@ -123,6 +123,7 @@ Lint 邏輯純 deterministic（7 條 rule pattern match）。優點：
 | Change | 觸發點 | 內容 |
 |---|---|---|
 | `v3-multi-agentic-provider` | §9 trigger（real user 反映 / Anthropic 出事 / 贊助 / Tauri demo 想 multi-vendor） | 第二個 provider impl（codex / gemini / 其他）真的要進來時，先 spike：對方 CLI 有沒有 user-invocable slash command 機制？toolset gate 機制是什麼（Claude=`--tools`、Codex=docker/chroot 等）？驗完才設計 trait surface 或 enum dispatch。在那之前 provider 模組保持 single impl。|
+| `v3-run-log` | user 想看每個 verb 跑了多少 token、費了多少時間（v2 carry：`<vault>/.codebus/logs/runs.jsonl` 含 goal text / mode / model+effort / 時戳 / token usage / wiki_changed / lint counts） | spawn 行為要從 `Stdio::inherit()` 改成 `Stdio::piped()` + 自己 parse claude `--output-format=stream-json` 撈 `usage` event，順便用 `tee` 把原始 stdout 仍流到 user terminal。設計時抉擇：(A) 完整 v2 stream renderer — 倒退；(B) 只撈 usage event 純 stdout passthrough — 中等；(C) 不做、引導 user 看 claude 自家 session log — 0 成本。建議起步走 (B)。**注意**：本 change 與 `v3-render-polish` 的 banner 系統正交（banner 在 spawn 之前/之後印，stdio 不動；run-log 動 stdio 但不動 banner），可同時存在。|
 
 ## 5. 累積里程碑
 

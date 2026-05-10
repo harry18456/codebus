@@ -98,8 +98,14 @@ fn bare_invocation_routes_to_init_handler_and_creates_per_project_bundles() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("vault layout"));
-    assert!(stdout.contains("codebus init complete"));
+    // Default mode emits banner sequence (Start / SyncDone / PiiSummary /
+    // CommitDone / Done). In the subprocess test runner stdout is piped so
+    // emoji are off — the symbol fallback ▶ leads the Start banner. We
+    // verify the codebus brand identity via the literal `駛入` token from
+    // the Start banner body; `下車` from the Done banner; per-step progress
+    // lines like `vault layout:` are debug-mode-only now.
+    assert!(stdout.contains("駛入"), "missing Start banner: {stdout}");
+    assert!(stdout.contains("下車"), "missing Done banner: {stdout}");
     assert!(tmp.path().join(".codebus").is_dir());
     // v3-lint: skill bundles are written at BOTH locations (vault-internal
     // + repo-root) so both CLI-spawn-with-cwd-vault AND user-direct-from-
@@ -142,13 +148,17 @@ fn bare_invocation_routes_to_init_handler_and_creates_per_project_bundles() {
 fn explicit_init_and_bare_invocation_have_structurally_identical_output() {
     let tmp_bare = TempDir::new().unwrap();
     let tmp_explicit = TempDir::new().unwrap();
+    let home_bare = TempDir::new().unwrap();
+    let home_explicit = TempDir::new().unwrap();
     let bare = Command::new(BIN)
         .arg("--no-obsidian-register")
+        .env("CODEBUS_HOME", home_bare.path())
         .current_dir(tmp_bare.path())
         .output()
         .expect("run bare");
     let explicit = Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home_explicit.path())
         .current_dir(tmp_explicit.path())
         .output()
         .expect("run init");
@@ -165,8 +175,12 @@ fn explicit_init_and_bare_invocation_have_structurally_identical_output() {
         "stdout line count differs"
     );
     for (b, e) in bare_lines.iter().zip(explicit_lines.iter()) {
-        let b_prefix: String = b.chars().take(12).collect();
-        let e_prefix: String = e.chars().take(12).collect();
+        // Compare leading glyph only — content past the lead carries
+        // run-specific data (commit SHA, elapsed_ms, file counts) that
+        // legitimately differs across runs even when the structural shape
+        // is identical.
+        let b_prefix: String = b.chars().take(2).collect();
+        let e_prefix: String = e.chars().take(2).collect();
         assert_eq!(b_prefix, e_prefix);
     }
 }
@@ -176,10 +190,12 @@ fn explicit_init_and_bare_invocation_have_structurally_identical_output() {
 #[test]
 fn init_progress_line_includes_zero_pii_count_for_clean_repo() {
     let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
     // Repo with one harmless file → no PII matches expected.
     std::fs::write(tmp.path().join("README.md"), b"# hello\nplain text").unwrap();
     let out = Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
         .current_dir(tmp.path())
         .output()
         .expect("run init");
@@ -189,19 +205,22 @@ fn init_progress_line_includes_zero_pii_count_for_clean_repo() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let raw_line = stdout
+    // v3-render-polish: per-step `✓ raw mirror:` line moved to debug mode;
+    // PII match count surfaces via the PiiSummary banner instead.
+    let pii_line = stdout
         .lines()
-        .find(|l| l.starts_with("✓ raw mirror:"))
-        .expect("missing raw mirror progress line");
+        .find(|l| l.contains("PII：") || l.contains("PII:"))
+        .expect("missing PiiSummary banner line");
     assert!(
-        raw_line.contains("0 PII matches"),
-        "raw mirror line should contain '0 PII matches', got: {raw_line}"
+        pii_line.contains("hits 0"),
+        "PiiSummary banner should report hits 0; got: {pii_line}"
     );
 }
 
 #[test]
 fn init_progress_line_reports_nonzero_pii_count_for_repo_with_secrets() {
     let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
     std::fs::write(
         tmp.path().join("aws.py"),
         b"AWS_KEY=AKIAIOSFODNN7EXAMPLE\n",
@@ -209,23 +228,23 @@ fn init_progress_line_reports_nonzero_pii_count_for_repo_with_secrets() {
     .unwrap();
     let out = Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
         .current_dir(tmp.path())
         .output()
         .expect("run init");
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let raw_line = stdout
+    let pii_line = stdout
         .lines()
-        .find(|l| l.starts_with("✓ raw mirror:"))
-        .expect("missing raw mirror progress line");
-    // Expect the count column to be present and non-zero.
+        .find(|l| l.contains("PII：") || l.contains("PII:"))
+        .expect("missing PiiSummary banner line");
     assert!(
-        raw_line.contains("PII matches"),
-        "raw mirror line missing 'PII matches' label: {raw_line}"
+        !pii_line.contains("hits 0"),
+        "expected non-zero hits in PiiSummary banner; got: {pii_line}"
     );
     assert!(
-        !raw_line.contains("0 PII matches"),
-        "expected non-zero PII match count, got: {raw_line}"
+        pii_line.contains("hits "),
+        "PiiSummary banner missing 'hits' field: {pii_line}"
     );
     // stderr should carry at least one warning for the AWS key (does not
     // include the literal key text — verified separately at the lib level).
@@ -502,11 +521,9 @@ fn init_writes_global_config_starter_when_missing() {
         "starter config not written at {}",
         cfg_path.display()
     );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("✓ global config: wrote"),
-        "missing 'wrote' progress line:\n{stdout}"
-    );
+    // v3-render-polish: per-step `✓ global config: wrote` line moved to
+    // debug mode. Default mode no longer surfaces it; the side-effect
+    // (file existence above) is what we assert in default mode.
 }
 
 #[test]
@@ -530,11 +547,9 @@ fn init_does_not_overwrite_existing_global_config() {
     let preserved = std::fs::read_to_string(&cfg_path).unwrap();
     assert_eq!(preserved, custom, "init clobbered user config");
 
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("already present"),
-        "missing 'already present' progress line:\n{stdout}"
-    );
+    // v3-render-polish: per-step `already present` line moved to debug
+    // mode. Default mode validates the contract via the file's preserved
+    // content (asserted above) — no progress-line assertion needed.
 }
 
 #[test]
@@ -597,9 +612,13 @@ fn init_with_null_scanner_config_skips_pii_warnings() {
         "expected 0 pii warn lines under scanner: none, got: {stderr}"
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
+    let pii_line = stdout
+        .lines()
+        .find(|l| l.contains("PII：") || l.contains("PII:"))
+        .unwrap_or("");
     assert!(
-        stdout.contains("0 PII matches"),
-        "expected raw mirror line to report 0 matches under NullScanner: {stdout}"
+        pii_line.contains("hits 0") && pii_line.contains("none"),
+        "expected PiiSummary banner with scanner=none and hits=0: {pii_line}"
     );
 }
 
@@ -635,11 +654,113 @@ fn init_with_bad_patterns_extra_falls_back_to_builtin() {
         stderr.contains("warning: pii config patterns_extra"),
         "expected stderr fallback warning: {stderr}"
     );
-    // Built-in scanner still runs — AWS key match should be reported in
-    // stdout summary OR (under default on_hit=mask) the file is masked.
+    // Built-in scanner still runs — at least one PII hit reported via the
+    // PiiSummary banner. Under the default `on_hit=mask`, the matched
+    // substring is replaced inside the mirrored file.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let pii_line = stdout
+        .lines()
+        .find(|l| l.contains("PII：") || l.contains("PII:"))
+        .expect("missing PiiSummary banner line");
+    assert!(
+        !pii_line.contains("hits 0"),
+        "built-in scanner should still detect at least one match: {pii_line}"
+    );
+}
+
+// === v3-render-polish: Environment-Aware Output Styling ===
+
+/// Spec scenario: "Non-TTY pipe disables emoji and color and hyperlinks".
+/// Subprocess invocation pipes stdout, so emoji glyphs and ANSI escapes
+/// SHALL NOT appear. Banner uses ASCII fallback symbols (`▶`, `ok`, `~`,
+/// `!`, `.`, `✓`, `i`).
+#[test]
+fn init_pipe_disables_emoji_and_color() {
+    let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(tmp.path())
+        .output()
+        .expect("run init");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for emoji in ["🚌", "🎉", "🛡", "🔍", "🎯", "🔄", "📌"] {
+        assert!(
+            !stdout.contains(emoji),
+            "emoji {emoji} unexpectedly present under non-TTY: {stdout}"
+        );
+    }
+    assert!(
+        !stdout.contains("\x1b["),
+        "ANSI escape unexpectedly present under non-TTY: {stdout}"
+    );
+    // ASCII fallback for Start banner is `▶`.
+    assert!(stdout.contains("▶"), "missing ASCII Start lead `▶`: {stdout}");
+}
+
+/// Spec scenario: "--emoji flag is rejected by clap" — the flag was
+/// deliberately NOT registered in v3-render-polish (no 5-level emoji
+/// priority chain). clap MUST reject it.
+#[test]
+fn emoji_flag_rejected_by_clap() {
+    let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register", "--emoji", "on"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(tmp.path())
+        .output()
+        .expect("run init");
+    assert!(
+        !out.status.success(),
+        "init should reject --emoji flag; got success"
+    );
+}
+
+/// Spec scenario: "NO_EMOJI env is silently ignored" — since v3-render-
+/// polish drops the 5-level priority chain, NO_EMOJI has no observable
+/// effect. In subprocess context emoji are off anyway (non-TTY), so we
+/// assert that the binary does not error out when NO_EMOJI is set.
+#[test]
+fn no_emoji_env_silently_ignored() {
+    let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .env("NO_EMOJI", "1")
+        .current_dir(tmp.path())
+        .output()
+        .expect("run init");
+    assert!(
+        out.status.success(),
+        "init should succeed with NO_EMOJI set; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Spec scenario: "NO_COLOR disables ANSI color but keeps emoji".
+/// Verified at the lib-level for the lint formatter (emoji vs color flags
+/// are independent there). Process-level test is constrained because in
+/// subprocess context stdout is not a TTY → emoji are off regardless. We
+/// assert the weaker invariant: NO_COLOR set + non-TTY produces no ANSI.
+#[test]
+fn init_no_color_produces_no_ansi() {
+    let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .output()
+        .expect("run init");
+    assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("1 PII matches") || stdout.contains("PII matches"),
-        "built-in scanner should still detect at least one match: {stdout}"
+        !stdout.contains("\x1b["),
+        "ANSI escape leaked under NO_COLOR: {stdout}"
     );
 }

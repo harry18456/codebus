@@ -4,6 +4,7 @@ pub mod agent;
 pub mod config;
 pub mod git;
 pub mod pii;
+pub mod render;
 pub mod schema;
 pub mod skill_bundle;
 pub mod vault;

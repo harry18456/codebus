@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use codebus_core::render::RenderOptions;
 
 mod commands;
 
@@ -58,9 +59,16 @@ enum Command {
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     let repo_default: PathBuf = cli.repo.clone().unwrap_or_else(|| PathBuf::from("."));
+    // v3-render-polish: detect terminal capabilities ONCE at process start.
+    // Each verb command receives the snapshot and SHALL NOT re-detect mid-
+    // run (per the "Detection runs once per process" scenario). Hook sub-
+    // command is internal (Claude Code stdin/stdout JSON contract) and
+    // therefore does not consume render options.
+    let render_opts = RenderOptions::detect();
     match cli.command {
         None | Some(Command::Init) => {
-            commands::init::run(&repo_default, cli.no_obsidian_register, cli.debug).await
+            commands::init::run(&repo_default, cli.no_obsidian_register, cli.debug, &render_opts)
+                .await
         }
         Some(Command::Goal(args)) => {
             commands::goal::run(
@@ -69,13 +77,18 @@ async fn main() -> ExitCode {
                 cli.no_obsidian_register,
                 cli.no_fix,
                 cli.debug,
+                &render_opts,
             )
             .await
         }
-        Some(Command::Query(args)) => commands::query::run(&repo_default, args, cli.debug).await,
-        Some(Command::Lint(args)) => commands::lint::run(cli.repo.as_deref(), args, cli.debug).await,
+        Some(Command::Query(args)) => {
+            commands::query::run(&repo_default, args, cli.debug, &render_opts).await
+        }
+        Some(Command::Lint(args)) => {
+            commands::lint::run(cli.repo.as_deref(), args, cli.debug, &render_opts).await
+        }
         Some(Command::Fix) => {
-            commands::fix::run(cli.repo.as_deref(), cli.no_fix, cli.debug).await
+            commands::fix::run(cli.repo.as_deref(), cli.no_fix, cli.debug, &render_opts).await
         }
         Some(Command::Hook(args)) => commands::hook::run(args).await,
     }

@@ -12,6 +12,7 @@ use codebus_core::agent::{InvokeAgentOptions, invoke};
 use codebus_core::config::{
     ClaudeCodeConfig, default_config_path, load_claude_code_config,
 };
+use codebus_core::render::{Banner, RenderOptions, print_banner};
 use codebus_core::vault::layout::vault_paths;
 
 /// Read-only toolset for the query verb. Excludes Write/Edit/Bash. v2
@@ -25,7 +26,12 @@ pub struct QueryArgs {
     pub text: String,
 }
 
-pub async fn run(repo: &Path, args: QueryArgs, debug: bool) -> ExitCode {
+pub async fn run(
+    repo: &Path,
+    args: QueryArgs,
+    debug: bool,
+    render_opts: &RenderOptions,
+) -> ExitCode {
     let paths = vault_paths(repo);
 
     if debug {
@@ -35,6 +41,10 @@ pub async fn run(repo: &Path, args: QueryArgs, debug: bool) -> ExitCode {
             paths.root.display()
         );
     }
+
+    // Banner: 駛入 — query has no Done banner because it doesn't write the
+    // wiki ("下車" implies cargo delivered; query just rides the bus).
+    print_banner(Banner::Start { repo_path: repo }, render_opts);
 
     // Step 2: vault precondition — strict refuse, no auto-init fallback.
     // Query is a wiki user, not an ingest producer; missing vault is a

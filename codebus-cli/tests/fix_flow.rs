@@ -78,9 +78,12 @@ fn fix_exits_zero_on_clean_vault_without_spawning_agent() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
+    // v3-render-polish: detail line `✓ fix: vault already clean` is now
+    // debug-mode-only. Default mode emits banner sequence; clean vault
+    // shows LintDone with `0 errors, 0 warnings` instead.
     assert!(
-        stdout.contains("vault already clean"),
-        "expected initial-clean short-circuit message, got stdout: {stdout}"
+        stdout.contains("0 errors") && stdout.contains("0 warnings"),
+        "expected LintDone banner with zero counts on clean vault, got: {stdout}"
     );
     // Mock log should NOT exist — agent was never spawned.
     let log = tmp.path().join("mock-claude.log");

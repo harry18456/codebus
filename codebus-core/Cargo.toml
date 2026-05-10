@@ -22,6 +22,7 @@ dirs = { workspace = true }
 ignore = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
+supports-hyperlinks = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

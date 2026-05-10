@@ -5,44 +5,30 @@
 //! - JSON format: absolute paths via `vault_root` join, single JSON object,
 //!   no human prose / emoji / ANSI mixed in.
 
-use crate::wiki::types::{LintIssue, LintResult, LintSeverity};
+use crate::wiki::types::{LintResult, LintSeverity};
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// Format a lint result as human-readable text. Issue paths stay
-/// vault-relative (e.g. `concepts/foo.md`, `index.md`).
+/// Format a lint result as plain (no-styling) text — backwards-compatible
+/// API kept byte-equal with the v3-lint output. New v3-render-polish
+/// callers should use [`format_text_with_opts`] to opt into emoji / color /
+/// OSC 8 hyperlinks.
 pub fn format_text(result: &LintResult) -> String {
-    let coverage = format_coverage(result);
-    if result.issues.is_empty() {
-        return format!("ok {coverage}, no issues\n");
-    }
+    use crate::render::{RenderOptions, format_lint_text};
+    use std::path::Path;
+    format_lint_text(result, &RenderOptions::no_styling(), Path::new(""))
+}
 
-    let mut by_path: BTreeMap<&str, Vec<&LintIssue>> = BTreeMap::new();
-    for issue in &result.issues {
-        by_path.entry(issue.path.as_str()).or_default().push(issue);
-    }
-
-    let mut out = String::new();
-    out.push_str(&format!(
-        "# {coverage}, {} error(s), {} warning(s)\n\n",
-        result.error_count, result.warn_count
-    ));
-
-    for (path, issues) in by_path {
-        let has_error = issues.iter().any(|i| i.severity == LintSeverity::Error);
-        let lead = if has_error { "x" } else { "!" };
-        out.push_str(&format!("{lead} wiki/{path}\n"));
-        for issue in issues {
-            let sev_tag = match issue.severity {
-                LintSeverity::Error => "error:",
-                LintSeverity::Warn => "warn: ",
-            };
-            out.push_str(&format!("   {sev_tag} {} [{}]\n", issue.message, issue.rule_id));
-        }
-    }
-
-    out
+/// Format a lint result with caller-supplied styling. Delegates to
+/// `render::lint_text::format_lint_text`; this thin wrapper exists so
+/// `wiki::lint` consumers can keep importing from one place even after the
+/// styling logic moved to the `render` module.
+pub fn format_text_with_opts(
+    result: &LintResult,
+    opts: &crate::render::RenderOptions,
+    wiki_root: &std::path::Path,
+) -> String {
+    crate::render::format_lint_text(result, opts, wiki_root)
 }
 
 /// JSON-serializable view of a lint result with absolute issue paths.
@@ -99,14 +85,6 @@ fn absolutize(wiki_root: &Path, vault_relative: &str) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn format_coverage(result: &LintResult) -> String {
-    let pages = result.pages_scanned;
-    let navs = result.nav_files_scanned;
-    let p_plural = if pages == 1 { "" } else { "s" };
-    let n_plural = if navs == 1 { "" } else { "s" };
-    format!("{pages} page{p_plural} + {navs} nav file{n_plural} scanned")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,7 +128,11 @@ mod tests {
         // Must not contain absolute path leakage (no leading drive letter or slash before `wiki/`).
         // Text format is vault-relative only.
         assert!(!text.contains("/wiki/concepts"), "text leaked abs path: {text}");
-        assert!(text.contains("frontmatter-parse"));
+        // v3-render-polish post-ship UX tweak: rule_id no longer leaks into
+        // text format (lives only in JSON `rule` field). Human-readable
+        // message + severity tag is sufficient for the terminal user; agents
+        // consuming `--format json` still get the structured rule identifier.
+        assert!(!text.contains("[frontmatter-parse]"));
         assert!(text.contains("error:"));
     }
 
