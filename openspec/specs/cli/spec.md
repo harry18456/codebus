@@ -617,7 +617,7 @@ tests:
 ---
 ### Requirement: Banner Output for Verb Commands
 
-The system SHALL render run-lifecycle messages as a sequence of structured banners with codebus brand identity (the bus / boarding metaphor). The banner set SHALL contain at minimum these ten variants, each carrying a fixed set of payload fields: `Start { repo_path }`, `Goal { goal_text }`, `SyncStart`, `SyncDone { files, mib, elapsed_ms }`, `PiiSummary { scanner, scanned, hits, action }`, `LintStart`, `LintDone { errors, warns, elapsed_ms }`, `CommitDone { sha7 }`, `Done { wiki_path }`, `Hint { wiki_path }`. Each banner SHALL render to a single stdout line. The system SHALL provide both an emoji-leading form (e.g., `🚌 來囉來囉~ CodeBus 駛入 <path>...` for `Start`) and a symbol-leading fallback form (e.g., `▶ 來囉來囉~ CodeBus 駛入 <path>...`); selection between forms SHALL be governed by the `Environment-Aware Output Styling` requirement. The verb command modules (`init`, `goal`, `query`, `fix`, `lint`) SHALL invoke the appropriate banner sequence at lifecycle transitions in their own stdout (NOT in the spawned agent's stdout — agent output remains a passthrough).
+The system SHALL render run-lifecycle messages as a sequence of structured banners with codebus brand identity (the bus / boarding metaphor). The banner set SHALL contain at minimum these ten variants, each carrying a fixed set of payload fields: `Start { repo_path }`, `Goal { goal_text }`, `SyncStart`, `SyncDone { files, mib, elapsed_ms }`, `PiiSummary { scanner, scanned, hits, action }`, `LintStart`, `LintDone { errors, warns, elapsed_ms }`, `CommitDone { sha7 }`, `Done { wiki_path }`, `Hint { wiki_path }`. Each banner SHALL render to a single stdout line. The `PiiSummary` `action` field SHALL be formatted as `critical=<X>, warn=<Y>` where `<X>` is always `mask` (security floor per `pii-filter` capability `On-Hit Policy Default`) and `<Y>` is the resolved Warn-severity policy from `pii.on_hit` (one of `warn` / `skip` / `mask`). The system SHALL provide both an emoji-leading form (e.g., `🚌 來囉來囉~ CodeBus 駛入 <path>...` for `Start`) and a symbol-leading fallback form (e.g., `▶ 來囉來囉~ CodeBus 駛入 <path>...`); selection between forms SHALL be governed by the `Environment-Aware Output Styling` requirement. The verb command modules (`init`, `goal`, `query`, `fix`, `lint`) SHALL invoke the appropriate banner sequence at lifecycle transitions in their own stdout (NOT in the spawned agent's stdout — agent output remains a passthrough).
 
 #### Scenario: Start banner appears at verb invocation
 
@@ -641,9 +641,20 @@ The system SHALL render run-lifecycle messages as a sequence of structured banne
 
 ##### Example: init banner sequence on a fresh repo
 
-- **GIVEN** a fresh git repo with one tracked file, Obsidian installed and registered
+- **GIVEN** a fresh git repo with one tracked file, Obsidian installed and registered, default `pii.on_hit` (Warn)
 - **WHEN** `codebus init` runs in default mode with emoji enabled
-- **THEN** stdout banner sequence SHALL be: `🚌 來囉來囉~ CodeBus 駛入 ./...`, `✓ 同步完成 (1 檔, 0.0 MiB, <ms> ms)`, `🛡 PII：regex_basic, scanned 1, hits 0, action mask`, `📌 commit <sha7>`, `🎉 掰掰~下車囉！wiki 已生成於 ./.codebus/wiki`, `💡 請用 Obsidian 開 ./.codebus/wiki`
+- **THEN** stdout banner sequence SHALL be: `🚌 來囉來囉~ CodeBus 駛入 ./...`, `✓ 同步完成 (1 檔, 0.0 MiB, <ms> ms)`, `🛡 PII：regex_basic, scanned 1, hits 0, action critical=mask, warn=warn`, `📌 commit <sha7>`, `🎉 掰掰~下車囉！wiki 已生成於 ./.codebus/wiki`, `💡 請用 Obsidian 開 ./.codebus/wiki`
+
+#### Scenario: PiiSummary action field reflects per-severity dispatch
+
+- **WHEN** `codebus init` runs with `pii.on_hit: mask` configured
+- **THEN** the `PiiSummary` banner action field SHALL contain the substring `critical=mask, warn=mask`
+
+##### Example: PiiSummary action under default Warn policy
+
+- **GIVEN** a config file omitting `pii.on_hit` (so the loader applies the default)
+- **WHEN** `codebus init` runs and emits the `PiiSummary` banner
+- **THEN** the banner body SHALL contain the substring `action critical=mask, warn=warn`
 
 #### Scenario: Symbol fallback used when emoji disabled
 
@@ -652,29 +663,13 @@ The system SHALL render run-lifecycle messages as a sequence of structured banne
 
 
 <!-- @trace
-source: v3-render-polish
+source: v3-pii-severity-dispatch
 updated: 2026-05-10
 code:
-  - codebus-core/src/render/lint_text.rs
-  - docs/v3-roadmap.md
-  - codebus-cli/src/commands/lint.rs
-  - codebus-core/src/render/banner.rs
-  - codebus-cli/src/commands/goal.rs
-  - codebus-cli/src/main.rs
-  - codebus-cli/src/commands/fix.rs
-  - codebus-core/src/render/mod.rs
+  - codebus-core/src/config/global_starter.rs
+  - codebus-core/src/config/pii.rs
   - codebus-cli/src/commands/init.rs
-  - codebus-core/src/render/options.rs
-  - codebus-cli/src/commands/query.rs
-  - Cargo.toml
-  - codebus-core/src/vault/obsidian_register.rs
-  - codebus-core/Cargo.toml
-  - codebus-core/src/lib.rs
-  - codebus-core/src/wiki/lint/output.rs
-tests:
-  - codebus-cli/tests/cli_routing.rs
-  - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/fix_flow.rs
+  - codebus-core/src/vault/raw_sync.rs
 -->
 
 ---

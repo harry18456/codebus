@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use ignore::WalkBuilder;
 
 use crate::pii::PiiScanner;
-use crate::pii::provider::OnHit;
+use crate::pii::provider::{OnHit, PiiSeverity};
 
 const ALWAYS_SKIP_AT_ROOT: &[&str] = &[".codebus", ".git", ".env"];
 
@@ -252,23 +252,52 @@ pub fn sync_with_scanner_into<W: io::Write>(
             continue;
         }
 
-        match on_hit {
-            OnHit::Warn => {
-                fs::copy(path, &dst)?;
-                summary.files += 1;
-            }
-            OnHit::Skip => {
-                summary.pii_skipped_files += 1;
-                // Do NOT copy — file is intentionally absent from mirror.
-            }
-            OnHit::Mask => {
-                // utf8_content is guaranteed Some here (matches non-empty
-                // implies a successful scan, which only runs on Some).
-                let original = utf8_content.expect("matches non-empty implies UTF-8 content");
-                let masked = mask_matches(&original, &matches);
-                fs::write(&dst, masked.as_bytes())?;
-                summary.files += 1;
-                summary.pii_masked_matches += matches.len();
+        // v3-pii-severity-dispatch: split matches by severity. Critical
+        // matches (AWS / Anthropic key) MUST be masked regardless of
+        // user-configured `on_hit` — the security floor prevents real
+        // credentials from entering the raw mirror recoverably. Warn
+        // matches (email / ipv4) follow the user-configured `on_hit`.
+        let has_critical = matches
+            .iter()
+            .any(|m| m.severity == PiiSeverity::Critical);
+
+        if has_critical {
+            // Critical floor: mask every Critical match (and any Warn match
+            // alongside it ONLY when on_hit also says Mask). The file is
+            // ALWAYS mirrored even if on_hit was Skip — Skip dropping a
+            // file that contains a real credential would lose the audit
+            // trail the warn lines provide.
+            let original = utf8_content.expect("matches non-empty implies UTF-8 content");
+            let matches_to_mask: Vec<_> = matches
+                .iter()
+                .filter(|m| {
+                    m.severity == PiiSeverity::Critical || on_hit == OnHit::Mask
+                })
+                .cloned()
+                .collect();
+            let masked = mask_matches(&original, &matches_to_mask);
+            fs::write(&dst, masked.as_bytes())?;
+            summary.files += 1;
+            summary.pii_masked_matches += matches_to_mask.len();
+        } else {
+            // Warn-only file: follow user's on_hit policy strictly.
+            match on_hit {
+                OnHit::Warn => {
+                    fs::copy(path, &dst)?;
+                    summary.files += 1;
+                }
+                OnHit::Skip => {
+                    summary.pii_skipped_files += 1;
+                    // Do NOT copy — file is intentionally absent from mirror.
+                }
+                OnHit::Mask => {
+                    let original =
+                        utf8_content.expect("matches non-empty implies UTF-8 content");
+                    let masked = mask_matches(&original, &matches);
+                    fs::write(&dst, masked.as_bytes())?;
+                    summary.files += 1;
+                    summary.pii_masked_matches += matches.len();
+                }
             }
         }
     }
@@ -423,62 +452,68 @@ mod tests {
         let src = TempDir::new().unwrap();
         let raw = TempDir::new().unwrap();
         write(
-            &src.path().join("aws.py"),
-            b"AWS_KEY=AKIAIOSFODNN7EXAMPLE\n",
+            &src.path().join("docs.md"),
+            b"contact alice@example.com\n",
         );
         let scanner = RegexBasicScanner::new(&[]).unwrap();
+        // v3-pii-severity-dispatch: Warn-severity match (email) under Warn
+        // policy → file mirrored byte-identical, warn line emitted, no mask.
+        // (Critical-severity matches under Warn now mask — covered by the
+        // dedicated `critical_match_under_warn_policy_is_masked` test below.)
         let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Warn);
         assert_eq!(summary.pii_matches, 1);
         assert_eq!(summary.pii_skipped_files, 0);
         assert_eq!(summary.pii_masked_matches, 0);
-        assert!(raw.path().join("aws.py").exists());
-        let mirrored = fs::read_to_string(raw.path().join("aws.py")).unwrap();
-        assert_eq!(mirrored, "AWS_KEY=AKIAIOSFODNN7EXAMPLE\n");
+        assert!(raw.path().join("docs.md").exists());
+        let mirrored = fs::read_to_string(raw.path().join("docs.md")).unwrap();
+        assert_eq!(mirrored, "contact alice@example.com\n");
         assert!(
-            warns.contains("pii warn: aws-access-key at aws.py:"),
+            warns.contains("pii warn: email at docs.md:"),
             "warn line missing or wrong format: {warns:?}"
         );
     }
 
-    /// `OnHit::Skip`: file with matches is NOT mirrored; warn line still
-    /// emitted; `pii_skipped_files` counter increments.
+    /// `OnHit::Skip` for Warn-severity-only file: file is NOT mirrored;
+    /// warn line still emitted; `pii_skipped_files` counter increments.
+    /// (Critical-severity matches under Skip → file STILL mirrored with
+    /// mask per the security floor; covered by
+    /// `critical_match_under_skip_policy_is_masked_not_skipped`.)
     #[test]
     fn skip_mode_omits_matched_file() {
         let src = TempDir::new().unwrap();
         let raw = TempDir::new().unwrap();
         write(
-            &src.path().join("aws.py"),
-            b"AWS_KEY=AKIAIOSFODNN7EXAMPLE\n",
+            &src.path().join("docs.md"),
+            b"contact alice@example.com\n",
         );
         let scanner = RegexBasicScanner::new(&[]).unwrap();
         let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Skip);
         assert_eq!(summary.pii_matches, 1);
         assert_eq!(summary.pii_skipped_files, 1);
         assert_eq!(summary.files, 0);
-        assert!(!raw.path().join("aws.py").exists());
+        assert!(!raw.path().join("docs.md").exists());
         assert!(
-            warns.contains("pii warn: aws-access-key"),
+            warns.contains("pii warn: email"),
             "warn line missing under Skip mode: {warns:?}"
         );
     }
 
-    /// `OnHit::Skip` with mixed input: clean files mirrored, dirty files
-    /// skipped. `pii_skipped_files` counts dirty files exactly (one per
-    /// file, not per match).
+    /// `OnHit::Skip` with mixed input — clean files mirrored, Warn-only
+    /// dirty files skipped. `pii_skipped_files` counts dirty files exactly
+    /// (one per file, not per match). (Files with Critical matches would
+    /// be force-mirrored under mask — covered by Critical-floor tests.)
     #[test]
     fn skip_mode_records_skipped_count() {
         let src = TempDir::new().unwrap();
         let raw = TempDir::new().unwrap();
-        // 1 clean file + 2 dirty files (one with two matches → still counts
-        // as 1 skipped file).
         write(&src.path().join("clean.rs"), b"fn ok() {}");
         write(
             &src.path().join("dirty1.py"),
-            b"AWS_KEY=AKIAIOSFODNN7EXAMPLE",
+            b"contact alice@example.com",
         );
         write(
             &src.path().join("dirty2.py"),
-            b"k1=AKIAIOSFODNN7EXAMPLE\nk2=AKIAQQQQQQQQQQQQQQQQ",
+            b"e1=alice@example.com\ne2=bob@example.com",
         );
         let scanner = RegexBasicScanner::new(&[]).unwrap();
         let (summary, _) = run_sync(src.path(), raw.path(), &scanner, OnHit::Skip);
@@ -581,19 +616,116 @@ mod tests {
         let raw = TempDir::new().unwrap();
         write(
             &src.path().join("logs.txt"),
-            b"key1=AKIAIOSFODNN7EXAMPLE\nkey2=alice@example.com\n",
+            b"key1=alice@example.com\nkey2=192.168.1.1\n",
         );
         let scanner = RegexBasicScanner::new(&[]).unwrap();
+        // v3-pii-severity-dispatch: only Warn-severity matches in this file
+        // (email + ipv4) → under Warn policy, file is mirrored byte-identical
+        // and no mask occurs.
         let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Warn);
         assert_eq!(summary.pii_matches, 2);
         assert_eq!(summary.pii_masked_matches, 0);
         assert_eq!(summary.pii_skipped_files, 0);
         let mirrored = fs::read_to_string(raw.path().join("logs.txt")).unwrap();
-        assert_eq!(mirrored, "key1=AKIAIOSFODNN7EXAMPLE\nkey2=alice@example.com\n");
+        assert_eq!(mirrored, "key1=alice@example.com\nkey2=192.168.1.1\n");
         assert_eq!(
             warns.matches("pii warn:").count(),
             2,
             "exactly 2 warn lines expected: {warns:?}"
         );
+    }
+
+    // === v3-pii-severity-dispatch: Critical floor overrides on_hit ===
+
+    /// Spec scenario: "Critical severity ignores on_hit configuration" —
+    /// AWS key (Critical) under Warn policy SHALL be masked in mirror,
+    /// not just warn-logged.
+    #[test]
+    fn critical_match_under_warn_policy_is_masked() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        write(
+            &src.path().join("creds.py"),
+            b"key = AKIAIOSFODNN7EXAMPLE",
+        );
+        let scanner = RegexBasicScanner::new(&[]).unwrap();
+        let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Warn);
+        assert_eq!(summary.pii_matches, 1);
+        assert_eq!(summary.pii_masked_matches, 1, "Critical match under Warn policy SHALL still be masked");
+        assert_eq!(summary.files, 1, "file SHALL still be mirrored");
+        let mirrored = fs::read_to_string(raw.path().join("creds.py")).unwrap();
+        assert_eq!(mirrored, "key = [REDACTED:aws-access-key]");
+        assert!(warns.contains("pii warn: aws-access-key"));
+    }
+
+    /// Spec scenario: "File with Critical matches is masked even under
+    /// Skip policy" — Critical floor overrides Skip, file is mirrored
+    /// (with mask) instead of dropped.
+    #[test]
+    fn critical_match_under_skip_policy_is_masked_not_skipped() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        write(
+            &src.path().join("creds.py"),
+            b"key = AKIAIOSFODNN7EXAMPLE",
+        );
+        let scanner = RegexBasicScanner::new(&[]).unwrap();
+        let (summary, _) = run_sync(src.path(), raw.path(), &scanner, OnHit::Skip);
+        assert_eq!(summary.pii_skipped_files, 0, "Critical floor SHALL prevent Skip");
+        assert_eq!(summary.pii_masked_matches, 1);
+        assert_eq!(summary.files, 1, "file SHALL be mirrored despite Skip policy");
+        assert!(raw.path().join("creds.py").exists());
+        let mirrored = fs::read_to_string(raw.path().join("creds.py")).unwrap();
+        assert!(mirrored.contains("[REDACTED:aws-access-key]"));
+    }
+
+    /// Spec scenario "Critical-only mask under Warn policy": file with
+    /// both Critical (AWS key) and Warn (email) matches under Warn policy
+    /// SHALL mask only the Critical, leave the Warn match intact.
+    #[test]
+    fn mixed_severity_under_warn_policy_only_critical_masked() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        write(
+            &src.path().join("contact.md"),
+            b"creds: AKIAIOSFODNN7EXAMPLE -- contact alice@example.com",
+        );
+        let scanner = RegexBasicScanner::new(&[]).unwrap();
+        let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Warn);
+        assert_eq!(summary.pii_matches, 2, "scanner SHALL still find both matches");
+        assert_eq!(summary.pii_masked_matches, 1, "only Critical SHALL be masked under Warn");
+        let mirrored = fs::read_to_string(raw.path().join("contact.md")).unwrap();
+        assert!(
+            mirrored.contains("[REDACTED:aws-access-key]"),
+            "AWS key SHALL be masked: {mirrored}"
+        );
+        assert!(
+            mirrored.contains("alice@example.com"),
+            "email SHALL be preserved unchanged: {mirrored}"
+        );
+        // warn sink contains both lines (audit trail).
+        assert!(warns.contains("aws-access-key"));
+        assert!(warns.contains("email"));
+    }
+
+    /// Spec scenario "File with only Warn matches is omitted from mirror
+    /// under Skip" — but here under Warn policy, the file SHALL be mirrored
+    /// byte-identical (the prior on_hit=Warn behavior, unchanged for files
+    /// without Critical content).
+    #[test]
+    fn warn_only_file_under_warn_policy_unchanged() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        let original = b"contact alice@example.com please";
+        write(&src.path().join("docs.md"), original);
+        let scanner = RegexBasicScanner::new(&[]).unwrap();
+        let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Warn);
+        assert_eq!(summary.pii_matches, 1);
+        assert_eq!(summary.pii_masked_matches, 0, "Warn under Warn SHALL NOT mask");
+        assert_eq!(summary.pii_skipped_files, 0);
+        assert_eq!(summary.files, 1);
+        let mirrored = fs::read(raw.path().join("docs.md")).unwrap();
+        assert_eq!(mirrored, original, "Warn under Warn SHALL leave file byte-identical");
+        assert!(warns.contains("pii warn: email"));
     }
 }

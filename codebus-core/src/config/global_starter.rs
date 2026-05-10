@@ -54,11 +54,18 @@ pii:
   # stderr warning.
   patterns_extra: []
 
-  # Action on PII match:
-  #   warn — copy file to mirror as-is, emit stderr warning per match
+  # Action on Warn-severity PII match (email, ipv4):
+  #   warn — copy file to mirror as-is, emit stderr warning per match (default)
   #   skip — do NOT copy the file to the mirror; emit stderr warning per match
-  #   mask — copy file with each match replaced by [REDACTED:<pattern_name>]
-  on_hit: mask
+  #   mask — copy file with each Warn match replaced by [REDACTED:<pattern_name>]
+  #
+  # NOTE: this setting only governs Warn-severity matches. Critical-severity
+  # matches (AWS access keys, Anthropic API keys) are ALWAYS masked
+  # regardless of this value — the security floor that prevents real
+  # credentials from entering the raw mirror in a recoverable form is
+  # non-negotiable. Set to `mask` for the legacy v3-config behavior of
+  # masking everything (Warn matches included).
+  on_hit: warn
 
 # Per-verb Claude Code agent config. `model` and `effort` flow through to
 # the spawned `claude -p` invocation as `--model <X>` / `--effort <Y>`.
@@ -158,7 +165,9 @@ mod tests {
 
         let pii = load_pii_config(&target).unwrap();
         assert_eq!(pii, PiiConfig::default());
-        assert_eq!(pii.on_hit, OnHit::Mask);
+        // v3-pii-severity-dispatch: starter `on_hit: warn` matches the new
+        // PiiConfig::default() value.
+        assert_eq!(pii.on_hit, OnHit::Warn);
 
         let cc = load_claude_code_config(&target).unwrap();
         assert_eq!(cc, ClaudeCodeConfig::default());

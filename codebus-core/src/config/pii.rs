@@ -6,7 +6,9 @@
 //! pii:
 //!   scanner: regex_basic   # or "none" to disable scanning entirely
 //!   patterns_extra: []     # optional regex strings appended to built-in 4 patterns
-//!   on_hit: mask           # warn | skip | mask
+//!   on_hit: warn           # warn | skip | mask — controls Warn-severity only;
+//!                          # Critical-severity matches are unconditionally
+//!                          # masked by raw_sync (security floor)
 //! ```
 //!
 //! Why `"none"` not `"null"`: YAML treats `null` as the null literal, which
@@ -14,15 +16,18 @@
 //! keeps the value as a string discriminator and avoids the foot-gun.
 //!
 //! All fields are optional. Defaults: `scanner: regex_basic`,
-//! `patterns_extra: []`, `on_hit: mask`. Missing file / missing section /
+//! `patterns_extra: []`, `on_hit: warn`. Missing file / missing section /
 //! missing field all fall through to defaults without stderr output.
 //! Unknown keys inside `pii` are silently ignored (forward-compat). Unknown
 //! enum discriminators (e.g. `on_hit: hyperflood`) cause `serde_yaml` to
 //! return a parse error, which the caller is expected to translate into a
 //! stderr warning + default fallback.
 //!
-//! v3-pii's `OnHit::Warn` hardcoded default is replaced here by `OnHit::Mask`
-//! per v3-config Migration Plan (BREAKING).
+//! Default policy history: v3-pii hardcoded `OnHit::Warn`; v3-config flipped
+//! the default to `OnHit::Mask`; v3-pii-severity-dispatch reverts the default
+//! back to `OnHit::Warn` while making raw_sync route Critical-severity matches
+//! through Mask unconditionally (the prior `Mask` default mass-redacted
+//! benign Warn-severity matches like example emails / `127.0.0.1` in docs).
 
 use crate::pii::provider::OnHit;
 use serde::Deserialize;
@@ -57,7 +62,13 @@ impl Default for PiiConfig {
         Self {
             scanner: PiiScannerKind::RegexBasic,
             patterns_extra: Vec::new(),
-            on_hit: OnHit::Mask,
+            // v3-pii-severity-dispatch: default Warn-severity policy is Warn
+            // (not Mask). Critical-severity matches are unconditionally masked
+            // by raw_sync per the security floor — this default only governs
+            // Warn-severity (email / ipv4) handling, where the prior `Mask`
+            // default produced too many false-positive redactions in
+            // docs / test fixtures.
+            on_hit: OnHit::Warn,
         }
     }
 }
@@ -162,7 +173,9 @@ mod tests {
         let cfg = load_pii_config(&tmp.path().join("nonexistent.yaml")).unwrap();
         assert_eq!(cfg, PiiConfig::default());
         assert_eq!(cfg.scanner, PiiScannerKind::RegexBasic);
-        assert_eq!(cfg.on_hit, OnHit::Mask);
+        // v3-pii-severity-dispatch: default is Warn (governs Warn-severity
+        // matches only; Critical-severity always masked by raw_sync).
+        assert_eq!(cfg.on_hit, OnHit::Warn);
         assert!(cfg.patterns_extra.is_empty());
     }
 
@@ -182,7 +195,9 @@ mod tests {
         let p = write_yaml(tmp.path(), "pii:\n  scanner: none\n");
         let cfg = load_pii_config(&p).unwrap();
         assert_eq!(cfg.scanner, PiiScannerKind::Null);
-        assert_eq!(cfg.on_hit, OnHit::Mask);
+        // v3-pii-severity-dispatch: default Warn-severity policy is now Warn
+        // (was Mask in v3-config — see PiiConfig::default doc comment).
+        assert_eq!(cfg.on_hit, OnHit::Warn);
         assert!(cfg.patterns_extra.is_empty());
     }
 

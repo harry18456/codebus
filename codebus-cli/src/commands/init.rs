@@ -330,12 +330,16 @@ fn pii_scanner_label(kind: &PiiScannerKind) -> &'static str {
     }
 }
 
-/// Map [`OnHit`] to its lowercase label for the PiiSummary banner.
+/// Map [`OnHit`] to the per-severity dispatch label rendered in the
+/// PiiSummary banner. v3-pii-severity-dispatch: Critical-severity matches
+/// are ALWAYS masked (security floor); the user-configured `OnHit` only
+/// governs Warn-severity. The banner exposes both so the user can see
+/// the per-severity outcome at a glance.
 fn on_hit_label(action: OnHit) -> &'static str {
     match action {
-        OnHit::Warn => "warn",
-        OnHit::Skip => "skip",
-        OnHit::Mask => "mask",
+        OnHit::Warn => "critical=mask, warn=warn",
+        OnHit::Skip => "critical=mask, warn=skip",
+        OnHit::Mask => "critical=mask, warn=mask",
     }
 }
 
