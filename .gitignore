@@ -20,3 +20,6 @@ legacy/v2-rust/docs/spikes/*/transcripts/
 .superpowers/
 openspec/.vector-search.db*
 .codebus/
+
+# Claude Code session lock files (transient per-session state)
+.claude/*.lock
