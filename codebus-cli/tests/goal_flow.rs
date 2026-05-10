@@ -429,3 +429,60 @@ fn goal_spawn_forwards_user_configured_model() {
         "expected user-configured effort in argv; dump:\n{dump}"
     );
 }
+
+// === v3-run-log: stream rendering + RunLog persistence ===
+
+/// Spec: "Each verb invocation appends exactly one RunLog entry"
+/// — under the success-stream-json mock, the goal verb SHALL render the
+/// stream events to stdout (ASCII fallback in subprocess context) AND
+/// append one RunLog entry under <vault>/.codebus/log/runs-<today>.jsonl
+/// with mode "goal" and tokens.input_tokens == 100 (from the mock's
+/// usage event).
+#[test]
+fn goal_streams_events_and_writes_jsonl_log() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success(), "setup init");
+
+    let (out, _log) = run_goal(tmp.path(), "test", &[], "success-stream-json");
+    assert!(
+        out.status.success(),
+        "goal stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Subprocess pipe → non-TTY → ASCII fallback. Stream events should appear.
+    assert!(
+        stdout.contains("[Agent 思考]"),
+        "expected Thought event in stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("[呼叫工具]"),
+        "expected ToolUse event in stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("[觀察結果]"),
+        "expected ToolResult event in stdout: {stdout}"
+    );
+
+    // RunLog jsonl exists under vault log dir.
+    let log_dir = tmp.path().join(".codebus/log");
+    let entries: Vec<_> = fs::read_dir(&log_dir)
+        .expect("log dir exists")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("runs-")
+        })
+        .collect();
+    assert_eq!(entries.len(), 1, "expected 1 runs-*.jsonl, got {entries:?}");
+
+    let body = fs::read_to_string(entries[0].path()).unwrap();
+    let line = body.lines().last().expect("at least one line");
+    let parsed: serde_json::Value = serde_json::from_str(line).expect("parse JSON line");
+    assert_eq!(parsed["mode"], "goal");
+    assert_eq!(parsed["tokens"]["input_tokens"], 100);
+    assert_eq!(parsed["tokens"]["output_tokens"], 50);
+}

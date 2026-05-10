@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use codebus_core::render::RenderOptions;
 
 mod commands;
+mod run_log;
 
 #[derive(Parser, Debug)]
 #[command(

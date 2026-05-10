@@ -142,3 +142,58 @@ fix flow 跑時，agent 訊息：「**由於 `codebus` 指令在目前 shell 環
 ✅ **4 條 quality findings 全部 close**（同日 commit）。v3.0.0 已 ship-ready。
 
 vault 留在 `D:/side_project/uv/.codebus/`、isolated home 在 `/tmp/cb-verify-home`、log 在 `/tmp/cb-verify/*.{stdout,stderr}` 供你 inspect。
+
+---
+
+## 附錄: v3-run-log Manual e2e (Task 9.3)
+
+執行於 2026-05-10，release build (`target/release/codebus.exe`)，target vault `D:/side_project/uv/.codebus`。
+
+### (a) Stream events 即時可見
+`codebus goal "name 2 source files in uv crate"` 執行期間 terminal 持續顯示：
+- `→ [呼叫工具]` Glob/Read/Write 即時逐筆出現
+- `← [觀察結果]` 200-char 截斷的 tool output
+- `+ [正在生成]` Write 工具的特殊渲染
+- `◆ [Agent 思考]` 模型中間 reasoning text
+
+不再黑盒 — 與 v2 的 `claude-code-stream` 等價輸出。
+
+### (b) RunLog jsonl 含完整 token usage
+`D:/side_project/uv/.codebus/log/runs-2026-05-10.jsonl` 一條為例：
+
+```json
+{"goal":"name 2 source files in uv crate","mode":"goal","model":"opus","effort":"high",
+ "started_at":"2026-05-10T05:25:59Z","finished_at":"2026-05-10T05:26:53Z",
+ "tokens":{"input_tokens":11,"output_tokens":3642,"cache_read_tokens":153827,"cache_write_tokens":27110,
+           "extras":{...full provider meta preserved...}},
+ "wiki_changed":true,"lint_error_count":0,"lint_warn_count":0}
+```
+
+`extras` 完整保留 cache_creation breakdown / iterations / service_tier 等 provider-specific 欄位，未來換 model 不會丟資料。
+
+### (c) `sink: none` 真的關掉持久化
+`~/.codebus/config.yaml`：
+```yaml
+log:
+  sink: none
+```
+重跑 `codebus goal` 後 `wc -l runs-2026-05-10.jsonl` 維持 3 條（未新增）。spec rename `Null` 變體成 `none` 的 YAML 字面值對齊 `pii.scanner: none` 的 foot-gun avoidance — 確認生效。
+
+### (d) sink build 失敗 → warning + exit 0
+`~/.codebus/config.yaml`：
+```yaml
+log:
+  sink: jsonl
+  dir: "D:/side_project/uv/.codebus/log/blocker.txt"   # 是檔案不是目錄
+```
+`codebus goal` 完整跑完，stderr 末段：
+```
+warning: run-log write failed (non-fatal): log sink io: 當檔案已存在時，無法建立該檔案。 (os error 183)
+✓ 掰掰~下車囉！wiki 已生成於 ./.codebus/wiki
+EXIT=0
+```
+即 `RunLog Write Failure Is Non-Fatal` 契約：log persistence 失敗 SHALL NOT 改變 verb exit code，僅 stderr 警告。
+
+### Side findings (v3-run-log scope 內當場修)
+- 初版實作意外帶上 `--input-format stream-json`：claude 把它解讀為「等 stdin streaming JSON」，與 `Stdio::null()` stdin 衝突→ child 立即退出 0、stdout 空、tokens 全 0。修：移除該 flag，input format 用 default `text` (prompt 由 `-p` 提供)。
+- `wiki_changed_since_last_commit` 在新 vault (只有 1 commit) 跑 `git diff HEAD~1` 會洩 `fatal: bad revision 'HEAD~1'` 到使用者 terminal。修：`.stderr(Stdio::null())` 抑制；exit code 判斷邏輯不變。

@@ -190,6 +190,7 @@ name = "codebus-cli"
 version = "3.0.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "codebus-core",
  "dirs",

@@ -13,7 +13,8 @@
 
 pub mod prompt;
 
-use crate::agent::{InvokeAgentOptions, invoke};
+use crate::agent::{InvokeAgentOptions, InvokeReport, invoke};
+use crate::render::RenderOptions;
 use crate::wiki::lint::lint_wiki;
 use crate::wiki::types::LintResult;
 use std::io;
@@ -39,6 +40,12 @@ pub struct FixReport {
     pub clean: bool,
     /// Reason the run terminated.
     pub termination: TerminationReason,
+    /// `Some(InvokeReport)` when an agent was actually spawned (i.e., not
+    /// `InitialClean`). `None` on the initial-clean short-circuit. v3-run-log:
+    /// caller uses this to compose the verb's `RunLog` entry (token totals
+    /// and timestamps come from the agent process; lint counts come from
+    /// `final_lint`).
+    pub invoke: Option<InvokeReport>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +90,7 @@ pub fn run_fix_loop(
     vault_root: PathBuf,
     model: Option<String>,
     effort: Option<String>,
+    render_opts: &RenderOptions,
 ) -> Result<FixReport, FixError> {
     let initial = lint_wiki(&vault_root);
     if initial.error_count == 0 && initial.warn_count == 0 {
@@ -91,11 +99,13 @@ pub fn run_fix_loop(
             final_lint: initial,
             clean: true,
             termination: TerminationReason::InitialClean,
+            invoke: None,
         });
     }
 
-    invoke_fix_agent(&vault_root, prompt::initial_prompt(), model, effort)
-        .map_err(FixError::Spawn)?;
+    let invoke_report =
+        invoke_fix_agent(&vault_root, prompt::initial_prompt(), model, effort, render_opts)
+            .map_err(FixError::Spawn)?;
 
     let post = lint_wiki(&vault_root);
     let clean = post.error_count == 0 && post.warn_count == 0;
@@ -108,6 +118,7 @@ pub fn run_fix_loop(
         } else {
             TerminationReason::PostLintIssuesRemain
         },
+        invoke: Some(invoke_report),
     })
 }
 
@@ -116,21 +127,26 @@ fn invoke_fix_agent(
     slash_command: String,
     model: Option<String>,
     effort: Option<String>,
-) -> io::Result<()> {
-    let status = invoke(InvokeAgentOptions {
-        slash_command,
-        vault_root: vault_root.to_path_buf(),
-        toolset: FIX_TOOLSET,
-        bash_whitelist: Some(FIX_BASH_WHITELIST),
-        model,
-        effort,
-    })?;
+    render_opts: &RenderOptions,
+) -> io::Result<InvokeReport> {
+    let report = invoke(
+        InvokeAgentOptions {
+            slash_command,
+            vault_root: vault_root.to_path_buf(),
+            toolset: FIX_TOOLSET,
+            bash_whitelist: Some(FIX_BASH_WHITELIST),
+            model,
+            effort,
+        },
+        render_opts,
+    )?;
     // We don't propagate non-zero exit: the agent's "I'm done" or "I gave up"
     // signal flows back via the post-spawn lint check. Spawn-level IO errors
     // (binary missing, fork fail) bubble up; agent's own non-zero exit is
     // expected ("nothing more I can do") and handled by the next lint round.
-    let _ = status;
-    Ok(())
+    // We DO return the report so the caller can use accumulated_tokens /
+    // timestamps for RunLog composition.
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -157,7 +173,12 @@ mod tests {
         unsafe {
             std::env::set_var("CODEBUS_CLAUDE_BIN", "/no/such/claude/bin/test-clean-skip");
         }
-        let result = run_fix_loop(tmp.path().to_path_buf(), None, None);
+        let result = run_fix_loop(
+            tmp.path().to_path_buf(),
+            None,
+            None,
+            &RenderOptions::no_styling(),
+        );
         unsafe {
             std::env::remove_var("CODEBUS_CLAUDE_BIN");
         }

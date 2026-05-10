@@ -15,10 +15,15 @@ use codebus_core::config::{
     load_lint_fix_config,
 };
 use codebus_core::git::auto_commit;
+use codebus_core::log::RunLog;
 use codebus_core::render::{Banner, RenderOptions, print_banner};
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::wiki::fix::{TerminationReason, run_fix_loop};
 use std::time::Instant;
+
+use crate::run_log::{
+    load_log_config_with_warning, resolve_sink_dir, wiki_changed_since_last_commit, write_run_log,
+};
 
 pub async fn run(
     repo_override: Option<&Path>,
@@ -92,8 +97,9 @@ pub async fn run(
     let lint_started = Instant::now();
     let report = match run_fix_loop(
         paths.root.clone(),
-        cc_cfg.fix.model,
-        cc_cfg.fix.effort,
+        cc_cfg.fix.model.clone(),
+        cc_cfg.fix.effort.clone(),
+        render_opts,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -149,6 +155,27 @@ pub async fn run(
             eprintln!("error: vault auto-commit: {e}");
             return ExitCode::from(1);
         }
+    }
+
+    // v3-run-log: persist a RunLog entry. Uses the InvokeReport from the
+    // FixReport (Some only when the agent actually spawned — InitialClean
+    // path returned earlier without writing a log entry).
+    if let Some(invoke_report) = &report.invoke {
+        let run_log = RunLog {
+            goal: String::new(), // fix has no positional argument
+            mode: "fix".into(),
+            model: cc_cfg.fix.model,
+            effort: cc_cfg.fix.effort,
+            started_at: invoke_report.started_at.clone(),
+            finished_at: invoke_report.finished_at.clone(),
+            tokens: invoke_report.accumulated_tokens.clone(),
+            wiki_changed: wiki_changed_since_last_commit(&paths.root),
+            lint_error_count: report.final_lint.error_count,
+            lint_warn_count: report.final_lint.warn_count,
+        };
+        let log_cfg = load_log_config_with_warning();
+        let sink_cfg = resolve_sink_dir(log_cfg, &paths.log);
+        write_run_log(sink_cfg, &run_log);
     }
 
     if report.clean {

@@ -12,7 +12,9 @@
 pub mod banner;
 pub mod lint_text;
 pub mod options;
+pub mod stream_event;
 
 pub use banner::{Banner, format_banner, print_banner};
 pub use lint_text::format_lint_text;
 pub use options::RenderOptions;
+pub use stream_event::{format_event, print_event};

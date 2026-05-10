@@ -226,3 +226,61 @@ fn fix_spawn_includes_default_model_and_effort_flags() {
         "expected --effort medium in fix spawn argv:\n{body}"
     );
 }
+
+// === v3-run-log: stream rendering + RunLog persistence ===
+
+/// Spec: "Fix verb that actually spawns the agent SHALL persist a RunLog
+/// entry; the InitialClean short-circuit path SHALL NOT."
+#[test]
+fn fix_writes_run_log_when_agent_spawns_and_skips_when_clean() {
+    // Case A — agent spawns: dirty vault, agent runs, RunLog gets written.
+    let tmp = TempDir::new().unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
+    let _ = run_fix(tmp.path(), &[], "success-stream-json");
+
+    let log_dir = tmp.path().join(".codebus/log");
+    let entries: Vec<_> = fs::read_dir(&log_dir)
+        .expect("log dir exists")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("runs-"))
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "fix with agent spawn should write 1 runs-*.jsonl, got {entries:?}"
+    );
+    let body = fs::read_to_string(entries[0].path()).unwrap();
+    let line = body.lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+    assert_eq!(parsed["mode"], "fix");
+    assert_eq!(parsed["tokens"]["input_tokens"], 100);
+
+    // Case B — InitialClean short-circuit: fresh init + planted nav files
+    // → lint clean → fix exits 0 without spawning agent → no RunLog file.
+    let tmp2 = TempDir::new().unwrap();
+    assert!(run_init(tmp2.path()).status.success());
+    let vault2 = tmp2.path().join(".codebus");
+    fs::write(vault2.join("wiki/index.md"), "# index\n").unwrap();
+    fs::write(vault2.join("wiki/log.md"), "# log\n").unwrap();
+    let out = run_fix(tmp2.path(), &[], "success-noop");
+    assert_eq!(out.status.code(), Some(0));
+
+    let log_dir2 = tmp2.path().join(".codebus/log");
+    let entries2: Vec<_> = fs::read_dir(&log_dir2)
+        .map(|it| {
+            it.filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().starts_with("runs-"))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        entries2.is_empty(),
+        "InitialClean fix MUST NOT write a RunLog entry; found {entries2:?}"
+    );
+}

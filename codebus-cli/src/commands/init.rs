@@ -35,7 +35,10 @@ const INTERNAL_GITIGNORE_LINES: &[&str] = &[
     ".lock",
     "raw/code/",
     "**/.obsidian/",
-    "logs/",
+    // v3-run-log: align with `vault::layout` which creates `log/` (singular,
+    // not the `logs/` plural the prior line had — that line never matched
+    // anything on disk and let runs-*.jsonl files dirty the working tree).
+    "log/",
     ".claude/settings.local.json",
 ];
 

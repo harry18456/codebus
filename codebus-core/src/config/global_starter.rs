@@ -91,6 +91,19 @@ lint:
     # Whether the post-goal lint-and-fix phase runs (and whether `codebus fix`
     # is allowed to run when invoked directly). Set false to disable both.
     enabled: true
+
+# Run-log persistence (per-verb-invocation jsonl history).
+log:
+  # Sink implementation:
+  #   jsonl  — append one JSON line per run to <dir>/runs-YYYY-MM-DD.jsonl
+  #   none   — opt out, no log written. (Use the literal `none`; a bare YAML
+  #            null literal returns a parse error and falls back to default.
+  #            Same foot-gun avoidance as `pii.scanner: none`.)
+  sink: jsonl
+
+  # Output directory. Omit (or comment out) to use the per-vault default
+  # <vault>/.codebus/log/. Tilde-prefixed paths expand to the home directory.
+  # dir: ~/codebus-history
 "#;
 
 /// Write [`STARTER_CONFIG`] to `path` if the file does not already exist.
@@ -112,8 +125,8 @@ pub fn write_starter_config_if_missing(path: &Path) -> io::Result<StarterOutcome
 mod tests {
     use super::*;
     use crate::config::{
-        ClaudeCodeConfig, PiiConfig, load_claude_code_config, load_lint_fix_config,
-        load_pii_config,
+        ClaudeCodeConfig, LogConfig, PiiConfig, load_claude_code_config,
+        load_lint_fix_config, load_log_config, load_pii_config,
     };
     use crate::pii::provider::OnHit;
     use tempfile::TempDir;
@@ -174,5 +187,9 @@ mod tests {
 
         let lf = load_lint_fix_config(&target).unwrap();
         assert!(lf.enabled);
+
+        // v3-run-log: log section also round-trips to default.
+        let lg = load_log_config(&target).unwrap();
+        assert_eq!(lg, LogConfig::default());
     }
 }

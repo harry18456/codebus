@@ -241,3 +241,37 @@ fn query_spawn_includes_default_model_and_effort_flags() {
         "expected --effort low in spawn argv; dump:\n{dump}"
     );
 }
+
+// === v3-run-log: stream rendering + RunLog persistence ===
+
+/// Spec: "Query persists a RunLog entry with mode query"
+#[test]
+fn query_streams_events_and_writes_jsonl_log_with_zero_wiki_changed() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+
+    let (out, _) = run_query(tmp.path(), "test", "success-stream-json");
+    assert!(out.status.success());
+
+    let log_dir = tmp.path().join(".codebus/log");
+    let entries: Vec<_> = fs::read_dir(&log_dir)
+        .expect("log dir exists")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("runs-")
+        })
+        .collect();
+    assert_eq!(entries.len(), 1, "expected 1 runs-*.jsonl, got {entries:?}");
+
+    let body = fs::read_to_string(entries[0].path()).unwrap();
+    let line = body.lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+    assert_eq!(parsed["mode"], "query");
+    assert_eq!(parsed["wiki_changed"], false);
+    assert_eq!(parsed["lint_error_count"], 0);
+    assert_eq!(parsed["lint_warn_count"], 0);
+    assert_eq!(parsed["tokens"]["input_tokens"], 100);
+}

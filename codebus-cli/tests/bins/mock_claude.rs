@@ -56,11 +56,52 @@ fn main() -> ExitCode {
             ExitCode::from(1)
         }
 
+        // v3-run-log: emit 5 stream-json lines covering the full event taxonomy
+        // (system → assistant text → assistant tool_use → user tool_result →
+        // result with usage). Lets integration tests verify the parse + render
+        // + RunLog-write pipeline end-to-end against a deterministic stream.
+        "success-stream-json" => {
+            emit_stream_json_success();
+            ExitCode::SUCCESS
+        }
+
+        // Same as success-stream-json but truncated mid-flow (no result event)
+        // and exits non-zero. Tests assert that the verb still writes a RunLog
+        // entry with zero tokens (Usage event was never emitted).
+        "failure-stream-json" => {
+            emit_stream_json_partial();
+            ExitCode::from(1)
+        }
+
         other => {
             eprintln!("mock-claude: unknown behavior `{other}`");
             ExitCode::from(2)
         }
     }
+}
+
+fn emit_stream_json_success() {
+    println!(r#"{{"type":"system","subtype":"init"}}"#);
+    println!(
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"思考中..."}}]}}}}"#
+    );
+    println!(
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","name":"Read","input":{{"file_path":"/x"}}}}]}}}}"#
+    );
+    println!(
+        r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","content":"file contents","is_error":false}}]}}}}"#
+    );
+    println!(
+        r#"{{"type":"result","usage":{{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}}"#
+    );
+}
+
+fn emit_stream_json_partial() {
+    println!(r#"{{"type":"system","subtype":"init"}}"#);
+    println!(
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"about to fail"}}]}}}}"#
+    );
+    // No result event → no Usage → RunLog tokens stay zero.
 }
 
 fn write_test_page(rel_path: &str, name: &str) -> std::io::Result<()> {

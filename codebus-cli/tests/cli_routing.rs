@@ -388,9 +388,12 @@ fn internal_gitignore_appends_missing_required_lines() {
         lines.contains(&"**/.obsidian/"),
         "missing **/.obsidian/ line: {body:?}"
     );
+    // v3-run-log: line is `log/` (singular, aligns with vault::layout's
+    // `log/` directory) — was `logs/` plural until v3-run-log corrected
+    // the typo.
     assert!(
-        lines.contains(&"logs/"),
-        "missing logs/ line: {body:?}"
+        lines.contains(&"log/"),
+        "missing log/ line: {body:?}"
     );
     // User-added `notes/` not duplicated.
     assert_eq!(
@@ -405,6 +408,36 @@ fn internal_gitignore_appends_missing_required_lines() {
 // subcommands (goal, query, lint, fix) now have explicit Subcommand
 // Behavior requirements. This block previously asserted lint/fix were
 // stubs; that assertion is now obsolete.
+
+/// v3-run-log: explicit assertion that the gitignore line is `log/`
+/// (singular, aligned with `vault::layout` which creates `log/`), NOT
+/// `logs/` (plural, the typo carried by earlier changes). Sister test
+/// to `internal_gitignore_appends_missing_required_lines` — this one
+/// fails loud if anyone reverts the typo fix.
+#[test]
+fn init_internal_gitignore_lists_log_singular_not_logs_plural() {
+    let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
+    let out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(tmp.path())
+        .output()
+        .expect("run init");
+    assert!(out.status.success(), "init failed: {:?}", out);
+
+    let body = std::fs::read_to_string(tmp.path().join(".codebus/.gitignore"))
+        .expect("internal .gitignore exists after init");
+    let lines: Vec<&str> = body.lines().collect();
+    assert!(
+        lines.contains(&"log/"),
+        "expected `log/` (singular) in {body:?}"
+    );
+    assert!(
+        !lines.contains(&"logs/"),
+        "must NOT contain `logs/` (plural) — that's the typo v3-run-log fixed: {body:?}"
+    );
+}
 
 #[test]
 fn init_no_longer_matches_stub_behavior() {

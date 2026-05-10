@@ -7,6 +7,7 @@ use std::process::ExitCode;
 
 use clap::Args;
 use codebus_core::agent::{InvokeAgentOptions, invoke};
+use codebus_core::log::RunLog;
 use codebus_core::config::{
     ClaudeCodeConfig, LintFixConfig, PiiConfig, PiiScannerKind, default_config_path,
     load_claude_code_config, load_lint_fix_config, load_pii_config,
@@ -24,6 +25,9 @@ use codebus_core::wiki::fix::{TerminationReason, run_fix_loop};
 use std::time::Instant;
 
 use crate::commands::init;
+use crate::run_log::{
+    load_log_config_with_warning, resolve_sink_dir, wiki_changed_since_last_commit, write_run_log,
+};
 
 /// Toolset for goal: read code, write/edit wiki pages. No Bash (fix gets that),
 /// no WebFetch / Task / NotebookEdit / etc. v2 iter-9 carry, spike-verified
@@ -187,29 +191,33 @@ pub async fn run(
             GOAL_TOOLSET
         );
     }
-    let child_status = match invoke(InvokeAgentOptions {
-        slash_command,
-        vault_root: paths.root.clone(),
-        toolset: GOAL_TOOLSET,
-        bash_whitelist: None,
-        model: cc_cfg.goal.model.clone(),
-        effort: cc_cfg.goal.effort.clone(),
-    }) {
-        Ok(status) => status,
+    let invoke_report = match invoke(
+        InvokeAgentOptions {
+            slash_command,
+            vault_root: paths.root.clone(),
+            toolset: GOAL_TOOLSET,
+            bash_whitelist: None,
+            model: cc_cfg.goal.model.clone(),
+            effort: cc_cfg.goal.effort.clone(),
+        },
+        render_opts,
+    ) {
+        Ok(report) => report,
         Err(e) => {
             eprintln!("error: spawn claude: {e}");
             return ExitCode::from(1);
         }
     };
-    let child_exit_code: u8 = child_status
+    let child_exit_code: u8 = invoke_report
+        .exit
         .code()
         .and_then(|c| u8::try_from(c).ok())
         .unwrap_or(1);
     if debug {
         eprintln!(
             "[debug] goal: agent exited code={}, success={}",
-            child_status.code().unwrap_or(-1),
-            child_status.success()
+            invoke_report.exit.code().unwrap_or(-1),
+            invoke_report.exit.success()
         );
     }
 
@@ -220,6 +228,8 @@ pub async fn run(
     // BEFORE auto-commit, so wiki writes from the goal agent and any
     // repair edits land in the same single commit.
     let mut fix_exit: u8 = 0;
+    let mut fix_lint_errors: usize = 0;
+    let mut fix_lint_warns: usize = 0;
     if fix_cfg.enabled {
         if debug {
             eprintln!("[debug] goal: running lint-and-fix phase (single-shot)");
@@ -230,8 +240,11 @@ pub async fn run(
             paths.root.clone(),
             cc_cfg.fix.model.clone(),
             cc_cfg.fix.effort.clone(),
+            render_opts,
         ) {
             Ok(report) => {
+                fix_lint_errors = report.final_lint.error_count;
+                fix_lint_warns = report.final_lint.warn_count;
                 let lint_elapsed_ms = lint_started.elapsed().as_millis();
                 if debug {
                     eprintln!(
@@ -290,6 +303,25 @@ pub async fn run(
             return ExitCode::from(1);
         }
     }
+
+    // v3-run-log: persist a RunLog entry per `Verb RunLog Capture and
+    // Persistence` requirement BEFORE the Done banner, so the entry includes
+    // the final wiki_changed (post-commit) and lint counts.
+    let run_log = RunLog {
+        goal: args.text.clone(),
+        mode: "goal".into(),
+        model: cc_cfg.goal.model.clone(),
+        effort: cc_cfg.goal.effort.clone(),
+        started_at: invoke_report.started_at.clone(),
+        finished_at: invoke_report.finished_at.clone(),
+        tokens: invoke_report.accumulated_tokens.clone(),
+        wiki_changed: wiki_changed_since_last_commit(&paths.root),
+        lint_error_count: fix_lint_errors,
+        lint_warn_count: fix_lint_warns,
+    };
+    let log_cfg = load_log_config_with_warning();
+    let sink_cfg = resolve_sink_dir(log_cfg, &paths.log);
+    write_run_log(sink_cfg, &run_log);
 
     print_banner(Banner::Done { wiki_path: &paths.wiki }, render_opts);
 

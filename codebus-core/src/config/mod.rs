@@ -15,11 +15,13 @@
 pub mod claude_code;
 pub mod global_starter;
 pub mod lint_fix;
+pub mod log;
 pub mod pii;
 
 pub use claude_code::{ClaudeCodeConfig, VerbAgentConfig, load_claude_code_config};
 pub use global_starter::{StarterOutcome, write_starter_config_if_missing};
 pub use lint_fix::{LintFixConfig, load_lint_fix_config};
+pub use log::{LogConfig, load_log_config};
 pub use pii::{PiiConfig, PiiScannerKind, load_pii_config};
 
 use std::path::PathBuf;
