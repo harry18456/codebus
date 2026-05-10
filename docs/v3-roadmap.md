@@ -87,20 +87,20 @@ Lint 邏輯純 deterministic（7 條 rule pattern match）。優點：
 
 ## 4. Change Decomposition
 
-10 個 change，序列做。每個 ≤ 14 tasks。
+10 個 change，序列做。每個 ≤ 14 tasks。**全 10 條已於 2026-05-10 ship v3.0.0 完成**（commit `6936902 chore(release): v3.0.0`）— 表格保留供歷史對照。
 
-| # | Change | CLI 完成什麼 | Skill 完成什麼 | 依賴 |
-|---|---|---|---|---|
-| 1 | `v3-workspace` | `codebus --help` + 5 verb routing（subcommand mode、no-arg → init at pwd）；含 `codebus-app` placeholder crate | — | — |
-| 2 | `v3-init` | `codebus init [--repo X] [--no-obsidian-register]` 全功能：vault layout / raw_sync (NullScanner) / **obsidian vault register** / `.gitignore` mutation / per-repo `.codebus/CLAUDE.md` / 寫 3 個 skill bundle 骨架；含 `sanity_check::check_repo_is_not_vault` | 3 個 SKILL.md 骨架寫到 `~/.claude/skills/codebus-{goal,query,fix}/`（內容暫定，後續 change 補） | #1 |
-| 3 | `v3-pii` | 接 `pii::PiiScanner` trait + `RegexBasicScanner`（v2 builtin regex：AWS / Anthropic key / email / IPv4）+ `NullScanner`（test fixture）；raw_sync default 切 RegexBasic with `OnHit::Warn`（mirror file + stderr warn 每個 match）；init 輸出含 PII match count。**Hardcode default rules 不開 config 入口** — `patterns_extra` / `on_hit` 覆蓋是 #9 的事 | — | #2 |
-| 4 | `v3-vault-history` | 接 `core::git::nested_repo` 模組（v2 carry：`legacy/v2-rust/codebus-core/src/git/nested_repo.rs`）；init.rs 在 raw_sync 之後 obsidian-register 之前 init nested repo + 收尾 `auto_commit "init: codebus vault"`；`.codebus/.gitignore` 內含 `.lock` / `raw/code/` / `**/.obsidian/` / `logs/`（v2 carry）；公開 `auto_commit` API 給 #5 #8 wire；vault spec 反轉「SHALL NOT create `.codebus/.git/`」requirement | — | #3 |
-| 5 | `v3-goal` | `codebus goal "..." [--force-resync] [--no-obsidian-register]` spawn `claude -p` 帶 slash command；首次寫 `codebus-core/src/agent/claude_cli.rs` single impl + `--tools/--allowedTools/--permission-mode acceptEdits` 三旗 sandbox（[2026-05-09 spike verified](#)）；vault 不存在 → auto-init（v2 carry）；source-signal detection 偵測 source drift 才 re-sync（manifest.git_head/file_count/total_bytes 比對）；spawn 收尾 `auto_commit "wiki: {goal}"` | `codebus-goal/SKILL.md` 補完整內容（neutral.md §4 workflow per goal + frontmatter schema reference；schema 仍 by-reference 引用 cwd `CLAUDE.md` 不 inline 重複） | #4 |
-| 6 | `v3-query` | `codebus query "..."` spawn 同 #5 模式，read-only toolset（Read/Glob/Grep）；不 auto_commit | `codebus-query/SKILL.md` 補完整內容（neutral.md §11 workflow per query + read-only invariant） | #2 |
-| 7 | `v3-lint` | `codebus lint [--repo X] [--json]` direct 全功能（7 rules：broken_wikilink / frontmatter_integrity / page_size / duplicate_slug / orphaned_page / taxonomy_violation / pii_leak）；human + JSON 雙輸出；exit 0/1 | — | #2 |
-| 8 | `v3-fix` | `codebus fix` spawn 同 #5 模式，toolset 含 Bash（給 fix skill 跑 `codebus lint --json`）；spawn 收尾 `auto_commit "wiki: lint fix loop"` | `codebus-fix/SKILL.md`：用 Bash tool 跑 `codebus lint --json` → 解析 findings → 編輯 wiki page 改正 → 重跑 lint，max 5 iterations（user 可改） | #4 #7 |
-| 9 | `v3-config` | `~/.codebus/config.yaml` 6 條 tolerance（v2 carry：missing file / parse fail / unknown key / unknown discriminator / unknown subfield / type mismatch graceful warn）；`lint` section（disabled_rules + custom_rules_dir + auto_fix.max_iterations）；`pii` section（`patterns_extra` append 到 #3 builtin rules + `on_hit` 覆蓋 #3 default `Warn`） | 反向打通：lint 吃 config disabled_rules；init 用 config 覆蓋 #3 PII default（`patterns_extra` append、`on_hit` 覆蓋）；fix skill 從 config 讀 max_iterations 寫進 SKILL.md instruction | #3 #7 |
-| 10 | `v3-render-polish` | OSC 8 hyperlink wrap `[[wikilink]]` for `codebus lint` output；terminal color 5-level emoji priority（`--emoji` flag > `--no-emoji` > `NO_EMOJI` env > config.yaml `emoji:` > TTY auto-detect）；`NO_COLOR` env 守 color | — | #7 #9 |
+| # | Status | Change | CLI 完成什麼 | Skill 完成什麼 | 依賴 |
+|---|---|---|---|---|---|
+| 1 | ✅ | `v3-workspace` | `codebus --help` + 5 verb routing（subcommand mode、no-arg → init at pwd）；含 `codebus-app` placeholder crate | — | — |
+| 2 | ✅ | `v3-init` | `codebus init [--repo X] [--no-obsidian-register]` 全功能：vault layout / raw_sync (NullScanner) / **obsidian vault register** / `.gitignore` mutation / per-repo `.codebus/CLAUDE.md` / 寫 3 個 skill bundle 骨架；含 `sanity_check::check_repo_is_not_vault` | 3 個 SKILL.md 骨架寫到 `~/.claude/skills/codebus-{goal,query,fix}/`（內容暫定，後續 change 補） | #1 |
+| 3 | ✅ | `v3-pii` | 接 `pii::PiiScanner` trait + `RegexBasicScanner`（v2 builtin regex：AWS / Anthropic key / email / IPv4）+ `NullScanner`（test fixture）；raw_sync default 切 RegexBasic with `OnHit::Warn`（mirror file + stderr warn 每個 match）；init 輸出含 PII match count。**Hardcode default rules 不開 config 入口** — `patterns_extra` / `on_hit` 覆蓋是 #9 的事 | — | #2 |
+| 4 | ✅ | `v3-vault-history` | 接 `core::git::nested_repo` 模組（v2 carry：`legacy/v2-rust/codebus-core/src/git/nested_repo.rs`）；init.rs 在 raw_sync 之後 obsidian-register 之前 init nested repo + 收尾 `auto_commit "init: codebus vault"`；`.codebus/.gitignore` 內含 `.lock` / `raw/code/` / `**/.obsidian/` / `logs/`（v2 carry）；公開 `auto_commit` API 給 #5 #8 wire；vault spec 反轉「SHALL NOT create `.codebus/.git/`」requirement | — | #3 |
+| 5 | ✅ | `v3-goal` | `codebus goal "..." [--force-resync] [--no-obsidian-register]` spawn `claude -p` 帶 slash command；首次寫 `codebus-core/src/agent/claude_cli.rs` single impl + `--tools/--allowedTools/--permission-mode acceptEdits` 三旗 sandbox（[2026-05-09 spike verified](#)）；vault 不存在 → auto-init（v2 carry）；source-signal detection 偵測 source drift 才 re-sync（manifest.git_head/file_count/total_bytes 比對）；spawn 收尾 `auto_commit "wiki: {goal}"` | `codebus-goal/SKILL.md` 補完整內容（neutral.md §4 workflow per goal + frontmatter schema reference；schema 仍 by-reference 引用 cwd `CLAUDE.md` 不 inline 重複） | #4 |
+| 6 | ✅ | `v3-query` | `codebus query "..."` spawn 同 #5 模式，read-only toolset（Read/Glob/Grep）；不 auto_commit | `codebus-query/SKILL.md` 補完整內容（neutral.md §11 workflow per query + read-only invariant） | #2 |
+| 7 | ✅ | `v3-lint` | `codebus lint [--repo X] [--json]` direct 全功能（7 rules：broken_wikilink / frontmatter_integrity / page_size / duplicate_slug / orphaned_page / taxonomy_violation / pii_leak）；human + JSON 雙輸出；exit 0/1 | — | #2 |
+| 8 | ✅ | `v3-fix` | `codebus fix` spawn 同 #5 模式，toolset 含 Bash（給 fix skill 跑 `codebus lint --json`）；spawn 收尾 `auto_commit "wiki: lint fix loop"` | `codebus-fix/SKILL.md`：用 Bash tool 跑 `codebus lint --json` → 解析 findings → 編輯 wiki page 改正 → 重跑 lint，max 5 iterations（user 可改） | #4 #7 |
+| 9 | ✅ | `v3-config` | `~/.codebus/config.yaml` 6 條 tolerance（v2 carry：missing file / parse fail / unknown key / unknown discriminator / unknown subfield / type mismatch graceful warn）；`lint` section（disabled_rules + custom_rules_dir + auto_fix.max_iterations）；`pii` section（`patterns_extra` append 到 #3 builtin rules + `on_hit` 覆蓋 #3 default `Warn`） | 反向打通：lint 吃 config disabled_rules；init 用 config 覆蓋 #3 PII default（`patterns_extra` append、`on_hit` 覆蓋）；fix skill 從 config 讀 max_iterations 寫進 SKILL.md instruction | #3 #7 |
+| 10 | ✅ | `v3-render-polish` | OSC 8 hyperlink wrap `[[wikilink]]` for `codebus lint` output；terminal color 5-level emoji priority（`--emoji` flag > `--no-emoji` > `NO_EMOJI` env > config.yaml `emoji:` > TTY auto-detect）；`NO_COLOR` env 守 color | — | #7 #9 |
 
 ### 依賴圖
 
@@ -118,18 +118,25 @@ Lint 邏輯純 deterministic（7 條 rule pattern match）。優點：
 
 ### Follow-up changes（非主 10 條序列）
 
-下面這些 nice-to-have 不在 ship-blocking path 上，等主序列推進到對應 trigger 點再開：
+下面這些 nice-to-have 不在 ship-blocking path 上，等主序列推進到對應 trigger 點再開。**狀態欄是事實 source-of-truth，動工前先看這欄不要再憑印象**：
 
-| Change | 觸發點 | 內容 |
-|---|---|---|
-| `v3-multi-agentic-provider` | §9 trigger（real user 反映 / Anthropic 出事 / 贊助 / Tauri demo 想 multi-vendor） | 第二個 provider impl（codex / gemini / 其他）真的要進來時，先 spike：對方 CLI 有沒有 user-invocable slash command 機制？toolset gate 機制是什麼（Claude=`--tools`、Codex=docker/chroot 等）？驗完才設計 trait surface 或 enum dispatch。在那之前 provider 模組保持 single impl。|
-| `v3-run-log` | user 想看每個 verb 跑了多少 token、費了多少時間（v2 carry：`<vault>/.codebus/logs/runs.jsonl` 含 goal text / mode / model+effort / 時戳 / token usage / wiki_changed / lint counts） | spawn 行為要從 `Stdio::inherit()` 改成 `Stdio::piped()` + 自己 parse claude `--output-format=stream-json` 撈 `usage` event，順便用 `tee` 把原始 stdout 仍流到 user terminal。設計時抉擇：(A) 完整 v2 stream renderer — 倒退；(B) 只撈 usage event 純 stdout passthrough — 中等；(C) 不做、引導 user 看 claude 自家 session log — 0 成本。建議起步走 (B)。**注意**：本 change 與 `v3-render-polish` 的 banner 系統正交（banner 在 spawn 之前/之後印，stdio 不動；run-log 動 stdio 但不動 banner），可同時存在。|
-| `v3-bug-fixes` | v3-render-polish 後 UV repo 驗收（`docs/v3-uv-verification-2026-05-10.md`）暴露的 2 個非 BREAKING bug | 兩個合併 fix：(a) `init` 緊接 `goal` 不該觸發 re-sync — 排查 `walk_source_for_signal()` 與 `sync_with_scanner()` filter rule 是否一致、`compute_source_signal()` 邏輯是否時序差異；(b) `codebus lint --repo <vault-root>`（傳 `.codebus/` 自身）silently 回 `0 pages, no issues` — 改成偵測到 vault root 時自動向上一層或回 error 提示。風險低、純 additive、適合 v3.0.0 ship 前快收尾。|
-| `v3-pii-severity-dispatch` | UV repo 驗收暴露：default `on_hit: mask` 對 docs/test 的 `127.0.0.1` / example email 過於激進（uv 觸發 672 hits 多為 false-positive），降低 wiki agent 對源碼可讀性 | **BREAKING — 需先 `/spectra-discuss`**。設計選項：(A) split severity 路由 — `Critical`（AWS / Anthropic key）→ mask、`Warn`（email / ipv4）→ warn；(B) 加 `pii.patterns_exclude` config 路徑，允許 user 排除已知 false-positive；(C) 兩者都做。default 改變第二次（v3-config 才剛把 default 從 warn → mask），需要慎重。|
+| Status | Change | 觸發點 | 內容 / 結果 |
+|---|---|---|---|
+| ⏳ Pending | `v3-multi-agentic-provider` | §9 trigger（real user 反映 / Anthropic 出事 / 贊助 / Tauri demo 想 multi-vendor） | 第二個 provider impl（codex / gemini / 其他）真的要進來時，先 spike：對方 CLI 有沒有 user-invocable slash command 機制？toolset gate 機制是什麼（Claude=`--tools`、Codex=docker/chroot 等）？驗完才設計 trait surface 或 enum dispatch。在那之前 provider 模組保持 single impl。|
+| ✅ Done 2026-05-10 | `v3-run-log` (commits `9187da5` + `adb88c2`) | user 想看每個 verb 跑了多少 token、費了多少時間（v2 carry：`<vault>/.codebus/log/runs-<date>.jsonl` 含 goal / mode / model+effort / 時戳 / token usage / wiki_changed / lint counts） | 走 (A) 完整 v2 stream renderer port：`Stdio::piped()` + parse `--output-format stream-json --verbose` → render Thought/ToolUse/ToolResult 即時到 stdout + accumulate Usage 入 RunLog；jsonl date-rotate 一檔 / `sink: none` opt-out / sink 失敗 stderr warning + verb exit code 不變。Banner 系統如預期正交未動。Manual e2e 對 `D:/side_project/uv` 4 條 scenario 全綠（見 `docs/v3-uv-verification-2026-05-10.md` 附錄）。|
+| ✅ Done 2026-05-10 | `v3-bug-fixes` (commit `87e9b0c`) | v3-render-polish 後 UV repo 驗收（`docs/v3-uv-verification-2026-05-10.md`）暴露的 2 個非 BREAKING bug | (a) `init` 緊接 `goal` 不該觸發 re-sync — `walk_source_for_signal()` 與 `sync_with_scanner()` filter rule 對齊；(b) `codebus lint --repo <vault-root>` silently 回 `0 pages, no issues` — 偵測到 vault root 時 emit error 提示。|
+| ✅ Done 2026-05-10 | `v3-pii-severity-dispatch` (commit `c4f3d30`) | UV repo 驗收暴露：default `on_hit: mask` 對 docs/test 的 `127.0.0.1` / example email 過於激進（uv 觸發 672 hits 多為 false-positive），降低 wiki agent 對源碼可讀性 | severity-dispatched on_hit + Critical floor — Critical (AWS / Anthropic key) 強制 mask、Warn (email / ipv4) 走 user-config，wiki agent 對源碼可讀性回升。|
 
 另外有一條**純 docs 工作不需要開 spectra change**，**直接 commit 到 README**：
 
-- **`docs(quickstart): require codebus on PATH for fix loop`** — UV repo 驗收暴露：fix flow spawned agent 內部跑 `Bash(codebus lint *)` 時找不到 binary（CLI 最終 check 仍 OK）。修法：README quickstart 補一條 `cargo install --path codebus-cli` 與「為何 fix 需要 PATH 上有 codebus」的說明。如果之後想自動化（init 寫 `.claude/settings.json` 注 PATH），再開 `v3-fix-path-inject` change。
+- ✅ Done 2026-05-10 — **`docs(quickstart): require codebus on PATH for fix loop`** (commit `e4e8bfa`) — UV repo 驗收暴露：fix flow spawned agent 內部跑 `Bash(codebus lint *)` 時找不到 binary（CLI 最終 check 仍 OK）。已在 README quickstart 補一條 `cargo install --path codebus-cli` 與「為何 fix 需要 PATH 上有 codebus」的說明。如果之後想自動化（init 寫 `.claude/settings.json` 注 PATH），再開 `v3-fix-path-inject` change。
+
+### v3.x 再來的可能 follow-up（v3.0.0 ship 後新冒出的）
+
+| Status | Change | 內容 |
+|---|---|---|
+| 💭 Idea | `v3-fix-path-inject` | init 自動注 PATH 進 `.claude/settings.json`，免 user 手動 `cargo install`。等真的有 user 抱怨 fix 跑不起來再開。|
+| 💭 Idea | bump v3.1.0 | v3-run-log 是 v3.0.0 ship 後新加的 backwards-compatible feature（stream rendering + RunLog 持久化），按 semver 是 minor bump。決定前先看是否還有 v3.x 想攢一起。|
 
 ## 5. 累積里程碑
 
