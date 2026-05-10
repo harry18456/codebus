@@ -124,6 +124,12 @@ Lint 邏輯純 deterministic（7 條 rule pattern match）。優點：
 |---|---|---|
 | `v3-multi-agentic-provider` | §9 trigger（real user 反映 / Anthropic 出事 / 贊助 / Tauri demo 想 multi-vendor） | 第二個 provider impl（codex / gemini / 其他）真的要進來時，先 spike：對方 CLI 有沒有 user-invocable slash command 機制？toolset gate 機制是什麼（Claude=`--tools`、Codex=docker/chroot 等）？驗完才設計 trait surface 或 enum dispatch。在那之前 provider 模組保持 single impl。|
 | `v3-run-log` | user 想看每個 verb 跑了多少 token、費了多少時間（v2 carry：`<vault>/.codebus/logs/runs.jsonl` 含 goal text / mode / model+effort / 時戳 / token usage / wiki_changed / lint counts） | spawn 行為要從 `Stdio::inherit()` 改成 `Stdio::piped()` + 自己 parse claude `--output-format=stream-json` 撈 `usage` event，順便用 `tee` 把原始 stdout 仍流到 user terminal。設計時抉擇：(A) 完整 v2 stream renderer — 倒退；(B) 只撈 usage event 純 stdout passthrough — 中等；(C) 不做、引導 user 看 claude 自家 session log — 0 成本。建議起步走 (B)。**注意**：本 change 與 `v3-render-polish` 的 banner 系統正交（banner 在 spawn 之前/之後印，stdio 不動；run-log 動 stdio 但不動 banner），可同時存在。|
+| `v3-bug-fixes` | v3-render-polish 後 UV repo 驗收（`docs/v3-uv-verification-2026-05-10.md`）暴露的 2 個非 BREAKING bug | 兩個合併 fix：(a) `init` 緊接 `goal` 不該觸發 re-sync — 排查 `walk_source_for_signal()` 與 `sync_with_scanner()` filter rule 是否一致、`compute_source_signal()` 邏輯是否時序差異；(b) `codebus lint --repo <vault-root>`（傳 `.codebus/` 自身）silently 回 `0 pages, no issues` — 改成偵測到 vault root 時自動向上一層或回 error 提示。風險低、純 additive、適合 v3.0.0 ship 前快收尾。|
+| `v3-pii-severity-dispatch` | UV repo 驗收暴露：default `on_hit: mask` 對 docs/test 的 `127.0.0.1` / example email 過於激進（uv 觸發 672 hits 多為 false-positive），降低 wiki agent 對源碼可讀性 | **BREAKING — 需先 `/spectra-discuss`**。設計選項：(A) split severity 路由 — `Critical`（AWS / Anthropic key）→ mask、`Warn`（email / ipv4）→ warn；(B) 加 `pii.patterns_exclude` config 路徑，允許 user 排除已知 false-positive；(C) 兩者都做。default 改變第二次（v3-config 才剛把 default 從 warn → mask），需要慎重。|
+
+另外有一條**純 docs 工作不需要開 spectra change**，**直接 commit 到 README**：
+
+- **`docs(quickstart): require codebus on PATH for fix loop`** — UV repo 驗收暴露：fix flow spawned agent 內部跑 `Bash(codebus lint *)` 時找不到 binary（CLI 最終 check 仍 OK）。修法：README quickstart 補一條 `cargo install --path codebus-cli` 與「為何 fix 需要 PATH 上有 codebus」的說明。如果之後想自動化（init 寫 `.claude/settings.json` 注 PATH），再開 `v3-fix-path-inject` change。
 
 ## 5. 累積里程碑
 
