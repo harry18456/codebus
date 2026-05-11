@@ -1,3 +1,4 @@
+pub mod init;
 pub mod layout;
 pub mod manifest;
 pub mod obsidian_register;

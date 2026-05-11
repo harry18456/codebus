@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  codebus app icon — dev-quality source.
+  - Amber (#f5a623) rounded square background; matches design-handoff "the one accent" rule.
+  - Dark (#0a0a0a) bus silhouette with knock-out windows + wheel hubs in amber.
+  - 1024×1024 canvas; geometry biased toward legibility at 16×16 (taskbar).
+  Edit this file then run: cargo tauri icon codebus-app/src-tauri/icons/source.svg
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" shape-rendering="geometricPrecision">
+  <rect width="1024" height="1024" rx="200" ry="200" fill="#f5a623"/>
+  <g fill="#0a0a0a">
+    <!-- Bus body (rounded rect) -->
+    <rect x="170" y="280" width="684" height="440" rx="80" ry="80"/>
+    <!-- Wheels -->
+    <circle cx="320" cy="780" r="90"/>
+    <circle cx="704" cy="780" r="90"/>
+  </g>
+  <g fill="#f5a623">
+    <!-- Windows (knock-out) -->
+    <rect x="220" y="350" width="160" height="130" rx="32" ry="32"/>
+    <rect x="400" y="350" width="160" height="130" rx="32" ry="32"/>
+    <rect x="580" y="350" width="160" height="130" rx="32" ry="32"/>
+    <!-- Driver window (front, narrower) -->
+    <rect x="760" y="350" width="68" height="130" rx="28" ry="28"/>
+    <!-- Wheel hubs -->
+    <circle cx="320" cy="780" r="36"/>
+    <circle cx="704" cy="780" r="36"/>
+    <!-- Headlight -->
+    <rect x="780" y="600" width="56" height="32" rx="10" ry="10"/>
+    <!-- Side stripe to break the long body visually at 32×32+ -->
+    <rect x="170" y="560" width="684" height="14"/>
+  </g>
+</svg>

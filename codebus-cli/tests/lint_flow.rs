@@ -42,6 +42,76 @@ fn fm_clean() -> &'static str {
     "title: foo\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-09'\nupdated: '2026-05-09'\nrelated: []\nstale: false\n"
 }
 
+/// v3-app-foundation task 6.3 — CLI MUST NOT warn about, modify, or
+/// otherwise depend on the `app.*` namespace in `~/.codebus/config.yaml`.
+/// `lint` is chosen as the verb under test because it is the most
+/// config-touching read-only verb; a passing assertion here gives us
+/// confidence the other CLI verbs (init/goal/query/fix) which share the
+/// same loaders also stay quiet.
+#[test]
+fn cli_ignores_app_namespace_in_global_config() {
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+
+    let config_dir = home.path().join(".codebus");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let config_path = config_dir.join("config.yaml");
+    let original = "\
+pii:
+  scanner: regex_basic
+  on_hit: warn
+claude_code:
+  goal:
+    model: opus
+    effort: high
+app:
+  quiz:
+    pass_threshold: 70
+    default_length: 4
+";
+    std::fs::write(&config_path, original).unwrap();
+
+    // Init the vault sharing the same HOME so the existing `app.*`
+    // namespace is the one the CLI sees.
+    let init_out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path())
+        .output()
+        .expect("run init");
+    assert!(init_out.status.success(), "init must succeed");
+
+    // Lint a fresh clean vault.
+    write_page(&repo.path().join(".codebus"), "concepts/foo.md", fm_clean(), "# foo");
+    let lint_out = Command::new(BIN)
+        .arg("lint")
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path())
+        .output()
+        .expect("run lint");
+
+    let stderr = String::from_utf8_lossy(&lint_out.stderr);
+    let stdout = String::from_utf8_lossy(&lint_out.stdout);
+    assert_eq!(lint_out.status.code(), Some(0), "lint must succeed");
+
+    // No CLI verb may complain about the app namespace.
+    for line in stderr.lines().chain(stdout.lines()) {
+        let lower = line.to_lowercase();
+        if lower.contains("unknown") || lower.contains("warning") {
+            assert!(
+                !lower.contains("app.")
+                    && !lower.contains("app:")
+                    && !lower.contains("quiz"),
+                "CLI must not warn about app.* / app.quiz; offending line: {line}"
+            );
+        }
+    }
+
+    // The config.yaml MUST be byte-identical after the CLI run.
+    let after = std::fs::read_to_string(&config_path).unwrap();
+    assert_eq!(after, original, "CLI must not rewrite ~/.codebus/config.yaml");
+}
+
 #[test]
 fn lint_exits_two_when_no_vault_locatable() {
     let tmp = TempDir::new().unwrap();
