@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>codebus — design canvas</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  html, body { margin: 0; height: 100%; background: #f0eee9; }
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  /* artboard wrapper: the design_canvas card gets the fixed pixel size;
+     this fills it so our cb-app picks up height: 100%. */
+  .artboard-fill { width: 100%; height: 100%; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="components/icons.jsx"></script>
+<script type="text/babel" src="components/sidebar.jsx"></script>
+<script type="text/babel" src="components/tokens-card.jsx"></script>
+<script type="text/babel" src="components/vault-workspace.jsx"></script>
+<script type="text/babel" src="components/goal-detail.jsx"></script>
+<script type="text/babel" src="components/quiz.jsx"></script>
+<script type="text/babel" src="components/lobby.jsx"></script>
+<script type="text/babel" src="components/cmdk-overlay.jsx"></script>
+<script type="text/babel" src="components/settings.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const { useState } = React;
+
+  function CanvasApp() {
+    return (
+      <DesignCanvas>
+        <DCSection
+          id="system"
+          title="codebus · visual system"
+          subtitle="Dark IDE · Inter + JetBrains Mono · 13px body · amber accent · hairline 1px borders · 4–6px radii"
+        >
+          <DCArtboard id="tokens" label="00 · Tokens" width={1100} height={760}>
+            <div className="artboard-fill"><TokensCard /></div>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="screens"
+          title="Screens"
+          subtitle="Sequence — screen 1 of 6. More to come."
+        >
+          <DCArtboard id="vault-workspace" label="01 · Vault Workspace" width={1280} height={800}>
+            <div className="artboard-fill"><VaultWorkspace /></div>
+          </DCArtboard>
+          <DCArtboard id="goal-running" label="02a · Goal · Running" width={1280} height={800}>
+            <div className="artboard-fill"><GoalDetail state="running" /></div>
+          </DCArtboard>
+          <DCArtboard id="goal-done" label="02b · Goal · Completed" width={1280} height={800}>
+            <div className="artboard-fill"><GoalDetail state="done" /></div>
+          </DCArtboard>
+          <DCArtboard id="quiz-pending" label="03a · Quiz · Pending" width={1280} height={800}>
+            <div className="artboard-fill"><Quiz state="pending" /></div>
+          </DCArtboard>
+          <DCArtboard id="quiz-review" label="03b · Quiz · Reviewing" width={1280} height={800}>
+            <div className="artboard-fill"><Quiz state="review" /></div>
+          </DCArtboard>
+          <DCArtboard id="lobby-populated" label="04a · Lobby · Populated" width={1100} height={760}>
+            <div className="artboard-fill"><Lobby state="populated" /></div>
+          </DCArtboard>
+          <DCArtboard id="lobby-empty" label="04b · Lobby · Empty" width={1100} height={760}>
+            <div className="artboard-fill"><Lobby state="empty" /></div>
+          </DCArtboard>
+          <DCArtboard id="cmdk-streaming" label="05a · Cmd+K · Streaming" width={1280} height={800}>
+            <div className="artboard-fill"><CmdKOverlay state="streaming" /></div>
+          </DCArtboard>
+          <DCArtboard id="cmdk-answered" label="05b · Cmd+K · Answered" width={1280} height={800}>
+            <div className="artboard-fill"><CmdKOverlay state="answered" /></div>
+          </DCArtboard>
+          <DCArtboard id="settings-modal" label="06 · Settings" width={1280} height={800}>
+            <div className="artboard-fill"><Settings /></div>
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<CanvasApp />);
+</script>
+</body>
+</html>
