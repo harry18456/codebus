@@ -14,11 +14,13 @@
 pub mod prompt;
 
 use crate::agent::{InvokeAgentOptions, InvokeReport, invoke};
-use crate::render::RenderOptions;
+use crate::stream::StreamEvent;
 use crate::wiki::lint::lint_wiki;
 use crate::wiki::types::LintResult;
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 /// Toolset for fix agent (excluding the Bash whitelist, appended separately).
 pub const FIX_TOOLSET: &[&str] = &["Read", "Glob", "Grep", "Write", "Edit"];
@@ -91,7 +93,8 @@ pub fn run_fix_loop(
     model: Option<String>,
     effort: Option<String>,
     env: crate::agent::EnvOverrides,
-    render_opts: &RenderOptions,
+    on_event: impl FnMut(StreamEvent),
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<FixReport, FixError> {
     let initial = lint_wiki(&vault_root);
     if initial.error_count == 0 && initial.warn_count == 0 {
@@ -110,7 +113,8 @@ pub fn run_fix_loop(
         model,
         effort,
         env,
-        render_opts,
+        on_event,
+        cancel,
     )
     .map_err(FixError::Spawn)?;
 
@@ -135,7 +139,8 @@ fn invoke_fix_agent(
     model: Option<String>,
     effort: Option<String>,
     env: crate::agent::EnvOverrides,
-    render_opts: &RenderOptions,
+    on_event: impl FnMut(StreamEvent),
+    cancel: Option<Arc<AtomicBool>>,
 ) -> io::Result<InvokeReport> {
     let report = invoke(
         InvokeAgentOptions {
@@ -147,7 +152,8 @@ fn invoke_fix_agent(
             effort,
             env,
         },
-        render_opts,
+        on_event,
+        cancel,
     )?;
     // We don't propagate non-zero exit: the agent's "I'm done" or "I gave up"
     // signal flows back via the post-spawn lint check. Spawn-level IO errors
@@ -187,7 +193,8 @@ mod tests {
             None,
             None,
             crate::agent::EnvOverrides::for_system(),
-            &RenderOptions::no_styling(),
+            |_event| {},
+            None,
         );
         unsafe {
             std::env::remove_var("CODEBUS_CLAUDE_BIN");

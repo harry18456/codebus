@@ -91,6 +91,7 @@ pub async fn run(
         }
     };
     let _ = EnvOverrides::for_system; // suppress unused-import warning
+    let render_opts_for_closure = render_opts.clone();
     let invoke_report = match invoke(
         InvokeAgentOptions {
             slash_command,
@@ -101,7 +102,10 @@ pub async fn run(
             effort: query_resolved.effort.clone(),
             env: query_env,
         },
-        render_opts,
+        move |event| {
+            codebus_core::render::print_event(&event, &render_opts_for_closure)
+        },
+        None,
     ) {
         Ok(report) => report,
         Err(e) => {

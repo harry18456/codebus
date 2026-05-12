@@ -216,6 +216,11 @@ pub async fn run(
         }
     };
     let _ = EnvOverrides::for_system; // suppress unused-import warning
+    // CLI thin wrapper: closure renders each StreamEvent via the existing
+    // terminal renderer using the captured RenderOptions. Verb library
+    // refactor (v3-goal-library) — once `verb::goal::run_goal` lands, this
+    // closure is built inside the library caller, not here.
+    let render_opts_for_closure = render_opts.clone();
     let invoke_report = match invoke(
         InvokeAgentOptions {
             slash_command,
@@ -226,7 +231,10 @@ pub async fn run(
             effort: goal_resolved.effort.clone(),
             env: goal_env,
         },
-        render_opts,
+        move |event| {
+            codebus_core::render::print_event(&event, &render_opts_for_closure)
+        },
+        None,
     ) {
         Ok(report) => report,
         Err(e) => {
@@ -276,12 +284,14 @@ pub async fn run(
             }
         };
         let _ = EnvOverrides::for_system; // suppress unused-import warning
+        let render_opts_for_fix = render_opts.clone();
         match run_fix_loop(
             paths.root.clone(),
             fix_resolved.model.clone(),
             fix_resolved.effort.clone(),
             fix_env,
-            render_opts,
+            move |event| codebus_core::render::print_event(&event, &render_opts_for_fix),
+            None,
         ) {
             Ok(report) => {
                 fix_lint_errors = report.final_lint.error_count;

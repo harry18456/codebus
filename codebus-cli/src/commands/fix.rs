@@ -114,12 +114,14 @@ pub async fn run(
     };
     print_banner(Banner::LintStart, render_opts);
     let lint_started = Instant::now();
+    let render_opts_for_fix = render_opts.clone();
     let report = match run_fix_loop(
         paths.root.clone(),
         fix_resolved.model.clone(),
         fix_resolved.effort.clone(),
         fix_env,
-        render_opts,
+        move |event| codebus_core::render::print_event(&event, &render_opts_for_fix),
+        None,
     ) {
         Ok(r) => r,
         Err(e) => {

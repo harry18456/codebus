@@ -13,7 +13,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use codebus_core::agent::{EnvOverrides, InvokeAgentOptions, invoke};
-use codebus_core::render::RenderOptions;
 use tempfile::TempDir;
 
 const MOCK_CLAUDE: &str = env!("CARGO_BIN_EXE_mock-claude");
@@ -49,7 +48,8 @@ fn invoke_passes_env_overrides_to_command() {
                 "sk-injection-test",
             ),
         },
-        &RenderOptions::no_styling(),
+        |_event| {},
+        None,
     )
     .expect("invoke spawn-and-wait succeeds against mock-claude");
     assert!(report.exit.success(), "mock-claude should exit 0");
@@ -115,7 +115,8 @@ fn for_system_does_not_inject_env() {
             effort: None,
             env: EnvOverrides::for_system(),
         },
-        &RenderOptions::no_styling(),
+        |_event| {},
+        None,
     )
     .expect("invoke spawn-and-wait succeeds");
     assert!(report.exit.success());
