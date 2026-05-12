@@ -1,7 +1,13 @@
 import { create } from "zustand"
 
 import {
+  type ActiveProfile,
+  type AzureProfile,
+  type ClaudeCodeBlock,
   type GlobalConfig,
+  type SystemProfile,
+  DEFAULT_AZURE_KEYRING_SERVICE,
+  SYSTEM_PROFILE_DEFAULTS,
   loadGlobalConfig as loadGlobalConfigIpc,
   saveGlobalConfig as saveGlobalConfigIpc,
 } from "@/lib/ipc"
@@ -16,6 +22,19 @@ interface SettingsState {
   error: LocalizedError | null
   load: () => Promise<void>
   update: (patch: Partial<GlobalConfig>) => void
+  /**
+   * Get a fully-populated `claude_code` block from the current config,
+   * filling defaults for any missing field. Returns the new profile-mode
+   * schema (active + system + azure) — never the legacy flat shape.
+   * Components mutate the returned object freely (it's a fresh copy) and
+   * persist via {@link updateClaudeCode}.
+   */
+  getClaudeCodeBlock: () => ClaudeCodeBlock
+  /**
+   * Write the entire `claude_code` block back to the in-memory config.
+   * Marks the store dirty so the Save button enables.
+   */
+  updateClaudeCode: (block: ClaudeCodeBlock) => void
   reset: () => void
   save: () => Promise<void>
   clearError: () => void
@@ -51,6 +70,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ config: merged, dirty: true })
   },
 
+  getClaudeCodeBlock() {
+    return readClaudeCodeBlock(get().config)
+  },
+
+  updateClaudeCode(block) {
+    const next = { ...get().config, claude_code: block } as GlobalConfig
+    set({ config: next, dirty: true })
+  },
+
   reset() {
     set((state) => ({ config: state.initialConfig, dirty: false, error: null }))
   },
@@ -72,6 +100,54 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 }))
 
+
+/**
+ * Read a profile-shaped `claude_code` block from a possibly-empty / possibly-
+ * legacy config payload. Always returns a fully populated `ClaudeCodeBlock`
+ * — missing keys are filled with built-in defaults, missing azure block
+ * is reported as `null`.
+ *
+ * Legacy-schema config (top-level `goal` / `query` / `fix` under
+ * `claude_code` without `system` / `azure` wrappers) is NOT migrated
+ * here — the IPC load path emits a stderr warning and falls back to
+ * defaults; this function just reads what the load path produced. UI
+ * therefore always sees the new profile shape.
+ */
+function readClaudeCodeBlock(config: GlobalConfig | null | undefined): ClaudeCodeBlock {
+  const raw = (config as { claude_code?: unknown } | null | undefined)?.claude_code as
+    | Partial<ClaudeCodeBlock>
+    | undefined
+  const active: ActiveProfile = raw?.active === "azure" ? "azure" : "system"
+  const system: SystemProfile = mergeSystemProfile(raw?.system)
+  const azure: AzureProfile | null = readAzureProfile(raw?.azure)
+  return { active, system, azure }
+}
+
+function mergeSystemProfile(raw: unknown): SystemProfile {
+  const r = (raw ?? {}) as Partial<SystemProfile>
+  return {
+    goal:  r.goal  ?? { ...SYSTEM_PROFILE_DEFAULTS.goal },
+    query: r.query ?? { ...SYSTEM_PROFILE_DEFAULTS.query },
+    fix:   r.fix   ?? { ...SYSTEM_PROFILE_DEFAULTS.fix },
+  }
+}
+
+function readAzureProfile(raw: unknown): AzureProfile | null {
+  if (!raw || typeof raw !== "object") return null
+  const r = raw as Partial<AzureProfile>
+  // Treat a partial azure block as still surfacing to the UI so the user
+  // can finish editing — but pre-fill the keyring_service default when
+  // the field is empty / missing (Stage A first-time-setup ergonomics).
+  return {
+    base_url: r.base_url ?? "",
+    keyring_service: r.keyring_service && r.keyring_service.length > 0
+      ? r.keyring_service
+      : DEFAULT_AZURE_KEYRING_SERVICE,
+    goal:  r.goal  ?? { model: "", effort: "high" },
+    query: r.query ?? { model: "", effort: "low" },
+    fix:   r.fix   ?? { model: "", effort: "medium" },
+  }
+}
 
 function mergeDeep<T extends Record<string, unknown>>(target: T, patch: Partial<T>): T {
   const out: Record<string, unknown> = { ...target }

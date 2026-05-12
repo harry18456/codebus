@@ -17,6 +17,7 @@
 //! make claude wait for streaming JSON messages on stdin and conflict with
 //! the closed `Stdio::null()` stdin.
 
+use crate::agent::env_overrides::EnvOverrides;
 use crate::log::{TokenUsage, accumulate_token_usage};
 use crate::render::{RenderOptions, print_event};
 use crate::stream::{StreamEvent, parse_claude_stream_line};
@@ -29,6 +30,14 @@ use std::time::{Duration, Instant};
 
 /// Inputs for [`invoke`]. Caller (verb command modules) constructs this with
 /// verb-specific values and a `'static` toolset slice.
+///
+/// `env` carries scoped environment overrides injected into the child
+/// process. System profile callers pass `EnvOverrides::for_system()`
+/// (empty); azure profile callers pass `EnvOverrides::for_azure(...)`
+/// after resolving the API key via `config::keyring::read_azure_key`.
+/// The spawn path uses `Command::envs(...)` — it does NOT touch the
+/// parent shell environment (audited: no `std::env::set_var` in the
+/// `agent` module).
 pub struct InvokeAgentOptions {
     pub slash_command: String,
     pub vault_root: PathBuf,
@@ -36,6 +45,7 @@ pub struct InvokeAgentOptions {
     pub bash_whitelist: Option<&'static str>,
     pub model: Option<String>,
     pub effort: Option<String>,
+    pub env: EnvOverrides,
 }
 
 /// Result of one [`invoke`] call. Returned to the verb command so it can
@@ -103,6 +113,11 @@ pub fn invoke(
     if let Some(effort) = opts.effort.as_deref() {
         cmd.arg("--effort").arg(effort);
     }
+
+    // Scoped env injection. `cmd.envs(...)` sets vars on the child only;
+    // the parent shell environment is never modified (the `agent` module
+    // contains zero `std::env::set_var` calls — see env_overrides.rs docs).
+    cmd.envs(opts.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
 
     let started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
 
@@ -210,6 +225,7 @@ mod tests {
             bash_whitelist: None,
             model: None,
             effort: None,
+            env: EnvOverrides::for_system(),
         };
         let InvokeAgentOptions {
             slash_command,
@@ -218,6 +234,7 @@ mod tests {
             bash_whitelist,
             model,
             effort,
+            env,
         } = opts;
         assert_eq!(slash_command, "/codebus-goal \"x\"");
         assert_eq!(vault_root, PathBuf::from("/tmp/v"));
@@ -225,6 +242,7 @@ mod tests {
         assert!(bash_whitelist.is_none());
         assert!(model.is_none());
         assert!(effort.is_none());
+        assert!(env.is_empty());
     }
 
     #[test]
@@ -284,6 +302,7 @@ mod tests {
                 bash_whitelist: None,
                 model: None,
                 effort: None,
+                env: EnvOverrides::for_system(),
             },
             &RenderOptions::no_styling(),
         );

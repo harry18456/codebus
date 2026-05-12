@@ -6,11 +6,11 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Args;
-use codebus_core::agent::{InvokeAgentOptions, invoke};
+use codebus_core::agent::{EnvOverrides, InvokeAgentOptions, invoke};
 use codebus_core::log::RunLog;
 use codebus_core::config::{
-    ClaudeCodeConfig, LintFixConfig, PiiConfig, PiiScannerKind, default_config_path,
-    load_claude_code_config, load_lint_fix_config, load_pii_config,
+    ClaudeCodeConfig, LintFixConfig, PiiConfig, PiiScannerKind, Verb, build_env_overrides,
+    default_config_path, load_claude_code_config, load_lint_fix_config, load_pii_config,
 };
 use codebus_core::git::auto_commit;
 use codebus_core::pii::PiiScanner;
@@ -92,13 +92,17 @@ pub async fn run(
         }
     }
 
-    // Load fix loop config (used by Step 5 lint-and-fix phase).
+    // Load fix loop config (used by Step 5 lint-and-fix phase). Fail-loud
+    // on parse error (spec: cli / Config Parse Failure Aborts Invocation).
     let fix_cfg = match default_config_path() {
         Some(p) => match load_lint_fix_config(&p) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("warning: lint.fix config load failed (using defaults): {e}");
-                LintFixConfig::default()
+                eprintln!(
+                    "error: lint.fix config parse failed at {}: {e}",
+                    p.display()
+                );
+                return ExitCode::from(2);
             }
         },
         None => LintFixConfig::default(),
@@ -125,9 +129,15 @@ pub async fn run(
     }
 
     // Load pii + claude_code config once; scanner dispatch + agent flag
-    // forwarding both use them.
-    let pii_cfg = load_pii_config_with_warning();
-    let cc_cfg = load_claude_code_config_with_warning();
+    // forwarding both use them. Fail-loud on parse error per spec.
+    let pii_cfg = match load_pii_config_with_warning() {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let cc_cfg = match load_claude_code_config_with_warning() {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
 
     if needs_resync {
         let scanner = build_pii_scanner(&pii_cfg);
@@ -191,14 +201,30 @@ pub async fn run(
             GOAL_TOOLSET
         );
     }
+    let goal_resolved = cc_cfg.resolve(Verb::Goal);
+    // Profile-aware env injection. System profile yields an empty map;
+    // azure profile reads the API key via the keyring → env fallback
+    // chain. If the azure profile is active AND no key is reachable,
+    // we surface the error and exit non-zero WITHOUT spawning the
+    // child process (spec: Scoped Environment Injection At Spawn /
+    // OS Keyring Integration With Env Fallback).
+    let goal_env = match build_env_overrides(&cc_cfg) {
+        Ok(env) => env,
+        Err(e) => {
+            eprintln!("error: goal: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    let _ = EnvOverrides::for_system; // suppress unused-import warning
     let invoke_report = match invoke(
         InvokeAgentOptions {
             slash_command,
             vault_root: paths.root.clone(),
             toolset: GOAL_TOOLSET,
             bash_whitelist: None,
-            model: cc_cfg.goal.model.clone(),
-            effort: cc_cfg.goal.effort.clone(),
+            model: goal_resolved.model.clone(),
+            effort: goal_resolved.effort.clone(),
+            env: goal_env,
         },
         render_opts,
     ) {
@@ -236,10 +262,25 @@ pub async fn run(
         }
         print_banner(Banner::LintStart, render_opts);
         let lint_started = Instant::now();
+        let fix_resolved = cc_cfg.resolve(Verb::Fix);
+        // Profile-aware env injection — same chain as the goal spawn
+        // above. The key was already validated at goal-spawn time, but
+        // we re-resolve here so the fix child gets a fresh copy of the
+        // env values (the goal spawn may have run for many minutes,
+        // increasing the chance the keyring entry rotated underneath).
+        let fix_env = match build_env_overrides(&cc_cfg) {
+            Ok(env) => env,
+            Err(e) => {
+                eprintln!("error: goal lint-fix phase: {e}");
+                return ExitCode::from(3);
+            }
+        };
+        let _ = EnvOverrides::for_system; // suppress unused-import warning
         match run_fix_loop(
             paths.root.clone(),
-            cc_cfg.fix.model.clone(),
-            cc_cfg.fix.effort.clone(),
+            fix_resolved.model.clone(),
+            fix_resolved.effort.clone(),
+            fix_env,
             render_opts,
         ) {
             Ok(report) => {
@@ -310,8 +351,8 @@ pub async fn run(
     let run_log = RunLog {
         goal: args.text.clone(),
         mode: "goal".into(),
-        model: cc_cfg.goal.model.clone(),
-        effort: cc_cfg.goal.effort.clone(),
+        model: goal_resolved.model.clone(),
+        effort: goal_resolved.effort.clone(),
         started_at: invoke_report.started_at.clone(),
         finished_at: invoke_report.finished_at.clone(),
         tokens: invoke_report.accumulated_tokens.clone(),
@@ -319,7 +360,10 @@ pub async fn run(
         lint_error_count: fix_lint_errors,
         lint_warn_count: fix_lint_warns,
     };
-    let log_cfg = load_log_config_with_warning();
+    let log_cfg = match load_log_config_with_warning() {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
     let sink_cfg = resolve_sink_dir(log_cfg, &paths.log);
     write_run_log(sink_cfg, &run_log);
 
@@ -334,32 +378,40 @@ pub async fn run(
     }
 }
 
-/// Load `pii.*` config from default path with warn-and-default on parse failure.
-fn load_pii_config_with_warning() -> PiiConfig {
+/// Load `pii.*` config from default path. Returns `Default::default()` when
+/// the config file does not exist (first-time setup). Returns `Err(ExitCode)`
+/// when the file exists but fails to parse — caller SHALL propagate the
+/// exit code without performing any side effect that depends on this
+/// section (spec: cli / `Config Parse Failure Aborts Invocation`).
+fn load_pii_config_with_warning() -> Result<PiiConfig, ExitCode> {
     let path = match default_config_path() {
         Some(p) => p,
-        None => return PiiConfig::default(),
+        None => return Ok(PiiConfig::default()),
     };
     match load_pii_config(&path) {
-        Ok(cfg) => cfg,
+        Ok(cfg) => Ok(cfg),
         Err(e) => {
-            eprintln!("warning: pii config load failed (using defaults): {e}");
-            PiiConfig::default()
+            eprintln!("error: pii config parse failed at {}: {e}", path.display());
+            Err(ExitCode::from(2))
         }
     }
 }
 
-/// Load `claude_code.*` config from default path with warn-and-default on parse failure.
-fn load_claude_code_config_with_warning() -> ClaudeCodeConfig {
+/// Load `claude_code.*` config from default path. Same fail-loud contract
+/// as `load_pii_config_with_warning`.
+fn load_claude_code_config_with_warning() -> Result<ClaudeCodeConfig, ExitCode> {
     let path = match default_config_path() {
         Some(p) => p,
-        None => return ClaudeCodeConfig::default(),
+        None => return Ok(ClaudeCodeConfig::default()),
     };
     match load_claude_code_config(&path) {
-        Ok(cfg) => cfg,
+        Ok(cfg) => Ok(cfg),
         Err(e) => {
-            eprintln!("warning: claude_code config load failed (using defaults): {e}");
-            ClaudeCodeConfig::default()
+            eprintln!(
+                "error: claude_code config parse failed at {}: {e}",
+                path.display()
+            );
+            Err(ExitCode::from(2))
         }
     }
 }

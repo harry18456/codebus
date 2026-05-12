@@ -90,6 +90,7 @@ pub fn run_fix_loop(
     vault_root: PathBuf,
     model: Option<String>,
     effort: Option<String>,
+    env: crate::agent::EnvOverrides,
     render_opts: &RenderOptions,
 ) -> Result<FixReport, FixError> {
     let initial = lint_wiki(&vault_root);
@@ -103,9 +104,15 @@ pub fn run_fix_loop(
         });
     }
 
-    let invoke_report =
-        invoke_fix_agent(&vault_root, prompt::initial_prompt(), model, effort, render_opts)
-            .map_err(FixError::Spawn)?;
+    let invoke_report = invoke_fix_agent(
+        &vault_root,
+        prompt::initial_prompt(),
+        model,
+        effort,
+        env,
+        render_opts,
+    )
+    .map_err(FixError::Spawn)?;
 
     let post = lint_wiki(&vault_root);
     let clean = post.error_count == 0 && post.warn_count == 0;
@@ -127,6 +134,7 @@ fn invoke_fix_agent(
     slash_command: String,
     model: Option<String>,
     effort: Option<String>,
+    env: crate::agent::EnvOverrides,
     render_opts: &RenderOptions,
 ) -> io::Result<InvokeReport> {
     let report = invoke(
@@ -137,6 +145,7 @@ fn invoke_fix_agent(
             bash_whitelist: Some(FIX_BASH_WHITELIST),
             model,
             effort,
+            env,
         },
         render_opts,
     )?;
@@ -177,6 +186,7 @@ mod tests {
             tmp.path().to_path_buf(),
             None,
             None,
+            crate::agent::EnvOverrides::for_system(),
             &RenderOptions::no_styling(),
         );
         unsafe {
@@ -208,6 +218,7 @@ mod tests {
             bash_whitelist: Some(FIX_BASH_WHITELIST),
             model: None,
             effort: None,
+            env: crate::agent::EnvOverrides::for_system(),
         };
         // Destructuring asserts the struct has exactly these fields and no
         // session-related fields. Compile fails if a session field is added.
@@ -218,6 +229,7 @@ mod tests {
             bash_whitelist: _,
             model: _,
             effort: _,
+            env: _,
         } = opts;
     }
 }

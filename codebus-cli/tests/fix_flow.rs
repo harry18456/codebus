@@ -207,7 +207,8 @@ fn fix_spawn_uses_bare_bash_in_tools_and_restricted_in_allowed_tools() {
 }
 
 /// Spec: "Fix subcommand forwards configured model and effort" — default
-/// `claude_code.fix` is `{ model: sonnet, effort: medium }`.
+/// `claude_code.system.fix` is `{ model: sonnet-4-6, effort: medium }` and
+/// the SystemModel enum translates `sonnet-4-6` to `claude-sonnet-4-6`.
 #[test]
 fn fix_spawn_includes_default_model_and_effort_flags() {
     let tmp = TempDir::new().unwrap();
@@ -218,8 +219,8 @@ fn fix_spawn_includes_default_model_and_effort_flags() {
     let log = tmp.path().join("mock-claude.log");
     let body = fs::read_to_string(&log).expect("mock-claude log");
     assert!(
-        body.contains("arg=--model") && body.contains("arg=sonnet"),
-        "expected --model sonnet in fix spawn argv:\n{body}"
+        body.contains("arg=--model") && body.contains("arg=claude-sonnet-4-6"),
+        "expected --model claude-sonnet-4-6 in fix spawn argv:\n{body}"
     );
     assert!(
         body.contains("arg=--effort") && body.contains("arg=medium"),

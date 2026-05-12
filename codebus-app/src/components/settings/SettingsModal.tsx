@@ -19,17 +19,24 @@ import {
 } from "@/components/ui/select"
 import { useSettingsStore } from "@/store/settings"
 import { useT, type TFunction } from "@/i18n/useT"
+import {
+  type CliStatus,
+  checkCliInstalled,
+  validateClaudeCodeBlock,
+} from "@/lib/ipc"
+import { EndpointSection } from "./EndpointSection"
 
 /**
  * Default value table for the reset-to-default affordance. Pinned to match
  * codebus-core's per-section `Default::default()` impls + CLI starter
  * config. Drift risk is low (these values are spec-locked) but if a future
  * change moves any of them, update this table at the same time.
+ *
+ * As of `stage-b-app-endpoint-settings`, model defaults moved into
+ * `<EndpointSection>` (which reads them from `SYSTEM_PROFILE_DEFAULTS`
+ * exported by `lib/ipc.ts`). PII / quiz defaults remain here.
  */
 const FIELD_DEFAULTS = {
-  goalModel: "opus",
-  queryModel: "haiku",
-  fixModel: "sonnet",
   piiScanner: "regex_basic",
   passThreshold: 80,
   defaultLength: 5,
@@ -72,18 +79,12 @@ interface SettingsModalProps {
    * Surfaced as a prop so the markup never hard-codes the count.
    */
   piiPatternCount: number
-  /** OAuth status surfaced as text. v1 has no live auth flow, so caller
-   * provides a static label. */
-  oauthStatus?: "connected" | "disconnected"
 }
-
-const MODEL_OPTIONS = ["opus", "sonnet", "haiku"] as const
 
 export function SettingsModal({
   open,
   onClose,
   piiPatternCount,
-  oauthStatus = "connected",
 }: SettingsModalProps) {
   const t = useT()
   const config = useSettingsStore((s) => s.config)
@@ -94,15 +95,23 @@ export function SettingsModal({
   const update = useSettingsStore((s) => s.update)
   const save = useSettingsStore((s) => s.save)
   const reset = useSettingsStore((s) => s.reset)
+  const getClaudeCodeBlock = useSettingsStore((s) => s.getClaudeCodeBlock)
+  const updateClaudeCode = useSettingsStore((s) => s.updateClaudeCode)
 
   const [saved, setSaved] = useState(false)
+  const [cliStatus, setCliStatus] = useState<CliStatus | "checking" | null>(null)
 
   useEffect(() => {
     if (open) {
       load()
+      setCliStatus("checking")
+      checkCliInstalled("claude_code")
+        .then(setCliStatus)
+        .catch(() => setCliStatus({ kind: "not_installed" }))
     } else {
       reset()
       setSaved(false)
+      setCliStatus(null)
     }
   }, [open, load, reset])
 
@@ -110,14 +119,12 @@ export function SettingsModal({
     app?: { quiz?: { pass_threshold?: number; default_length?: number } }
     pii?: { scanner?: string }
     log?: { sink?: string; dir?: string }
-    claude_code?: Record<string, { model?: string } | undefined>
   }
   const passThreshold = safeConfig.app?.quiz?.pass_threshold ?? 80
   const defaultLength = safeConfig.app?.quiz?.default_length ?? 5
-
-  const goalModel = readModel(safeConfig, "goal")
-  const queryModel = readModel(safeConfig, "query")
-  const fixModel = readModel(safeConfig, "fix")
+  const claudeCode = getClaudeCodeBlock()
+  const claudeCodeErrors = validateClaudeCodeBlock(claudeCode)
+  const claudeCodeValid = claudeCodeErrors.length === 0
 
   const piiScanner = safeConfig.pii?.scanner ?? "regex_basic"
   const logDir = safeConfig.log?.dir ?? ""
@@ -158,86 +165,35 @@ export function SettingsModal({
             </div>
           </Field>
 
-          {/* 2. Authentication */}
-          <Field label={t("settings.fields.auth.label")}>
+          {/* 2. CLI status — probes whether `claude --version` works.
+             Replaces the v1 OAuth pseudo-status with a real installation
+             check; future Codex / Gemini providers add their own rows. */}
+          <Field label="Claude Code CLI">
             <div className="flex items-center gap-2">
-              <span
-                data-testid="oauth-status"
-                className="rounded-full border border-success/40 bg-success/10 px-2 py-px font-mono text-[10px] text-success"
-              >
-                {oauthStatus === "connected"
-                  ? t("settings.fields.auth.connected")
-                  : t("settings.fields.auth.disconnected")}
-              </span>
-              <button className="text-xs text-fg-secondary underline decoration-dashed hover:text-fg">
-                {t("settings.fields.auth.reauthenticate")}
-              </button>
+              <CliStatusBadge status={cliStatus} />
+              {cliStatus &&
+                cliStatus !== "checking" &&
+                cliStatus.kind === "not_installed" && (
+                  <span
+                    className="text-xs text-fg-secondary"
+                    data-testid="cli-install-hint"
+                  >
+                    Install Claude Code first; then reopen Settings.
+                  </span>
+                )}
             </div>
           </Field>
 
-          {/* 3. Default model per verb */}
-          <Field
-            label={t("settings.fields.defaultModel.label")}
-            subLabel={t("settings.fields.defaultModel.sublabel")}
-            testId="default-model-field"
-          >
-            <div className="flex flex-col gap-2">
-              {(["goal", "query", "fix"] as const).map((verb) => {
-                const current =
-                  verb === "goal"
-                    ? goalModel
-                    : verb === "query"
-                      ? queryModel
-                      : fixModel
-                const defaultValue =
-                  verb === "goal"
-                    ? FIELD_DEFAULTS.goalModel
-                    : verb === "query"
-                      ? FIELD_DEFAULTS.queryModel
-                      : FIELD_DEFAULTS.fixModel
-                return (
-                  <div key={verb} className="flex items-center gap-2">
-                    <span className="font-mono w-[56px] text-fg-tertiary text-[11px]">
-                      {verb}
-                    </span>
-                    <Select
-                      value={current}
-                      onValueChange={(value) =>
-                        update({
-                          claude_code: {
-                            [verb]: { model: value },
-                          } as Record<string, unknown>,
-                        } as never)
-                      }
-                    >
-                      <SelectTrigger className="w-[140px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {MODEL_OPTIONS.map((m) => (
-                          <SelectItem key={m} value={m}>
-                            {m}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <ResetButton
-                      isDefault={current === defaultValue}
-                      onReset={() =>
-                        update({
-                          claude_code: {
-                            [verb]: { model: defaultValue },
-                          } as Record<string, unknown>,
-                        } as never)
-                      }
-                      testId={`reset-default-model-${verb}`}
-                      t={t}
-                    />
-                  </div>
-                )
-              })}
-            </div>
-          </Field>
+          {/* 3. Endpoint settings (system / azure profile) — supersedes
+             the legacy "Default model per verb" dropdowns; lives in its
+             own component because the form has two non-trivial profile
+             sub-sections + keyring management. */}
+          <EndpointSection
+            claudeCode={claudeCode}
+            onChange={updateClaudeCode}
+            errors={claudeCodeErrors}
+          />
+
 
           {/* 4. PII scanner — dynamic count */}
           <Field label={t("settings.fields.pii.label")}>
@@ -444,14 +400,60 @@ export function SettingsModal({
           <Button
             variant="primary"
             onClick={handleSave}
-            disabled={!dirty || saving}
+            disabled={!dirty || saving || !claudeCodeValid}
             data-testid="settings-save"
+            title={
+              !claudeCodeValid
+                ? "Endpoint configuration is incomplete — fix highlighted fields"
+                : undefined
+            }
           >
             {saving ? t("common.saving") : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function CliStatusBadge({
+  status,
+}: {
+  status: CliStatus | "checking" | null
+}) {
+  if (status === null) {
+    return null
+  }
+  if (status === "checking") {
+    return (
+      <span
+        data-testid="cli-status"
+        data-state="checking"
+        className="rounded-full border border-border bg-bg px-2 py-px font-mono text-[10px] text-fg-tertiary"
+      >
+        Checking…
+      </span>
+    )
+  }
+  if (status.kind === "installed") {
+    return (
+      <span
+        data-testid="cli-status"
+        data-state="installed"
+        className="rounded-full border border-success/40 bg-success/10 px-2 py-px font-mono text-[10px] text-success"
+      >
+        Installed · {status.version}
+      </span>
+    )
+  }
+  return (
+    <span
+      data-testid="cli-status"
+      data-state="not_installed"
+      className="rounded-full border border-error/40 bg-error/10 px-2 py-px font-mono text-[10px] text-error"
+    >
+      Not installed
+    </span>
   )
 }
 
@@ -484,14 +486,3 @@ function Field({
   )
 }
 
-function readModel(
-  config: Record<string, unknown> | { claude_code?: unknown },
-  verb: "goal" | "query" | "fix",
-): string {
-  const cc = (config as { claude_code?: Record<string, unknown> }).claude_code
-  if (cc && typeof cc === "object") {
-    const verbCfg = cc[verb] as { model?: string } | undefined
-    if (verbCfg?.model) return verbCfg.model
-  }
-  return verb === "query" ? "haiku" : "sonnet"
-}

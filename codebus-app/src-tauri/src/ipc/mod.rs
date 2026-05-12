@@ -1,6 +1,6 @@
 //! IPC command registry.
 //!
-//! The frontend MAY invoke only the five commands listed in
+//! The frontend MAY invoke only the nine commands listed in
 //! [`REGISTERED_COMMANDS`]. The spec ("IPC Command Registry") forbids any
 //! other command from being registered by this change. The constant is the
 //! source of truth checked by the unit test below, and is consumed by
@@ -9,20 +9,28 @@
 
 use crate::error::AppError;
 
+pub mod cli_status;
 pub mod config;
+pub mod keyring;
 pub mod vault_list;
 
+pub use cli_status::check_cli_installed;
 pub use config::{load_global_config, save_global_config};
+pub use keyring::{delete_endpoint_key, get_endpoint_key, set_endpoint_key};
 pub use vault_list::{add_vault, list_vaults, remove_vault};
 
-/// Exactly the five commands exposed by this Tauri app. Used by the
-/// `assert_only_registered_commands` test and consumed by `lib::run`.
+/// Exactly the nine commands exposed by this Tauri app. Used by the
+/// `exactly_nine_commands_are_registered` test and consumed by `lib::run`.
 pub const REGISTERED_COMMANDS: &[&str] = &[
     "list_vaults",
     "add_vault",
     "remove_vault",
     "load_global_config",
     "save_global_config",
+    "set_endpoint_key",
+    "get_endpoint_key",
+    "delete_endpoint_key",
+    "check_cli_installed",
 ];
 
 /// Sugar for `tauri::generate_handler!` so the registration is colocated
@@ -36,6 +44,10 @@ macro_rules! generate_ipc_handler {
             $crate::ipc::vault_list::remove_vault,
             $crate::ipc::config::load_global_config,
             $crate::ipc::config::save_global_config,
+            $crate::ipc::keyring::set_endpoint_key,
+            $crate::ipc::keyring::get_endpoint_key,
+            $crate::ipc::keyring::delete_endpoint_key,
+            $crate::ipc::cli_status::check_cli_installed,
         ]
     };
 }
@@ -49,11 +61,11 @@ mod tests {
     use super::REGISTERED_COMMANDS;
 
     #[test]
-    fn exactly_five_commands_are_registered() {
+    fn exactly_nine_commands_are_registered() {
         assert_eq!(
             REGISTERED_COMMANDS.len(),
-            5,
-            "IPC Command Registry requires exactly 5 commands"
+            9,
+            "IPC Command Registry requires exactly 9 commands"
         );
     }
 
@@ -65,6 +77,10 @@ mod tests {
             "remove_vault",
             "load_global_config",
             "save_global_config",
+            "set_endpoint_key",
+            "get_endpoint_key",
+            "delete_endpoint_key",
+            "check_cli_installed",
         ]
         .into_iter()
         .collect();

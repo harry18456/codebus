@@ -54,6 +54,21 @@ impl From<std::io::Error> for AppError {
     }
 }
 
+impl From<codebus_core::config::keyring::KeyringError> for AppError {
+    /// `KeyringError::Backend` surfaces as `Internal` so the frontend can
+    /// distinguish it from validation / parse errors and render an
+    /// "underlying keyring backend failed" toast. `EndpointKeyMissing` is
+    /// not produced by the store / delete code paths used in the keyring
+    /// IPC commands (those bypass the env-fallback chain in `read_azure_key`),
+    /// but we map it defensively to `Internal` in case future code routes
+    /// it through this conversion.
+    fn from(err: codebus_core::config::keyring::KeyringError) -> Self {
+        AppError::Internal {
+            message: err.to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,5 +161,28 @@ mod tests {
         let io: std::io::Error = std::io::ErrorKind::NotFound.into();
         let app: AppError = io.into();
         assert!(matches!(app, AppError::Io { .. }));
+    }
+
+    /// Spec: `app-shell / AppError Discriminated Union` — keyring backend
+    /// failures surface as `Internal { message }` so the frontend can
+    /// render a generic "keyring unavailable" toast.
+    #[test]
+    fn keyring_backend_failure_maps_to_internal() {
+        use codebus_core::config::keyring::KeyringError;
+        // Use the public `EndpointKeyMissing` variant — it's constructible
+        // without a `keyring::Error` instance (which is opaque) and exercises
+        // the same `From` impl path. The mapping target is identical for both
+        // variants of `KeyringError`.
+        let err = KeyringError::EndpointKeyMissing {
+            service: "codebus-test".into(),
+        };
+        let app: AppError = err.into();
+        let AppError::Internal { message } = app else {
+            panic!("expected Internal variant");
+        };
+        assert!(
+            message.contains("codebus-test"),
+            "Internal message should preserve service name: {message}"
+        );
     }
 }

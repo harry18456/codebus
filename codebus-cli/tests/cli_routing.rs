@@ -35,10 +35,10 @@ fn git(vault: &Path, args: &[&str]) -> Output {
         .expect("run git")
 }
 
-// === Subcommand Registration ===
+// === Subcommand Registration (six subcommands; `claude-code-endpoint-profiles`) ===
 
 #[test]
-fn help_lists_exactly_the_five_subcommands() {
+fn help_lists_exactly_the_six_subcommands() {
     let out = Command::new(BIN).arg("--help").output().expect("run binary");
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     let combined = format!(
@@ -46,13 +46,30 @@ fn help_lists_exactly_the_five_subcommands() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    for verb in ["init", "goal", "query", "lint", "fix"] {
+    for verb in ["init", "goal", "query", "lint", "fix", "config"] {
         assert!(combined.contains(verb), "help missing `{verb}`:\n{combined}");
     }
     for forbidden in ["mcp", "ingest"] {
         assert!(
             !combined.contains(&format!(" {forbidden} ")),
             "help unexpectedly contains `{forbidden}`:\n{combined}"
+        );
+    }
+}
+
+#[test]
+fn config_help_lists_three_sub_actions() {
+    let out = Command::new(BIN).args(["config", "--help"]).output().expect("run binary");
+    assert!(out.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for action in ["set-key", "get-key", "delete-key"] {
+        assert!(
+            combined.contains(action),
+            "config --help missing `{action}`:\n{combined}"
         );
     }
 }

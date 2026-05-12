@@ -35,6 +35,19 @@ fn main() -> ExitCode {
         for a in &args {
             log.push_str(&format!("arg={a}\n"));
         }
+        // Dump the env vars codebus is expected to scope-inject for the
+        // azure profile. `claude-code-endpoint-profiles` change uses this
+        // to assert `Command::envs` actually carries the 3 vars without
+        // leaking to the parent shell. Missing var → omit line.
+        for key in [
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_DISABLE_ADVISOR_TOOL",
+        ] {
+            if let Ok(v) = env::var(key) {
+                log.push_str(&format!("env_{key}={v}\n"));
+            }
+        }
         let _ = fs::write(path, log);
     }
 

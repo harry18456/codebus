@@ -223,7 +223,8 @@ fn query_propagates_agent_exit_code() {
 }
 
 /// Spec: "Query subcommand forwards configured model and effort" — default
-/// `claude_code.query` is `{ model: haiku, effort: low }`.
+/// `claude_code.system.query` is `{ model: haiku-4-5, effort: low }` and
+/// the SystemModel enum translates `haiku-4-5` to `claude-haiku-4-5`.
 #[test]
 fn query_spawn_includes_default_model_and_effort_flags() {
     let tmp = TempDir::new().unwrap();
@@ -233,8 +234,8 @@ fn query_spawn_includes_default_model_and_effort_flags() {
     let (_out, log) = run_query(tmp.path(), "test", "success-noop");
     let dump = fs::read_to_string(&log).expect("mock-claude log");
     assert!(
-        dump.contains("arg=--model") && dump.contains("arg=haiku"),
-        "expected --model haiku in spawn argv; dump:\n{dump}"
+        dump.contains("arg=--model") && dump.contains("arg=claude-haiku-4-5"),
+        "expected --model claude-haiku-4-5 in spawn argv; dump:\n{dump}"
     );
     assert!(
         dump.contains("arg=--effort") && dump.contains("arg=low"),

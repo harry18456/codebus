@@ -8,5 +8,7 @@
 //! actually validated, not speculatively now.
 
 pub mod claude_cli;
+pub mod env_overrides;
 
 pub use claude_cli::{InvokeAgentOptions, InvokeReport, invoke};
+pub use env_overrides::EnvOverrides;

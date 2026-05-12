@@ -8,20 +8,26 @@
 use codebus_core::config::{LogConfig, default_config_path, load_log_config};
 use codebus_core::log::{RunLog, SinkConfig, build_sink};
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
-/// Load the `log:` config section from `~/.codebus/config.yaml` with stderr
-/// warning + default fallback on parse failure (mirrors the
-/// `load_*_config_with_warning` helpers in init.rs / goal.rs).
-pub fn load_log_config_with_warning() -> LogConfig {
+/// Load the `log:` config section from `~/.codebus/config.yaml`. Returns
+/// `Default::default()` when the config file does not exist (first-time
+/// setup). Returns `Err(ExitCode)` when the file exists but fails to
+/// parse — caller SHALL propagate the exit code without writing to the
+/// run-log sink (spec: cli / `Config Parse Failure Aborts Invocation`).
+pub fn load_log_config_with_warning() -> Result<LogConfig, ExitCode> {
     let path = match default_config_path() {
         Some(p) => p,
-        None => return LogConfig::default(),
+        None => return Ok(LogConfig::default()),
     };
     match load_log_config(&path) {
-        Ok(cfg) => cfg,
+        Ok(cfg) => Ok(cfg),
         Err(e) => {
-            eprintln!("warning: log config load failed (using defaults): {e}");
-            LogConfig::default()
+            eprintln!(
+                "error: log config parse failed at {}: {e}",
+                path.display()
+            );
+            Err(ExitCode::from(2))
         }
     }
 }

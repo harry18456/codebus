@@ -13,12 +13,22 @@
 //! `default_config_path()` resolves to `<home>/.codebus/config.yaml`.
 
 pub mod claude_code;
+pub mod endpoint;
 pub mod global_starter;
+pub mod keyring;
 pub mod lint_fix;
 pub mod log;
 pub mod pii;
 
-pub use claude_code::{ClaudeCodeConfig, VerbAgentConfig, load_claude_code_config};
+pub use claude_code::{
+    LEGACY_MIGRATION_WARNING, ResolvedVerb, Verb, build_env_overrides, load_claude_code_config,
+    load_claude_code_config_into,
+};
+pub use keyring::KeyringError;
+pub use endpoint::{
+    ActiveProfile, AzureProfile, AzureVerbConfig, ClaudeCodeConfig, SystemModel, SystemProfile,
+    SystemVerbConfig,
+};
 pub use global_starter::{StarterOutcome, write_starter_config_if_missing};
 pub use lint_fix::{LintFixConfig, load_lint_fix_config};
 pub use log::{LogConfig, load_log_config};

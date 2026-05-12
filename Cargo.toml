@@ -26,6 +26,8 @@ ignore = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 tempfile = "3"
 supports-hyperlinks = "3"
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native", "sync-secret-service"] }
+rpassword = "7"
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-dialog = "2"

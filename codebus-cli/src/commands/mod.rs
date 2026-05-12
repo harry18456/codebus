@@ -1,3 +1,4 @@
+pub mod config;
 pub mod fix;
 pub mod goal;
 pub mod hook;

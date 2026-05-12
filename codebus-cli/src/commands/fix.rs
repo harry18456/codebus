@@ -11,8 +11,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use codebus_core::config::{
-    ClaudeCodeConfig, LintFixConfig, default_config_path, load_claude_code_config,
-    load_lint_fix_config,
+    ClaudeCodeConfig, LintFixConfig, Verb, build_env_overrides, default_config_path,
+    load_claude_code_config, load_lint_fix_config,
 };
 use codebus_core::git::auto_commit;
 use codebus_core::log::RunLog;
@@ -60,13 +60,17 @@ pub async fn run(
         eprintln!("[debug] fix: --no-fix = {no_fix}");
     }
 
-    // Load config and merge CLI overrides.
+    // Load config and merge CLI overrides. Fail-loud on parse error
+    // (spec: cli / Config Parse Failure Aborts Invocation).
     let cfg = match default_config_path() {
         Some(p) => match load_lint_fix_config(&p) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("warning: lint.fix config load failed (using defaults): {e}");
-                LintFixConfig::default()
+                eprintln!(
+                    "error: lint.fix config parse failed at {}: {e}",
+                    p.display()
+                );
+                return ExitCode::from(2);
             }
         },
         None => LintFixConfig::default(),
@@ -79,13 +83,16 @@ pub async fn run(
     }
 
     // Load claude_code.fix config so the spawned agent gets the configured
-    // model/effort flags. Failure → defaults (sonnet/medium) per spec.
+    // model/effort flags. Fail-loud on parse error per spec.
     let cc_cfg = match default_config_path() {
         Some(p) => match load_claude_code_config(&p) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("warning: claude_code config load failed (using defaults): {e}");
-                ClaudeCodeConfig::default()
+                eprintln!(
+                    "error: claude_code config parse failed at {}: {e}",
+                    p.display()
+                );
+                return ExitCode::from(2);
             }
         },
         None => ClaudeCodeConfig::default(),
@@ -93,12 +100,25 @@ pub async fn run(
 
     // Run the single-shot flow. The fix module handles initial-clean
     // short-circuit internally — no spawn on clean vault.
+    let fix_resolved = cc_cfg.resolve(Verb::Fix);
+    // Profile-aware env injection (system → empty; azure → 3-key inject
+    // with key resolved via keyring → env fallback chain). Failure to
+    // resolve the key → exit non-zero BEFORE the fix lint-spawn loop
+    // begins.
+    let fix_env = match build_env_overrides(&cc_cfg) {
+        Ok(env) => env,
+        Err(e) => {
+            eprintln!("error: fix: {e}");
+            return ExitCode::from(3);
+        }
+    };
     print_banner(Banner::LintStart, render_opts);
     let lint_started = Instant::now();
     let report = match run_fix_loop(
         paths.root.clone(),
-        cc_cfg.fix.model.clone(),
-        cc_cfg.fix.effort.clone(),
+        fix_resolved.model.clone(),
+        fix_resolved.effort.clone(),
+        fix_env,
         render_opts,
     ) {
         Ok(r) => r,
@@ -164,8 +184,8 @@ pub async fn run(
         let run_log = RunLog {
             goal: String::new(), // fix has no positional argument
             mode: "fix".into(),
-            model: cc_cfg.fix.model,
-            effort: cc_cfg.fix.effort,
+            model: fix_resolved.model.clone(),
+            effort: fix_resolved.effort.clone(),
             started_at: invoke_report.started_at.clone(),
             finished_at: invoke_report.finished_at.clone(),
             tokens: invoke_report.accumulated_tokens.clone(),
@@ -173,7 +193,10 @@ pub async fn run(
             lint_error_count: report.final_lint.error_count,
             lint_warn_count: report.final_lint.warn_count,
         };
-        let log_cfg = load_log_config_with_warning();
+        let log_cfg = match load_log_config_with_warning() {
+            Ok(c) => c,
+            Err(code) => return code,
+        };
         let sink_cfg = resolve_sink_dir(log_cfg, &paths.log);
         write_run_log(sink_cfg, &run_log);
     }

@@ -67,23 +67,47 @@ pii:
   # masking everything (Warn matches included).
   on_hit: warn
 
-# Per-verb Claude Code agent config. `model` and `effort` flow through to
-# the spawned `claude -p` invocation as `--model <X>` / `--effort <Y>`.
-# Any string accepted by the Claude CLI is valid here (codebus does not
-# validate; the CLI does).
+# Claude Code endpoint + per-verb agent config. Two profiles are supported:
+#   system — use the user's globally configured Claude CLI endpoint (no env
+#            injection). `model` is a closed enum: opus-4-7 / opus-4-6 /
+#            haiku-4-5 / sonnet-4-6 (codebus translates to the right --model
+#            flag).
+#   azure  — talk to an Azure AI Foundry Anthropic-compatible endpoint.
+#            `model` is the Azure deployment name (a free string, passed
+#            verbatim). API key is read from the OS keyring; codebus
+#            injects ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY /
+#            CLAUDE_CODE_DISABLE_ADVISOR_TOOL into the child process only —
+#            never modifies the parent shell environment.
+#
+# The `active` selector picks which profile drives the spawn. The other
+# profile is cold storage: codebus does NOT validate its fields, so you
+# can park half-edited config there while iterating.
 claude_code:
-  goal:
-    # Reasoning-heavy ingest into the wiki — defaults to opus.
-    model: opus
-    effort: high
-  query:
-    # Read-only retrieval — defaults to haiku for fast turnaround.
-    model: haiku
-    effort: low
-  fix:
-    # Lint-and-edit loop — balanced choice.
-    model: sonnet
-    effort: medium
+  active: system
+
+  system:
+    goal:
+      # Reasoning-heavy ingest into the wiki — v2-verified default.
+      model: opus-4-6
+      effort: high
+    query:
+      # Read-only retrieval — fast turnaround.
+      model: haiku-4-5
+      effort: low
+    fix:
+      # Lint-and-edit loop — balanced choice.
+      model: sonnet-4-6
+      effort: medium
+
+  # Uncomment + fill in to use Azure endpoints. Run
+  #   codebus config set-key azure
+  # to store the API key in your OS keyring.
+  # azure:
+  #   base_url: https://<your-resource>.cognitiveservices.azure.com/anthropic
+  #   keyring_service: codebus-azure
+  #   goal:  { model: <your-opus-deployment-name>,   effort: high   }
+  #   query: { model: <your-haiku-deployment-name>,  effort: low    }
+  #   fix:   { model: <your-sonnet-deployment-name>, effort: medium }
 
 # Lint subsystem.
 lint:

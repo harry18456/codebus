@@ -362,8 +362,9 @@ fn goal_propagates_fix_exit_one_when_post_spawn_lint_has_issues() {
 }
 
 /// Spec: "Goal subcommand forwards configured model and effort" — default
-/// `claude_code.goal` is `{ model: opus, effort: high }`, both flags appear
-/// on the spawned argv.
+/// `claude_code.system.goal` is `{ model: opus-4-6, effort: high }` after
+/// the `claude-code-endpoint-profiles` change. The SystemModel enum
+/// translates `opus-4-6` → `claude-opus-4-6` for the spawn argv.
 #[test]
 fn goal_spawn_includes_default_model_and_effort_flags() {
     let tmp = TempDir::new().unwrap();
@@ -373,8 +374,8 @@ fn goal_spawn_includes_default_model_and_effort_flags() {
     let (_out, log) = run_goal(tmp.path(), "test", &[], "success-noop");
     let dump = fs::read_to_string(&log).expect("mock-claude log");
     assert!(
-        dump.contains("arg=--model") && dump.contains("arg=opus"),
-        "expected --model opus in spawn argv; dump:\n{dump}"
+        dump.contains("arg=--model") && dump.contains("arg=claude-opus-4-6"),
+        "expected --model claude-opus-4-6 in spawn argv; dump:\n{dump}"
     );
     assert!(
         dump.contains("arg=--effort") && dump.contains("arg=high"),
@@ -383,7 +384,8 @@ fn goal_spawn_includes_default_model_and_effort_flags() {
 }
 
 /// Spec: "User-provided non-default values flow through" — config override
-/// of `claude_code.goal.model` reaches the spawned argv.
+/// of `claude_code.system.goal.model` reaches the spawned argv (system
+/// profile, alias `opus-4-7` translates to `claude-opus-4-7`).
 #[test]
 fn goal_spawn_forwards_user_configured_model() {
     let tmp = TempDir::new().unwrap();
@@ -393,7 +395,7 @@ fn goal_spawn_forwards_user_configured_model() {
     fs::create_dir_all(&cfg_dir).unwrap();
     fs::write(
         cfg_dir.join("config.yaml"),
-        "claude_code:\n  goal:\n    model: claude-opus-4-7\n    effort: max\n",
+        "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-7, effort: max }\n    query: { model: haiku-4-5,  effort: low }\n    fix:   { model: sonnet-4-6, effort: medium }\n",
     )
     .unwrap();
 
