@@ -11,7 +11,7 @@ CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 
 | # | Change | Scope (one line) | Depends on |
 |---|---|---|---|
 | 1 | `v3-app-foundation` | Tauri shell + IPC bridge（5 commands） + Lobby（populated + empty） + Settings modal（7 fields） + Workspace stub + design system foundation（Tailwind v4 token / shadcn primitives） | — |
-| A | `v3-goal-library` | goal + query orchestration 搬進 codebus-core；`agent::invoke()` 加 `on_event` callback；`run_goal` / `run_query` 接 `CancellationToken`；CLI 端 byte-equivalent thin wrapper（鏡像 foundation 的 `init::run_init` pattern） | — |
+| A | `v3-goal-library` | 3 個 spawn verb（goal / query / fix）orchestration 搬進 codebus-core；`agent::invoke()` 加 `on_event` callback；`run_goal` / `run_query` / `run_fix` 接 `CancellationToken`；CLI 三個 commands 變 thin wrapper byte-equivalent（鏡像 foundation 的 `init::run_init` pattern）。lint 已 library 不動。 | — |
 | B | `v3-run-log-events` | RunLog schema 加 `outcome`（`succeeded` / `failed` / `cancelled`）；per-run events.jsonl 持久化（`<vault>/.codebus/log/events-<started_at_slug>.jsonl`）；cancel path 寫 `outcome=cancelled` 且不 auto-commit；GUI-spawned runs 強制寫（忽略 `log.sink: none`） | A |
 | C | `v3-app-workspace-goal` | Vault Workspace 真內容：sidebar Goals/Wiki/Quiz tabs + Wiki preview (Milkdown) + Goal flow（modal + inline mini-stream + running / done / cancelled / interrupted detail view 含 `[Retry with same goal]`） | foundation + A + B |
 | D | `v3-app-query-cmdk` | Cmd+K spotlight query 抽屜（streaming + 引用）— 重用 A 的 `run_query` + C 的 stream rendering pipeline + spotlight UX（Ctrl/Cmd+K 喚出、搜尋框、即時 stream、引用 link 可點回 wiki preview） | C |

@@ -46,16 +46,36 @@ stream render 跟 invoke 綁死。GUI 想 reuse `invoke()` 把 events emit 到 T
 
 ## Q1 / Q2 / Q3 決議
 
-### D1（Q1）：CLI goal orchestration 抽進 codebus-core library
+### D1（Q1）：CLI 三個 spawn verb 全部抽進 codebus-core library
 
 **拆獨立 prerequisite change** `v3-goal-library`：
 
 - `codebus_core::agent::invoke()` 加 `on_event: impl FnMut(StreamEvent)` callback
 - CLI 端 closure 包 `print_event` 保持 byte-equivalent stdout
-- 抽 `codebus_core::cmd::goal::run_goal(repo, options, on_event, cancel_token)` —— 鏡像 foundation 的 `init::run_init` pattern
-- 同時抽 `codebus_core::cmd::query::run_query`（#3 query-cmdk 後續 reuse，一次抽乾淨）
-- **fix 不抽**：GUI v1 沒 fix UI，scope 控住
-- CLI `commands/goal.rs` / `commands/query.rs` 變 thin wrapper
+- 抽 3 個 spawn verb 為 library function（鏡像 foundation 的 `init::run_init` pattern）：
+  - `codebus_core::cmd::goal::run_goal(repo, options, on_event, cancel_token)`
+  - `codebus_core::cmd::query::run_query(repo, options, on_event, cancel_token)`
+  - `codebus_core::cmd::fix::run_fix(repo, options, on_event, cancel_token)`
+- CLI `commands/{goal,query,fix}.rs` 變 thin wrapper byte-equivalent
+
+#### D1.1：為什麼 3 個一起抽，不分批
+
+實機 grep `codebus-cli/src/commands/*.rs` 後確認：
+
+| Verb | CLI 端內容 | core lib 狀態 |
+|---|---|---|
+| **lint** | 40 行 thin wrapper（clap arg + `wiki::lint::lint_wiki()` + format text/json） | ✅ 已 library，**不抽** |
+| **goal** | ~250 行完整 orchestration（drift / sync / invoke / fix loop / auto-commit / run-log） | ❌ 抽 |
+| **query** | ~100 行 orchestration（vault precondition / config / env build / invoke / run-log） | ❌ 抽 |
+| **fix** | ~150 行 orchestration（vault precondition / lint pre-check / invoke / fix loop / final lint / auto-commit / run-log）— 結構跟 goal 幾乎一模一樣 | ❌ 抽 |
+
+3 個一起抽的理由：
+
+1. **`invoke()` callback refactor 一動，3 個 verb callsite 都要改** — 既然 3 個都要動，順手抽進 library 比讓 3 份 `closure 包 print_event` 散在 CLI 端乾淨
+2. **shape 同類** — goal / query / fix 三個都是「load config → spawn agent → run-log」骨架，抽 1 留 2 或抽 2 留 1 都是人為不一致；抽 0 或抽 3 一致
+3. **不違反 anti-pattern #1**（spec 不寫 single-impl 抽象）— `run_goal` / `run_query` / `run_fix` 是 library function 不是 trait；fix 雖然 GUI v1 不用，caller 仍只有 CLI 一個，但跟 foundation 把 `init::run_init` 抽進 core 同 pattern（caller 也只有 CLI），這是「組織程式碼位置」不是「設計 abstract surface」
+
+lint 不抽是因為 `commands/lint.rs` 已經是 thin wrapper，core lint logic 早在 `codebus_core::wiki::lint` library；GUI 要用直接 call `lint_wiki()`。
 
 ### D2（Q2）：Run-log 擴充存 stream events，CLI 也要做
 
