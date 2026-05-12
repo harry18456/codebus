@@ -65,7 +65,10 @@ pub struct AppConfig {
 /// Missing `app` or `app.quiz` keys collapse to defaults (forward-compat
 /// rule: app must boot cleanly on a config.yaml with no `app:` section).
 pub fn read_app_config(payload: &serde_json::Value) -> Result<AppConfig, AppError> {
-    let app_node = payload.get("app").cloned().unwrap_or(serde_json::Value::Null);
+    let app_node = payload
+        .get("app")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let cfg: AppConfig = if app_node.is_null() {
         AppConfig::default()
     } else {

@@ -235,8 +235,7 @@ pub enum ParseOutcome {
 /// the active profile is fully populated; non-active profile data is
 /// preserved verbatim but not validated.
 pub fn parse_claude_code_yaml(yaml: &str) -> Result<ParseOutcome, ConfigLoadError> {
-    let raw: RawConfigFile =
-        serde_yaml::from_str(yaml).map_err(ConfigLoadError::YamlParse)?;
+    let raw: RawConfigFile = serde_yaml::from_str(yaml).map_err(ConfigLoadError::YamlParse)?;
     let Some(cc) = raw.claude_code else {
         return Ok(ParseOutcome::Missing);
     };
@@ -267,11 +266,11 @@ fn validate_system_profile(
     raw: Option<RawSystemProfile>,
 ) -> Result<SystemProfile, ConfigLoadError> {
     match (active, raw) {
-        (ActiveProfile::System, None) => Err(ConfigLoadError::YamlParse(
-            serde_yaml::Error::custom(
+        (ActiveProfile::System, None) => {
+            Err(ConfigLoadError::YamlParse(serde_yaml::Error::custom(
                 "claude_code.active: system but `claude_code.system` block is missing",
-            ),
-        )),
+            )))
+        }
         (ActiveProfile::System, Some(raw)) => {
             let goal = raw.goal.ok_or_else(|| {
                 ConfigLoadError::YamlParse(serde_yaml::Error::custom(
@@ -304,11 +303,9 @@ fn validate_azure_profile(
     raw: Option<RawAzureProfile>,
 ) -> Result<Option<AzureProfile>, ConfigLoadError> {
     match (active, raw) {
-        (ActiveProfile::Azure, None) => Err(ConfigLoadError::YamlParse(
-            serde_yaml::Error::custom(
-                "claude_code.active: azure but `claude_code.azure` block is missing",
-            ),
-        )),
+        (ActiveProfile::Azure, None) => Err(ConfigLoadError::YamlParse(serde_yaml::Error::custom(
+            "claude_code.active: azure but `claude_code.azure` block is missing",
+        ))),
         (ActiveProfile::Azure, Some(raw)) => {
             let base_url = require_non_empty(raw.base_url, "claude_code.azure.base_url")?;
             let keyring_service =
@@ -330,7 +327,13 @@ fn validate_azure_profile(
         // construct an `AzureProfile` (which would require them) and
         // instead return None so the caller can ignore it.
         (ActiveProfile::System, Some(raw)) => {
-            match (raw.base_url, raw.keyring_service, raw.goal, raw.query, raw.fix) {
+            match (
+                raw.base_url,
+                raw.keyring_service,
+                raw.goal,
+                raw.query,
+                raw.fix,
+            ) {
                 (Some(base_url), Some(keyring_service), Some(goal), Some(query), Some(fix))
                     if !base_url.is_empty() && !keyring_service.is_empty() =>
                 {
@@ -420,7 +423,10 @@ mod tests {
         let yaml = "claude_code:\n  active: system\n  system:\n    goal: { model: gpt-4, effort: high }\n    query: { model: haiku-4-5, effort: low }\n    fix: { model: sonnet-4-6, effort: medium }\n";
         let err = parse_claude_code_yaml(yaml).expect_err("gpt-4 must be rejected");
         let msg = format!("{err}");
-        assert!(msg.contains("variant") || msg.contains("gpt-4"), "got: {msg}");
+        assert!(
+            msg.contains("variant") || msg.contains("gpt-4"),
+            "got: {msg}"
+        );
     }
 
     // === Active=System happy paths ===
@@ -625,6 +631,9 @@ mod tests {
         let yaml = "claude_code:\n  goal: { model: opus, effort: high }\n  system:\n    goal: { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5, effort: low }\n    fix:   { model: sonnet-4-6, effort: medium }\n";
         let err = parse_claude_code_yaml(yaml).expect_err("mixing schemas must be rejected");
         let msg = format!("{err}");
-        assert!(msg.contains("top-level") || msg.contains("legacy"), "got: {msg}");
+        assert!(
+            msg.contains("top-level") || msg.contains("legacy"),
+            "got: {msg}"
+        );
     }
 }

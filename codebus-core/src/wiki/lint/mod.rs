@@ -175,7 +175,12 @@ mod tests {
         let r = lint_wiki(&v);
         let dup_count = count_with(&r, LintSeverity::Warn, "duplicate slug 'cart'");
         assert_eq!(dup_count, 2);
-        assert!(r.issues.iter().filter(|i| i.message.contains("duplicate slug 'cart'")).all(|i| i.rule_id == "duplicate-slug"));
+        assert!(
+            r.issues
+                .iter()
+                .filter(|i| i.message.contains("duplicate slug 'cart'"))
+                .all(|i| i.rule_id == "duplicate-slug")
+        );
         cleanup(&v);
     }
 
@@ -192,10 +197,19 @@ mod tests {
     #[test]
     fn body_wikilink_to_nonexistent_slug_flagged_at_warn() {
         let v = tmp_vault("bodyghost");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), "see [[ghost]]");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &[]),
+            "see [[ghost]]",
+        );
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.md");
-        assert!(issues.iter().any(|i| i.rule_id == "broken-wikilink-body" && i.message.contains("[[ghost]]")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.rule_id == "broken-wikilink-body" && i.message.contains("[[ghost]]"))
+        );
         cleanup(&v);
     }
 
@@ -206,7 +220,11 @@ mod tests {
         frontmatter = frontmatter.replace("related: []", "related:\n  - 'broken-no-brackets'");
         write_page(&v, "concepts/foo.md", &frontmatter, "# foo");
         let r = lint_wiki(&v);
-        let errs: Vec<_> = r.issues.iter().filter(|i| i.rule_id == "related-format").collect();
+        let errs: Vec<_> = r
+            .issues
+            .iter()
+            .filter(|i| i.rule_id == "related-format")
+            .collect();
         assert!(!errs.is_empty());
         cleanup(&v);
     }
@@ -214,16 +232,29 @@ mod tests {
     #[test]
     fn related_entry_to_missing_slug_is_error() {
         let v = tmp_vault("relmissing");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &["[[ghost]]"]), "# foo");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &["[[ghost]]"]),
+            "# foo",
+        );
         let r = lint_wiki(&v);
-        assert!(r.issues.iter().any(|i| i.rule_id == "broken-wikilink-related" && i.message.contains("[[ghost]]")));
+        assert!(
+            r.issues
+                .iter()
+                .any(|i| i.rule_id == "broken-wikilink-related" && i.message.contains("[[ghost]]"))
+        );
         cleanup(&v);
     }
 
     #[test]
     fn frontmatter_parse_failure_is_error() {
         let v = tmp_vault("fmparse");
-        fs::write(v.join("wiki/concepts/broken.md"), "---\n: : not yaml\n---\n").unwrap();
+        fs::write(
+            v.join("wiki/concepts/broken.md"),
+            "---\n: : not yaml\n---\n",
+        )
+        .unwrap();
         let r = lint_wiki(&v);
         assert!(r.issues.iter().any(|i| i.rule_id == "frontmatter-parse"));
         cleanup(&v);
@@ -232,7 +263,12 @@ mod tests {
     #[test]
     fn body_wikilink_inside_inline_code_is_skipped() {
         let v = tmp_vault("inline");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), "use `[[wikilink]]` here");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &[]),
+            "use `[[wikilink]]` here",
+        );
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.md");
         assert!(issues.is_empty(), "expected zero issues, got {issues:?}");
@@ -242,7 +278,12 @@ mod tests {
     #[test]
     fn body_wikilink_inside_fenced_block_is_skipped() {
         let v = tmp_vault("fenced");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &[]), "\n```\n[[ghost]]\n```\n");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &[]),
+            "\n```\n[[ghost]]\n```\n",
+        );
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "concepts/foo.md");
         assert!(issues.is_empty());
@@ -255,7 +296,11 @@ mod tests {
         fs::write(v.join("wiki/index.md"), "see [[ghost]]").unwrap();
         let r = lint_wiki(&v);
         let issues = issues_for_path(&r, "index.md");
-        assert!(issues.iter().any(|i| i.rule_id == "broken-wikilink-nav" && i.message.contains("[[ghost]]")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.rule_id == "broken-wikilink-nav" && i.message.contains("[[ghost]]"))
+        );
         cleanup(&v);
     }
 
@@ -284,7 +329,12 @@ mod tests {
     #[test]
     fn lint_read_only_invariant_dirty_vault() {
         let v = tmp_vault("readonly");
-        write_page(&v, "concepts/foo.md", &fm("foo", "concept", &["[[ghost]]"]), "see [[also-ghost]]");
+        write_page(
+            &v,
+            "concepts/foo.md",
+            &fm("foo", "concept", &["[[ghost]]"]),
+            "see [[also-ghost]]",
+        );
         write_page(&v, "concepts/cart.md", &fm("Cart-c", "concept", &[]), "# c");
         write_page(&v, "entities/cart.md", &fm("Cart-e", "entity", &[]), "# e");
         fs::write(v.join("wiki/orphan.md"), "---\ntitle: orphan\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-05'\nupdated: '2026-05-05'\nrelated: []\nstale: false\n---\n").unwrap();
@@ -292,7 +342,10 @@ mod tests {
         let snap_before = snapshot_dir(&v.join("wiki"));
         let _ = lint_wiki(&v);
         let snap_after = snapshot_dir(&v.join("wiki"));
-        assert_eq!(snap_before, snap_after, "lint must not modify any vault file");
+        assert_eq!(
+            snap_before, snap_after,
+            "lint must not modify any vault file"
+        );
         cleanup(&v);
     }
 

@@ -149,8 +149,8 @@ pub fn write_starter_config_if_missing(path: &Path) -> io::Result<StarterOutcome
 mod tests {
     use super::*;
     use crate::config::{
-        ClaudeCodeConfig, LogConfig, PiiConfig, load_claude_code_config,
-        load_lint_fix_config, load_log_config, load_pii_config,
+        ClaudeCodeConfig, LogConfig, PiiConfig, load_claude_code_config, load_lint_fix_config,
+        load_log_config, load_pii_config,
     };
     use crate::pii::provider::OnHit;
     use tempfile::TempDir;

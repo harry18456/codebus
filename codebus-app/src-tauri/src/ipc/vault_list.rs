@@ -95,7 +95,10 @@ pub(crate) fn list_vaults_at(state_path: &Path) -> IpcResult<Vec<VaultEntry>> {
     if migrated {
         let _ = save_app_state(state_path, &state);
     }
-    Ok(map_to_vault_entries(state.vault_list.clone(), default_path_exists))
+    Ok(map_to_vault_entries(
+        state.vault_list.clone(),
+        default_path_exists,
+    ))
 }
 
 #[tauri::command]
@@ -206,8 +209,7 @@ pub(crate) fn add_vault_at(
         (AddVaultMode::JustBind, false) => {
             return Err(AppError::Invalid {
                 field: "mode".into(),
-                message: "just_bind requires an existing .codebus/ at the target path"
-                    .into(),
+                message: "just_bind requires an existing .codebus/ at the target path".into(),
             });
         }
         (AddVaultMode::JustBind, true) => {
@@ -256,10 +258,7 @@ fn init_opts() -> InitOptions {
 }
 
 #[tauri::command]
-pub async fn add_vault(
-    path: String,
-    options: AddVaultOptions,
-) -> IpcResult<VaultEntry> {
+pub async fn add_vault(path: String, options: AddVaultOptions) -> IpcResult<VaultEntry> {
     let state_path = app_state_path().ok_or_else(|| AppError::Internal {
         message: "home directory unavailable".into(),
     })?;
@@ -416,7 +415,10 @@ mod tests {
         });
 
         assert!(!entry.is_missing);
-        assert!(sentinel.is_file(), "just_bind must not touch vault contents");
+        assert!(
+            sentinel.is_file(),
+            "just_bind must not touch vault contents"
+        );
     }
 
     #[test]
@@ -445,8 +447,8 @@ mod tests {
 
         with_codebus_home(home.path(), || {
             add_vault_at(&state_path, repo.path(), &opts).expect("first add ok");
-            let err = add_vault_at(&state_path, repo.path(), &opts)
-                .expect_err("second add must fail");
+            let err =
+                add_vault_at(&state_path, repo.path(), &opts).expect_err("second add must fail");
             assert!(matches!(err, AppError::VaultAlreadyExists { .. }));
         });
     }
@@ -563,9 +565,6 @@ mod tests {
             !entries[0].is_missing,
             "real tempdir path should not be missing"
         );
-        assert!(
-            entries[1].is_missing,
-            "bogus path should be missing"
-        );
+        assert!(entries[1].is_missing, "bogus path should be missing");
     }
 }

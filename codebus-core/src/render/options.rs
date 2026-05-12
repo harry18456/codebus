@@ -49,8 +49,8 @@ impl RenderOptions {
     pub fn detect_with_vault_id(vault_id: Option<String>) -> Self {
         let use_emoji = std::io::stdout().is_terminal();
         let use_color = use_emoji && std::env::var_os("NO_COLOR").is_none();
-        let use_hyperlinks = use_color
-            && supports_hyperlinks::on(supports_hyperlinks::Stream::Stdout);
+        let use_hyperlinks =
+            use_color && supports_hyperlinks::on(supports_hyperlinks::Stream::Stdout);
         Self {
             use_emoji,
             use_color,
@@ -141,7 +141,10 @@ mod tests {
     fn detect_invariant_hyperlinks_implies_color() {
         let opts = RenderOptions::detect();
         if opts.use_hyperlinks {
-            assert!(opts.use_color, "hyperlinks=true requires color=true in detect()");
+            assert!(
+                opts.use_color,
+                "hyperlinks=true requires color=true in detect()"
+            );
         }
     }
 
@@ -149,7 +152,10 @@ mod tests {
     fn detect_invariant_color_implies_emoji() {
         let opts = RenderOptions::detect();
         if opts.use_color {
-            assert!(opts.use_emoji, "color=true requires emoji=true (TTY) in detect()");
+            assert!(
+                opts.use_emoji,
+                "color=true requires emoji=true (TTY) in detect()"
+            );
         }
     }
 

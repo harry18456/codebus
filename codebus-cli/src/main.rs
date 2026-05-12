@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use codebus_core::render::RenderOptions;
 
 mod commands;
-mod run_log;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -70,8 +69,13 @@ async fn main() -> ExitCode {
     let render_opts = RenderOptions::detect();
     match cli.command {
         None | Some(Command::Init) => {
-            commands::init::run(&repo_default, cli.no_obsidian_register, cli.debug, &render_opts)
-                .await
+            commands::init::run(
+                &repo_default,
+                cli.no_obsidian_register,
+                cli.debug,
+                &render_opts,
+            )
+            .await
         }
         Some(Command::Goal(args)) => {
             commands::goal::run(

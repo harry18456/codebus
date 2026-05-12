@@ -24,9 +24,7 @@ use codebus_app_tauri_lib::ipc::REGISTERED_COMMANDS;
 use codebus_app_tauri_lib::ipc::keyring::{
     KeyStatus, delete_endpoint_key, get_endpoint_key, set_endpoint_key,
 };
-use codebus_core::config::keyring::{
-    delete_azure_key, probe_keyring_only, store_azure_key,
-};
+use codebus_core::config::keyring::{delete_azure_key, probe_keyring_only, store_azure_key};
 use tempfile::TempDir;
 
 fn unique_service() -> String {
@@ -81,10 +79,13 @@ where
 /// three keyring command names are part of the registered set.
 #[test]
 fn registered_commands_includes_three_keyring_names() {
-    let names: std::collections::HashSet<&str> =
-        REGISTERED_COMMANDS.iter().copied().collect();
+    let names: std::collections::HashSet<&str> = REGISTERED_COMMANDS.iter().copied().collect();
     assert_eq!(names.len(), 9);
-    for required in ["set_endpoint_key", "get_endpoint_key", "delete_endpoint_key"] {
+    for required in [
+        "set_endpoint_key",
+        "get_endpoint_key",
+        "delete_endpoint_key",
+    ] {
         assert!(names.contains(required), "missing command: {required}");
     }
 }

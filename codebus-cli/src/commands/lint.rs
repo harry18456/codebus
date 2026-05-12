@@ -14,7 +14,9 @@ use clap::{Args, ValueEnum};
 use codebus_core::render::{RenderOptions, format_lint_text};
 use codebus_core::vault::layout::vault_paths;
 use codebus_core::vault::obsidian_register::lookup_vault_id;
-use codebus_core::wiki::lint::{format_json, format_text, lint_wiki, locate_vault_root, LocateError};
+use codebus_core::wiki::lint::{
+    LocateError, format_json, format_text, lint_wiki, locate_vault_root,
+};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 

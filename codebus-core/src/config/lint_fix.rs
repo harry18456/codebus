@@ -86,7 +86,8 @@ pub fn load_lint_fix_config(path: &Path) -> Result<LintFixConfig, super::ConfigL
         }
         Err(err) => return Err(super::ConfigLoadError::Io(err)),
     };
-    let file: ConfigFile = serde_yaml::from_str(&body).map_err(super::ConfigLoadError::YamlParse)?;
+    let file: ConfigFile =
+        serde_yaml::from_str(&body).map_err(super::ConfigLoadError::YamlParse)?;
     let mut cfg = LintFixConfig::default();
     if let Some(lint) = file.lint {
         if let Some(fix) = lint.fix {
@@ -170,7 +171,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = write_yaml(tmp.path(), "lint:\n  fix:\n    : :: not yaml\n");
         let result = load_lint_fix_config(&p);
-        assert!(matches!(result, Err(super::super::ConfigLoadError::YamlParse(_))));
+        assert!(matches!(
+            result,
+            Err(super::super::ConfigLoadError::YamlParse(_))
+        ));
     }
 
     /// Spec: "--no-fix flag disables fix even when config enables it"

@@ -14,12 +14,8 @@ use std::process::ExitCode;
 
 use clap::{Args, Subcommand, ValueEnum};
 
-use codebus_core::config::keyring::{
-    delete_azure_key, probe_keyring_only, store_azure_key,
-};
-use codebus_core::config::{
-    ClaudeCodeConfig, default_config_path, load_claude_code_config,
-};
+use codebus_core::config::keyring::{delete_azure_key, probe_keyring_only, store_azure_key};
+use codebus_core::config::{ClaudeCodeConfig, default_config_path, load_claude_code_config};
 
 /// Default keyring service when the user has not configured an azure
 /// profile yet. Production callers SHOULD set `claude_code.azure.keyring_service`

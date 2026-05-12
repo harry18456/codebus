@@ -116,7 +116,10 @@ mod tests {
         let cfg = SinkConfig::default();
         let yaml = serde_yaml::to_string(&cfg).unwrap();
         assert!(yaml.contains("sink: jsonl"), "yaml: {yaml}");
-        assert!(!yaml.contains("dir:"), "dir: None should be skipped: {yaml}");
+        assert!(
+            !yaml.contains("dir:"),
+            "dir: None should be skipped: {yaml}"
+        );
     }
 
     #[test]

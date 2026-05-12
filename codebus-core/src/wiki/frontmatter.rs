@@ -270,7 +270,10 @@ mod tests {
     fn related_with_quoted_wikilinks_parses_to_bracketed_strings() {
         let content = "---\ntitle: x\ntype: concept\nsources: []\ngoals: []\ncreated: '2026-05-05'\nupdated: '2026-05-05'\nrelated:\n  - '[[a]]'\n  - '[[b]]'\nstale: false\n---\n";
         let p = parse_page(content).unwrap();
-        assert_eq!(p.frontmatter.related, vec!["[[a]]".to_string(), "[[b]]".to_string()]);
+        assert_eq!(
+            p.frontmatter.related,
+            vec!["[[a]]".to_string(), "[[b]]".to_string()]
+        );
     }
 
     #[test]

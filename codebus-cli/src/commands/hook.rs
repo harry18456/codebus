@@ -159,7 +159,9 @@ mod tests {
     fn allow_codebus_via_unix_absolute_path() {
         if !cfg!(target_os = "windows") {
             assert!(is_codebus_lint_command("/usr/local/bin/codebus lint"));
-            assert!(is_codebus_lint_command("/home/user/.cargo/bin/codebus lint --format json"));
+            assert!(is_codebus_lint_command(
+                "/home/user/.cargo/bin/codebus lint --format json"
+            ));
         }
     }
 
@@ -167,7 +169,9 @@ mod tests {
     fn allow_codebus_exe_via_windows_path() {
         if cfg!(target_os = "windows") {
             assert!(is_codebus_lint_command("D:/dev/codebus.exe lint"));
-            assert!(is_codebus_lint_command("D:\\dev\\codebus.exe lint --repo C:\\repo"));
+            assert!(is_codebus_lint_command(
+                "D:\\dev\\codebus.exe lint --repo C:\\repo"
+            ));
             assert!(is_codebus_lint_command("D:/dev/codebus.EXE lint"));
             assert!(is_codebus_lint_command("D:/dev/Codebus.exe lint"));
         }
@@ -229,7 +233,10 @@ mod tests {
             "{{\"decision\":\"block\",\"reason\":{}}}",
             json_escape("test message")
         );
-        assert_eq!(payload, "{\"decision\":\"block\",\"reason\":\"test message\"}");
+        assert_eq!(
+            payload,
+            "{\"decision\":\"block\",\"reason\":\"test message\"}"
+        );
         // Confirm the payload parses as JSON.
         let parsed: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(parsed["decision"], "block");

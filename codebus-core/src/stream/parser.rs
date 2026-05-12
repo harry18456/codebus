@@ -327,7 +327,8 @@ mod tests {
 
     #[test]
     fn malformed_json_returns_empty_vec_no_panic() {
-        let result = parse_claude_stream_line(r#"{"type":"assistant","message":{"content":[{"type":"#);
+        let result =
+            parse_claude_stream_line(r#"{"type":"assistant","message":{"content":[{"type":"#);
         assert!(result.is_empty());
     }
 

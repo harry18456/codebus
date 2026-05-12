@@ -143,10 +143,12 @@ pub fn run_fix(
 
     // Step 5: load claude_code config.
     let cc_cfg = match default_config_path() {
-        Some(p) if p.exists() => load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
-            which: "claude_code",
-            source: e,
-        })?,
+        Some(p) if p.exists() => {
+            load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
+                which: "claude_code",
+                source: e,
+            })?
+        }
         _ => Default::default(),
     };
 

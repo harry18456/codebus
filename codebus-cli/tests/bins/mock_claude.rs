@@ -24,8 +24,7 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let log_path = env::var("CODEBUS_MOCK_LOG").ok();
-    let behavior = env::var("CODEBUS_MOCK_BEHAVIOR")
-        .unwrap_or_else(|_| "success-noop".to_string());
+    let behavior = env::var("CODEBUS_MOCK_BEHAVIOR").unwrap_or_else(|_| "success-noop".to_string());
     let args: Vec<String> = env::args().skip(1).collect();
     let cwd: PathBuf = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 

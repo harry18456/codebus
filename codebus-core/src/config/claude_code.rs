@@ -14,13 +14,13 @@ use std::fs;
 use std::path::Path;
 
 use super::ConfigLoadError;
-use crate::config::endpoint::{
-    ActiveProfile, ClaudeCodeConfig, ParseOutcome, parse_claude_code_yaml,
-};
 use super::keyring::{KeyringError, read_azure_key};
 use crate::agent::EnvOverrides;
 #[cfg(test)]
 use crate::config::endpoint::SystemModel;
+use crate::config::endpoint::{
+    ActiveProfile, ClaudeCodeConfig, ParseOutcome, parse_claude_code_yaml,
+};
 
 /// Which verb's settings to resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,9 +128,7 @@ NOT been modified.";
 ///   modified.
 /// - File exists but yaml is structurally invalid OR the new schema has
 ///   an invalid required field → returns [`ConfigLoadError::YamlParse`].
-pub fn load_claude_code_config(
-    path: &Path,
-) -> Result<ClaudeCodeConfig, ConfigLoadError> {
+pub fn load_claude_code_config(path: &Path) -> Result<ClaudeCodeConfig, ConfigLoadError> {
     load_claude_code_config_into(path, &mut std::io::stderr())
 }
 
@@ -232,7 +230,10 @@ mod tests {
         assert_eq!(cfg, ClaudeCodeConfig::default());
 
         let after = fs::read(&p).unwrap();
-        assert_eq!(before, after, "legacy detection must not rewrite the user file");
+        assert_eq!(
+            before, after,
+            "legacy detection must not rewrite the user file"
+        );
     }
 
     /// Invalid yaml → propagate the parse error so the caller can warn +
@@ -246,7 +247,10 @@ mod tests {
         );
         let err = load_claude_code_config(&p).expect_err("bogus active rejected");
         let msg = format!("{err}");
-        assert!(msg.contains("bogus") || msg.contains("variant"), "got: {msg}");
+        assert!(
+            msg.contains("bogus") || msg.contains("variant"),
+            "got: {msg}"
+        );
     }
 
     // === build_env_overrides ===

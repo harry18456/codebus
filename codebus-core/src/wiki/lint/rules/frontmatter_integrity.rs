@@ -59,9 +59,7 @@ impl LintRule for FrontmatterIntegrityRule {
                                 path: page.rel_path.clone(),
                                 severity: LintSeverity::Error,
                                 rule_id: "related-format".into(),
-                                message: format!(
-                                    "related[] entry not in [[wikilink]] format: {r}"
-                                ),
+                                message: format!("related[] entry not in [[wikilink]] format: {r}"),
                             });
                         }
                     }

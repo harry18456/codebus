@@ -28,9 +28,7 @@ pub enum KeyringError {
     /// Spawning the agent is impossible because no API key can be resolved
     /// from either source. Error message names both the keyring service
     /// AND the env var so the user knows exactly what to set.
-    EndpointKeyMissing {
-        service: String,
-    },
+    EndpointKeyMissing { service: String },
     /// A keyring backend operation failed for a reason other than
     /// missing-entry (e.g. credential storage write rejected by the OS).
     /// Distinct from `EndpointKeyMissing` so callers can decide whether
@@ -49,7 +47,10 @@ impl std::fmt::Display for KeyringError {
                 "EndpointKeyMissing: no api key found in keyring (service={service}, account={KEYRING_ACCOUNT}) AND env var {ENV_FALLBACK} is unset or empty. Run `codebus config set-key azure` or `export {ENV_FALLBACK}=<your-key>`."
             ),
             KeyringError::Backend { service, source } => {
-                write!(f, "keyring backend error for ({service}, {KEYRING_ACCOUNT}): {source}")
+                write!(
+                    f,
+                    "keyring backend error for ({service}, {KEYRING_ACCOUNT}): {source}"
+                )
             }
         }
     }
@@ -143,23 +144,23 @@ pub fn read_azure_key(service: &str) -> Result<String, KeyringError> {
 /// Store `value` as the keyring password for `(service, "default")`.
 /// Overwrites any existing entry.
 pub fn store_azure_key(service: &str, value: &str) -> Result<(), KeyringError> {
-    SystemKeyring.store(service, value).map_err(|source| {
-        KeyringError::Backend {
+    SystemKeyring
+        .store(service, value)
+        .map_err(|source| KeyringError::Backend {
             service: service.to_string(),
             source,
-        }
-    })
+        })
 }
 
 /// Remove the keyring entry for `(service, "default")`. Idempotent —
 /// returns `Ok(())` whether or not the entry existed.
 pub fn delete_azure_key(service: &str) -> Result<(), KeyringError> {
-    SystemKeyring.delete(service).map_err(|source| {
-        KeyringError::Backend {
+    SystemKeyring
+        .delete(service)
+        .map_err(|source| KeyringError::Backend {
             service: service.to_string(),
             source,
-        }
-    })
+        })
 }
 
 /// Probe the keyring without consulting the `CODEBUS_AZURE_KEY` env
@@ -173,12 +174,12 @@ pub fn delete_azure_key(service: &str) -> Result<(), KeyringError> {
 /// purely on keyring state. Surfacing env-fallback values here would
 /// mask a missing keyring entry and confuse `delete-key`'s semantics.
 pub fn probe_keyring_only(service: &str) -> Result<Option<String>, KeyringError> {
-    SystemKeyring.read(service).map_err(|source| {
-        KeyringError::Backend {
+    SystemKeyring
+        .read(service)
+        .map_err(|source| KeyringError::Backend {
             service: service.to_string(),
             source,
-        }
-    })
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +245,9 @@ mod tests {
         fn store(&self, service: &str, value: &str) -> Result<(), keyring::Error> {
             match self {
                 MockKeyring::Present(m) => {
-                    m.lock().unwrap().insert(service.to_string(), value.to_string());
+                    m.lock()
+                        .unwrap()
+                        .insert(service.to_string(), value.to_string());
                     Ok(())
                 }
                 MockKeyring::Absent | MockKeyring::Unavailable => Err(keyring::Error::NoEntry),
@@ -262,7 +265,9 @@ mod tests {
     }
 
     fn with_env<F: FnOnce()>(value: Option<&str>, f: F) {
-        let _g = super::TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _g = super::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let prev = std::env::var(ENV_FALLBACK).ok();
         unsafe {
             match value {

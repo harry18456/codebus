@@ -220,9 +220,6 @@ mod tests {
         // to when the file exists.
         let cfg = LogConfig::default();
         // Default shape: Jsonl { dir: None }
-        assert!(matches!(
-            cfg.sink,
-            SinkConfig::Jsonl { dir: None }
-        ));
+        assert!(matches!(cfg.sink, SinkConfig::Jsonl { dir: None }));
     }
 }

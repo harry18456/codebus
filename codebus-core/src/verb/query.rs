@@ -50,12 +50,16 @@ pub struct QueryOptions {
 
 /// Successful query run summary. Query is read-only so `wiki_changed`
 /// and lint counts are absent (always zero conceptually — the RunLog
-/// entry written internally records them as zero).
+/// entry written internally records them as zero). `agent_exit_code`
+/// is the spawned agent's process exit code (None when the platform
+/// reported a signal termination); CLI thin wrapper propagates it as
+/// its own exit code so existing exit-code-propagation tests stay green.
 #[derive(Debug, Clone)]
 pub struct QueryReport {
     pub accumulated_tokens: TokenUsage,
     pub started_at: String,
     pub finished_at: String,
+    pub agent_exit_code: Option<i32>,
 }
 
 /// Run the query verb against `repo`. See module docs for orchestration order.
@@ -81,10 +85,12 @@ pub fn run_query(
 
     // Step 3: load claude_code config.
     let cc_cfg = match default_config_path() {
-        Some(p) if p.exists() => load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
-            which: "claude_code",
-            source: e,
-        })?,
+        Some(p) if p.exists() => {
+            load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
+                which: "claude_code",
+                source: e,
+            })?
+        }
         _ => Default::default(),
     };
 
@@ -169,6 +175,7 @@ pub fn run_query(
         accumulated_tokens: invoke_report.accumulated_tokens,
         started_at: invoke_report.started_at,
         finished_at: invoke_report.finished_at,
+        agent_exit_code: invoke_report.exit.code(),
     })
 }
 
@@ -192,21 +199,27 @@ mod tests {
         );
         match result {
             Err(VerbError::VaultMissing { path }) => {
-                assert!(path.ends_with(".codebus"), "expected path to .codebus, got {path:?}");
+                assert!(
+                    path.ends_with(".codebus"),
+                    "expected path to .codebus, got {path:?}"
+                );
             }
             other => panic!("expected VaultMissing, got {other:?}"),
         }
         // The Start banner SHOULD fire before precondition check.
         let collected = events.borrow();
         assert!(
-            collected.iter().any(|e| matches!(e, VerbEvent::Banner(VerbBanner::Start { .. }))),
+            collected
+                .iter()
+                .any(|e| matches!(e, VerbEvent::Banner(VerbBanner::Start { .. }))),
             "expected Start banner before precondition check"
         );
         // SpawnStart SHALL NOT fire — agent never spawned.
         assert!(
-            !collected
-                .iter()
-                .any(|e| matches!(e, VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart { .. }))),
+            !collected.iter().any(|e| matches!(
+                e,
+                VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart { .. })
+            )),
             "agent must not spawn when vault is missing"
         );
     }

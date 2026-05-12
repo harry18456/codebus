@@ -55,10 +55,7 @@ pub fn format_event(event: &StreamEvent, opts: &RenderOptions) -> String {
                     .and_then(Value::as_str)
                     .map(normalize_path)
                     .unwrap_or_else(|| "(unknown)".into());
-                format!(
-                    "{} [正在生成]\n{INDENT}{fp}",
-                    lead("✍️", "+", opts)
-                )
+                format!("{} [正在生成]\n{INDENT}{fp}", lead("✍️", "+", opts))
             } else {
                 let args = format_tool_args(input);
                 format!(
@@ -83,11 +80,7 @@ pub fn format_event(event: &StreamEvent, opts: &RenderOptions) -> String {
             // is_error already conveyed by the tool's own output; we don't
             // duplicate the signal in the renderer.
             let _ = is_error;
-            format!(
-                "{} [觀察結果]\n{}",
-                lead("👀", "←", opts),
-                indent(&body)
-            )
+            format!("{} [觀察結果]\n{}", lead("👀", "←", opts), indent(&body))
         }
         StreamEvent::Usage(_) => String::new(),
     }
@@ -190,10 +183,7 @@ mod tests {
     /// Spec scenario: "Thought ASCII fallback uses diamond glyph"
     #[test]
     fn thought_ascii_fallback_uses_diamond() {
-        let s = format_event(
-            &StreamEvent::Thought { text: "x".into() },
-            &emoji_off(),
-        );
+        let s = format_event(&StreamEvent::Thought { text: "x".into() }, &emoji_off());
         assert!(s.starts_with("◆ [Agent 思考]"), "got: {s:?}");
     }
 

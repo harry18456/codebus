@@ -69,14 +69,26 @@ impl LintRule for BrokenWikilinkRule {
                 }
             }
 
-            scan_body(&parsed.body, &page.rel_path, page_slugs, &mut issues, "broken-wikilink-body");
+            scan_body(
+                &parsed.body,
+                &page.rel_path,
+                page_slugs,
+                &mut issues,
+                "broken-wikilink-body",
+            );
         }
 
         for nav in &ctx.nav_files {
             let Some(content) = nav.content.as_ref() else {
                 continue;
             };
-            scan_body(content, nav.name, page_slugs, &mut issues, "broken-wikilink-nav");
+            scan_body(
+                content,
+                nav.name,
+                page_slugs,
+                &mut issues,
+                "broken-wikilink-nav",
+            );
         }
 
         issues

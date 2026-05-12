@@ -370,10 +370,7 @@ fn load_pii_with_warn(on_event: &mut impl FnMut(InitEvent<'_>)) -> PiiConfig {
     }
 }
 
-fn build_scanner(
-    cfg: &PiiConfig,
-    on_event: &mut impl FnMut(InitEvent<'_>),
-) -> Box<dyn PiiScanner> {
+fn build_scanner(cfg: &PiiConfig, on_event: &mut impl FnMut(InitEvent<'_>)) -> Box<dyn PiiScanner> {
     match cfg.scanner {
         PiiScannerKind::Null => Box::new(NullScanner::new()),
         PiiScannerKind::RegexBasic => match RegexBasicScanner::new(&cfg.patterns_extra) {
@@ -382,10 +379,7 @@ fn build_scanner(
                 on_event(InitEvent::PiiPatternsExtraWarn {
                     message: e.to_string(),
                 });
-                Box::new(
-                    RegexBasicScanner::new(&[])
-                        .expect("built-in patterns must compile"),
-                )
+                Box::new(RegexBasicScanner::new(&[]).expect("built-in patterns must compile"))
             }
         },
     }
@@ -402,8 +396,7 @@ fn merge_internal_gitignore(vault_root: &Path) -> io::Result<()> {
         Err(err) => return Err(err),
     };
 
-    let present: std::collections::HashSet<&str> =
-        existing.lines().map(str::trim).collect();
+    let present: std::collections::HashSet<&str> = existing.lines().map(str::trim).collect();
     let missing: Vec<&&str> = INTERNAL_GITIGNORE_LINES
         .iter()
         .filter(|l| !present.contains(*l as &str))
@@ -490,8 +483,8 @@ mod tests {
             no_obsidian_register: true,
             write_starter_config: false,
         };
-        let outcome = run_init(tmp.path(), &opts, |_event| {})
-            .expect("init should succeed in tempdir");
+        let outcome =
+            run_init(tmp.path(), &opts, |_event| {}).expect("init should succeed in tempdir");
 
         // Layout is present.
         assert!(outcome.paths.root.is_dir());

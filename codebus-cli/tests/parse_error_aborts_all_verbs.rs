@@ -118,7 +118,10 @@ fn invalid_system_model_aborts_goal_before_spawn() {
         .output()
         .expect("run codebus goal");
 
-    assert!(!out.status.success(), "goal must exit non-zero on schema error");
+    assert!(
+        !out.status.success(),
+        "goal must exit non-zero on schema error"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("gpt-4") || stderr.to_lowercase().contains("variant"),

@@ -7,8 +7,7 @@
 use std::fs;
 
 use codebus_core::config::{
-    ActiveProfile, ClaudeCodeConfig, LEGACY_MIGRATION_WARNING,
-    load_claude_code_config_into,
+    ActiveProfile, ClaudeCodeConfig, LEGACY_MIGRATION_WARNING, load_claude_code_config_into,
 };
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;

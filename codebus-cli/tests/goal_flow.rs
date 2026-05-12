@@ -83,7 +83,10 @@ fn goal_spawns_agent_with_canonical_sandbox_args() {
 
     // cwd is the vault root.
     let vault_str = tmp.path().join(".codebus").to_string_lossy().to_string();
-    let cwd_line = lines.iter().find(|l| l.starts_with("cwd=")).expect("cwd line");
+    let cwd_line = lines
+        .iter()
+        .find(|l| l.starts_with("cwd="))
+        .expect("cwd line");
     let cwd_value = cwd_line.strip_prefix("cwd=").unwrap();
     // tolerate Windows extended-length prefix (`\\?\D:\...` etc.) by ends_with check
     assert!(
@@ -102,7 +105,10 @@ fn goal_spawns_agent_with_canonical_sandbox_args() {
         "missing slash command in {arg_lines:?}"
     );
     assert!(arg_lines.contains(&"--tools"), "missing --tools");
-    assert!(arg_lines.contains(&"--allowedTools"), "missing --allowedTools");
+    assert!(
+        arg_lines.contains(&"--allowedTools"),
+        "missing --allowedTools"
+    );
     assert!(
         arg_lines.contains(&"--permission-mode"),
         "missing --permission-mode"
@@ -163,8 +169,7 @@ fn goal_auto_commits_partial_writes_on_agent_failure() {
     fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
     assert!(run_init(tmp.path()).status.success());
 
-    let (out, _log) =
-        run_goal(tmp.path(), "test", &[], "failure-write-then-exit-1");
+    let (out, _log) = run_goal(tmp.path(), "test", &[], "failure-write-then-exit-1");
 
     // codebus propagates the agent's non-zero exit.
     assert!(
@@ -217,8 +222,7 @@ fn goal_force_resync_bypasses_detection() {
     );
 
     // Second goal with --force-resync. SHALL re-sync regardless of detection.
-    let (out2, _log2) =
-        run_goal(tmp.path(), "second", &["--force-resync"], "success-noop");
+    let (out2, _log2) = run_goal(tmp.path(), "second", &["--force-resync"], "success-noop");
     assert!(
         out2.status.success(),
         "second goal stderr: {}",
@@ -238,12 +242,7 @@ fn goal_force_resync_bypasses_detection() {
 
 /// Run `goal` WITHOUT the default --no-fix prefix so the lint-and-fix
 /// phase actually runs. Returns the binary's Output.
-fn run_goal_with_fix(
-    repo: &Path,
-    goal_text: &str,
-    extra_flags: &[&str],
-    behavior: &str,
-) -> Output {
+fn run_goal_with_fix(repo: &Path, goal_text: &str, extra_flags: &[&str], behavior: &str) -> Output {
     let log = repo.join("mock-claude.log");
     let _ = fs::remove_file(&log);
     let home = TempDir::new().expect("isolated CODEBUS_HOME");
@@ -473,11 +472,7 @@ fn goal_streams_events_and_writes_jsonl_log() {
     let entries: Vec<_> = fs::read_dir(&log_dir)
         .expect("log dir exists")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("runs-")
-        })
+        .filter(|e| e.file_name().to_string_lossy().starts_with("runs-"))
         .collect();
     assert_eq!(entries.len(), 1, "expected 1 runs-*.jsonl, got {entries:?}");
 

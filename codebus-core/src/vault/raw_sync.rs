@@ -257,9 +257,7 @@ pub fn sync_with_scanner_into<W: io::Write>(
         // user-configured `on_hit` — the security floor prevents real
         // credentials from entering the raw mirror recoverably. Warn
         // matches (email / ipv4) follow the user-configured `on_hit`.
-        let has_critical = matches
-            .iter()
-            .any(|m| m.severity == PiiSeverity::Critical);
+        let has_critical = matches.iter().any(|m| m.severity == PiiSeverity::Critical);
 
         if has_critical {
             // Critical floor: mask every Critical match (and any Warn match
@@ -270,9 +268,7 @@ pub fn sync_with_scanner_into<W: io::Write>(
             let original = utf8_content.expect("matches non-empty implies UTF-8 content");
             let matches_to_mask: Vec<_> = matches
                 .iter()
-                .filter(|m| {
-                    m.severity == PiiSeverity::Critical || on_hit == OnHit::Mask
-                })
+                .filter(|m| m.severity == PiiSeverity::Critical || on_hit == OnHit::Mask)
                 .cloned()
                 .collect();
             let masked = mask_matches(&original, &matches_to_mask);
@@ -291,8 +287,7 @@ pub fn sync_with_scanner_into<W: io::Write>(
                     // Do NOT copy — file is intentionally absent from mirror.
                 }
                 OnHit::Mask => {
-                    let original =
-                        utf8_content.expect("matches non-empty implies UTF-8 content");
+                    let original = utf8_content.expect("matches non-empty implies UTF-8 content");
                     let masked = mask_matches(&original, &matches);
                     fs::write(&dst, masked.as_bytes())?;
                     summary.files += 1;
@@ -451,10 +446,7 @@ mod tests {
     fn warn_mode_copies_file_and_emits_warn() {
         let src = TempDir::new().unwrap();
         let raw = TempDir::new().unwrap();
-        write(
-            &src.path().join("docs.md"),
-            b"contact alice@example.com\n",
-        );
+        write(&src.path().join("docs.md"), b"contact alice@example.com\n");
         let scanner = RegexBasicScanner::new(&[]).unwrap();
         // v3-pii-severity-dispatch: Warn-severity match (email) under Warn
         // policy → file mirrored byte-identical, warn line emitted, no mask.
@@ -482,10 +474,7 @@ mod tests {
     fn skip_mode_omits_matched_file() {
         let src = TempDir::new().unwrap();
         let raw = TempDir::new().unwrap();
-        write(
-            &src.path().join("docs.md"),
-            b"contact alice@example.com\n",
-        );
+        write(&src.path().join("docs.md"), b"contact alice@example.com\n");
         let scanner = RegexBasicScanner::new(&[]).unwrap();
         let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Skip);
         assert_eq!(summary.pii_matches, 1);
@@ -507,10 +496,7 @@ mod tests {
         let src = TempDir::new().unwrap();
         let raw = TempDir::new().unwrap();
         write(&src.path().join("clean.rs"), b"fn ok() {}");
-        write(
-            &src.path().join("dirty1.py"),
-            b"contact alice@example.com",
-        );
+        write(&src.path().join("dirty1.py"), b"contact alice@example.com");
         write(
             &src.path().join("dirty2.py"),
             b"e1=alice@example.com\ne2=bob@example.com",
@@ -580,7 +566,10 @@ mod tests {
         assert_eq!(summary.files, 1);
         let mirrored = fs::read(raw.path().join("blob.bin")).unwrap();
         assert_eq!(mirrored, bytes);
-        assert!(warns.is_empty(), "no warn lines for non-UTF-8 input: {warns:?}");
+        assert!(
+            warns.is_empty(),
+            "no warn lines for non-UTF-8 input: {warns:?}"
+        );
     }
 
     /// `OnHit::Mask` summary: per-match counter accumulates across multiple
@@ -644,14 +633,14 @@ mod tests {
     fn critical_match_under_warn_policy_is_masked() {
         let src = TempDir::new().unwrap();
         let raw = TempDir::new().unwrap();
-        write(
-            &src.path().join("creds.py"),
-            b"key = AKIAIOSFODNN7EXAMPLE",
-        );
+        write(&src.path().join("creds.py"), b"key = AKIAIOSFODNN7EXAMPLE");
         let scanner = RegexBasicScanner::new(&[]).unwrap();
         let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Warn);
         assert_eq!(summary.pii_matches, 1);
-        assert_eq!(summary.pii_masked_matches, 1, "Critical match under Warn policy SHALL still be masked");
+        assert_eq!(
+            summary.pii_masked_matches, 1,
+            "Critical match under Warn policy SHALL still be masked"
+        );
         assert_eq!(summary.files, 1, "file SHALL still be mirrored");
         let mirrored = fs::read_to_string(raw.path().join("creds.py")).unwrap();
         assert_eq!(mirrored, "key = [REDACTED:aws-access-key]");
@@ -665,15 +654,18 @@ mod tests {
     fn critical_match_under_skip_policy_is_masked_not_skipped() {
         let src = TempDir::new().unwrap();
         let raw = TempDir::new().unwrap();
-        write(
-            &src.path().join("creds.py"),
-            b"key = AKIAIOSFODNN7EXAMPLE",
-        );
+        write(&src.path().join("creds.py"), b"key = AKIAIOSFODNN7EXAMPLE");
         let scanner = RegexBasicScanner::new(&[]).unwrap();
         let (summary, _) = run_sync(src.path(), raw.path(), &scanner, OnHit::Skip);
-        assert_eq!(summary.pii_skipped_files, 0, "Critical floor SHALL prevent Skip");
+        assert_eq!(
+            summary.pii_skipped_files, 0,
+            "Critical floor SHALL prevent Skip"
+        );
         assert_eq!(summary.pii_masked_matches, 1);
-        assert_eq!(summary.files, 1, "file SHALL be mirrored despite Skip policy");
+        assert_eq!(
+            summary.files, 1,
+            "file SHALL be mirrored despite Skip policy"
+        );
         assert!(raw.path().join("creds.py").exists());
         let mirrored = fs::read_to_string(raw.path().join("creds.py")).unwrap();
         assert!(mirrored.contains("[REDACTED:aws-access-key]"));
@@ -692,8 +684,14 @@ mod tests {
         );
         let scanner = RegexBasicScanner::new(&[]).unwrap();
         let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Warn);
-        assert_eq!(summary.pii_matches, 2, "scanner SHALL still find both matches");
-        assert_eq!(summary.pii_masked_matches, 1, "only Critical SHALL be masked under Warn");
+        assert_eq!(
+            summary.pii_matches, 2,
+            "scanner SHALL still find both matches"
+        );
+        assert_eq!(
+            summary.pii_masked_matches, 1,
+            "only Critical SHALL be masked under Warn"
+        );
         let mirrored = fs::read_to_string(raw.path().join("contact.md")).unwrap();
         assert!(
             mirrored.contains("[REDACTED:aws-access-key]"),
@@ -721,11 +719,17 @@ mod tests {
         let scanner = RegexBasicScanner::new(&[]).unwrap();
         let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Warn);
         assert_eq!(summary.pii_matches, 1);
-        assert_eq!(summary.pii_masked_matches, 0, "Warn under Warn SHALL NOT mask");
+        assert_eq!(
+            summary.pii_masked_matches, 0,
+            "Warn under Warn SHALL NOT mask"
+        );
         assert_eq!(summary.pii_skipped_files, 0);
         assert_eq!(summary.files, 1);
         let mirrored = fs::read(raw.path().join("docs.md")).unwrap();
-        assert_eq!(mirrored, original, "Warn under Warn SHALL leave file byte-identical");
+        assert_eq!(
+            mirrored, original,
+            "Warn under Warn SHALL leave file byte-identical"
+        );
         assert!(warns.contains("pii warn: email"));
     }
 }

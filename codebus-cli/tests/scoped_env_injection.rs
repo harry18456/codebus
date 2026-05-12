@@ -56,7 +56,9 @@ fn invoke_passes_env_overrides_to_command() {
 
     let log = fs::read_to_string(&log_path).expect("mock-claude wrote log");
     assert!(
-        log.contains("env_ANTHROPIC_BASE_URL=https://example.cognitiveservices.azure.com/anthropic"),
+        log.contains(
+            "env_ANTHROPIC_BASE_URL=https://example.cognitiveservices.azure.com/anthropic"
+        ),
         "child missing ANTHROPIC_BASE_URL injection:\n{log}"
     );
     assert!(

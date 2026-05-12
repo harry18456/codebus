@@ -38,7 +38,9 @@ pub async fn run(
         write_starter_config: true,
     };
 
-    match run_init(repo, &opts, |event| handle_event(&event, debug, render_opts)) {
+    match run_init(repo, &opts, |event| {
+        handle_event(&event, debug, render_opts)
+    }) {
         Ok(_) => ExitCode::SUCCESS,
         Err(InitError::Refused(refusal)) => {
             eprintln!("error: {refusal}");
@@ -243,7 +245,9 @@ fn handle_event(event: &InitEvent<'_>, debug: bool, render_opts: &RenderOptions)
                             "[debug] settings.json: preserved existing {}",
                             settings_path.display()
                         );
-                        println!("✓ vault settings: .codebus/.claude/settings.json already present");
+                        println!(
+                            "✓ vault settings: .codebus/.claude/settings.json already present"
+                        );
                     }
                 }
             }
@@ -283,19 +287,14 @@ fn handle_event(event: &InitEvent<'_>, debug: bool, render_opts: &RenderOptions)
         }
         InitEvent::StarterConfigUnavailable => {
             if debug {
-                eprintln!(
-                    "[debug] global config: home dir unavailable, skipping starter write"
-                );
+                eprintln!("[debug] global config: home dir unavailable, skipping starter write");
             }
         }
         InitEvent::StarterConfigDone { path, outcome } => {
             if debug {
                 match outcome {
                     StarterOutcome::Written => {
-                        eprintln!(
-                            "[debug] global config: wrote starter at {}",
-                            path.display()
-                        );
+                        eprintln!("[debug] global config: wrote starter at {}", path.display());
                         println!("✓ global config: wrote {}", path.display());
                     }
                     StarterOutcome::AlreadyPresent => {
@@ -318,9 +317,19 @@ fn handle_event(event: &InitEvent<'_>, debug: bool, render_opts: &RenderOptions)
             paths,
             obsidian_registered,
         } => {
-            print_banner(Banner::Done { wiki_path: &paths.wiki }, render_opts);
+            print_banner(
+                Banner::Done {
+                    wiki_path: &paths.wiki,
+                },
+                render_opts,
+            );
             if *obsidian_registered {
-                print_banner(Banner::Hint { wiki_path: &paths.wiki }, render_opts);
+                print_banner(
+                    Banner::Hint {
+                        wiki_path: &paths.wiki,
+                    },
+                    render_opts,
+                );
             }
         }
     }

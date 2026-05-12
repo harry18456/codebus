@@ -28,7 +28,11 @@ fn init_vault(repo: &Path) {
         .current_dir(repo)
         .output()
         .expect("run init");
-    assert!(out.status.success(), "init failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 fn write_page(vault: &Path, rel: &str, frontmatter: &str, body: &str) {
@@ -82,7 +86,12 @@ app:
     assert!(init_out.status.success(), "init must succeed");
 
     // Lint a fresh clean vault.
-    write_page(&repo.path().join(".codebus"), "concepts/foo.md", fm_clean(), "# foo");
+    write_page(
+        &repo.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "# foo",
+    );
     let lint_out = Command::new(BIN)
         .arg("lint")
         .env("CODEBUS_HOME", home.path())
@@ -99,9 +108,7 @@ app:
         let lower = line.to_lowercase();
         if lower.contains("unknown") || lower.contains("warning") {
             assert!(
-                !lower.contains("app.")
-                    && !lower.contains("app:")
-                    && !lower.contains("quiz"),
+                !lower.contains("app.") && !lower.contains("app:") && !lower.contains("quiz"),
                 "CLI must not warn about app.* / app.quiz; offending line: {line}"
             );
         }
@@ -109,7 +116,10 @@ app:
 
     // The config.yaml MUST be byte-identical after the CLI run.
     let after = std::fs::read_to_string(&config_path).unwrap();
-    assert_eq!(after, original, "CLI must not rewrite ~/.codebus/config.yaml");
+    assert_eq!(
+        after, original,
+        "CLI must not rewrite ~/.codebus/config.yaml"
+    );
 }
 
 #[test]
@@ -126,9 +136,19 @@ fn lint_exits_two_when_no_vault_locatable() {
 fn lint_exits_zero_on_clean_vault() {
     let tmp = TempDir::new().unwrap();
     init_vault(tmp.path());
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "# foo");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "# foo",
+    );
     let out = lint(tmp.path(), &[]);
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
@@ -136,7 +156,12 @@ fn lint_exits_zero_with_warnings_only() {
     let tmp = TempDir::new().unwrap();
     init_vault(tmp.path());
     // Page with broken body wikilink → warn (not error)
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
     let out = lint(tmp.path(), &[]);
     assert_eq!(out.status.code(), Some(0), "warning-only must exit 0");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -158,19 +183,32 @@ fn lint_exits_one_on_errors() {
 fn lint_text_format_emits_vault_relative_paths() {
     let tmp = TempDir::new().unwrap();
     init_vault(tmp.path());
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
     let out = lint(tmp.path(), &[]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("wiki/concepts/foo.md") || stdout.contains("wiki\\concepts\\foo.md"));
     // Text format must not contain absolute path leakage
-    assert!(!stdout.contains(tmp.path().to_string_lossy().as_ref()), "text leaked abs path: {stdout}");
+    assert!(
+        !stdout.contains(tmp.path().to_string_lossy().as_ref()),
+        "text leaked abs path: {stdout}"
+    );
 }
 
 #[test]
 fn lint_json_format_emits_single_valid_json() {
     let tmp = TempDir::new().unwrap();
     init_vault(tmp.path());
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
     let out = lint(tmp.path(), &["--format", "json"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let parsed: serde_json::Value =
@@ -193,13 +231,14 @@ fn lint_with_explicit_repo_flag_targets_specified_directory() {
     init_vault(tmp1.path());
     init_vault(tmp2.path());
     // Plant an issue in tmp2, run from tmp1 with --repo tmp2
-    write_page(&tmp2.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    write_page(
+        &tmp2.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
     let out = Command::new(BIN)
-        .args([
-            "--repo",
-            tmp2.path().to_str().unwrap(),
-            "lint",
-        ])
+        .args(["--repo", tmp2.path().to_str().unwrap(), "lint"])
         .current_dir(tmp1.path())
         .output()
         .expect("run");
@@ -212,7 +251,12 @@ fn lint_with_explicit_repo_flag_targets_specified_directory() {
 fn lint_does_not_modify_vault_files() {
     let tmp = TempDir::new().unwrap();
     init_vault(tmp.path());
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "# foo");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "# foo",
+    );
     let snap_before = snapshot(&tmp.path().join(".codebus").join("wiki"));
     let _ = lint(tmp.path(), &[]);
     let snap_after = snapshot(&tmp.path().join(".codebus").join("wiki"));
@@ -250,13 +294,15 @@ fn lint_repo_pointing_at_vault_root_works_same_as_source_repo() {
     // Plant a broken-wikilink warning so both invocations have a real
     // finding to surface (not just the empty "no issues" baseline).
     let vault = tmp.path().join(".codebus");
-    write_page(&vault, "concepts/foo.md", fm_clean(), "see [[ghost-page]]\n");
+    write_page(
+        &vault,
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost-page]]\n",
+    );
 
     let source_form = lint(tmp.path(), &["--repo", tmp.path().to_str().unwrap()]);
-    let vault_form = lint(
-        tmp.path(),
-        &["--repo", vault.to_str().unwrap()],
-    );
+    let vault_form = lint(tmp.path(), &["--repo", vault.to_str().unwrap()]);
 
     assert_eq!(
         source_form.status.code(),

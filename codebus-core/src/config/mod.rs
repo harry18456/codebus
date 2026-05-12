@@ -24,12 +24,12 @@ pub use claude_code::{
     LEGACY_MIGRATION_WARNING, ResolvedVerb, Verb, build_env_overrides, load_claude_code_config,
     load_claude_code_config_into,
 };
-pub use keyring::KeyringError;
 pub use endpoint::{
     ActiveProfile, AzureProfile, AzureVerbConfig, ClaudeCodeConfig, SystemModel, SystemProfile,
     SystemVerbConfig,
 };
 pub use global_starter::{StarterOutcome, write_starter_config_if_missing};
+pub use keyring::KeyringError;
 pub use lint_fix::{LintFixConfig, load_lint_fix_config};
 pub use log::{LogConfig, load_log_config};
 pub use pii::{PiiConfig, PiiScannerKind, load_pii_config};

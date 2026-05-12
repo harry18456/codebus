@@ -14,12 +14,8 @@
 
 use std::path::PathBuf;
 
-use codebus_core::config::{
-    ClaudeCodeConfig, default_config_path, load_claude_code_config,
-};
-use codebus_core::config::keyring::{
-    delete_azure_key, probe_keyring_only, store_azure_key,
-};
+use codebus_core::config::keyring::{delete_azure_key, probe_keyring_only, store_azure_key};
+use codebus_core::config::{ClaudeCodeConfig, default_config_path, load_claude_code_config};
 use serde::{Deserialize, Serialize};
 
 use super::IpcResult;
@@ -77,9 +73,7 @@ fn resolve_keyring_service(profile: &str) -> IpcResult<String> {
     if profile != "azure" {
         return Err(AppError::Invalid {
             field: "profile".into(),
-            message: format!(
-                "unknown endpoint profile `{profile}`; only `azure` is supported"
-            ),
+            message: format!("unknown endpoint profile `{profile}`; only `azure` is supported"),
         });
     }
     let path: PathBuf = match default_config_path() {
@@ -89,14 +83,10 @@ fn resolve_keyring_service(profile: &str) -> IpcResult<String> {
     if !path.exists() {
         return Ok(DEFAULT_AZURE_KEYRING_SERVICE.to_string());
     }
-    let cfg: ClaudeCodeConfig = load_claude_code_config(&path).map_err(|e| {
-        AppError::ConfigParse {
-            message: format!(
-                "claude_code config parse failed at {}: {e}",
-                path.display()
-            ),
-        }
-    })?;
+    let cfg: ClaudeCodeConfig =
+        load_claude_code_config(&path).map_err(|e| AppError::ConfigParse {
+            message: format!("claude_code config parse failed at {}: {e}", path.display()),
+        })?;
     if let Some(az) = cfg.azure.as_ref() {
         if !az.keyring_service.is_empty() {
             return Ok(az.keyring_service.clone());

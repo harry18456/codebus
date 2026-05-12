@@ -16,13 +16,8 @@ use std::path::{Path, PathBuf};
 pub const SPECIAL_FILES: &[&str] = &["index.md", "log.md"];
 
 /// Folder names directly under `wiki/` that the linter recognizes.
-pub const RECOGNIZED_ROOT_DIRS: &[&str] = &[
-    "concepts",
-    "entities",
-    "modules",
-    "processes",
-    "synthesis",
-];
+pub const RECOGNIZED_ROOT_DIRS: &[&str] =
+    &["concepts", "entities", "modules", "processes", "synthesis"];
 
 pub trait LintRule: Send + Sync {
     fn name(&self) -> &str;

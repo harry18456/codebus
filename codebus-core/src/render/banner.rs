@@ -27,13 +27,26 @@ pub enum Banner<'a> {
     /// Raw mirror sync starting.
     SyncStart,
     /// Raw mirror sync done. `mib` is `bytes / 1024 / 1024` rounded to 1 decimal.
-    SyncDone { files: usize, mib: f64, elapsed_ms: u128 },
+    SyncDone {
+        files: usize,
+        mib: f64,
+        elapsed_ms: u128,
+    },
     /// PII scan summary line. `action` is one of `"warn"` / `"skip"` / `"mask"`.
-    PiiSummary { scanner: &'a str, scanned: usize, hits: usize, action: &'a str },
+    PiiSummary {
+        scanner: &'a str,
+        scanned: usize,
+        hits: usize,
+        action: &'a str,
+    },
     /// Lint phase starting.
     LintStart,
     /// Lint phase done.
-    LintDone { errors: usize, warns: usize, elapsed_ms: u128 },
+    LintDone {
+        errors: usize,
+        warns: usize,
+        elapsed_ms: u128,
+    },
     /// Vault auto-commit produced a non-empty commit. `sha7` is the 7-char short SHA.
     CommitDone { sha7: &'a str },
     /// Verb completion. Emitted last on the success path.
@@ -65,14 +78,8 @@ pub fn format_banner(banner: Banner<'_>, opts: &RenderOptions) -> String {
             lead("🚌", "▶", opts),
             norm(repo_path)
         ),
-        Banner::Goal { goal_text } => format!(
-            "{} 任務目標：{goal_text}",
-            lead("🎯", "◎", opts),
-        ),
-        Banner::SyncStart => format!(
-            "{} 同步 source → raw/code...",
-            lead("🔄", "~", opts),
-        ),
+        Banner::Goal { goal_text } => format!("{} 任務目標：{goal_text}", lead("🎯", "◎", opts),),
+        Banner::SyncStart => format!("{} 同步 source → raw/code...", lead("🔄", "~", opts),),
         Banner::SyncDone {
             files,
             mib,
@@ -90,10 +97,7 @@ pub fn format_banner(banner: Banner<'_>, opts: &RenderOptions) -> String {
             "{} PII：{scanner}, scanned {scanned}, hits {hits}, action {action}",
             lead("🛡", "!", opts),
         ),
-        Banner::LintStart => format!(
-            "{} lint 中...",
-            lead("🔍", "~", opts),
-        ),
+        Banner::LintStart => format!("{} lint 中...", lead("🔍", "~", opts),),
         Banner::LintDone {
             errors,
             warns,
@@ -102,10 +106,7 @@ pub fn format_banner(banner: Banner<'_>, opts: &RenderOptions) -> String {
             "{} lint：{errors} errors, {warns} warnings ({elapsed_ms} ms)",
             lead("✓", "ok", opts),
         ),
-        Banner::CommitDone { sha7 } => format!(
-            "{} commit {sha7}",
-            lead("📌", ".", opts),
-        ),
+        Banner::CommitDone { sha7 } => format!("{} commit {sha7}", lead("📌", ".", opts),),
         Banner::Done { wiki_path } => format!(
             "{} 掰掰~下車囉！wiki 已生成於 {}",
             lead("🎉", "✓", opts),
@@ -157,14 +158,24 @@ mod tests {
 
     #[test]
     fn format_goal_emoji_on() {
-        let s = format_banner(Banner::Goal { goal_text: "describe auth" }, &emoji_on());
+        let s = format_banner(
+            Banner::Goal {
+                goal_text: "describe auth",
+            },
+            &emoji_on(),
+        );
         assert!(s.starts_with("🎯"));
         assert!(s.contains("describe auth"));
     }
 
     #[test]
     fn format_goal_emoji_off() {
-        let s = format_banner(Banner::Goal { goal_text: "describe auth" }, &emoji_off());
+        let s = format_banner(
+            Banner::Goal {
+                goal_text: "describe auth",
+            },
+            &emoji_off(),
+        );
         assert!(s.starts_with("◎"));
     }
 
@@ -288,7 +299,14 @@ mod tests {
             format_banner(Banner::Start { repo_path: &p }, &opts),
             format_banner(Banner::Goal { goal_text: "g" }, &opts),
             format_banner(Banner::SyncStart, &opts),
-            format_banner(Banner::SyncDone { files: 1, mib: 0.0, elapsed_ms: 1 }, &opts),
+            format_banner(
+                Banner::SyncDone {
+                    files: 1,
+                    mib: 0.0,
+                    elapsed_ms: 1,
+                },
+                &opts,
+            ),
             format_banner(
                 Banner::PiiSummary {
                     scanner: "s",
@@ -299,7 +317,14 @@ mod tests {
                 &opts,
             ),
             format_banner(Banner::LintStart, &opts),
-            format_banner(Banner::LintDone { errors: 0, warns: 0, elapsed_ms: 1 }, &opts),
+            format_banner(
+                Banner::LintDone {
+                    errors: 0,
+                    warns: 0,
+                    elapsed_ms: 1,
+                },
+                &opts,
+            ),
             format_banner(Banner::CommitDone { sha7: "abc1234" }, &opts),
             format_banner(Banner::Done { wiki_path: &p }, &opts),
             format_banner(Banner::Hint { wiki_path: &p }, &opts),

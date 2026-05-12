@@ -35,16 +35,39 @@ pub enum VerbEvent {
 /// it can be sent across thread boundaries (GUI Tauri event emit).
 #[derive(Debug, Clone)]
 pub enum VerbBanner {
-    Start { repo_path: PathBuf },
-    Goal { goal_text: String },
+    Start {
+        repo_path: PathBuf,
+    },
+    Goal {
+        goal_text: String,
+    },
     SyncStart,
-    SyncDone { files: usize, mib: f64, elapsed_ms: u128 },
-    PiiSummary { scanner: String, scanned: usize, hits: usize, action: String },
+    SyncDone {
+        files: usize,
+        mib: f64,
+        elapsed_ms: u128,
+    },
+    PiiSummary {
+        scanner: String,
+        scanned: usize,
+        hits: usize,
+        action: String,
+    },
     LintStart,
-    LintDone { errors: usize, warns: usize, elapsed_ms: u128 },
-    CommitDone { sha7: String },
-    Done { wiki_path: PathBuf },
-    Hint { wiki_path: PathBuf },
+    LintDone {
+        errors: usize,
+        warns: usize,
+        elapsed_ms: u128,
+    },
+    CommitDone {
+        sha7: String,
+    },
+    Done {
+        wiki_path: PathBuf,
+    },
+    Hint {
+        wiki_path: PathBuf,
+    },
 }
 
 impl VerbBanner {
@@ -56,19 +79,32 @@ impl VerbBanner {
             VerbBanner::Start { repo_path } => Banner::Start { repo_path },
             VerbBanner::Goal { goal_text } => Banner::Goal { goal_text },
             VerbBanner::SyncStart => Banner::SyncStart,
-            VerbBanner::SyncDone { files, mib, elapsed_ms } => Banner::SyncDone {
+            VerbBanner::SyncDone {
+                files,
+                mib,
+                elapsed_ms,
+            } => Banner::SyncDone {
                 files: *files,
                 mib: *mib,
                 elapsed_ms: *elapsed_ms,
             },
-            VerbBanner::PiiSummary { scanner, scanned, hits, action } => Banner::PiiSummary {
+            VerbBanner::PiiSummary {
+                scanner,
+                scanned,
+                hits,
+                action,
+            } => Banner::PiiSummary {
                 scanner,
                 scanned: *scanned,
                 hits: *hits,
                 action,
             },
             VerbBanner::LintStart => Banner::LintStart,
-            VerbBanner::LintDone { errors, warns, elapsed_ms } => Banner::LintDone {
+            VerbBanner::LintDone {
+                errors,
+                warns,
+                elapsed_ms,
+            } => Banner::LintDone {
                 errors: *errors,
                 warns: *warns,
                 elapsed_ms: *elapsed_ms,
@@ -85,10 +121,20 @@ impl VerbBanner {
 /// UI). The CLI thin wrapper SHALL no-op on these variants.
 #[derive(Debug, Clone)]
 pub enum VerbLifecycleEvent {
-    SpawnStart { verb: Verb },
-    SpawnEnd { verb: Verb, exit_code: Option<i32> },
-    FixIterationStart { iteration: u8 },
-    LintFinal { error_count: usize, warn_count: usize },
+    SpawnStart {
+        verb: Verb,
+    },
+    SpawnEnd {
+        verb: Verb,
+        exit_code: Option<i32>,
+    },
+    FixIterationStart {
+        iteration: u8,
+    },
+    LintFinal {
+        error_count: usize,
+        warn_count: usize,
+    },
 }
 
 #[cfg(test)]
@@ -107,7 +153,9 @@ mod tests {
         let rendered = format_banner(borrowed, &opts);
         // Reference rendering via Banner directly should match.
         let reference = format_banner(
-            Banner::Start { repo_path: Path::new("/tmp/repo") },
+            Banner::Start {
+                repo_path: Path::new("/tmp/repo"),
+            },
             &opts,
         );
         assert_eq!(rendered, reference);
@@ -123,7 +171,12 @@ mod tests {
         };
         let borrowed = owned.as_banner();
         match borrowed {
-            Banner::PiiSummary { scanner, scanned, hits, action } => {
+            Banner::PiiSummary {
+                scanner,
+                scanned,
+                hits,
+                action,
+            } => {
                 assert_eq!(scanner, "regex_basic");
                 assert_eq!(scanned, 100);
                 assert_eq!(hits, 5);
@@ -139,16 +192,12 @@ mod tests {
         let _ = VerbEvent::Stream(StreamEvent::Thought {
             text: "hello".to_string(),
         });
-        let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
-            verb: Verb::Goal,
-        });
+        let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart { verb: Verb::Goal });
         let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnEnd {
             verb: Verb::Query,
             exit_code: Some(0),
         });
-        let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::FixIterationStart {
-            iteration: 2,
-        });
+        let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::FixIterationStart { iteration: 2 });
         let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::LintFinal {
             error_count: 0,
             warn_count: 1,

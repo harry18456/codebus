@@ -12,13 +12,13 @@ use codebus_core::schema::NEUTRAL_RULES;
 use codebus_core::skill_bundle::{self, BundleOutcome, VERBS};
 use codebus_core::vault::layout::{create_vault_layout, vault_paths};
 use codebus_core::vault::manifest::{
-    compute_source_signal, write_or_update_manifest, ManifestOutcome, SourceSignal,
+    ManifestOutcome, SourceSignal, compute_source_signal, write_or_update_manifest,
 };
+use codebus_core::vault::obsidian_register::{RegisterOutcome, register_at};
 use codebus_core::vault::raw_sync::SyncSummary;
-use codebus_core::vault::obsidian_register::{register_at, RegisterOutcome};
 use codebus_core::vault::raw_sync::{sync_with_scanner, sync_with_scanner_into};
 use codebus_core::vault::sanity_check::check_repo_is_not_vault;
-use codebus_core::vault::source_gitignore::{ensure_codebus_in_gitignore, GitignoreOutcome};
+use codebus_core::vault::source_gitignore::{GitignoreOutcome, ensure_codebus_in_gitignore};
 use tempfile::TempDir;
 
 fn write(p: &Path, content: &[u8]) {
@@ -111,7 +111,10 @@ fn raw_mirror_honors_source_gitignore() {
     let raw = TempDir::new().unwrap();
     write(&tmp.path().join(".gitignore"), b"target/\n");
     write(&tmp.path().join("src/foo.rs"), b"fn foo(){}");
-    write(&tmp.path().join("target/debug/foo.rs"), b"// build artifact");
+    write(
+        &tmp.path().join("target/debug/foo.rs"),
+        b"// build artifact",
+    );
     sync_with_scanner(tmp.path(), raw.path(), &NullScanner::new(), OnHit::Warn).unwrap();
     assert!(raw.path().join("src/foo.rs").exists());
     assert!(!raw.path().join("target").exists());
@@ -136,7 +139,8 @@ fn raw_sync_emits_warnings_for_known_pii_patterns() {
     let scanner = RegexBasicScanner::new(&[]).expect("builtin patterns must compile");
     let mut warn_buf: Vec<u8> = Vec::new();
     let summary =
-        sync_with_scanner_into(src.path(), raw.path(), &scanner, OnHit::Warn, &mut warn_buf).unwrap();
+        sync_with_scanner_into(src.path(), raw.path(), &scanner, OnHit::Warn, &mut warn_buf)
+            .unwrap();
 
     let warn_text = String::from_utf8(warn_buf).expect("warn output should be valid UTF-8");
     let warn_lines: Vec<&str> = warn_text.lines().filter(|l| !l.is_empty()).collect();
@@ -257,7 +261,15 @@ fn schema_file_write_if_missing_writes_taxonomy_content() {
 #[test]
 fn schema_content_is_vendor_neutral() {
     let lower = NEUTRAL_RULES.to_lowercase();
-    for token in ["claude", "anthropic", "stream-json", "--tools", "codex", "gemini", "cursor"] {
+    for token in [
+        "claude",
+        "anthropic",
+        "stream-json",
+        "--tools",
+        "codex",
+        "gemini",
+        "cursor",
+    ] {
         assert!(!lower.contains(token), "vendor token leaked: {token}");
     }
 }
@@ -276,20 +288,22 @@ fn dummy_signal(file_count: usize, total_bytes: u64) -> SourceSignal {
 fn manifest_records_meta_and_sync_state_on_first_init() {
     let tmp = TempDir::new().unwrap();
     let p = create_vault_layout(tmp.path()).unwrap();
-    let outcome = write_or_update_manifest(
-        tmp.path(),
-        &p.root,
-        "0.3.0-test",
-        dummy_signal(42, 1234),
-    )
-    .unwrap();
+    let outcome =
+        write_or_update_manifest(tmp.path(), &p.root, "0.3.0-test", dummy_signal(42, 1234))
+            .unwrap();
     assert_eq!(outcome, ManifestOutcome::Written);
 
     let body = fs::read_to_string(&p.manifest_yaml).unwrap();
     let yaml: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
     let map = yaml.as_mapping().unwrap();
     assert_eq!(map.len(), 5);
-    for key in ["codebus_version", "created_at", "repo_root", "last_sync_at", "source_signal"] {
+    for key in [
+        "codebus_version",
+        "created_at",
+        "repo_root",
+        "last_sync_at",
+        "source_signal",
+    ] {
         assert!(
             map.contains_key(serde_yaml::Value::String(key.into())),
             "missing top-level key `{key}`"
@@ -323,13 +337,9 @@ fn manifest_re_init_preserves_write_once_and_updates_sync_state() {
     let body_first = fs::read_to_string(&p.manifest_yaml).unwrap();
     let parsed_first: serde_yaml::Value = serde_yaml::from_str(&body_first).unwrap();
 
-    let outcome2 = write_or_update_manifest(
-        tmp.path(),
-        &p.root,
-        "0.4.0-second",
-        dummy_signal(20, 2000),
-    )
-    .unwrap();
+    let outcome2 =
+        write_or_update_manifest(tmp.path(), &p.root, "0.4.0-second", dummy_signal(20, 2000))
+            .unwrap();
     assert_eq!(outcome2, ManifestOutcome::Updated);
 
     let body_second = fs::read_to_string(&p.manifest_yaml).unwrap();
@@ -337,7 +347,9 @@ fn manifest_re_init_preserves_write_once_and_updates_sync_state() {
 
     // Write-once fields preserved: codebus_version stays at "0.3.0-first" not "0.4.0-second"
     assert_eq!(
-        parsed_second.get("codebus_version").and_then(|v| v.as_str()),
+        parsed_second
+            .get("codebus_version")
+            .and_then(|v| v.as_str()),
         Some("0.3.0-first")
     );
     assert_eq!(
@@ -443,11 +455,14 @@ fn skill_bundles_creates_six_outcomes_no_lint_at_either_location() {
     }
     for verb in VERBS {
         assert!(
-            vault.join(format!(".claude/skills/codebus-{verb}/SKILL.md")).exists(),
+            vault
+                .join(format!(".claude/skills/codebus-{verb}/SKILL.md"))
+                .exists(),
             "missing vault bundle for {verb}"
         );
         assert!(
-            repo.join(format!(".claude/skills/codebus-{verb}/SKILL.md")).exists(),
+            repo.join(format!(".claude/skills/codebus-{verb}/SKILL.md"))
+                .exists(),
             "missing repo-root bundle for {verb}"
         );
     }
@@ -520,7 +535,11 @@ fn skill_bundle_write_if_missing_preserves_existing_at_each_location() {
     let (vault, repo) = dual_layout(&tmp);
     let goal_vault_path = vault.join(".claude/skills/codebus-goal/SKILL.md");
     fs::create_dir_all(goal_vault_path.parent().unwrap()).unwrap();
-    fs::write(&goal_vault_path, "---\nname: codebus-goal\n---\nuser custom").unwrap();
+    fs::write(
+        &goal_vault_path,
+        "---\nname: codebus-goal\n---\nuser custom",
+    )
+    .unwrap();
     let outcomes = skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
     // Vault: goal preserved (idx 0), query/fix written (idx 1, 2)
     assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent);
@@ -530,7 +549,11 @@ fn skill_bundle_write_if_missing_preserves_existing_at_each_location() {
     assert_eq!(outcomes[3], BundleOutcome::Written);
     assert_eq!(outcomes[4], BundleOutcome::Written);
     assert_eq!(outcomes[5], BundleOutcome::Written);
-    assert!(fs::read_to_string(&goal_vault_path).unwrap().contains("user custom"));
+    assert!(
+        fs::read_to_string(&goal_vault_path)
+            .unwrap()
+            .contains("user custom")
+    );
 }
 
 // ===== Sanity wiring: vault_paths agrees with create_vault_layout =====

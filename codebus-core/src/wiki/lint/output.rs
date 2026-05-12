@@ -127,7 +127,10 @@ mod tests {
         assert!(text.contains("wiki/concepts/foo.md"));
         // Must not contain absolute path leakage (no leading drive letter or slash before `wiki/`).
         // Text format is vault-relative only.
-        assert!(!text.contains("/wiki/concepts"), "text leaked abs path: {text}");
+        assert!(
+            !text.contains("/wiki/concepts"),
+            "text leaked abs path: {text}"
+        );
         // v3-render-polish post-ship UX tweak: rule_id no longer leaks into
         // text format (lives only in JSON `rule` field). Human-readable
         // message + severity tag is sufficient for the terminal user; agents
@@ -189,7 +192,10 @@ mod tests {
             normalized.contains("wiki/concepts/foo.md"),
             "abs path missing tail: {abs}"
         );
-        assert!(normalized.contains(".codebus"), "abs path missing root: {abs}");
+        assert!(
+            normalized.contains(".codebus"),
+            "abs path missing root: {abs}"
+        );
     }
 
     #[test]
@@ -209,7 +215,12 @@ mod tests {
         let result = LintResult {
             pages_scanned: 3,
             nav_files_scanned: 1,
-            issues: vec![issue("index.md", LintSeverity::Warn, "nav-missing", "log.md missing")],
+            issues: vec![issue(
+                "index.md",
+                LintSeverity::Warn,
+                "nav-missing",
+                "log.md missing",
+            )],
             error_count: 0,
             warn_count: 1,
         };
@@ -230,7 +241,12 @@ mod tests {
         let result = LintResult {
             pages_scanned: 1,
             nav_files_scanned: 0,
-            issues: vec![issue("a.md", LintSeverity::Warn, "broken-wikilink-body", "x")],
+            issues: vec![issue(
+                "a.md",
+                LintSeverity::Warn,
+                "broken-wikilink-body",
+                "x",
+            )],
             error_count: 0,
             warn_count: 1,
         };

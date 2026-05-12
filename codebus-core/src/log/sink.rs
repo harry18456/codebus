@@ -199,7 +199,7 @@ mod tests {
         accumulate_token_usage(&mut acc, &addend);
         assert_eq!(acc.cache_read_tokens, Some(30)); // both Some → sum
         assert_eq!(acc.cache_write_tokens, Some(7)); // None + Some → Some
-        assert_eq!(acc.reasoning_tokens, Some(5));   // Some + None → keep
+        assert_eq!(acc.reasoning_tokens, Some(5)); // Some + None → keep
     }
 
     #[test]

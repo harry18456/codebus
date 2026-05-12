@@ -53,7 +53,8 @@ pub fn load_log_config(path: &Path) -> Result<LogConfig, super::ConfigLoadError>
         }
         Err(err) => return Err(super::ConfigLoadError::Io(err)),
     };
-    let file: ConfigFile = serde_yaml::from_str(&body).map_err(super::ConfigLoadError::YamlParse)?;
+    let file: ConfigFile =
+        serde_yaml::from_str(&body).map_err(super::ConfigLoadError::YamlParse)?;
     let mut cfg = LogConfig::default();
     if let Some(sink) = file.log {
         cfg.sink = sink;
@@ -143,10 +144,7 @@ mod tests {
     #[test]
     fn unknown_subkey_silently_ignored() {
         let tmp = TempDir::new().unwrap();
-        let p = write_yaml(
-            tmp.path(),
-            "log:\n  sink: jsonl\n  retention_days: 30\n",
-        );
+        let p = write_yaml(tmp.path(), "log:\n  sink: jsonl\n  retention_days: 30\n");
         let cfg = load_log_config(&p).unwrap();
         assert_eq!(cfg.sink, SinkConfig::Jsonl { dir: None });
     }

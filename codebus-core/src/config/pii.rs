@@ -138,7 +138,8 @@ pub fn load_pii_config(path: &Path) -> Result<PiiConfig, super::ConfigLoadError>
         }
         Err(err) => return Err(super::ConfigLoadError::Io(err)),
     };
-    let file: ConfigFile = serde_yaml::from_str(&body).map_err(super::ConfigLoadError::YamlParse)?;
+    let file: ConfigFile =
+        serde_yaml::from_str(&body).map_err(super::ConfigLoadError::YamlParse)?;
     let mut cfg = PiiConfig::default();
     if let Some(pii) = file.pii {
         if let Some(scanner) = pii.scanner {

@@ -61,10 +61,7 @@ pub(crate) fn load_global_config_at(path: &Path) -> IpcResult<GlobalConfig> {
     Ok(payload)
 }
 
-pub(crate) fn save_global_config_at(
-    path: &Path,
-    payload: &GlobalConfig,
-) -> IpcResult<()> {
+pub(crate) fn save_global_config_at(path: &Path, payload: &GlobalConfig) -> IpcResult<()> {
     // Validate first — surfaces `AppError::Invalid` / `ConfigParse` to the
     // caller without ever touching disk.
     let app_cfg = read_app_config(payload)?;
@@ -80,10 +77,8 @@ pub(crate) fn save_global_config_at(
     // as a missing-field YAML — the next load then fails to deserialize
     // because of the absent sibling field.
     let mut enriched = payload.clone();
-    let enriched_app = serde_json::to_value(&app_cfg).map_err(|e| {
-        AppError::ConfigParse {
-            message: format!("app→json: {e}"),
-        }
+    let enriched_app = serde_json::to_value(&app_cfg).map_err(|e| AppError::ConfigParse {
+        message: format!("app→json: {e}"),
     })?;
     if let Some(obj) = enriched.as_object_mut() {
         obj.insert("app".to_string(), enriched_app);
@@ -125,8 +120,7 @@ fn validate_claude_code(payload: &GlobalConfig) -> IpcResult<()> {
             // input — surface as Invalid so we notice in tests.
             Err(AppError::Invalid {
                 field: "claude_code".into(),
-                message: "internal: legacy schema produced by frontend serialisation"
-                    .into(),
+                message: "internal: legacy schema produced by frontend serialisation".into(),
             })
         }
         Err(e) => Err(AppError::Invalid {
@@ -138,7 +132,13 @@ fn validate_claude_code(payload: &GlobalConfig) -> IpcResult<()> {
 
 fn indent_yaml(body: &str) -> String {
     body.lines()
-        .map(|l| if l.is_empty() { String::new() } else { format!("  {l}") })
+        .map(|l| {
+            if l.is_empty() {
+                String::new()
+            } else {
+                format!("  {l}")
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -205,7 +205,10 @@ mod tests {
 
         assert_eq!(loaded["future_thing"]["knob"], json!(42));
         assert_eq!(loaded["app"]["quiz"]["pass_threshold"], json!(70));
-        assert_eq!(loaded["claude_code"]["system"]["goal"]["model"], json!("opus-4-6"));
+        assert_eq!(
+            loaded["claude_code"]["system"]["goal"]["model"],
+            json!("opus-4-6")
+        );
     }
 
     /// Spec: `save_global_config` SHALL reject an incomplete azure
@@ -233,8 +236,8 @@ mod tests {
             },
             "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } }
         });
-        let err = save_global_config_at(&path, &payload)
-            .expect_err("incomplete azure must be rejected");
+        let err =
+            save_global_config_at(&path, &payload).expect_err("incomplete azure must be rejected");
         assert!(
             matches!(err, AppError::Invalid { ref field, .. } if field == "claude_code"),
             "expected Invalid(claude_code), got {err:?}"
@@ -269,7 +272,10 @@ mod tests {
         });
         save_global_config_at(&path, &payload).expect("complete profile accepted");
         let loaded = load_global_config_at(&path).expect("reloads cleanly");
-        assert_eq!(loaded["claude_code"]["azure"]["base_url"], json!("https://x.example.com/anthropic"));
+        assert_eq!(
+            loaded["claude_code"]["azure"]["base_url"],
+            json!("https://x.example.com/anthropic")
+        );
     }
 
     #[test]
@@ -301,14 +307,15 @@ mod tests {
         let path = config_path(&tmp);
 
         // Plant a valid baseline.
-        let baseline =
-            json!({ "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } } });
+        let baseline = json!({ "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } } });
         save_global_config_at(&path, &baseline).unwrap();
         let baseline_disk = fs::read_to_string(&path).unwrap();
 
         let bad = json!({ "app": { "quiz": { "pass_threshold": 200, "default_length": 5 } } });
         let err = save_global_config_at(&path, &bad).expect_err("must reject 200");
-        assert!(matches!(err, AppError::Invalid { ref field, .. } if field == "app.quiz.pass_threshold"));
+        assert!(
+            matches!(err, AppError::Invalid { ref field, .. } if field == "app.quiz.pass_threshold")
+        );
 
         // Disk content unchanged.
         let after = fs::read_to_string(&path).unwrap();
@@ -319,8 +326,7 @@ mod tests {
     fn save_uses_atomic_write_no_leftover_tmp() {
         let tmp = TempDir::new().unwrap();
         let path = config_path(&tmp);
-        let payload =
-            json!({ "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } } });
+        let payload = json!({ "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } } });
         save_global_config_at(&path, &payload).unwrap();
         let tmp_path = path.with_extension("yaml.tmp");
         assert!(!tmp_path.exists(), "atomic rename must remove .tmp");

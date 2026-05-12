@@ -44,10 +44,7 @@ pub struct Manifest {
 /// Compute the source-state signal for the current init invocation.
 /// `git_head` is the verbatim contents of `<repo_root>/.git/HEAD` (preserves
 /// `ref: refs/heads/main\n` or detached SHA forms); `None` if no git repo.
-pub fn compute_source_signal(
-    repo_root: &Path,
-    sync_summary: &SyncSummary,
-) -> SourceSignal {
+pub fn compute_source_signal(repo_root: &Path, sync_summary: &SyncSummary) -> SourceSignal {
     let git_head = read_git_head(repo_root);
     SourceSignal {
         git_head,
@@ -145,7 +142,13 @@ mod tests {
         let parsed: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
         let map = parsed.as_mapping().unwrap();
         assert_eq!(map.len(), 5);
-        for key in ["codebus_version", "created_at", "repo_root", "last_sync_at", "source_signal"] {
+        for key in [
+            "codebus_version",
+            "created_at",
+            "repo_root",
+            "last_sync_at",
+            "source_signal",
+        ] {
             assert!(
                 map.contains_key(serde_yaml::Value::String(key.into())),
                 "missing top-level key `{key}`"
@@ -184,8 +187,9 @@ mod tests {
             file_count: 15,
             total_bytes: 2000,
         };
-        let outcome = write_or_update_manifest(tmp.path(), &vault, "0.4.0-second", signal_second.clone())
-            .unwrap();
+        let outcome =
+            write_or_update_manifest(tmp.path(), &vault, "0.4.0-second", signal_second.clone())
+                .unwrap();
         assert_eq!(outcome, ManifestOutcome::Updated);
 
         let body_second = fs::read_to_string(vault.join("manifest.yaml")).unwrap();

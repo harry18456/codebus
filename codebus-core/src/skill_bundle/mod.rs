@@ -168,7 +168,6 @@ The goal text's language SHALL override the natural language of any existing wik
 
 ";
 
-
 /// 4-step read-only lookup workflow for the query verb. SKILL.md is an
 /// "internal surface" per cwd `CLAUDE.md` §0 Language Policy → workflow
 /// body stays in English. Step 4 deliberately avoids any literal sample
@@ -273,7 +272,11 @@ mod tests {
                 let p = skill_bundle_path(base, verb);
                 assert!(p.exists(), "missing bundle for verb `{verb}` at {base:?}");
                 let s = p.to_string_lossy();
-                assert!(s.contains(".claude") && s.contains("skills") && s.contains(&format!("codebus-{verb}")));
+                assert!(
+                    s.contains(".claude")
+                        && s.contains("skills")
+                        && s.contains(&format!("codebus-{verb}"))
+                );
                 let body = fs::read_to_string(&p).unwrap();
                 assert!(body.starts_with("---\n"));
                 assert!(body.contains(&format!("name: codebus-{verb}")));
@@ -343,7 +346,7 @@ mod tests {
         assert_eq!(outcomes[1], BundleOutcome::AlreadyPresent); // vault query
         assert_eq!(outcomes[2], BundleOutcome::AlreadyPresent); // vault fix
         assert_eq!(outcomes[3], BundleOutcome::AlreadyPresent); // repo goal
-        assert_eq!(outcomes[4], BundleOutcome::Written);        // repo query (refilled)
+        assert_eq!(outcomes[4], BundleOutcome::Written); // repo query (refilled)
         assert_eq!(outcomes[5], BundleOutcome::AlreadyPresent); // repo fix
     }
 
@@ -446,10 +449,10 @@ mod tests {
             "Here is the answer",
             "The answer is",
             "Found N pages",
-            "\u{67E5}\u{5230}",                  // 查到 (Chinese)
-            "\u{56DE}\u{7B54}\u{5982}\u{4E0B}",  // 回答如下 (Chinese)
-            "\u{7B54}\u{3048}\u{306F}",          // 答えは (Japanese)
-            "\u{B2F5}\u{C740}",                  // 답은 (Korean)
+            "\u{67E5}\u{5230}",                 // 查到 (Chinese)
+            "\u{56DE}\u{7B54}\u{5982}\u{4E0B}", // 回答如下 (Chinese)
+            "\u{7B54}\u{3048}\u{306F}",         // 答えは (Japanese)
+            "\u{B2F5}\u{C740}",                 // 답은 (Korean)
         ];
         for phrase in forbidden_literals {
             assert!(
@@ -540,8 +543,7 @@ mod tests {
         // The workflow MUST have a section explicitly explaining the
         // CLI's authority is post-session lint only.
         assert!(
-            body.contains("CLI is the final-only verifier")
-                || body.contains("final-only verifier"),
+            body.contains("CLI is the final-only verifier") || body.contains("final-only verifier"),
             "fix SKILL.md missing `final-only verifier` framing"
         );
         // And the agent decides its own completion.
@@ -585,9 +587,9 @@ mod tests {
             "Added 4 pages",
             "modified 0 pages",
             "created N pages",
-            "\u{672C}\u{6B21}\u{65B0}\u{589E}",       // 本次新增 (Chinese)
+            "\u{672C}\u{6B21}\u{65B0}\u{589E}", // 本次新增 (Chinese)
             "\u{30DA}\u{30FC}\u{30B8}\u{3092}\u{8FFD}\u{52A0}", // ページを追加 (Japanese)
-            "\u{C774}\u{BC88}\u{C5D0}\u{20}\u{C0C8}\u{B85C}",  // 이번에 새로 (Korean)
+            "\u{C774}\u{BC88}\u{C5D0}\u{20}\u{C0C8}\u{B85C}", // 이번에 새로 (Korean)
         ];
         for phrase in forbidden_literals {
             assert!(

@@ -99,8 +99,7 @@ pub fn invoke(
     mut on_event: impl FnMut(StreamEvent),
     cancel: Option<Arc<AtomicBool>>,
 ) -> io::Result<InvokeReport> {
-    let claude_bin = std::env::var("CODEBUS_CLAUDE_BIN")
-        .unwrap_or_else(|_| "claude".to_string());
+    let claude_bin = std::env::var("CODEBUS_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string());
     let tools_csv = build_tools_csv(opts.toolset, opts.bash_whitelist);
     let allowed_tools_csv = build_allowed_tools_csv(opts.toolset, opts.bash_whitelist);
 
@@ -218,10 +217,7 @@ fn join_within(handle: thread::JoinHandle<()>, deadline: Duration) {
 }
 
 /// Compose the `--tools` value: bare tool names (the toolset hard-gate).
-pub(crate) fn build_tools_csv(
-    toolset: &[&str],
-    bash_whitelist: Option<&str>,
-) -> String {
+pub(crate) fn build_tools_csv(toolset: &[&str], bash_whitelist: Option<&str>) -> String {
     let mut parts: Vec<&str> = toolset.to_vec();
     if bash_whitelist.is_some() {
         parts.push("Bash");
@@ -231,10 +227,7 @@ pub(crate) fn build_tools_csv(
 
 /// Compose the `--allowedTools` value: bare tool names (auto-approval) plus
 /// any fine-grained permission specifiers.
-pub(crate) fn build_allowed_tools_csv(
-    toolset: &[&str],
-    bash_whitelist: Option<&str>,
-) -> String {
+pub(crate) fn build_allowed_tools_csv(toolset: &[&str], bash_whitelist: Option<&str>) -> String {
     match bash_whitelist {
         None => toolset.join(","),
         Some(spec) if toolset.is_empty() => spec.to_string(),

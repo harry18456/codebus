@@ -59,7 +59,10 @@ pub struct GoalOptions {
     pub no_obsidian_register: bool,
 }
 
-/// Outcome of a successful `run_goal` invocation.
+/// Outcome of a successful `run_goal` invocation. `agent_exit_code` is
+/// the goal agent's process exit code (None on signal termination); CLI
+/// thin wrapper propagates it (precedence over the fix exit code) so
+/// goal_flow's existing exit-code-propagation tests stay green.
 #[derive(Debug, Clone)]
 pub struct GoalReport {
     pub accumulated_tokens: TokenUsage,
@@ -68,6 +71,8 @@ pub struct GoalReport {
     pub lint_warn_count: usize,
     pub started_at: String,
     pub finished_at: String,
+    pub agent_exit_code: Option<i32>,
+    pub fix_post_lint_issues_remain: bool,
 }
 
 /// Run the goal verb against `repo`. See module docs for full behavior.
@@ -101,10 +106,7 @@ pub fn run_goal(
         })?;
         if !paths.root.exists() {
             return Err(VerbError::Internal {
-                message: format!(
-                    "auto-init did not create vault at {}",
-                    paths.root.display()
-                ),
+                message: format!("auto-init did not create vault at {}", paths.root.display()),
             });
         }
     }
@@ -132,8 +134,7 @@ pub fn run_goal(
         pii_masked_matches: 0,
     };
     let current_signal = manifest::compute_source_signal(repo, &stub_summary);
-    let needs_resync =
-        options.force_resync || detect_drift(&paths.manifest_yaml, &current_signal);
+    let needs_resync = options.force_resync || detect_drift(&paths.manifest_yaml, &current_signal);
 
     // Step 5: load pii + claude_code config.
     let pii_cfg = match default_config_path() {
@@ -144,10 +145,12 @@ pub fn run_goal(
         _ => Default::default(),
     };
     let cc_cfg = match default_config_path() {
-        Some(p) if p.exists() => load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
-            which: "claude_code",
-            source: e,
-        })?,
+        Some(p) if p.exists() => {
+            load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
+                which: "claude_code",
+                source: e,
+            })?
+        }
         _ => Default::default(),
     };
 
@@ -156,12 +159,10 @@ pub fn run_goal(
         let scanner = build_pii_scanner(&pii_cfg);
         on_event(VerbEvent::Banner(VerbBanner::SyncStart));
         let sync_started = Instant::now();
-        let summary =
-            sync_with_scanner(repo, &paths.raw_code, scanner.as_ref(), pii_cfg.on_hit).map_err(
-                |e| VerbError::Internal {
-                    message: format!("raw mirror re-sync: {e}"),
-                },
-            )?;
+        let summary = sync_with_scanner(repo, &paths.raw_code, scanner.as_ref(), pii_cfg.on_hit)
+            .map_err(|e| VerbError::Internal {
+                message: format!("raw mirror re-sync: {e}"),
+            })?;
         let sync_elapsed_ms = sync_started.elapsed().as_millis();
         on_event(VerbEvent::Banner(VerbBanner::SyncDone {
             files: summary.files,
@@ -226,6 +227,7 @@ pub fn run_goal(
     // Step 9: lint-and-fix phase (when enabled).
     let mut fix_lint_errors: usize = 0;
     let mut fix_lint_warns: usize = 0;
+    let mut fix_post_lint_issues_remain = false;
     if fix_cfg.enabled {
         on_event(VerbEvent::Banner(VerbBanner::LintStart));
         let lint_started = Instant::now();
@@ -248,6 +250,8 @@ pub fn run_goal(
         };
         fix_lint_errors = report.final_lint.error_count;
         fix_lint_warns = report.final_lint.warn_count;
+        fix_post_lint_issues_remain =
+            !report.clean && report.termination == TerminationReason::PostLintIssuesRemain;
         let lint_elapsed_ms = lint_started.elapsed().as_millis();
         on_event(VerbEvent::Banner(VerbBanner::LintDone {
             errors: fix_lint_errors,
@@ -261,9 +265,6 @@ pub fn run_goal(
         {
             return Err(VerbError::Cancelled);
         }
-
-        // Track unused report variant to silence warnings.
-        let _ = TerminationReason::InitialClean;
     }
 
     // Step 10: auto-commit "wiki: <goal>".
@@ -317,6 +318,8 @@ pub fn run_goal(
         lint_warn_count: fix_lint_warns,
         started_at: invoke_report.started_at,
         finished_at: invoke_report.finished_at,
+        agent_exit_code: invoke_report.exit.code(),
+        fix_post_lint_issues_remain,
     })
 }
 
@@ -329,9 +332,9 @@ fn build_pii_scanner(cfg: &PiiConfig) -> Box<dyn PiiScanner> {
         PiiScannerKind::Null => Box::new(NullScanner::new()),
         PiiScannerKind::RegexBasic => match RegexBasicScanner::new(&cfg.patterns_extra) {
             Ok(s) => Box::new(s),
-            Err(_) => Box::new(
-                RegexBasicScanner::new(&[]).expect("built-in patterns must compile"),
-            ),
+            Err(_) => {
+                Box::new(RegexBasicScanner::new(&[]).expect("built-in patterns must compile"))
+            }
         },
     }
 }

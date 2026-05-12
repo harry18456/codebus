@@ -25,9 +25,9 @@
 pub mod error;
 pub mod event;
 
+pub mod fix;
 pub mod goal;
 pub mod query;
-pub mod fix;
 
 pub use error::VerbError;
 pub use event::{VerbBanner, VerbEvent, VerbLifecycleEvent};

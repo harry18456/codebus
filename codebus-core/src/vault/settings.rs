@@ -83,7 +83,10 @@ mod tests {
         let hooks = &parsed["hooks"]["PreToolUse"];
         assert!(hooks.is_array(), "hooks.PreToolUse must be an array");
         let entries = hooks.as_array().unwrap();
-        assert!(!entries.is_empty(), "PreToolUse must have at least one entry");
+        assert!(
+            !entries.is_empty(),
+            "PreToolUse must have at least one entry"
+        );
         // First entry matches Bash and invokes codebus hook check-bash.
         assert_eq!(entries[0]["matcher"], "Bash");
         let nested = entries[0]["hooks"].as_array().unwrap();

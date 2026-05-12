@@ -95,7 +95,12 @@ fn fix_no_fix_flag_short_circuits() {
     let tmp = TempDir::new().unwrap();
     assert!(run_init(tmp.path()).status.success());
     // Add lint issue, but --no-fix should still exit 0 without spawning agent.
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
     let out = run_fix(tmp.path(), &["--no-fix"], "success-noop");
     assert_eq!(
         out.status.code(),
@@ -122,7 +127,9 @@ fn fix_max_iter_flag_rejected_by_clap() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     // clap emits "unexpected argument" or similar for unknown flags
     assert!(
-        stderr.contains("unexpected") || stderr.contains("unrecognized") || stderr.contains("error"),
+        stderr.contains("unexpected")
+            || stderr.contains("unrecognized")
+            || stderr.contains("error"),
         "expected clap rejection of --fix-max-iter; stderr: {stderr}"
     );
 }
@@ -133,12 +140,20 @@ fn fix_max_iter_flag_rejected_by_clap() {
 fn fix_spawn_does_not_pass_session_continuity_flags() {
     let tmp = TempDir::new().unwrap();
     assert!(run_init(tmp.path()).status.success());
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
     let _ = run_fix(tmp.path(), &[], "success-noop");
     let log = tmp.path().join("mock-claude.log");
     assert!(log.exists(), "agent should have been spawned");
     let body = fs::read_to_string(&log).unwrap();
-    let arg_lines: Vec<&str> = body.lines().filter_map(|l| l.strip_prefix("arg=")).collect();
+    let arg_lines: Vec<&str> = body
+        .lines()
+        .filter_map(|l| l.strip_prefix("arg="))
+        .collect();
     assert!(
         !arg_lines.contains(&"--session-id"),
         "fix spawn must not pass --session-id; args: {arg_lines:?}"
@@ -161,7 +176,12 @@ fn fix_spawns_agent_exactly_once() {
     assert!(run_init(tmp.path()).status.success());
     // Plant lint issue → triggers spawn. mock-claude success-noop won't
     // repair anything → final lint still has issue. Verify single spawn.
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
     let _ = run_fix(tmp.path(), &[], "success-noop");
     let log = tmp.path().join("mock-claude.log");
     let body = fs::read_to_string(&log).unwrap();
@@ -182,28 +202,50 @@ fn fix_spawn_uses_bare_bash_in_tools_and_restricted_in_allowed_tools() {
     // from the agent OR unrestricted Bash auto-approval.
     let tmp = TempDir::new().unwrap();
     assert!(run_init(tmp.path()).status.success());
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
     let _ = run_fix(tmp.path(), &[], "success-noop");
     let log = tmp.path().join("mock-claude.log");
     assert!(log.exists(), "agent should have been spawned");
     let body = fs::read_to_string(&log).unwrap();
-    let arg_lines: Vec<String> = body.lines().filter_map(|l| l.strip_prefix("arg=").map(String::from)).collect();
+    let arg_lines: Vec<String> = body
+        .lines()
+        .filter_map(|l| l.strip_prefix("arg=").map(String::from))
+        .collect();
 
     // Find the value that follows --tools and the value that follows --allowedTools.
-    let tools_idx = arg_lines.iter().position(|a| a == "--tools").expect("--tools flag missing");
-    let allowed_idx = arg_lines.iter().position(|a| a == "--allowedTools").expect("--allowedTools flag missing");
+    let tools_idx = arg_lines
+        .iter()
+        .position(|a| a == "--tools")
+        .expect("--tools flag missing");
+    let allowed_idx = arg_lines
+        .iter()
+        .position(|a| a == "--allowedTools")
+        .expect("--allowedTools flag missing");
     let tools_val = arg_lines.get(tools_idx + 1).expect("--tools value missing");
-    let allowed_val = arg_lines.get(allowed_idx + 1).expect("--allowedTools value missing");
+    let allowed_val = arg_lines
+        .get(allowed_idx + 1)
+        .expect("--allowedTools value missing");
 
     // --tools must contain bare Bash and NOT contain the restriction.
-    assert!(tools_val.contains(",Bash") || tools_val == "Bash" || tools_val.starts_with("Bash,"),
-        "--tools value missing bare `Bash`: `{tools_val}`");
-    assert!(!tools_val.contains("Bash("),
-        "--tools value should not contain the Bash(...) restriction: `{tools_val}`");
+    assert!(
+        tools_val.contains(",Bash") || tools_val == "Bash" || tools_val.starts_with("Bash,"),
+        "--tools value missing bare `Bash`: `{tools_val}`"
+    );
+    assert!(
+        !tools_val.contains("Bash("),
+        "--tools value should not contain the Bash(...) restriction: `{tools_val}`"
+    );
 
     // --allowedTools must contain the restriction pattern.
-    assert!(allowed_val.contains("Bash(codebus lint *)"),
-        "--allowedTools missing Bash(codebus lint *) restriction: `{allowed_val}`");
+    assert!(
+        allowed_val.contains("Bash(codebus lint *)"),
+        "--allowedTools missing Bash(codebus lint *) restriction: `{allowed_val}`"
+    );
 }
 
 /// Spec: "Fix subcommand forwards configured model and effort" — default
@@ -214,7 +256,12 @@ fn fix_spawn_includes_default_model_and_effort_flags() {
     let tmp = TempDir::new().unwrap();
     assert!(run_init(tmp.path()).status.success());
     // Plant lint issue → triggers fix spawn (clean vault would short-circuit).
-    write_page(&tmp.path().join(".codebus"), "concepts/foo.md", fm_clean(), "see [[ghost]]");
+    write_page(
+        &tmp.path().join(".codebus"),
+        "concepts/foo.md",
+        fm_clean(),
+        "see [[ghost]]",
+    );
     let _ = run_fix(tmp.path(), &[], "success-noop");
     let log = tmp.path().join("mock-claude.log");
     let body = fs::read_to_string(&log).expect("mock-claude log");

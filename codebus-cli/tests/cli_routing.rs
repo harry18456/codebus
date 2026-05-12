@@ -39,15 +39,25 @@ fn git(vault: &Path, args: &[&str]) -> Output {
 
 #[test]
 fn help_lists_exactly_the_six_subcommands() {
-    let out = Command::new(BIN).arg("--help").output().expect("run binary");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new(BIN)
+        .arg("--help")
+        .output()
+        .expect("run binary");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     for verb in ["init", "goal", "query", "lint", "fix", "config"] {
-        assert!(combined.contains(verb), "help missing `{verb}`:\n{combined}");
+        assert!(
+            combined.contains(verb),
+            "help missing `{verb}`:\n{combined}"
+        );
     }
     for forbidden in ["mcp", "ingest"] {
         assert!(
@@ -59,7 +69,10 @@ fn help_lists_exactly_the_six_subcommands() {
 
 #[test]
 fn config_help_lists_three_sub_actions() {
-    let out = Command::new(BIN).args(["config", "--help"]).output().expect("run binary");
+    let out = Command::new(BIN)
+        .args(["config", "--help"])
+        .output()
+        .expect("run binary");
     assert!(out.status.success());
     let combined = format!(
         "{}{}",
@@ -76,7 +89,10 @@ fn config_help_lists_three_sub_actions() {
 
 #[test]
 fn version_flag_prints_cargo_pkg_version() {
-    let out = Command::new(BIN).arg("--version").output().expect("run binary");
+    let out = Command::new(BIN)
+        .arg("--version")
+        .output()
+        .expect("run binary");
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains(env!("CARGO_PKG_VERSION")));
@@ -84,11 +100,16 @@ fn version_flag_prints_cargo_pkg_version() {
 
 #[test]
 fn unknown_subcommand_is_rejected_by_clap() {
-    let out = Command::new(BIN).arg("randomverb").output().expect("run binary");
+    let out = Command::new(BIN)
+        .arg("randomverb")
+        .output()
+        .expect("run binary");
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("unrecognized") || stderr.contains("invalid") || stderr.contains("subcommand"),
+        stderr.contains("unrecognized")
+            || stderr.contains("invalid")
+            || stderr.contains("subcommand"),
         "stderr should mention rejection: {stderr}"
     );
 }
@@ -133,17 +154,26 @@ fn bare_invocation_routes_to_init_handler_and_creates_per_project_bundles() {
             .join(".codebus/.claude/skills")
             .join(format!("codebus-{verb}"))
             .join("SKILL.md");
-        assert!(vault_path.exists(), "missing vault-internal bundle for {verb}: {vault_path:?}");
+        assert!(
+            vault_path.exists(),
+            "missing vault-internal bundle for {verb}: {vault_path:?}"
+        );
         let repo_path = tmp
             .path()
             .join(".claude/skills")
             .join(format!("codebus-{verb}"))
             .join("SKILL.md");
-        assert!(repo_path.exists(), "missing repo-root bundle for {verb}: {repo_path:?}");
+        assert!(
+            repo_path.exists(),
+            "missing repo-root bundle for {verb}: {repo_path:?}"
+        );
     }
     // v3-fix-trust-agent: vault-internal settings.json with PreToolUse Bash hook.
     let settings_path = tmp.path().join(".codebus/.claude/settings.json");
-    assert!(settings_path.exists(), "missing vault-internal settings.json");
+    assert!(
+        settings_path.exists(),
+        "missing vault-internal settings.json"
+    );
     let body = std::fs::read_to_string(&settings_path).unwrap();
     let parsed: serde_json::Value =
         serde_json::from_str(&body).expect("settings.json must parse as JSON");
@@ -152,11 +182,16 @@ fn bare_invocation_routes_to_init_handler_and_creates_per_project_bundles() {
     assert_eq!(entries[0]["matcher"], "Bash");
     // v3-fix-trust-agent: settings.json NOT written to source repo root.
     let bad = tmp.path().join(".claude/settings.json");
-    assert!(!bad.exists(), "settings.json must not be written to repo root: {bad:?}");
+    assert!(
+        !bad.exists(),
+        "settings.json must not be written to repo root: {bad:?}"
+    );
     // v3-fix-trust-agent: vault internal .gitignore includes settings.local.json.
     let internal_gi = std::fs::read_to_string(tmp.path().join(".codebus/.gitignore")).unwrap();
     assert!(
-        internal_gi.lines().any(|l| l == ".claude/settings.local.json"),
+        internal_gi
+            .lines()
+            .any(|l| l == ".claude/settings.local.json"),
         "vault internal .gitignore missing `.claude/settings.local.json` line:\n{internal_gi}"
     );
 }
@@ -238,11 +273,7 @@ fn init_progress_line_includes_zero_pii_count_for_clean_repo() {
 fn init_progress_line_reports_nonzero_pii_count_for_repo_with_secrets() {
     let tmp = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
-    std::fs::write(
-        tmp.path().join("aws.py"),
-        b"AWS_KEY=AKIAIOSFODNN7EXAMPLE\n",
-    )
-    .unwrap();
+    std::fs::write(tmp.path().join("aws.py"), b"AWS_KEY=AKIAIOSFODNN7EXAMPLE\n").unwrap();
     let out = Command::new(BIN)
         .args(["init", "--no-obsidian-register"])
         .env("CODEBUS_HOME", home.path())
@@ -356,10 +387,7 @@ fn re_init_preserves_user_modified_git_config() {
     let vault = tmp.path().join(".codebus");
 
     // Simulate user override of nested repo identity.
-    let set = git(
-        &vault,
-        &["config", "user.email", "alice@example.com"],
-    );
+    let set = git(&vault, &["config", "user.email", "alice@example.com"]);
     assert!(set.status.success());
 
     // Re-init: nested repo already exists, init_nested_repo SHALL be a no-op.
@@ -408,10 +436,7 @@ fn internal_gitignore_appends_missing_required_lines() {
     // v3-run-log: line is `log/` (singular, aligns with vault::layout's
     // `log/` directory) — was `logs/` plural until v3-run-log corrected
     // the typo.
-    assert!(
-        lines.contains(&"log/"),
-        "missing log/ line: {body:?}"
-    );
+    assert!(lines.contains(&"log/"), "missing log/ line: {body:?}");
     // User-added `notes/` not duplicated.
     assert_eq!(
         lines.iter().filter(|l| **l == "notes/").count(),
@@ -483,7 +508,11 @@ fn debug_flag_at_top_level_emits_debug_lines() {
         .current_dir(tmp.path())
         .output()
         .expect("run");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
@@ -521,8 +550,14 @@ fn debug_flag_at_subcommand_position_behaves_identically() {
         );
         combined.contains("[debug]")
     };
-    assert!(has_debug(&top_level), "top-level --debug missing [debug] lines");
-    assert!(has_debug(&subcommand), "subcommand --debug missing [debug] lines");
+    assert!(
+        has_debug(&top_level),
+        "top-level --debug missing [debug] lines"
+    );
+    assert!(
+        has_debug(&subcommand),
+        "subcommand --debug missing [debug] lines"
+    );
 }
 
 #[test]
@@ -605,8 +640,7 @@ fn init_does_not_overwrite_existing_global_config() {
 #[test]
 fn init_writes_default_parseable_global_config() {
     use codebus_core::config::{
-        ClaudeCodeConfig, PiiConfig, load_claude_code_config, load_lint_fix_config,
-        load_pii_config,
+        ClaudeCodeConfig, PiiConfig, load_claude_code_config, load_lint_fix_config, load_pii_config,
     };
 
     let repo = TempDir::new().unwrap();
@@ -747,7 +781,10 @@ fn init_pipe_disables_emoji_and_color() {
         "ANSI escape unexpectedly present under non-TTY: {stdout}"
     );
     // ASCII fallback for Start banner is `▶`.
-    assert!(stdout.contains("▶"), "missing ASCII Start lead `▶`: {stdout}");
+    assert!(
+        stdout.contains("▶"),
+        "missing ASCII Start lead `▶`: {stdout}"
+    );
 }
 
 /// Spec scenario: "--emoji flag is rejected by clap" — the flag was
@@ -850,7 +887,11 @@ fn init_followed_by_repeat_init_does_not_drift() {
         .current_dir(tmp.path())
         .output()
         .expect("first init");
-    assert!(first.status.success(), "first init stderr: {}", String::from_utf8_lossy(&first.stderr));
+    assert!(
+        first.status.success(),
+        "first init stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
 
     let manifest_path = tmp.path().join(".codebus").join("manifest.yaml");
     let manifest_after_first = fs::read_to_string(&manifest_path).expect("manifest exists");
@@ -862,7 +903,11 @@ fn init_followed_by_repeat_init_does_not_drift() {
         .current_dir(tmp.path())
         .output()
         .expect("second init");
-    assert!(second.status.success(), "second init stderr: {}", String::from_utf8_lossy(&second.stderr));
+    assert!(
+        second.status.success(),
+        "second init stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
 
     let manifest_after_second = fs::read_to_string(&manifest_path).expect("manifest exists");
     let bytes_second = extract_total_bytes(&manifest_after_second);
@@ -880,4 +925,40 @@ fn extract_total_bytes(manifest_yaml: &str) -> u64 {
         }
     }
     panic!("manifest missing total_bytes field:\n{manifest_yaml}")
+}
+
+/// Verification for task 5.1 (Fix Loop Library Invocation Entry Point):
+/// the CLI binary crate SHALL NOT call `wiki::fix::run_fix_loop` directly
+/// — the only callers SHALL be inside `codebus_core::verb::{goal,fix}`.
+/// This guard scans the CLI source tree for the forbidden symbol so a
+/// future contributor cannot accidentally regress the delegation contract.
+#[test]
+fn cli_does_not_call_run_fix_loop_directly() {
+    use std::fs;
+    fn scan(dir: &Path) -> Vec<std::path::PathBuf> {
+        let mut hits = Vec::new();
+        for entry in fs::read_dir(dir).expect("read cli src dir") {
+            let entry = entry.expect("dir entry");
+            let path = entry.path();
+            if path.is_dir() {
+                hits.extend(scan(&path));
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let body = fs::read_to_string(&path).expect("read .rs file");
+                if body.contains("wiki::fix::run_fix_loop")
+                    || body.contains("use codebus_core::wiki::fix")
+                {
+                    hits.push(path);
+                }
+            }
+        }
+        hits
+    }
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let hits = scan(&src_dir);
+    assert!(
+        hits.is_empty(),
+        "CLI binary must not call run_fix_loop directly; \
+         delegate via codebus_core::verb::{{goal,fix}}::run_*. \
+         Forbidden references found in: {hits:?}"
+    );
 }

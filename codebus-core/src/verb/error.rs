@@ -144,7 +144,7 @@ mod tests {
             ),
             (
                 VerbError::Spawn {
-                    source: std::io::Error::new(std::io::ErrorKind::Other, "x"),
+                    source: std::io::Error::other("x"),
                 },
                 1,
             ),

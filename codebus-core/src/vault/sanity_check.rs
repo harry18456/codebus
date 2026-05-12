@@ -22,7 +22,8 @@ pub fn check_repo_is_not_vault(path: &Path) -> Result<(), VaultRefusal> {
     if path.file_name().and_then(|n| n.to_str()) == Some(".codebus") {
         return Err(VaultRefusal {
             path: path.to_path_buf(),
-            reason: "directory is named `.codebus` — refusing to nest a vault inside another vault".into(),
+            reason: "directory is named `.codebus` — refusing to nest a vault inside another vault"
+                .into(),
         });
     }
     let wiki = path.join("wiki");
@@ -30,7 +31,9 @@ pub fn check_repo_is_not_vault(path: &Path) -> Result<(), VaultRefusal> {
     if wiki.is_dir() && manifest.is_file() {
         return Err(VaultRefusal {
             path: path.to_path_buf(),
-            reason: "directory contains `wiki/` and `manifest.yaml` — looks like a codebus vault root".into(),
+            reason:
+                "directory contains `wiki/` and `manifest.yaml` — looks like a codebus vault root"
+                    .into(),
         });
     }
     Ok(())

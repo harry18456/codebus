@@ -77,7 +77,11 @@ fn set_get_show_delete_round_trip() {
     write_config_with_service(home.path(), &service);
 
     // set-key
-    let out = run_codebus(home.path(), &["config", "set-key", "azure"], Some("sk-round-trip\n"));
+    let out = run_codebus(
+        home.path(),
+        &["config", "set-key", "azure"],
+        Some("sk-round-trip\n"),
+    );
     assert!(
         out.status.success(),
         "set-key failed: stderr={}, stdout={}",

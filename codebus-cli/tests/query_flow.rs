@@ -69,7 +69,10 @@ fn query_spawns_agent_with_read_only_toolset() {
 
     // cwd is the vault root.
     let vault_str = tmp.path().join(".codebus").to_string_lossy().to_string();
-    let cwd_line = lines.iter().find(|l| l.starts_with("cwd=")).expect("cwd line");
+    let cwd_line = lines
+        .iter()
+        .find(|l| l.starts_with("cwd="))
+        .expect("cwd line");
     let cwd_value = cwd_line.strip_prefix("cwd=").unwrap();
     assert!(
         cwd_value.ends_with(vault_str.trim_start_matches("\\\\?\\")),
@@ -82,13 +85,14 @@ fn query_spawns_agent_with_read_only_toolset() {
         .collect();
     assert!(arg_lines.contains(&"-p"), "missing -p");
     assert!(
-        arg_lines
-            .iter()
-            .any(|a| a.starts_with("/codebus-query ")),
+        arg_lines.iter().any(|a| a.starts_with("/codebus-query ")),
         "missing slash command in {arg_lines:?}"
     );
     assert!(arg_lines.contains(&"--tools"), "missing --tools");
-    assert!(arg_lines.contains(&"--allowedTools"), "missing --allowedTools");
+    assert!(
+        arg_lines.contains(&"--allowedTools"),
+        "missing --allowedTools"
+    );
     assert!(
         arg_lines.contains(&"--permission-mode"),
         "missing --permission-mode"
@@ -104,10 +108,7 @@ fn query_spawns_agent_with_read_only_toolset() {
     // such inclusion would change the CSV literal and the count would
     // drop below 2. Substring `contains("Edit")` is unsafe because
     // `acceptEdits` (the permission-mode value) trivially contains it.
-    let toolset_count = arg_lines
-        .iter()
-        .filter(|a| **a == "Read,Glob,Grep")
-        .count();
+    let toolset_count = arg_lines.iter().filter(|a| **a == "Read,Glob,Grep").count();
     assert_eq!(
         toolset_count, 2,
         "read-only toolset CSV `Read,Glob,Grep` should appear twice (--tools + --allowedTools), got {toolset_count}; arg_lines={arg_lines:?}"
@@ -211,8 +212,7 @@ fn query_propagates_agent_exit_code() {
     // the write side-effect lands in the vault for the test to observe).
     // The test focus here is: codebus binary propagates the child's
     // non-zero exit code regardless of what the mock did.
-    let (out, _log) =
-        run_query(tmp.path(), "test", "failure-write-then-exit-1");
+    let (out, _log) = run_query(tmp.path(), "test", "failure-write-then-exit-1");
 
     assert!(
         !out.status.success(),
@@ -259,11 +259,7 @@ fn query_streams_events_and_writes_jsonl_log_with_zero_wiki_changed() {
     let entries: Vec<_> = fs::read_dir(&log_dir)
         .expect("log dir exists")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("runs-")
-        })
+        .filter(|e| e.file_name().to_string_lossy().starts_with("runs-"))
         .collect();
     assert_eq!(entries.len(), 1, "expected 1 runs-*.jsonl, got {entries:?}");
 

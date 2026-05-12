@@ -77,7 +77,10 @@ fn azure_profile_missing_key_aborts_before_spawn() {
         }
     }
 
-    assert!(!out.status.success(), "query must exit non-zero on missing key");
+    assert!(
+        !out.status.success(),
+        "query must exit non-zero on missing key"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("EndpointKeyMissing"),

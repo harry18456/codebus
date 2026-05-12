@@ -75,10 +75,7 @@ pub fn lookup_vault_id(wiki_path: &Path) -> io::Result<Option<String>> {
 /// Inner, testable form of [`lookup_vault_id`]. Tests drive this directly
 /// with a controlled `json_path` so they don't depend on the live
 /// `dirs::config_dir()` lookup.
-pub(crate) fn lookup_vault_id_at(
-    wiki_path: &Path,
-    json_path: &Path,
-) -> io::Result<Option<String>> {
+pub(crate) fn lookup_vault_id_at(wiki_path: &Path, json_path: &Path) -> io::Result<Option<String>> {
     let bytes = match fs::read(json_path) {
         Ok(b) => b,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -156,13 +153,10 @@ fn read_config(json_path: &Path) -> Result<ObsidianConfig, String> {
 
 fn write_config(json_path: &Path, cfg: &ObsidianConfig) -> Result<(), String> {
     if let Some(parent) = json_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("create dir {}: {e}", parent.display()))?;
+        fs::create_dir_all(parent).map_err(|e| format!("create dir {}: {e}", parent.display()))?;
     }
-    let bytes = serde_json::to_vec(cfg)
-        .map_err(|e| format!("serialize obsidian.json: {e}"))?;
-    fs::write(json_path, &bytes)
-        .map_err(|e| format!("write {}: {e}", json_path.display()))?;
+    let bytes = serde_json::to_vec(cfg).map_err(|e| format!("serialize obsidian.json: {e}"))?;
+    fs::write(json_path, &bytes).map_err(|e| format!("write {}: {e}", json_path.display()))?;
     Ok(())
 }
 
@@ -323,11 +317,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let json = tmp.path().join("obsidian/obsidian.json");
         fs::create_dir_all(json.parent().unwrap()).unwrap();
-        fs::write(
-            &json,
-            r#"{"vaults":{},"frameless":true,"width":1280}"#,
-        )
-        .unwrap();
+        fs::write(&json, r#"{"vaults":{},"frameless":true,"width":1280}"#).unwrap();
         let wiki = tmp.path().join("repo/.codebus/wiki");
         fs::create_dir_all(&wiki).unwrap();
 

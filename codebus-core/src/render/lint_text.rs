@@ -43,11 +43,7 @@ const OSC8_DELIM: &str = "\x1b\\";
 /// vault-relative paths). Pass an empty `Path::new("")` when emitting in a
 /// context that has no wiki context — the OSC 8 wrap is suppressed when
 /// `vault_id` is None regardless.
-pub fn format_lint_text(
-    result: &LintResult,
-    opts: &RenderOptions,
-    wiki_root: &Path,
-) -> String {
+pub fn format_lint_text(result: &LintResult, opts: &RenderOptions, wiki_root: &Path) -> String {
     let _ = wiki_root; // currently encoded inside LintIssue.path; reserved for future use
     let coverage = format_coverage(result);
 

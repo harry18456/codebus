@@ -84,8 +84,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let actual: std::collections::HashSet<&str> =
-            REGISTERED_COMMANDS.iter().copied().collect();
+        let actual: std::collections::HashSet<&str> = REGISTERED_COMMANDS.iter().copied().collect();
         assert_eq!(actual, expected, "registered command names drifted");
     }
 

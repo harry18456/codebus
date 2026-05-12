@@ -85,9 +85,7 @@ mod tests {
     fn unknown_provider_rejected_sync_probe() {
         // We exercise the sync helper directly — async command path
         // routes through the same `provider` match arm.
-        let err = match tauri::async_runtime::block_on(check_cli_installed(
-            "codex".into(),
-        )) {
+        let err = match tauri::async_runtime::block_on(check_cli_installed("codex".into())) {
             Err(e) => e,
             Ok(_) => panic!("expected Err for unknown provider"),
         };
