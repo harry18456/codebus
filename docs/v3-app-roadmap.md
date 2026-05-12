@@ -3,16 +3,20 @@
 CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 5 條序列化 change。每一條都假設前一條已 archive；不是平行可換序。
 
 > **2026-05-12 update**：原本 #3 `v3-app-quiz-cmdk` 把 Quiz 跟 Cmd+K query 捆一起。實機進入 #2 設計階段時討論發現 Cmd+K query 跟 #2 的 goal-stream 基建本質一樣（都 spawn codebus verb + 接 stream-json + render thought / tool calls / result），讓 query 緊跟 goal、把 Quiz 切到後一條 — (a) 兩條都更聚焦、(b) Cmd+K query 早 land 給 user 一個立即可用的問答 UI、(c) Quiz 可重用 cmdk 的 stream + citation 基建。Stage A 額外 ship 的 `stage-b-app-endpoint-settings` 也算 #1 之後的 Settings 補完，沒列在主序列裡（屬於 foundation 的 follow-up patch）。
+>
+> **2026-05-12 update (2)**：`v3-app-workspace-goal` 動工前 spectra-discuss 發現倚賴的 CLI 側基建有 2 個未做的洞 — (1) `codebus_core::agent::invoke()` stream render 跟 invoke 綁死沒 callback hook，GUI 無法 reuse；(2) run-log 只存 summary、stream events 沒持久化，Goals overview list / completed goal timeline / cancel UX 都缺資料來源。必須先以兩條獨立 prerequisite change 補完再做 GUI。**5 條序列 → 6 條**：最前面插 A `v3-goal-library` + B `v3-run-log-events`，原本 #2-#5 變 C-F。完整討論結論 / Q1/Q2/Q3 trade-offs / cancel & interrupted UX 設計見 `docs/2026-05-12-v3-app-workspace-goal-discussion.md`。
 
 ## Sequence
 
 | # | Change | Scope (one line) | Depends on |
 |---|---|---|---|
 | 1 | `v3-app-foundation` | Tauri shell + IPC bridge（5 commands） + Lobby（populated + empty） + Settings modal（7 fields） + Workspace stub + design system foundation（Tailwind v4 token / shadcn primitives） | — |
-| 2 | `v3-app-workspace-goal` | Vault Workspace 真內容：sidebar Goals/Wiki/Quiz tabs + Wiki preview (Milkdown) + Goal flow（live stream + 結束狀態） | foundation 的 IPC contract / route store / Workspace stub |
-| 3 | `v3-app-query-cmdk` | Cmd+K spotlight query 抽屜（streaming + 引用）— spawn `codebus query` + 重用 goal-stream 渲染管線 + spotlight UX（Ctrl/Cmd+K 喚出、搜尋框、即時 stream、引用 link 可點回 wiki preview） | workspace-goal 的 wiki page model / stream rendering pipeline |
-| 4 | `v3-app-quiz` | Quiz flow（pending / reviewing 兩態 + md 持久化） + 從 wiki page 觸發 quiz / 答題評分 / 結果寫回 md frontmatter | query-cmdk 的 wiki rendering / app-state 持久化 pattern |
-| 5 | `v3-app-polish-ship` | Release build / installer / auto-update / icon 視覺再優化 / E2E test infra / **跨平台驗證（含 v3-app-foundation / workspace-goal / query-cmdk / quiz 各自 acceptance checklist 在 macOS / Linux 重跑）** | 前四條都 ship |
+| A | `v3-goal-library` | goal + query orchestration 搬進 codebus-core；`agent::invoke()` 加 `on_event` callback；`run_goal` / `run_query` 接 `CancellationToken`；CLI 端 byte-equivalent thin wrapper（鏡像 foundation 的 `init::run_init` pattern） | — |
+| B | `v3-run-log-events` | RunLog schema 加 `outcome`（`succeeded` / `failed` / `cancelled`）；per-run events.jsonl 持久化（`<vault>/.codebus/log/events-<started_at_slug>.jsonl`）；cancel path 寫 `outcome=cancelled` 且不 auto-commit；GUI-spawned runs 強制寫（忽略 `log.sink: none`） | A |
+| C | `v3-app-workspace-goal` | Vault Workspace 真內容：sidebar Goals/Wiki/Quiz tabs + Wiki preview (Milkdown) + Goal flow（modal + inline mini-stream + running / done / cancelled / interrupted detail view 含 `[Retry with same goal]`） | foundation + A + B |
+| D | `v3-app-query-cmdk` | Cmd+K spotlight query 抽屜（streaming + 引用）— 重用 A 的 `run_query` + C 的 stream rendering pipeline + spotlight UX（Ctrl/Cmd+K 喚出、搜尋框、即時 stream、引用 link 可點回 wiki preview） | C |
+| E | `v3-app-quiz` | Quiz flow（pending / reviewing 兩態 + md 持久化） + 從 wiki page 觸發 quiz / 答題評分 / 結果寫回 md frontmatter | D |
+| F | `v3-app-polish-ship` | Release build / installer / auto-update / icon 視覺再優化 / E2E test infra / **跨平台驗證（含 foundation / A / B / C / D / E 各自 acceptance checklist 在 macOS / Linux 重跑）** | A-E 全 ship |
 
 序列的 「依賴」一欄列的是該 change **行為層** 必須先存在的東西；artifact 層每條 change 都各自 own 一份 spec / design / tasks。
 
@@ -27,9 +31,11 @@ CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 
 
 各 change 的 tasks.md 在 §13 不另列 macOS / Linux acceptance 條目（如 `v3-app-foundation` 13.2 已改為「在 roadmap 登記 deferral」的 documentation 任務）；polish-ship 屆時負責統整。
 
-## 為什麼切 5 條而不是一條
+## 為什麼切 6 條而不是一條
 
-7 週工作量。單一巨大 change 的歷史教訓：apply 失焦、review 不可行、in-flight spec drift。本 roadmap 的切點來自 2026-05-11 brainstorming session（原本 4 條 / 2026-05-12 把 quiz-cmdk 拆成 query-cmdk + quiz 兩條），每一條落點都是「換到下一條時，前一條跑得起來的 demo」（不是「實作了某個檔案」），所以 archive 任一條後都可以對外展示一個可用的 app 子集。
+7 週工作量。單一巨大 change 的歷史教訓：apply 失焦、review 不可行、in-flight spec drift。本 roadmap 的切點來自 2026-05-11 brainstorming session（原本 4 條 / 2026-05-12 把 quiz-cmdk 拆成 query-cmdk + quiz 兩條 / 2026-05-12 #2 動工前發現 CLI 缺基建再前插 A + B 兩條，總計 6 條），每一條落點都是「換到下一條時，前一條跑得起來的 demo」（不是「實作了某個檔案」），所以 archive 任一條後都可以對外展示一個可用的 app 子集。
+
+A / B 兩條雖然不直接 ship GUI 功能，但都是「換到 C 時 C 跑得起來」的 demo：A archive 後 `codebus goal "..."` CLI 行為 byte-equivalent（refactor 不破舊行為）；B archive 後 CLI user 多看到 events.jsonl 與 RunLog outcome 欄位（GUI user 還沒有 GUI 可用，但 CLI 已能驗 events 串流到磁碟）。
 
 ## Out of scope（全部 v1 範圍以外）
 
