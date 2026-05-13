@@ -90,16 +90,9 @@ pub fn run_goal(
     // Capture run started_at early — events.jsonl filename slug + RunLog row.
     let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
 
-    // Step 1: Start + Goal banners (raw on_event — events sink not yet
-    // built because vault may not exist).
-    on_event(VerbEvent::Banner(VerbBanner::Start {
-        repo_path: repo.to_path_buf(),
-    }));
-    on_event(VerbEvent::Banner(VerbBanner::Goal {
-        goal_text: options.text.clone(),
-    }));
-
-    // Step 2: vault precondition — auto-init if missing.
+    // Step 1: vault precondition — auto-init if missing. No banners
+    // yet — events sink needs vault dir to exist; we emit Start +
+    // Goal banners through fan_out below so events.jsonl captures them.
     if !paths.root.exists() {
         let init_opts = InitOptions {
             no_obsidian_register: options.no_obsidian_register,
@@ -187,6 +180,14 @@ pub fn run_goal(
         }
         on_event(event);
     };
+
+    // Start + Goal banners (post-sink-build so events.jsonl captures them).
+    fan_out(VerbEvent::Banner(VerbBanner::Start {
+        repo_path: repo.to_path_buf(),
+    }));
+    fan_out(VerbEvent::Banner(VerbBanner::Goal {
+        goal_text: options.text.clone(),
+    }));
 
     // Helper to write a cancel-path RunLog and return Cancelled. Used
     // at two cancel observation points (post-agent, post-fix-loop).

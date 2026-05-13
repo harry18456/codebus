@@ -79,19 +79,16 @@ pub fn run_query(
     // matches the RunLog row's started_at (GUI joins on this).
     let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
 
-    // Step 1: Start banner.
-    on_event(VerbEvent::Banner(VerbBanner::Start {
-        repo_path: repo.to_path_buf(),
-    }));
-
-    // Step 2: strict vault precondition.
+    // Step 1: strict vault precondition. Emitted before any banner so
+    // that the early-return path on VaultMissing does not produce a
+    // half-state events file (sink build needs vault dir to exist).
     if !paths.root.exists() {
         return Err(VerbError::VaultMissing {
             path: paths.root.clone(),
         });
     }
 
-    // Step 3: load claude_code + log config (log config needed for events sink).
+    // Step 2: load claude_code + log config (log config needed for events sink).
     let cc_cfg = match default_config_path() {
         Some(p) if p.exists() => {
             load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
@@ -125,8 +122,9 @@ pub fn run_query(
     let query_env =
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
-    // Step 6: spawn agent. Fan out each VerbEvent to (a) the events
-    // sink and (b) the caller's on_event closure.
+    // Fan out each VerbEvent to (a) the events sink and (b) the caller's
+    // on_event closure. Built here so the Start banner below also lands
+    // in events.jsonl.
     let mut fan_out = |event: VerbEvent| {
         let envelope = EventEnvelope {
             ts: chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
@@ -138,6 +136,12 @@ pub fn run_query(
         on_event(event);
     };
 
+    // Start banner (now emitted post-sink-build so events.jsonl captures it).
+    fan_out(VerbEvent::Banner(VerbBanner::Start {
+        repo_path: repo.to_path_buf(),
+    }));
+
+    // Step 6: spawn agent.
     fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Query,
     }));
@@ -241,13 +245,16 @@ mod tests {
             }
             other => panic!("expected VaultMissing, got {other:?}"),
         }
-        // The Start banner SHOULD fire before precondition check.
+        // After v3-run-log-events: vault precondition runs BEFORE any
+        // banner emission so that an early VaultMissing return does
+        // not produce a half-state events file. No Start banner on
+        // this error path.
         let collected = events.borrow();
         assert!(
-            collected
+            !collected
                 .iter()
                 .any(|e| matches!(e, VerbEvent::Banner(VerbBanner::Start { .. }))),
-            "expected Start banner before precondition check"
+            "Start banner must not fire when vault is missing (sink build needs vault)"
         );
         // SpawnStart SHALL NOT fire — agent never spawned.
         assert!(

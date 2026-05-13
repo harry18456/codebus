@@ -106,12 +106,8 @@ pub fn run_fix(
     // Capture run started_at early for events.jsonl slug + RunLog row.
     let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
 
-    // Step 1: Start banner.
-    on_event(VerbEvent::Banner(VerbBanner::Start {
-        repo_path: repo.to_path_buf(),
-    }));
-
-    // Step 2: strict vault precondition.
+    // Step 1: strict vault precondition (before any banner so a missing
+    // vault doesn't produce a half-state events file).
     if !paths.root.exists() {
         return Err(VerbError::VaultMissing {
             path: paths.root.clone(),
@@ -189,6 +185,11 @@ pub fn run_fix(
         }
         on_event(event);
     };
+
+    // Start banner (post-sink-build so events.jsonl captures it).
+    fan_out(VerbEvent::Banner(VerbBanner::Start {
+        repo_path: repo.to_path_buf(),
+    }));
 
     // Step 7: emit LintStart banner + SpawnStart lifecycle.
     fan_out(VerbEvent::Banner(VerbBanner::LintStart));
