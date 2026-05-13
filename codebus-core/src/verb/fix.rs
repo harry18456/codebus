@@ -252,6 +252,7 @@ pub fn run_fix(
             lint_error_count: report.final_lint.error_count,
             lint_warn_count: report.final_lint.warn_count,
             outcome: "cancelled".into(),
+            session_id: None,
         };
         write_run_log(sink_cfg.clone(), &cancel_run_log);
         return Err(VerbError::Cancelled);
@@ -322,6 +323,7 @@ pub fn run_fix(
             lint_error_count: report.final_lint.error_count,
             lint_warn_count: report.final_lint.warn_count,
             outcome: outcome.into(),
+            session_id: None,
         };
         write_run_log(sink_cfg.clone(), &run_log);
     }

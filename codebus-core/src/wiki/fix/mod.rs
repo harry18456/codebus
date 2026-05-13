@@ -151,6 +151,9 @@ fn invoke_fix_agent(
             model,
             effort,
             env,
+            // fix verb is one-shot (no session resume); chat verb is the
+            // only caller that sets Some(...) on this field.
+            resume_session_id: None,
         },
         on_event,
         cancel,
@@ -213,11 +216,15 @@ mod tests {
         assert_eq!(FIX_BASH_WHITELIST, "Bash(codebus lint *)");
     }
 
-    /// Spec scenario: "Fix spawn arguments contain no session continuity flags"
-    /// — verified at compile time by the absence of session_id/resume options
-    /// in `InvokeAgentOptions`. This test asserts the struct shape.
+    /// Spec scenario: "Fix spawn arguments contain no session continuity flags".
+    /// After v3-chat-verb added `resume_session_id: Option<String>` to
+    /// `InvokeAgentOptions`, fix verb keeps that field at `None` so the
+    /// spawned argv contains no `--resume` flag — byte-equivalent to the
+    /// pre-chat-verb implementation. Destructure pattern is exhaustive so
+    /// compile fails if a future field is added without a deliberate review
+    /// here.
     #[test]
-    fn invoke_options_has_no_session_field() {
+    fn invoke_options_carries_no_resume_session_id_for_fix() {
         let opts = InvokeAgentOptions {
             slash_command: "/codebus-fix".into(),
             vault_root: PathBuf::from("/tmp"),
@@ -226,9 +233,8 @@ mod tests {
             model: None,
             effort: None,
             env: crate::agent::EnvOverrides::for_system(),
+            resume_session_id: None,
         };
-        // Destructuring asserts the struct has exactly these fields and no
-        // session-related fields. Compile fails if a session field is added.
         let InvokeAgentOptions {
             slash_command: _,
             vault_root: _,
@@ -237,6 +243,11 @@ mod tests {
             model: _,
             effort: _,
             env: _,
+            resume_session_id,
         } = opts;
+        assert!(
+            resume_session_id.is_none(),
+            "fix verb must always pass resume_session_id: None"
+        );
     }
 }

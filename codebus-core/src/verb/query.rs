@@ -156,6 +156,9 @@ pub fn run_query(
                 model: query_resolved.model.clone(),
                 effort: query_resolved.effort.clone(),
                 env: query_env,
+                // query verb is one-shot (no session resume); chat verb is
+                // the only caller that sets Some(...) on this field.
+                resume_session_id: None,
             },
             |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
@@ -184,6 +187,7 @@ pub fn run_query(
             lint_error_count: 0,
             lint_warn_count: 0,
             outcome: "cancelled".into(),
+            session_id: None,
         };
         write_run_log(sink_cfg.clone(), &cancel_run_log);
         return Err(VerbError::Cancelled);
@@ -205,6 +209,7 @@ pub fn run_query(
         lint_error_count: 0,
         lint_warn_count: 0,
         outcome: "succeeded".into(),
+        session_id: None,
     };
     write_run_log(sink_cfg, &run_log);
 

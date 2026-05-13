@@ -127,7 +127,9 @@ impl VerbBanner {
 
 /// Lifecycle events specific to verb orchestration (not present in `Banner`
 /// because they're not user-facing terminal lines — they're for GUI progress
-/// UI). The CLI thin wrapper SHALL no-op on these variants.
+/// UI). The CLI thin wrappers for goal/query/fix SHALL no-op on these
+/// variants. The chat CLI command observes `PromoteSuggestion` to drive
+/// its interactive `(y/n)` prompt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VerbLifecycleEvent {
@@ -144,6 +146,17 @@ pub enum VerbLifecycleEvent {
     LintFinal {
         error_count: usize,
         warn_count: usize,
+    },
+    /// v3-chat-verb: chat agent emitted a promote-to-wiki suggestion via
+    /// the `[CODEBUS_PROMOTE_SUGGESTION] <reason>` line marker convention.
+    /// Emitted exclusively by `verb::chat::run_chat_turn` when its stream
+    /// parser detects the marker at the start of an assistant message.
+    /// CLI / GUI consumers use this to render an interactive confirmation
+    /// (e.g., `[suggest] promote to wiki? (y/n)`). The `reason` payload is
+    /// the literal substring after `[CODEBUS_PROMOTE_SUGGESTION] ` up to
+    /// the end of that line.
+    PromoteSuggestion {
+        reason: String,
     },
 }
 
@@ -212,5 +225,43 @@ mod tests {
             error_count: 0,
             warn_count: 1,
         });
+        let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::PromoteSuggestion {
+            reason: "auth lifecycle including JWT issuance".into(),
+        });
+    }
+
+    /// v3-chat-verb: pin the `PromoteSuggestion` payload shape so the chat
+    /// stream parser and CLI confirmation prompt rely on a stable contract.
+    #[test]
+    fn verb_lifecycle_event_promote_suggestion_constructible() {
+        let event = VerbLifecycleEvent::PromoteSuggestion {
+            reason: "uv-lib 與 uv-child 的關係".into(),
+        };
+        match event {
+            VerbLifecycleEvent::PromoteSuggestion { reason } => {
+                assert_eq!(reason, "uv-lib 與 uv-child 的關係");
+            }
+            other => panic!("expected PromoteSuggestion, got {other:?}"),
+        }
+    }
+
+    /// v3-chat-verb: ensure `PromoteSuggestion` round-trips through serde
+    /// so events.jsonl rows for chat turns parse back cleanly (GUI / analytics
+    /// consumers can rely on this).
+    #[test]
+    fn verb_lifecycle_event_promote_suggestion_serde_round_trip() {
+        let event = VerbLifecycleEvent::PromoteSuggestion {
+            reason: "auth flow".into(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("promote_suggestion"));
+        assert!(json.contains("\"reason\":\"auth flow\""));
+        let parsed: VerbLifecycleEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            VerbLifecycleEvent::PromoteSuggestion { reason } => {
+                assert_eq!(reason, "auth flow");
+            }
+            other => panic!("expected PromoteSuggestion after round-trip, got {other:?}"),
+        }
     }
 }

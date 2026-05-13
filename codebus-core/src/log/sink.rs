@@ -50,10 +50,11 @@ pub struct TokenUsage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunLog {
     /// The goal / query text that triggered the run. Empty string for
-    /// `fix` (which has no positional argument).
+    /// `fix` (which has no positional argument). For `chat`, the
+    /// per-turn user prompt text.
     pub goal: String,
-    /// `"goal"` / `"query"` / `"fix"`. Required because runs.jsonl mixes
-    /// modes; consumers filter on this field.
+    /// `"goal"` / `"query"` / `"fix"` / `"chat"`. Required because
+    /// runs.jsonl mixes modes; consumers filter on this field.
     pub mode: String,
     /// Model alias / id passed to the provider, if any. `None` when the
     /// caller did not configure a model (provider used its default).
@@ -80,6 +81,25 @@ pub struct RunLog {
     /// jsonl rows written before v3-run-log-events shipped.
     #[serde(default = "default_outcome")]
     pub outcome: String,
+    /// Claude CLI session id for the spawned `claude` child process,
+    /// extracted from the spawn's first `init` stream event.
+    ///
+    /// Semantics by mode (v3-chat-verb):
+    /// - `mode == "chat"`: SHALL always be `Some(<session_id>)`. Every chat
+    ///   turn spawns through `agent::invoke` and the init event always emits
+    ///   a session_id, which the chat verb writes here so a multi-turn chat
+    ///   REPL session produces multiple `RunLog` entries sharing the same
+    ///   session_id value.
+    /// - `mode == "goal" / "query" / "fix"`: SHALL always be `None`. These
+    ///   verbs do not currently expose session resume to the user; the field
+    ///   is reserved for future expansion if any of them grows multi-turn
+    ///   behavior.
+    ///
+    /// Serde `default + skip_serializing_if = "Option::is_none"` so legacy
+    /// jsonl rows written before v3-chat-verb deserialize cleanly to `None`
+    /// and serialized rows for goal/query/fix omit the field entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 fn default_outcome() -> String {
@@ -273,6 +293,7 @@ mod tests {
             lint_error_count: 0,
             lint_warn_count: 1,
             outcome: "succeeded".into(),
+            session_id: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         // Required fields present
@@ -329,6 +350,7 @@ mod tests {
                 lint_error_count: 0,
                 lint_warn_count: 0,
                 outcome: outcome.into(),
+            session_id: None,
             };
             let json = serde_json::to_string(&entry).unwrap();
             let parsed: RunLog = serde_json::from_str(&json).unwrap();
@@ -357,6 +379,7 @@ mod tests {
             lint_error_count: 1,
             lint_warn_count: 2,
             outcome: "failed".into(),
+            session_id: None,
         };
         let json = serde_json::to_string(&original).unwrap();
         let parsed: RunLog = serde_json::from_str(&json).unwrap();
@@ -366,5 +389,79 @@ mod tests {
         assert_eq!(parsed.outcome, "failed");
         assert_eq!(parsed.tokens.cache_read_tokens, Some(3));
         assert_eq!(parsed.tokens.extras, json!({"foo": "bar"}));
+    }
+
+    /// v3-chat-verb RunLog Schema scenario:
+    /// `session_id == None` MUST be omitted from the serialized JSON line
+    /// so goal/query/fix rows look identical to pre-chat-verb output.
+    #[test]
+    fn runlog_session_id_serialize_skip_when_none() {
+        let entry = RunLog {
+            goal: "describe X".into(),
+            mode: "goal".into(),
+            model: None,
+            effort: None,
+            started_at: "2026-05-13T00:00:00Z".into(),
+            finished_at: "2026-05-13T00:00:01Z".into(),
+            tokens: TokenUsage::default(),
+            wiki_changed: false,
+            lint_error_count: 0,
+            lint_warn_count: 0,
+            outcome: "succeeded".into(),
+            session_id: None,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("\"session_id\""),
+            "session_id key MUST be omitted when None; got: {json}"
+        );
+    }
+
+    /// v3-chat-verb RunLog Schema scenario:
+    /// Legacy jsonl rows written before v3-chat-verb shipped have no
+    /// `"session_id"` key. Deserialization MUST default the field to `None`
+    /// without raising any error.
+    #[test]
+    fn runlog_session_id_deserialize_legacy_row_as_none() {
+        let legacy_line = r#"{
+            "goal": "X",
+            "mode": "goal",
+            "started_at": "2026-05-10T00:00:00Z",
+            "finished_at": "2026-05-10T00:01:00Z",
+            "tokens": {"input_tokens": 0, "output_tokens": 0},
+            "wiki_changed": false,
+            "lint_error_count": 0,
+            "lint_warn_count": 0,
+            "outcome": "succeeded"
+        }"#;
+        let parsed: RunLog =
+            serde_json::from_str(legacy_line).expect("legacy row must deserialize cleanly");
+        assert_eq!(parsed.session_id, None);
+        assert_eq!(parsed.outcome, "succeeded");
+    }
+
+    /// v3-chat-verb RunLog Schema scenario:
+    /// When a chat turn writes `session_id == Some(id)`, the serialized
+    /// JSON SHALL include the field verbatim so consumers can group
+    /// per-turn rows by session.
+    #[test]
+    fn runlog_session_id_serializes_when_some_for_chat_mode() {
+        let entry = RunLog {
+            goal: "what does X do?".into(),
+            mode: "chat".into(),
+            model: None,
+            effort: None,
+            started_at: "2026-05-13T00:00:00Z".into(),
+            finished_at: "2026-05-13T00:00:01Z".into(),
+            tokens: TokenUsage::default(),
+            wiki_changed: false,
+            lint_error_count: 0,
+            lint_warn_count: 0,
+            outcome: "succeeded".into(),
+            session_id: Some("abc-123".into()),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"session_id\":\"abc-123\""));
+        assert!(json.contains("\"mode\":\"chat\""));
     }
 }

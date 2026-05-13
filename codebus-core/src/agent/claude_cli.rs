@@ -47,6 +47,14 @@ pub struct InvokeAgentOptions {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub env: EnvOverrides,
+    /// Claude CLI session id to resume. When `Some(id)`, `invoke()` appends
+    /// `--resume <id>` to the spawned `claude` argv before the toolset
+    /// flags so the new process continues the same conversation history.
+    /// When `None` (the default for goal/query/fix verbs), no `--resume`
+    /// arg is added — the spawn starts a fresh Claude CLI session.
+    /// chat-verb (v3-chat-verb) uses this to drive multi-turn REPL via
+    /// `--resume <id>` between turns.
+    pub resume_session_id: Option<String>,
 }
 
 /// Result of one [`invoke`] call. Returned to the verb command so it can
@@ -62,6 +70,13 @@ pub struct InvokeReport {
     /// RFC 3339 UTC timestamp captured immediately after `child.wait`
     /// returns. SHALL be greater than or equal to `started_at`.
     pub finished_at: String,
+    /// v3-chat-verb: Claude CLI session id extracted from the spawn's
+    /// first `{type: "system", subtype: "init", session_id: "..."}`
+    /// stream-json line. `Some(id)` when the init event was observed;
+    /// `None` when the spawn failed before init or the line was missing
+    /// the field. Chat verb uses this to drive `--resume <id>` on the
+    /// next turn; goal/query/fix verbs ignore the field.
+    pub session_id: Option<String>,
 }
 
 /// Spawn the configured `claude -p` child process, consume its stream-json
@@ -100,37 +115,7 @@ pub fn invoke(
     cancel: Option<Arc<AtomicBool>>,
 ) -> io::Result<InvokeReport> {
     let claude_bin = std::env::var("CODEBUS_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string());
-    let tools_csv = build_tools_csv(opts.toolset, opts.bash_whitelist);
-    let allowed_tools_csv = build_allowed_tools_csv(opts.toolset, opts.bash_whitelist);
-
-    let mut cmd = Command::new(&claude_bin);
-    cmd.arg("-p")
-        .arg(&opts.slash_command)
-        .arg("--tools")
-        .arg(&tools_csv)
-        .arg("--allowedTools")
-        .arg(&allowed_tools_csv)
-        .arg("--permission-mode")
-        .arg("acceptEdits")
-        // v3-run-log: enable stream-json so we can parse usage events and
-        // render thought/tool/result inline. `--verbose` is required by the
-        // claude CLI when `--output-format stream-json` is set. Input
-        // format stays default `text` (prompt comes via `-p`).
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--verbose");
-
-    if let Some(model) = opts.model.as_deref() {
-        cmd.arg("--model").arg(model);
-    }
-    if let Some(effort) = opts.effort.as_deref() {
-        cmd.arg("--effort").arg(effort);
-    }
-
-    // Scoped env injection. `cmd.envs(...)` sets vars on the child only;
-    // the parent shell environment is never modified (the `agent` module
-    // contains zero `std::env::set_var` calls — see env_overrides.rs docs).
-    cmd.envs(opts.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    let mut cmd = build_claude_cmd(&opts, &claude_bin);
 
     let started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
 
@@ -156,6 +141,7 @@ pub fn invoke(
     // caller closure. Cancel signal polled after each line — flip true →
     // kill child + drain remaining stdout silently + break.
     let mut accumulated = TokenUsage::default();
+    let mut session_id: Option<String> = None;
     let stdout = child.stdout.take().expect("stdout piped");
     let reader = BufReader::new(stdout);
     let mut cancelled = false;
@@ -165,6 +151,17 @@ pub fn invoke(
             // Already cancelled; keep draining lines silently so the
             // child's writer doesn't block on a full pipe buffer.
             continue;
+        }
+        // v3-chat-verb: capture the first `{type:system,subtype:init,session_id}`
+        // line out-of-band. Stream parser intentionally skips system events
+        // (they're not part of the StreamEvent closed enum per
+        // agent-stream-rendering capability), but chat verb needs the
+        // session_id for --resume on the next turn. Done as a cheap sniff:
+        // first hit wins, never overwrites.
+        if session_id.is_none() {
+            if let Some(id) = sniff_init_session_id(&line) {
+                session_id = Some(id);
+            }
         }
         for event in parse_claude_stream_line(&line) {
             if let StreamEvent::Usage(u) = &event {
@@ -197,7 +194,23 @@ pub fn invoke(
         accumulated_tokens: accumulated,
         started_at,
         finished_at,
+        session_id,
     })
+}
+
+/// v3-chat-verb: try to extract `session_id` from a raw stream-json line if
+/// it matches `{type:"system", subtype:"init", session_id:"..."}` shape.
+/// Returns `None` for any non-init line or malformed JSON — caller polls
+/// every line until a hit is observed.
+fn sniff_init_session_id(line: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(line).ok()?;
+    if parsed.get("type")?.as_str()? != "system" {
+        return None;
+    }
+    if parsed.get("subtype")?.as_str()? != "init" {
+        return None;
+    }
+    Some(parsed.get("session_id")?.as_str()?.to_string())
 }
 
 /// Wait for the thread to finish for at most `deadline`. If it doesn't,
@@ -214,6 +227,65 @@ fn join_within(handle: thread::JoinHandle<()>, deadline: Duration) {
         let _ = handle.join();
     }
     // Else: detach. The OS will clean up the thread when it eventually exits.
+}
+
+/// Compose the full `claude -p` argv (and scoped env vars) for spawn.
+///
+/// Pulled out as a separate helper so unit tests can inspect the resulting
+/// `Command::get_args()` without running a real child process. The caller
+/// (`invoke()`) is responsible for `current_dir` / stdio piping / spawn.
+///
+/// Argv order (stable, exercised by tests):
+///   1. `-p <slash_command>`
+///   2. `--resume <id>` — appended only when `opts.resume_session_id` is `Some(_)`
+///   3. `--tools <csv>`
+///   4. `--allowedTools <csv>`
+///   5. `--permission-mode acceptEdits`
+///   6. `--output-format stream-json`
+///   7. `--verbose`
+///   8. `--model <m>` — optional
+///   9. `--effort <e>` — optional
+pub(crate) fn build_claude_cmd(opts: &InvokeAgentOptions, claude_bin: &str) -> Command {
+    let tools_csv = build_tools_csv(opts.toolset, opts.bash_whitelist);
+    let allowed_tools_csv = build_allowed_tools_csv(opts.toolset, opts.bash_whitelist);
+
+    let mut cmd = Command::new(claude_bin);
+    cmd.arg("-p").arg(&opts.slash_command);
+    // v3-chat-verb: when caller supplies a session id, append `--resume <id>`
+    // BEFORE the toolset flags so the spawned claude process resumes the
+    // same conversation history (spike-verified: --resume + --tools 三旗 並存).
+    // For goal/query/fix this is always None → no --resume arg → byte-equivalent
+    // to pre-chat-verb spawn argv.
+    if let Some(id) = opts.resume_session_id.as_deref() {
+        cmd.arg("--resume").arg(id);
+    }
+    cmd.arg("--tools")
+        .arg(&tools_csv)
+        .arg("--allowedTools")
+        .arg(&allowed_tools_csv)
+        .arg("--permission-mode")
+        .arg("acceptEdits")
+        // v3-run-log: enable stream-json so we can parse usage events and
+        // render thought/tool/result inline. `--verbose` is required by the
+        // claude CLI when `--output-format stream-json` is set. Input
+        // format stays default `text` (prompt comes via `-p`).
+        .arg("--output-format")
+        .arg("stream-json")
+        .arg("--verbose");
+
+    if let Some(model) = opts.model.as_deref() {
+        cmd.arg("--model").arg(model);
+    }
+    if let Some(effort) = opts.effort.as_deref() {
+        cmd.arg("--effort").arg(effort);
+    }
+
+    // Scoped env injection. `cmd.envs(...)` sets vars on the child only;
+    // the parent shell environment is never modified (the `agent` module
+    // contains zero `std::env::set_var` calls — see env_overrides.rs docs).
+    cmd.envs(opts.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+
+    cmd
 }
 
 /// Compose the `--tools` value: bare tool names (the toolset hard-gate).
@@ -250,6 +322,7 @@ mod tests {
             model: None,
             effort: None,
             env: EnvOverrides::for_system(),
+            resume_session_id: None,
         };
         let InvokeAgentOptions {
             slash_command,
@@ -259,6 +332,7 @@ mod tests {
             model,
             effort,
             env,
+            resume_session_id,
         } = opts;
         assert_eq!(slash_command, "/codebus-goal \"x\"");
         assert_eq!(vault_root, PathBuf::from("/tmp/v"));
@@ -267,6 +341,112 @@ mod tests {
         assert!(model.is_none());
         assert!(effort.is_none());
         assert!(env.is_empty());
+        assert!(resume_session_id.is_none());
+    }
+
+    fn fixture_opts(resume: Option<&str>) -> InvokeAgentOptions {
+        InvokeAgentOptions {
+            slash_command: "/codebus-chat \"hi\"".into(),
+            vault_root: PathBuf::from("/tmp/v"),
+            toolset: &["Read", "Glob", "Grep"],
+            bash_whitelist: None,
+            model: None,
+            effort: None,
+            env: EnvOverrides::for_system(),
+            resume_session_id: resume.map(String::from),
+        }
+    }
+
+    fn cmd_args_collected(cmd: &Command) -> Vec<String> {
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn invoke_appends_resume_flag_when_session_id_some() {
+        // v3-chat-verb: chat verb spawn must carry --resume <id> when caller
+        // provides a session id, placed BEFORE --tools so the toolset gate
+        // remains the spike-verified hard floor regardless of session resume.
+        let cmd = build_claude_cmd(&fixture_opts(Some("abc-123")), "claude");
+        let args = cmd_args_collected(&cmd);
+
+        // Find --resume position and assert <id> follows it AND it precedes --tools.
+        let resume_pos = args
+            .iter()
+            .position(|a| a == "--resume")
+            .expect("--resume must appear when resume_session_id is Some");
+        assert_eq!(args.get(resume_pos + 1).map(String::as_str), Some("abc-123"));
+
+        let tools_pos = args
+            .iter()
+            .position(|a| a == "--tools")
+            .expect("--tools must always appear");
+        assert!(
+            resume_pos < tools_pos,
+            "--resume must appear before --tools (got resume at {resume_pos}, tools at {tools_pos})"
+        );
+    }
+
+    #[test]
+    fn invoke_omits_resume_flag_when_session_id_none() {
+        // Existing query/goal/fix verbs construct InvokeAgentOptions with
+        // resume_session_id: None and expect byte-equivalent argv to the
+        // pre-chat-verb implementation. No --resume must appear.
+        let cmd = build_claude_cmd(&fixture_opts(None), "claude");
+        let args = cmd_args_collected(&cmd);
+        assert!(
+            !args.iter().any(|a| a == "--resume"),
+            "--resume must NOT appear when resume_session_id is None; got argv: {args:?}"
+        );
+    }
+
+    #[test]
+    fn sniff_init_session_id_extracts_from_system_init_line() {
+        let line = r#"{"type":"system","subtype":"init","session_id":"abc-123","tools":["Read"]}"#;
+        assert_eq!(
+            sniff_init_session_id(line),
+            Some("abc-123".to_string()),
+            "system init line must yield session_id"
+        );
+    }
+
+    #[test]
+    fn sniff_init_session_id_returns_none_for_non_init_lines() {
+        let cases = [
+            r#"{"type":"assistant","message":{}}"#,
+            r#"{"type":"system","subtype":"hook_started"}"#,
+            r#"{"type":"result","usage":{}}"#,
+            "not even json",
+            "",
+        ];
+        for line in cases {
+            assert_eq!(sniff_init_session_id(line), None, "line: {line}");
+        }
+    }
+
+    #[test]
+    fn sniff_init_session_id_returns_none_when_field_missing() {
+        let line = r#"{"type":"system","subtype":"init","tools":["Read"]}"#;
+        assert_eq!(sniff_init_session_id(line), None);
+    }
+
+    #[test]
+    fn invoke_options_carries_resume_session_id_field() {
+        // v3-chat-verb: chat verb needs to drive --resume <id> via this
+        // optional field. Constructing with Some(...) and reading the field
+        // back pins the public API shape so chat library can rely on it.
+        let opts = InvokeAgentOptions {
+            slash_command: "/codebus-chat \"x\"".into(),
+            vault_root: PathBuf::from("/tmp/v"),
+            toolset: &["Read", "Glob", "Grep"],
+            bash_whitelist: None,
+            model: None,
+            effort: None,
+            env: EnvOverrides::for_system(),
+            resume_session_id: Some("abc-123".into()),
+        };
+        assert_eq!(opts.resume_session_id.as_deref(), Some("abc-123"));
     }
 
     #[test]
@@ -327,6 +507,7 @@ mod tests {
                 model: None,
                 effort: None,
                 env: EnvOverrides::for_system(),
+                resume_session_id: None,
             },
             |_event| {},
             None,
@@ -347,6 +528,7 @@ mod tests {
             accumulated_tokens: TokenUsage::default(),
             started_at: "2026-05-10T00:00:00Z".into(),
             finished_at: "2026-05-10T00:00:01Z".into(),
+            session_id: None,
         };
         let _: ExitStatus = report.exit;
         assert_eq!(report.accumulated_tokens.input_tokens, 0);
@@ -431,6 +613,7 @@ mod tests {
                 model: None,
                 effort: None,
                 env: EnvOverrides::for_system(),
+                resume_session_id: None,
             },
             |event| events.push(event),
             None,

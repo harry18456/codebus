@@ -50,6 +50,8 @@ enum Command {
     Lint(commands::lint::LintArgs),
     /// Trigger the codebus-fix skill in the user's agentic AI product.
     Fix,
+    /// Launch interactive multi-turn read-only chat REPL on the vault.
+    Chat(commands::chat::ChatArgs),
     /// Manage the Azure API key in the OS keyring.
     Config(commands::config::ConfigArgs),
     /// Internal: PreToolUse hook for fix sandbox (called by Claude Code, not users).
@@ -96,6 +98,9 @@ async fn main() -> ExitCode {
         }
         Some(Command::Fix) => {
             commands::fix::run(cli.repo.as_deref(), cli.no_fix, cli.debug, &render_opts).await
+        }
+        Some(Command::Chat(args)) => {
+            commands::chat::run(&repo_default, args, cli.debug, &render_opts).await
         }
         Some(Command::Config(args)) => commands::config::run(args).await,
         Some(Command::Hook(args)) => commands::hook::run(args).await,

@@ -178,6 +178,7 @@ mod tests {
             lint_error_count: 0,
             lint_warn_count: 0,
             outcome: "succeeded".into(),
+            session_id: None,
         };
         write_run_log(
             SinkConfig::Jsonl {

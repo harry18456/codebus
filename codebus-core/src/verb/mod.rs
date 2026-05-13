@@ -25,6 +25,7 @@
 pub mod error;
 pub mod event;
 
+pub mod chat;
 pub mod fix;
 pub mod goal;
 pub mod query;

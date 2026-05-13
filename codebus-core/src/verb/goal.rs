@@ -211,6 +211,7 @@ pub fn run_goal(
             lint_error_count: fix_lint_errors,
             lint_warn_count: fix_lint_warns,
             outcome: "cancelled".into(),
+            session_id: None,
         }
     };
 
@@ -266,6 +267,9 @@ pub fn run_goal(
                 model: goal_resolved.model.clone(),
                 effort: goal_resolved.effort.clone(),
                 env: goal_env,
+                // goal verb is one-shot (no session resume); chat verb is
+                // the only caller that sets Some(...) on this field.
+                resume_session_id: None,
             },
             |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
@@ -392,6 +396,7 @@ pub fn run_goal(
         lint_error_count: fix_lint_errors,
         lint_warn_count: fix_lint_warns,
         outcome: outcome.into(),
+        session_id: None,
     };
     write_run_log(sink_cfg.clone(), &run_log);
 

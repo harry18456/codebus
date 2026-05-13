@@ -29,6 +29,12 @@ pub enum Verb {
     Goal,
     Query,
     Fix,
+    /// v3-chat-verb: chat REPL turns. Settings (model / effort) are
+    /// reused from the `Query` verb because chat is also a read-only
+    /// exploration workflow — adding a dedicated `chat:` section to the
+    /// config schema would be scope creep with no user-visible benefit
+    /// at v1 (chat-verb propose explicit Non-Goal).
+    Chat,
 }
 
 /// A verb's resolved settings: `model` is the value to pass to `claude
@@ -50,6 +56,10 @@ impl ClaudeCodeConfig {
                     Verb::Goal => &self.system.goal,
                     Verb::Query => &self.system.query,
                     Verb::Fix => &self.system.fix,
+                    // v3-chat-verb: chat reuses the query settings (same
+                    // read-only sandbox semantics). No dedicated `chat`
+                    // config section at v1.
+                    Verb::Chat => &self.system.query,
                 };
                 ResolvedVerb {
                     model: Some(v.model.to_cli_flag().to_string()),
@@ -65,6 +75,7 @@ impl ClaudeCodeConfig {
                     Verb::Goal => &az.goal,
                     Verb::Query => &az.query,
                     Verb::Fix => &az.fix,
+                    Verb::Chat => &az.query,
                 };
                 ResolvedVerb {
                     model: Some(v.model.clone()),

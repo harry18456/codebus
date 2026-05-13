@@ -445,11 +445,12 @@ fn dual_layout(tmp: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
-fn skill_bundles_creates_six_outcomes_no_lint_at_either_location() {
+fn skill_bundles_creates_eight_outcomes_no_lint_at_either_location() {
     let tmp = TempDir::new().unwrap();
     let (vault, repo) = dual_layout(&tmp);
     let outcomes = skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
-    assert_eq!(outcomes.len(), 6);
+    // v3-chat-verb: 4 verbs (goal/query/fix/chat) × 2 locations = 8 outcomes.
+    assert_eq!(outcomes.len(), 8);
     for outcome in &outcomes {
         assert_eq!(*outcome, BundleOutcome::Written);
     }
@@ -484,7 +485,14 @@ fn skill_bundle_stub_content_has_required_format_at_both_locations() {
             assert!(body.contains("description:"));
             assert!(body.contains("CLAUDE.md"));
             assert!(!body.contains(".codebus/CLAUDE.md"));
-            assert!(body.lines().count() <= 80);
+            // chat SKILL is intentionally longer than goal/query/fix; widen
+            // the line cap accordingly.
+            let line_cap = if *verb == "chat" { 120 } else { 80 };
+            assert!(
+                body.lines().count() <= line_cap,
+                "verb `{verb}` SKILL.md too long ({} > {line_cap})",
+                body.lines().count()
+            );
         }
     }
 }
@@ -503,14 +511,18 @@ fn skill_bundle_stub_body_declares_hard_scope() {
         );
         assert!(
             body.contains("`wiki/`"),
-            "verb `{verb}` missing cwd-relative write scope `wiki/`"
+            "verb `{verb}` missing cwd-relative wiki scope `wiki/`"
         );
         assert!(
             !body.contains(".codebus/raw/code/") && !body.contains(".codebus/wiki/"),
             "verb `{verb}` should not use `.codebus/`-prefixed paths in scope"
         );
+        // chat is read-only and phrases the prohibition as
+        // "MUST NOT read any path that escapes the cwd" (no write half);
+        // the other three verbs share the "read or write" form. Assert on
+        // the common substring instead of the exact phrase.
         assert!(
-            body.contains("MUST NOT read or write any path that escapes the cwd"),
+            body.contains("MUST NOT") && body.contains("escapes the cwd"),
             "verb `{verb}` missing hard-scope prohibition"
         );
     }
@@ -521,7 +533,10 @@ fn skill_bundle_stub_body_declares_path_translation_rule() {
     let tmp = TempDir::new().unwrap();
     let (vault, repo) = dual_layout(&tmp);
     skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
-    for verb in VERBS {
+    // Path translation is meaningful only for write-capable verbs; chat is
+    // multi-turn read-only and never cites a source path in wiki frontmatter,
+    // so the rule does not apply.
+    for verb in VERBS.iter().filter(|v| **v != "chat") {
         let path = vault.join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
         let body = fs::read_to_string(&path).unwrap();
         assert!(body.contains("repo-relative logical path"));

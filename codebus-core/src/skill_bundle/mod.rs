@@ -23,7 +23,7 @@ pub enum BundleOutcome {
     AlreadyPresent,
 }
 
-pub const VERBS: &[&str] = &["goal", "query", "fix"];
+pub const VERBS: &[&str] = &["goal", "query", "fix", "chat"];
 
 /// Materialize the three skill bundle stubs at BOTH the vault-internal and
 /// the source repo-root locations.
@@ -82,6 +82,13 @@ fn write_bundle_if_missing(path: &Path, verb: &str) -> io::Result<BundleOutcome>
 }
 
 fn stub_content(verb: &str) -> String {
+    // v3-chat-verb: chat has a distinct SKILL structure (read-only sandbox,
+    // multi-turn workflow, promote-suggestion line marker emission rule,
+    // MCP prompt-layer exclusion) — return a completely separate body
+    // rather than shoe-horning it into the goal/query/fix shell.
+    if verb == "chat" {
+        return CHAT_SKILL_CONTENT.to_string();
+    }
     let description = match verb {
         "goal" => "Trigger codebus goal-ingest workflow on the active codebus vault",
         "query" => "Trigger codebus read-only wiki query workflow on the active codebus vault",
@@ -214,6 +221,84 @@ The query text's language SHALL override the natural language of any wiki conten
 /// language ("ONE round of repair", "Loop control belongs to the caller",
 /// "MUST NOT spawn nested fix invocations or loop internally") — those
 /// constraints are released in v3-fix-trust-agent.
+/// `codebus-chat/SKILL.md` body. Multi-turn read-only sandbox + promote-
+/// suggestion emission rule per `chat-verb` capability (Chat Skill Bundle
+/// Content + Promote Suggestion Line Marker + MCP Tool Prompt Layer
+/// Exclusion requirements). Sourced from the spike v0 draft (see
+/// `docs/2026-05-13-chat-verb-discussion.md` §Spike ❺), which passed 4/4
+/// scenarios with 2/2 format consistency.
+const CHAT_SKILL_CONTENT: &str = "---
+name: codebus-chat
+description: Trigger codebus multi-turn read-only chat workflow on the active codebus vault
+---
+
+# codebus-chat
+
+Trigger this skill when the user types `/codebus-chat` (typically the codebus binary spawns the agentic CLI with cwd at this vault root for you). This is **multi-turn** — each user message extends the same ongoing conversation rather than starting a fresh agent run.
+
+## Schema rules
+
+The current working directory is the codebus vault root. Read `CLAUDE.md` here for taxonomy, frontmatter, and wikilinks rules — that file is the single source of truth for vault structure.
+
+## Read-Only Invariant
+
+This workflow is **strictly read-only**. The agent MUST NOT call `Write`, `Edit`, `NotebookEdit`, or any tool whose name begins with `mcp_` (e.g. `mcp_claude_ai_Figma_authenticate`, `mcp_claude_ai_Gmail_authenticate`). The binary-layer toolset is gated at spawn time (`--tools Read,Glob,Grep`) so attempts to call Write / Edit / NotebookEdit fail at runtime regardless; however the `mcp_*` family is NOT covered by the `--tools` flag and is forbidden only by this prompt-layer constraint. Treat this rule as load-bearing even when an `mcp_*` tool appears to be available in the runtime toolset.
+
+## Hard scope
+
+Read scope: `raw/code/` (relative to cwd) — the PII-redacted source mirror. Do NOT navigate outside cwd; the user's source repo at the parent directory level is off-limits. Also Read `wiki/` to consult existing pages when answering.
+
+You MUST NOT read any path that escapes the cwd (no `..`, no absolute paths to outside locations).
+
+## Workflow (multi-turn read-only exploration)
+
+Each user turn is a fresh question or follow-up in the ongoing conversation. Use Read / Glob / Grep against `wiki/` and `raw/code/` to retrieve information and answer the user's question concisely in the same language they used. You MAY chain across multiple turns to deepen the user's understanding; assume the user can see your prior responses in this conversation.
+
+## Promote-suggestion emission
+
+When you judge that the current conversation contains content worth writing into the wiki, prepend exactly one line of the following format at the very start of your message (before any other text):
+
+    [CODEBUS_PROMOTE_SUGGESTION] <one-line reason in 5-15 words explaining what wiki page this would become>
+
+### When to emit
+
+- The user explicitly asks to write something to the wiki (\"help me write this to wiki\", \"幫我把這段寫成 wiki\", \"save this as a page\", \"this should be documented\", or similar promote-request phrasing).
+- The conversation has consolidated a non-trivial piece of architectural understanding across 2+ turns AND a quick check of `wiki/` shows no existing page covers it.
+- The user has chained 3+ related questions on the same topic and reached an understanding worth durable record.
+
+### When NOT to emit
+
+- The user's question is a single factual lookup (\"what file defines X\", \"which folder contains Y\") AND the answer is a single fact.
+- An existing wiki page already covers the topic — point the user there instead.
+- Discussion is still drifting / no consolidated understanding yet.
+- You are uncertain — under-emit rather than over-emit.
+
+### Format rules
+
+- The marker MUST be on its own first line of your message, at byte offset 0 (the message's first character SHALL be `[`).
+- The marker MUST appear at most once per message.
+- Do NOT emit the marker speculatively; only when you have a concrete wiki page suggestion in mind.
+- The reason text after the marker SHOULD be 5-15 words, naming what the wiki page would cover (not how to write it).
+- After the marker line, continue your normal response to the user's question.
+
+### Examples
+
+User: \"how does our auth work?\"
+You: (look up files, answer normally — no marker; single exploratory question)
+
+User: \"and JWT specifically?\" / \"and refresh token rotation?\" / \"summarize the full auth lifecycle\"
+You: `[CODEBUS_PROMOTE_SUGGESTION] auth lifecycle including JWT issuance and refresh rotation`
+Then continue with your summary.
+
+User: \"幫我把剛剛 auth 那段寫成 wiki\"
+You: `[CODEBUS_PROMOTE_SUGGESTION] auth flow and JWT handling consolidated from conversation`
+Then continue normally explaining what the page would cover.
+
+## Language Override
+
+The user's language SHALL override any other language in the conversation. Match the user's language for the answer body. The marker prefix `[CODEBUS_PROMOTE_SUGGESTION]` is always literal English (it is parsed by codebus CLI, not displayed to the user verbatim); only the `<reason>` portion follows the user's language.
+";
+
 const FIX_WORKFLOW: &str = "## Workflow (self-directed repair)
 
 When this skill is activated, follow these steps:
@@ -261,12 +346,12 @@ mod tests {
     }
 
     #[test]
-    fn first_time_writes_three_bundles_at_both_locations() {
+    fn first_time_writes_four_bundles_at_both_locations() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
         let outcomes = write_bundles_if_missing(&vault, &repo).unwrap();
-        // 6 outcomes: 3 vault-internal + 3 repo-root, all Written
-        assert_eq!(outcomes, vec![BundleOutcome::Written; 6]);
+        // v3-chat-verb: 8 outcomes — 4 verbs (goal/query/fix/chat) × 2 locations.
+        assert_eq!(outcomes, vec![BundleOutcome::Written; 8]);
         for verb in VERBS {
             for base in [&vault, &repo] {
                 let p = skill_bundle_path(base, verb);
@@ -280,7 +365,15 @@ mod tests {
                 let body = fs::read_to_string(&p).unwrap();
                 assert!(body.starts_with("---\n"));
                 assert!(body.contains(&format!("name: codebus-{verb}")));
-                assert!(body.lines().count() <= 80);
+                // chat SKILL is intentionally longer than goal/query/fix
+                // (it carries the full emission examples + read-only
+                // invariant + MCP exclusion), so widen the line cap.
+                let line_cap = if *verb == "chat" { 120 } else { 80 };
+                assert!(
+                    body.lines().count() <= line_cap,
+                    "verb `{verb}` SKILL too long ({} > {line_cap})",
+                    body.lines().count()
+                );
             }
         }
     }
@@ -319,14 +412,17 @@ mod tests {
         fs::write(&goal_vault, custom).unwrap();
 
         let outcomes = write_bundles_if_missing(&vault, &repo).unwrap();
-        // Vault: goal AlreadyPresent, query/fix Written
+        // v3-chat-verb: 8 outcomes — vault 4 (indices 0-3), repo 4 (4-7).
+        // Vault: goal AlreadyPresent, query/fix/chat Written
         assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent);
         assert_eq!(outcomes[1], BundleOutcome::Written);
         assert_eq!(outcomes[2], BundleOutcome::Written);
-        // Repo-root: all Written (independent check)
         assert_eq!(outcomes[3], BundleOutcome::Written);
+        // Repo-root: all Written (independent check)
         assert_eq!(outcomes[4], BundleOutcome::Written);
         assert_eq!(outcomes[5], BundleOutcome::Written);
+        assert_eq!(outcomes[6], BundleOutcome::Written);
+        assert_eq!(outcomes[7], BundleOutcome::Written);
         // Custom vault content preserved
         assert_eq!(fs::read_to_string(&goal_vault).unwrap(), custom);
     }
@@ -335,7 +431,7 @@ mod tests {
     fn write_if_missing_only_fills_missing_repo_root_when_vault_exists() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
-        // Pre-populate full vault (all 3 verbs)
+        // Pre-populate full vault (all 4 verbs at v3-chat-verb).
         write_bundles_if_missing(&vault, &repo).unwrap();
         // Wipe repo-root copy of one verb
         fs::remove_file(skill_bundle_path(&repo, "query")).unwrap();
@@ -345,9 +441,11 @@ mod tests {
         assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent); // vault goal
         assert_eq!(outcomes[1], BundleOutcome::AlreadyPresent); // vault query
         assert_eq!(outcomes[2], BundleOutcome::AlreadyPresent); // vault fix
-        assert_eq!(outcomes[3], BundleOutcome::AlreadyPresent); // repo goal
-        assert_eq!(outcomes[4], BundleOutcome::Written); // repo query (refilled)
-        assert_eq!(outcomes[5], BundleOutcome::AlreadyPresent); // repo fix
+        assert_eq!(outcomes[3], BundleOutcome::AlreadyPresent); // vault chat
+        assert_eq!(outcomes[4], BundleOutcome::AlreadyPresent); // repo goal
+        assert_eq!(outcomes[5], BundleOutcome::Written); // repo query (refilled)
+        assert_eq!(outcomes[6], BundleOutcome::AlreadyPresent); // repo fix
+        assert_eq!(outcomes[7], BundleOutcome::AlreadyPresent); // repo chat
     }
 
     #[test]
@@ -369,10 +467,14 @@ mod tests {
             );
             assert!(
                 body.contains("`wiki/`"),
-                "verb `{verb}` missing cwd-relative write scope `wiki/`"
+                "verb `{verb}` missing cwd-relative wiki scope `wiki/`"
             );
+            // chat is read-only and uses a slightly different escape-prohibition
+            // wording ("MUST NOT read any path that escapes the cwd"); the
+            // other three verbs share the "read or write" form. Assert on
+            // the common substring instead of the exact phrase.
             assert!(
-                body.contains("MUST NOT read or write any path that escapes the cwd"),
+                body.contains("MUST NOT") && body.contains("escapes the cwd"),
                 "verb `{verb}` missing escape-prohibition"
             );
         }
@@ -383,7 +485,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
         write_bundles_if_missing(&vault, &repo).unwrap();
-        for verb in VERBS {
+        // Path translation is meaningful only for write-capable verbs
+        // (goal writes wiki frontmatter `sources[].path`; query/fix also
+        // touch the path layout). chat is read-only multi-turn — it never
+        // cites a source path in a wiki frontmatter, so the rule does not
+        // apply. Skip chat here.
+        for verb in VERBS.iter().filter(|v| **v != "chat") {
             let body = fs::read_to_string(skill_bundle_path(&vault, verb)).unwrap();
             assert!(body.contains("repo-relative logical path"));
             assert!(body.contains("NOT the mirrored path"));
@@ -607,5 +714,78 @@ mod tests {
             body.contains("verbatim"),
             "step 5 must include an explicit `verbatim` warning that agents must not copy from this SKILL.md"
         );
+    }
+
+    /// v3-chat-verb `Chat Skill Bundle Content` scenario:
+    /// chat SKILL body contains the literal promote-suggestion line marker
+    /// (with trailing space), a Read-Only Invariant section, and the
+    /// `name: codebus-chat` frontmatter line. Sourced from the spike v0
+    /// draft that passed 4/4 emission scenarios.
+    #[test]
+    fn stub_content_chat_contains_promote_marker_format() {
+        let body = stub_content("chat");
+        assert!(
+            body.starts_with("---\n"),
+            "chat SKILL must begin with YAML frontmatter"
+        );
+        assert!(
+            body.contains("name: codebus-chat"),
+            "chat SKILL frontmatter must set `name: codebus-chat`"
+        );
+        assert!(
+            body.contains("[CODEBUS_PROMOTE_SUGGESTION] "),
+            "chat SKILL body must declare the literal marker prefix (with trailing space)"
+        );
+        assert!(
+            body.contains("Read-Only Invariant"),
+            "chat SKILL body must include the Read-Only Invariant section header"
+        );
+        // Non-ASCII example reason demonstrates language-agnostic emission.
+        assert!(
+            body.contains("\u{5E6B}\u{6211}"),
+            "chat SKILL body must contain at least one non-ASCII (Chinese) example for the marker"
+        );
+    }
+
+    /// v3-chat-verb `MCP Tool Prompt Layer Exclusion` requirement:
+    /// chat SKILL body must explicitly forbid the `mcp_*` tool family
+    /// under the Read-Only Invariant / hard-scope section, because those
+    /// tools are NOT gated by `--tools` at the binary layer.
+    #[test]
+    fn stub_content_chat_explicitly_forbids_mcp_tools() {
+        let body = stub_content("chat");
+        assert!(
+            body.contains("mcp_"),
+            "chat SKILL must mention the `mcp_` tool name prefix"
+        );
+        // The constraint must live alongside the read-only invariant — i.e.
+        // before the workflow / promote-suggestion sections — so an agent
+        // reading top-down sees it as load-bearing.
+        let mcp_pos = body
+            .find("mcp_")
+            .expect("mcp_ already asserted to exist above");
+        let workflow_pos = body
+            .find("## Workflow")
+            .expect("chat SKILL must have a Workflow section");
+        assert!(
+            mcp_pos < workflow_pos,
+            "MCP exclusion must appear BEFORE the Workflow section (found mcp_ at {mcp_pos}, workflow at {workflow_pos})"
+        );
+        // And the prohibition must be phrased as a hard rule.
+        assert!(
+            body.contains("MUST NOT") && body.contains("`mcp_"),
+            "chat SKILL must phrase MCP exclusion as a MUST NOT directive"
+        );
+    }
+
+    /// v3-chat-verb `Chat Verb Toolset` requirement (defense in depth):
+    /// chat SKILL body also names `Write` / `Edit` as forbidden at the
+    /// prompt layer, even though `--tools Read,Glob,Grep` already gates
+    /// them at the binary layer.
+    #[test]
+    fn stub_content_chat_explicitly_forbids_write_edit() {
+        let body = stub_content("chat");
+        assert!(body.contains("`Write`"));
+        assert!(body.contains("`Edit`"));
     }
 }

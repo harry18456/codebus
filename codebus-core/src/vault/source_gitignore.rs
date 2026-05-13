@@ -4,6 +4,7 @@
 //!
 //! v3-lint adds `.claude/skills/codebus-{goal,query,fix}/` so the dual-write
 //! skill bundles at the source repo root don't pollute source git history.
+//! v3-chat-verb adds `.claude/skills/codebus-chat/` for the fourth bundle.
 
 use std::fs;
 use std::io;
@@ -26,6 +27,7 @@ pub const REQUIRED_IGNORE_LINES: &[&str] = &[
     ".claude/skills/codebus-goal/",
     ".claude/skills/codebus-query/",
     ".claude/skills/codebus-fix/",
+    ".claude/skills/codebus-chat/",
 ];
 
 pub fn ensure_codebus_in_gitignore(repo_root: &Path) -> io::Result<GitignoreOutcome> {

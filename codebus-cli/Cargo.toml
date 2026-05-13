@@ -31,6 +31,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 rpassword = { workspace = true }
+# Cross-platform SIGINT/Ctrl+C trap for `codebus chat` REPL mid-turn cancel
+# (spike-verified: claude CLI has a built-in handshake when --resume after
+# cancel, so this trap just flips an AtomicBool that run_chat_turn polls).
+ctrlc = "3"
 
 [dev-dependencies]
 tempfile = { workspace = true }
