@@ -26,7 +26,7 @@ stream render 跟 invoke 綁死。GUI 想 reuse `invoke()` 把 events emit 到 T
 - (a) refactor `invoke()` 加 `on_event: impl FnMut(StreamEvent)` callback（鏡像 foundation 的 `init::run_init(on_event)` pattern）
 - (b) GUI 端 spawn `codebus goal` CLI binary 再 parse stdout — **不可行**，CLI stdout 是 terminal-rendered 文字（emoji + 中文 label），不是原始 stream-json
 
-選 (a)。同時順手把 `codebus-cli/src/commands/goal.rs::run()` 整套 orchestration（drift detection / re-sync / invoke / fix loop / auto-commit）抽進 `codebus_core::cmd::goal::run_goal(repo, options, on_event, cancel_token)`，CLI 端變 thin wrapper。
+選 (a)。同時順手把 `codebus-cli/src/commands/goal.rs::run()` 整套 orchestration（drift detection / re-sync / invoke / fix loop / auto-commit）抽進 `codebus_core::verb::goal::run_goal(repo, options, on_event, cancel)`，CLI 端變 thin wrapper。cancel 參數型別為 `Option<Arc<AtomicBool>>` — `None` 給 CLI 用（無 cancel button），`Some(flag)` 給 GUI 的 Cancel 按鈕用；不引入 tokio 依賴。
 
 **這不違反 anti-pattern #1（no single-impl trait）** — `invoke()` 一直是 single impl，這次只是 caller-supplied closure 取代 hard-coded println，純函數簽名擴展。
 
@@ -53,9 +53,10 @@ stream render 跟 invoke 綁死。GUI 想 reuse `invoke()` 把 events emit 到 T
 - `codebus_core::agent::invoke()` 加 `on_event: impl FnMut(StreamEvent)` callback
 - CLI 端 closure 包 `print_event` 保持 byte-equivalent stdout
 - 抽 3 個 spawn verb 為 library function（鏡像 foundation 的 `init::run_init` pattern）：
-  - `codebus_core::cmd::goal::run_goal(repo, options, on_event, cancel_token)`
-  - `codebus_core::cmd::query::run_query(repo, options, on_event, cancel_token)`
-  - `codebus_core::cmd::fix::run_fix(repo, options, on_event, cancel_token)`
+  - `codebus_core::verb::goal::run_goal(repo, options, on_event, cancel)`
+  - `codebus_core::verb::query::run_query(repo, options, on_event, cancel)`
+  - `codebus_core::verb::fix::run_fix(repo, options, on_event, cancel)`
+  - cancel 型別為 `Option<Arc<AtomicBool>>`（不引入 tokio 依賴）
 - CLI `commands/{goal,query,fix}.rs` 變 thin wrapper byte-equivalent
 
 #### D1.1：為什麼 3 個一起抽，不分批
@@ -141,7 +142,7 @@ lint 不抽是因為 `commands/lint.rs` 已經是 thin wrapper，core lint logic
 
 | # | Change name | 內容 | 依賴 |
 |---|---|---|---|
-| A | `v3-goal-library` | goal + query orchestration 搬進 codebus-core；`invoke()` 加 on_event callback；`run_goal` / `run_query` 接 cancel token；CLI 端 byte-equivalent | — |
+| A | `v3-goal-library` | 3 個 spawn verb（goal / query / fix）orchestration 搬進 `codebus_core::verb::*`；`invoke()` 加 `on_event` callback + `Option<Arc<AtomicBool>>` cancel signal；`run_goal` / `run_query` / `run_fix` 接同樣的 callback + cancel；CLI 三個 commands 變 thin wrapper byte-equivalent。lint 已 library 不動。 | — |
 | B | `v3-run-log-events` | RunLog schema 加 outcome；per-run events.jsonl 持久化；cancel 不 auto-commit；GUI-spawned runs 強制寫（忽略 `sink: none`） | A |
 | C | `v3-app-workspace-goal` | Vault Workspace sidebar + Goals overview + Goal flow（modal / inline mini-stream / running detail / done detail / cancelled detail / interrupted）+ Wiki preview（Milkdown + wikilinks）；Quiz tab 留 placeholder | A + B + foundation |
 | D | `v3-app-query-cmdk` | 原 v3-app-roadmap #3，依賴 C 的 stream rendering pipeline + wiki page model | C |
@@ -157,10 +158,20 @@ A / B 都改 CLI 但不破 CLI 對外行為：
 - **README §Final destination 段落跟現實 diverge** — 提 `<Checkpoint>` / 投影片模式，但這些已在 v3-app-roadmap §Out of scope。需後續 docs PR 更新（user-facing 文件，按 [[feedback_user_facing_docs_discuss_first]] 動手前先討論）。
 - **Foundation Settings UI Log sink foot-gun** — Change folder / Reset 永遠寫回 `sink: "jsonl"`，把 hand-edit 的 `none` 吃掉。本批 change 不處理（events.jsonl 強制寫策略避開此 foot-gun）；若日後想讓 GUI user 也能 opt-out CLI log，另開 polish change。
 
-## 待 confirm 動工點
+## 後記（apply 階段補充）
 
-1. 上面 6 條 change 序列、依賴關係 OK？
-2. A 同時抽 goal + query 是否合理（vs 只抽 goal、query 留給 #3 query-cmdk 抽）？
-3. Change name 可用嗎（`v3-goal-library` / `v3-run-log-events`）？
+discuss 時的 3 個 open question 都已 resolved：
 
-確認 → `/spectra-propose v3-goal-library`。
+1. 6 條 change 序列、依賴關係 — 確認沿用。
+2. A 的抽離範圍 — 最終擴大到「goal + query + fix」三個 spawn verb 一起抽（discuss 時只列了 goal + query，apply 動工讀完 CLI source 後發現 fix orchestration 跟 goal 結構同型，分批抽會二次 churn `invoke()` callback 簽名，所以一次做完）。lint 維持不抽（已是 thin wrapper）。
+3. Change name `v3-goal-library` / `v3-run-log-events` — 採用。
+
+實作階段發現 / 確定的設計細節（未進 discuss、進 spec / design）：
+
+- `VerbEvent::Banner` 採用 owning `VerbBanner` enum + `as_banner()` 借出 `Banner<'_>`，不是 `Banner` re-export — 因為 `Banner<'a>` 帶 lifetime，在 `impl FnMut(VerbEvent)` 跨執行緒 closure（GUI Tauri event emit）下無法滿足 `'static + Send`
+- `VerbError` 比 discuss 預估多一個 `KeyringMissing { source: KeyringError }` variant（exit 3）+ `ConfigParse` 加 `which: &'static str` 欄位 — 為了保留 CLI byte-equivalent stderr 訊息
+- `QueryReport` / `GoalReport` 加 `agent_exit_code: Option<i32>` — CLI 需要它做 exit code propagation
+- `GoalReport` 加 `fix_post_lint_issues_remain: bool` — CLI 需要它在 byte-equivalent 時機 emit `✗ fix: ...` 訊息
+- `FixReport` 加 `status: FixStatus { Skipped { reason }, InitialClean, PostLintClean, PostLintIssuesRemain }` + `SkipReason { NoFixFlag, DisabledByConfig }` enum — CLI 需要它分支 stderr 訊息與 exit code
+
+完整實作對照見 `openspec/changes/v3-goal-library/specs/verb-library/spec.md` 與 `specs/cli/spec.md`。

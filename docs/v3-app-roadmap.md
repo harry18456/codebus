@@ -1,6 +1,6 @@
 # codebus-app v1 Roadmap
 
-CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 5 條序列化 change。每一條都假設前一條已 archive；不是平行可換序。
+CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 6 條序列化 change（foundation + A + B + C + D + E + F；foundation 已 archive、A `v3-goal-library` 2026-05-13 tasks 全 done + 全 workspace tests 綠、manual e2e 對 uv vault 驗收完成，archive pending）。每一條都假設前一條已 archive；不是平行可換序。
 
 > **2026-05-12 update**：原本 #3 `v3-app-quiz-cmdk` 把 Quiz 跟 Cmd+K query 捆一起。實機進入 #2 設計階段時討論發現 Cmd+K query 跟 #2 的 goal-stream 基建本質一樣（都 spawn codebus verb + 接 stream-json + render thought / tool calls / result），讓 query 緊跟 goal、把 Quiz 切到後一條 — (a) 兩條都更聚焦、(b) Cmd+K query 早 land 給 user 一個立即可用的問答 UI、(c) Quiz 可重用 cmdk 的 stream + citation 基建。Stage A 額外 ship 的 `stage-b-app-endpoint-settings` 也算 #1 之後的 Settings 補完，沒列在主序列裡（屬於 foundation 的 follow-up patch）。
 >
@@ -11,7 +11,7 @@ CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 
 | # | Change | Scope (one line) | Depends on |
 |---|---|---|---|
 | 1 | `v3-app-foundation` | Tauri shell + IPC bridge（5 commands） + Lobby（populated + empty） + Settings modal（7 fields） + Workspace stub + design system foundation（Tailwind v4 token / shadcn primitives） | — |
-| A | `v3-goal-library` | 3 個 spawn verb（goal / query / fix）orchestration 搬進 codebus-core；`agent::invoke()` 加 `on_event` callback；`run_goal` / `run_query` / `run_fix` 接 `CancellationToken`；CLI 三個 commands 變 thin wrapper byte-equivalent（鏡像 foundation 的 `init::run_init` pattern）。lint 已 library 不動。 | — |
+| A | `v3-goal-library` | 3 個 spawn verb（goal / query / fix）orchestration 搬進 `codebus_core::verb::*`；`agent::invoke()` 加 `on_event` callback 與 `Option<Arc<AtomicBool>>` cancel signal；`run_goal` / `run_query` / `run_fix` 同樣接 callback + cancel；CLI 三個 commands 變 thin wrapper byte-equivalent（鏡像 foundation 的 `init::run_init` pattern）。lint 已 library 不動；cancel 用 `AtomicBool` polling 不引入 tokio。 | — |
 | B | `v3-run-log-events` | RunLog schema 加 `outcome`（`succeeded` / `failed` / `cancelled`）；per-run events.jsonl 持久化（`<vault>/.codebus/log/events-<started_at_slug>.jsonl`）；cancel path 寫 `outcome=cancelled` 且不 auto-commit；GUI-spawned runs 強制寫（忽略 `log.sink: none`） | A |
 | C | `v3-app-workspace-goal` | Vault Workspace 真內容：sidebar Goals/Wiki/Quiz tabs + Wiki preview (Milkdown) + Goal flow（modal + inline mini-stream + running / done / cancelled / interrupted detail view 含 `[Retry with same goal]`） | foundation + A + B |
 | D | `v3-app-query-cmdk` | Cmd+K spotlight query 抽屜（streaming + 引用）— 重用 A 的 `run_query` + C 的 stream rendering pipeline + spotlight UX（Ctrl/Cmd+K 喚出、搜尋框、即時 stream、引用 link 可點回 wiki preview） | C |

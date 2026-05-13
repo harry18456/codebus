@@ -26,7 +26,7 @@ CLI observable behavior — stdout banner sequence, `print_event` rendered outpu
 #### Scenario: CLI exit codes match per-error mapping
 
 - **WHEN** the goal / query / fix library function returns a `VerbError` variant
-- **THEN** the CLI handler SHALL produce the exit code per the existing policy: `VaultMissing` from query / fix → 2, `ConfigParse` → 2, `Spawn` → 1, `Internal` → 1; and the CLI handler SHALL be statically guaranteed to handle every variant via exhaustive `match`
+- **THEN** the CLI handler SHALL produce the exit code per the existing policy: `VaultMissing` from query / fix → 2, `ConfigParse { which: _, .. }` → 2, `KeyringMissing { source }` → 3, `Spawn { source }` → 1, `Internal { message }` → 1; AND the CLI handler SHALL be statically guaranteed to handle every variant via exhaustive `match` AND SHALL emit the verb-specific stderr message preserving byte-equivalent output (`error: {verb}: vault not found at {path}; run \`codebus init\` first` for `VaultMissing`, `error: {which} config parse failed at {path}: {source}` for `ConfigParse`, `error: {verb}: {source}` for `KeyringMissing`, `error: spawn claude: {source}` for `Spawn`, `error: {message}` for `Internal`)
 
 #### Scenario: CLI stdout / stderr / exit code byte-equivalent
 
