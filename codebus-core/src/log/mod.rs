@@ -6,12 +6,14 @@
 //! trait is object-safe so callers can pass `&mut dyn LogSink` and swap impls
 //! based on `~/.codebus/config.yaml log.sink` discriminator.
 
+pub mod events;
 pub mod factory;
 pub mod sink;
 pub mod sinks;
 pub mod verb_log;
 
-pub use factory::{SinkConfig, SinkError, build_sink};
+pub use events::{EventEnvelope, EventsJsonlSink, EventsNullSink, EventsSink};
+pub use factory::{SinkConfig, SinkError, build_events_sink, build_sink};
 pub use sink::{LogError, LogSink, RunLog, TokenUsage, accumulate_token_usage};
 pub use verb_log::{
     load_verb_log_config, resolve_sink_dir, wiki_changed_since_last_commit, write_run_log,

@@ -20,10 +20,18 @@
 use crate::config::Verb;
 use crate::render::Banner;
 use crate::stream::StreamEvent;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Top-level event emitted by `verb::*::run_*` orchestration functions.
-#[derive(Debug, Clone)]
+///
+/// Serialized with `kind` discriminator + nested `data` payload
+/// (`{"kind":"banner|stream|lifecycle","data":{...}}`) so events.jsonl
+/// consumers (GUI, analytics) dispatch on `kind` without colliding with
+/// the inner enums' own `kind` tags (`VerbBanner` / `StreamEvent` /
+/// `VerbLifecycleEvent` each carry their own variant `kind`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum VerbEvent {
     Banner(VerbBanner),
     Stream(StreamEvent),
@@ -33,7 +41,8 @@ pub enum VerbEvent {
 /// Owning mirror of [`crate::render::Banner`]. Banner is borrowed (`'a`)
 /// because it's designed for the direct print path; VerbBanner is owning so
 /// it can be sent across thread boundaries (GUI Tauri event emit).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VerbBanner {
     Start {
         repo_path: PathBuf,
@@ -119,7 +128,8 @@ impl VerbBanner {
 /// Lifecycle events specific to verb orchestration (not present in `Banner`
 /// because they're not user-facing terminal lines — they're for GUI progress
 /// UI). The CLI thin wrapper SHALL no-op on these variants.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VerbLifecycleEvent {
     SpawnStart {
         verb: Verb,

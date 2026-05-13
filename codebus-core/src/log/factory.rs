@@ -10,6 +10,7 @@
 //! per-vault history without explicit opt-in. Users who don't want any
 //! run logging set `log: { sink: "null" }` in `~/.codebus/config.yaml`.
 
+use crate::log::events::{EventsJsonlSink, EventsNullSink, EventsSink};
 use crate::log::sink::LogSink;
 use crate::log::sinks::{jsonl_sink::JsonlSink, null_sink::NullSink};
 use serde::{Deserialize, Serialize};
@@ -67,6 +68,30 @@ pub fn build_sink(cfg: SinkConfig) -> Result<Box<dyn LogSink>, SinkError> {
                 SinkError::Setup("jsonl sink requires `dir` (resolve before build_sink)".into())
             })?;
             Ok(Box::new(JsonlSink::new(dir)))
+        }
+    }
+}
+
+/// Build an events sink from a [`SinkConfig`] and the run's `started_at`
+/// timestamp (used to derive the events.jsonl filename slug). Same
+/// dispatch shape as [`build_sink`] — the `log.sink` discriminator
+/// controls runs.jsonl and events.jsonl together so users have one
+/// user-visible knob covering all logging. Returns `Err(SinkError::Setup)`
+/// when `Jsonl { dir: None }` is supplied (caller is expected to resolve
+/// the default vault-local path before invoking the factory).
+pub fn build_events_sink(
+    cfg: &SinkConfig,
+    started_at: &str,
+) -> Result<Box<dyn EventsSink>, SinkError> {
+    match cfg {
+        SinkConfig::Null {} => Ok(Box::new(EventsNullSink::new())),
+        SinkConfig::Jsonl { dir } => {
+            let dir = dir.as_ref().ok_or_else(|| {
+                SinkError::Setup(
+                    "jsonl events sink requires `dir` (resolve before build_events_sink)".into(),
+                )
+            })?;
+            Ok(Box::new(EventsJsonlSink::new(dir.clone(), started_at)))
         }
     }
 }
@@ -138,6 +163,34 @@ mod tests {
         // stderr warning.
         let result: Result<SinkConfig, _> = serde_yaml::from_str("sink: null\n");
         assert!(result.is_err(), "bare null SHALL not match `none` rename");
+    }
+
+    #[test]
+    fn build_events_null_returns_events_null_sink() {
+        let sink = build_events_sink(&SinkConfig::Null {}, "2026-05-13T03:25:11Z").unwrap();
+        assert_eq!(sink.name(), "null");
+    }
+
+    #[test]
+    fn build_events_jsonl_with_dir_returns_events_jsonl_sink() {
+        let cfg = SinkConfig::Jsonl {
+            dir: Some(PathBuf::from("/tmp/codebus-factory-test")),
+        };
+        let sink = build_events_sink(&cfg, "2026-05-13T03:25:11Z").unwrap();
+        assert_eq!(sink.name(), "jsonl");
+    }
+
+    #[test]
+    fn build_events_jsonl_without_dir_returns_setup_error() {
+        match build_events_sink(&SinkConfig::Jsonl { dir: None }, "2026-05-13T03:25:11Z") {
+            Err(SinkError::Setup(msg)) => {
+                assert!(
+                    msg.contains("dir"),
+                    "error should mention `dir`: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected SinkError::Setup, got Ok"),
+        }
     }
 
     #[test]

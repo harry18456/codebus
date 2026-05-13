@@ -28,12 +28,15 @@
 
 use crate::agent::{InvokeAgentOptions, invoke};
 use crate::config::{Verb, build_env_overrides, default_config_path, load_claude_code_config};
+use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
+use crate::log::factory::build_events_sink;
 use crate::log::verb_log::{load_verb_log_config, resolve_sink_dir, write_run_log};
-use crate::log::{RunLog, TokenUsage};
+use crate::log::{RunLog, SinkConfig, TokenUsage};
 use crate::stream::StreamEvent;
 use crate::vault::layout::vault_paths;
 use crate::verb::error::VerbError;
 use crate::verb::event::{VerbBanner, VerbEvent, VerbLifecycleEvent};
+use chrono::SecondsFormat;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -71,6 +74,11 @@ pub fn run_query(
 ) -> Result<QueryReport, VerbError> {
     let paths = vault_paths(repo);
 
+    // Capture run started_at early — used for both events.jsonl filename
+    // slug AND the final RunLog.started_at value, so events file name
+    // matches the RunLog row's started_at (GUI joins on this).
+    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+
     // Step 1: Start banner.
     on_event(VerbEvent::Banner(VerbBanner::Start {
         repo_path: repo.to_path_buf(),
@@ -83,7 +91,7 @@ pub fn run_query(
         });
     }
 
-    // Step 3: load claude_code config.
+    // Step 3: load claude_code + log config (log config needed for events sink).
     let cc_cfg = match default_config_path() {
         Some(p) if p.exists() => {
             load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
@@ -92,6 +100,21 @@ pub fn run_query(
             })?
         }
         _ => Default::default(),
+    };
+    let log_cfg = load_verb_log_config().map_err(|e| VerbError::ConfigParse {
+        which: "log",
+        source: e,
+    })?;
+    let sink_cfg: SinkConfig = resolve_sink_dir(log_cfg, &paths.log);
+
+    // Build events sink. Failure → fallback to no-op sink + stderr warn
+    // (events-log Write Failure Is Non-Fatal).
+    let mut events_sink: Box<dyn EventsSink> = match build_events_sink(&sink_cfg, &run_started_at) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("warning: events-log sink build failed (skipping persistence): {e}");
+            Box::new(EventsNullSink::new())
+        }
     };
 
     // Step 4: resolve verb config.
@@ -102,22 +125,24 @@ pub fn run_query(
     let query_env =
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
-    // Step 6: spawn agent. Wrap stream events in VerbEvent::Stream and
-    // forward to the caller closure.
-    on_event(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
+    // Step 6: spawn agent. Fan out each VerbEvent to (a) the events
+    // sink and (b) the caller's on_event closure.
+    let mut fan_out = |event: VerbEvent| {
+        let envelope = EventEnvelope {
+            ts: chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+            event: event.clone(),
+        };
+        if let Err(e) = events_sink.write_event(&envelope) {
+            eprintln!("warning: events-log write failed (non-fatal): {e}");
+        }
+        on_event(event);
+    };
+
+    fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Query,
     }));
-    // The closure borrows `on_event` via `&mut`; but `on_event` is the
-    // outer closure parameter. We need to share it between this and the
-    // post-invoke SpawnEnd emit. Use a workaround: collect events via
-    // a Vec and forward after... no, that breaks streaming. Instead
-    // restructure: take `&mut on_event` to a local closure.
-    //
-    // Rust trick: pass `|e| on_event(VerbEvent::Stream(e))` as a closure
-    // capturing `&mut on_event`. Since `on_event` itself is `impl FnMut`,
-    // we can re-borrow it.
     let invoke_report = {
-        let on_event = &mut on_event;
+        let fan_out = &mut fan_out;
         invoke(
             InvokeAgentOptions {
                 slash_command,
@@ -128,52 +153,62 @@ pub fn run_query(
                 effort: query_resolved.effort.clone(),
                 env: query_env,
             },
-            |event: StreamEvent| on_event(VerbEvent::Stream(event)),
+            |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
         )
         .map_err(|e| VerbError::Spawn { source: e })?
     };
-    on_event(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnEnd {
+    fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnEnd {
         verb: Verb::Query,
         exit_code: invoke_report.exit.code(),
     }));
 
-    // If cancel was observed, return Cancelled (no run_log write — we
-    // mirror auto-commit-skip semantics: cancelled runs leave minimal
-    // trace; the events.jsonl persisted by v3-run-log-events will carry
-    // the partial state).
+    // Cancellation: write RunLog with outcome cancelled BEFORE returning
+    // Err — GUI Goals overview row still needs the entry to list it.
     if let Some(flag) = &cancel
         && flag.load(Ordering::Relaxed)
     {
+        let cancel_run_log = RunLog {
+            goal: options.text.clone(),
+            mode: "query".into(),
+            model: query_resolved.model.clone(),
+            effort: query_resolved.effort.clone(),
+            started_at: run_started_at.clone(),
+            finished_at: invoke_report.finished_at.clone(),
+            tokens: invoke_report.accumulated_tokens.clone(),
+            wiki_changed: false,
+            lint_error_count: 0,
+            lint_warn_count: 0,
+            outcome: "cancelled".into(),
+        };
+        write_run_log(sink_cfg.clone(), &cancel_run_log);
         return Err(VerbError::Cancelled);
     }
 
-    // Step 7: load log config.
-    let log_cfg = load_verb_log_config().map_err(|e| VerbError::ConfigParse {
-        which: "log",
-        source: e,
-    })?;
-
-    // Step 8: resolve sink + write RunLog.
-    let sink_cfg = resolve_sink_dir(log_cfg, &paths.log);
+    // Step 7: write RunLog (success path).
+    // outcome: "succeeded" — query is read-only; the verb itself
+    // completed even when the agent exits non-zero (CLI propagates
+    // the agent exit via QueryReport.agent_exit_code field).
     let run_log = RunLog {
         goal: options.text.clone(),
         mode: "query".into(),
         model: query_resolved.model.clone(),
         effort: query_resolved.effort.clone(),
-        started_at: invoke_report.started_at.clone(),
+        started_at: run_started_at,
         finished_at: invoke_report.finished_at.clone(),
         tokens: invoke_report.accumulated_tokens.clone(),
         wiki_changed: false,
         lint_error_count: 0,
         lint_warn_count: 0,
+        outcome: "succeeded".into(),
     };
     write_run_log(sink_cfg, &run_log);
 
-    // Step 9: return report.
+    // Step 9: return report. started_at uses run_started_at to match
+    // the RunLog row and events.jsonl filename slug.
     Ok(QueryReport {
         accumulated_tokens: invoke_report.accumulated_tokens,
-        started_at: invoke_report.started_at,
+        started_at: run_log.started_at,
         finished_at: invoke_report.finished_at,
         agent_exit_code: invoke_report.exit.code(),
     })

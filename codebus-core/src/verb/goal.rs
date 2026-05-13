@@ -25,10 +25,12 @@ use crate::config::{
     load_claude_code_config, load_lint_fix_config, load_pii_config,
 };
 use crate::git::auto_commit;
+use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
+use crate::log::factory::build_events_sink;
 use crate::log::verb_log::{
     load_verb_log_config, resolve_sink_dir, wiki_changed_since_last_commit, write_run_log,
 };
-use crate::log::{RunLog, TokenUsage};
+use crate::log::{RunLog, SinkConfig, TokenUsage};
 use crate::pii::PiiScanner;
 use crate::pii::scanners::null_scanner::NullScanner;
 use crate::pii::scanners::regex_basic::RegexBasicScanner;
@@ -41,6 +43,7 @@ use crate::vault::source_signal_detect::detect_drift;
 use crate::verb::error::VerbError;
 use crate::verb::event::{VerbBanner, VerbEvent, VerbLifecycleEvent};
 use crate::wiki::fix::{TerminationReason, run_fix_loop};
+use chrono::SecondsFormat;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -84,7 +87,11 @@ pub fn run_goal(
 ) -> Result<GoalReport, VerbError> {
     let paths = vault_paths(repo);
 
-    // Step 1: Start + Goal banners.
+    // Capture run started_at early — events.jsonl filename slug + RunLog row.
+    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+
+    // Step 1: Start + Goal banners (raw on_event — events sink not yet
+    // built because vault may not exist).
     on_event(VerbEvent::Banner(VerbBanner::Start {
         repo_path: repo.to_path_buf(),
     }));
@@ -110,6 +117,20 @@ pub fn run_goal(
             });
         }
     }
+
+    // Now that vault exists, load log config and build events sink.
+    let log_cfg = load_verb_log_config().map_err(|e| VerbError::ConfigParse {
+        which: "log",
+        source: e,
+    })?;
+    let sink_cfg: SinkConfig = resolve_sink_dir(log_cfg, &paths.log);
+    let mut events_sink: Box<dyn EventsSink> = match build_events_sink(&sink_cfg, &run_started_at) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("warning: events-log sink build failed (skipping persistence): {e}");
+            Box::new(EventsNullSink::new())
+        }
+    };
 
     // Step 3: load lint.fix config + apply CLI override.
     let fix_cfg = match default_config_path() {
@@ -154,17 +175,55 @@ pub fn run_goal(
         _ => Default::default(),
     };
 
+    // Fan-out closure: emit each VerbEvent to events sink + caller.
+    // Built after vault exists + events sink ready.
+    let mut fan_out = |event: VerbEvent| {
+        let envelope = EventEnvelope {
+            ts: chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+            event: event.clone(),
+        };
+        if let Err(e) = events_sink.write_event(&envelope) {
+            eprintln!("warning: events-log write failed (non-fatal): {e}");
+        }
+        on_event(event);
+    };
+
+    // Helper to write a cancel-path RunLog and return Cancelled. Used
+    // at two cancel observation points (post-agent, post-fix-loop).
+    let make_cancel_runlog = |fix_lint_errors: usize,
+                              fix_lint_warns: usize,
+                              tokens: TokenUsage,
+                              finished_at: String,
+                              model: Option<String>,
+                              effort: Option<String>,
+                              wiki_changed: bool|
+     -> RunLog {
+        RunLog {
+            goal: options.text.clone(),
+            mode: "goal".into(),
+            model,
+            effort,
+            started_at: run_started_at.clone(),
+            finished_at,
+            tokens,
+            wiki_changed,
+            lint_error_count: fix_lint_errors,
+            lint_warn_count: fix_lint_warns,
+            outcome: "cancelled".into(),
+        }
+    };
+
     // Step 4b: conditional re-sync with PII scanner.
     if needs_resync {
         let scanner = build_pii_scanner(&pii_cfg);
-        on_event(VerbEvent::Banner(VerbBanner::SyncStart));
+        fan_out(VerbEvent::Banner(VerbBanner::SyncStart));
         let sync_started = Instant::now();
         let summary = sync_with_scanner(repo, &paths.raw_code, scanner.as_ref(), pii_cfg.on_hit)
             .map_err(|e| VerbError::Internal {
                 message: format!("raw mirror re-sync: {e}"),
             })?;
         let sync_elapsed_ms = sync_started.elapsed().as_millis();
-        on_event(VerbEvent::Banner(VerbBanner::SyncDone {
+        fan_out(VerbEvent::Banner(VerbBanner::SyncDone {
             files: summary.files,
             mib: (summary.bytes as f64) / (1024.0 * 1024.0),
             elapsed_ms: sync_elapsed_ms,
@@ -191,12 +250,12 @@ pub fn run_goal(
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
     // Step 8: spawn goal agent.
-    on_event(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
+    fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Goal,
     }));
     let slash_command = format!("/codebus-goal \"{}\"", options.text);
     let invoke_report = {
-        let on_event = &mut on_event;
+        let fan_out = &mut fan_out;
         crate::agent::invoke(
             crate::agent::InvokeAgentOptions {
                 slash_command,
@@ -207,20 +266,30 @@ pub fn run_goal(
                 effort: goal_resolved.effort.clone(),
                 env: goal_env,
             },
-            |event: StreamEvent| on_event(VerbEvent::Stream(event)),
+            |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
         )
         .map_err(|e| VerbError::Spawn { source: e })?
     };
-    on_event(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnEnd {
+    fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnEnd {
         verb: Verb::Goal,
         exit_code: invoke_report.exit.code(),
     }));
 
-    // Cancellation: skip fix loop, skip auto-commit, return Cancelled.
+    // Cancellation after agent spawn: write RunLog cancelled + return.
     if let Some(flag) = &cancel
         && flag.load(Ordering::Relaxed)
     {
+        let cancel_run_log = make_cancel_runlog(
+            0,
+            0,
+            invoke_report.accumulated_tokens.clone(),
+            invoke_report.finished_at.clone(),
+            goal_resolved.model.clone(),
+            goal_resolved.effort.clone(),
+            wiki_changed_since_last_commit(&paths.root),
+        );
+        write_run_log(sink_cfg.clone(), &cancel_run_log);
         return Err(VerbError::Cancelled);
     }
 
@@ -229,19 +298,19 @@ pub fn run_goal(
     let mut fix_lint_warns: usize = 0;
     let mut fix_post_lint_issues_remain = false;
     if fix_cfg.enabled {
-        on_event(VerbEvent::Banner(VerbBanner::LintStart));
+        fan_out(VerbEvent::Banner(VerbBanner::LintStart));
         let lint_started = Instant::now();
         let fix_resolved = cc_cfg.resolve(Verb::Fix);
         let fix_env =
             build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
         let report = {
-            let on_event = &mut on_event;
+            let fan_out = &mut fan_out;
             run_fix_loop(
                 paths.root.clone(),
                 fix_resolved.model.clone(),
                 fix_resolved.effort.clone(),
                 fix_env,
-                |event: StreamEvent| on_event(VerbEvent::Stream(event)),
+                |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
                 cancel.clone(),
             )
             .map_err(|e| match e {
@@ -253,16 +322,26 @@ pub fn run_goal(
         fix_post_lint_issues_remain =
             !report.clean && report.termination == TerminationReason::PostLintIssuesRemain;
         let lint_elapsed_ms = lint_started.elapsed().as_millis();
-        on_event(VerbEvent::Banner(VerbBanner::LintDone {
+        fan_out(VerbEvent::Banner(VerbBanner::LintDone {
             errors: fix_lint_errors,
             warns: fix_lint_warns,
             elapsed_ms: lint_elapsed_ms,
         }));
 
-        // Cancellation propagated by run_fix_loop: re-check.
+        // Cancellation propagated by run_fix_loop: write RunLog + return.
         if let Some(flag) = &cancel
             && flag.load(Ordering::Relaxed)
         {
+            let cancel_run_log = make_cancel_runlog(
+                fix_lint_errors,
+                fix_lint_warns,
+                invoke_report.accumulated_tokens.clone(),
+                invoke_report.finished_at.clone(),
+                goal_resolved.model.clone(),
+                goal_resolved.effort.clone(),
+                wiki_changed_since_last_commit(&paths.root),
+            );
+            write_run_log(sink_cfg.clone(), &cancel_run_log);
             return Err(VerbError::Cancelled);
         }
     }
@@ -273,7 +352,7 @@ pub fn run_goal(
         Ok(sha) => {
             if !sha.is_empty() {
                 let sha7: String = sha.chars().take(7).collect();
-                on_event(VerbEvent::Banner(VerbBanner::CommitDone {
+                fan_out(VerbEvent::Banner(VerbBanner::CommitDone {
                     sha7: sha7.clone(),
                 }));
             }
@@ -287,27 +366,36 @@ pub fn run_goal(
 
     // Step 11: write RunLog.
     let wiki_changed = wiki_changed_since_last_commit(&paths.root);
+    // outcome: "failed" when agent exited non-zero OR fix loop still
+    // has issues; "succeeded" otherwise. Cancel path doesn't reach this
+    // code (returns earlier with Cancelled).
+    let agent_failed = invoke_report
+        .exit
+        .code()
+        .map(|c| c != 0)
+        .unwrap_or(true);
+    let outcome = if agent_failed || fix_post_lint_issues_remain {
+        "failed"
+    } else {
+        "succeeded"
+    };
     let run_log = RunLog {
         goal: options.text.clone(),
         mode: "goal".into(),
         model: goal_resolved.model.clone(),
         effort: goal_resolved.effort.clone(),
-        started_at: invoke_report.started_at.clone(),
+        started_at: run_started_at.clone(),
         finished_at: invoke_report.finished_at.clone(),
         tokens: invoke_report.accumulated_tokens.clone(),
         wiki_changed,
         lint_error_count: fix_lint_errors,
         lint_warn_count: fix_lint_warns,
+        outcome: outcome.into(),
     };
-    let log_cfg = load_verb_log_config().map_err(|e| VerbError::ConfigParse {
-        which: "log",
-        source: e,
-    })?;
-    let sink_cfg = resolve_sink_dir(log_cfg, &paths.log);
-    write_run_log(sink_cfg, &run_log);
+    write_run_log(sink_cfg.clone(), &run_log);
 
     // Step 12: Done banner + return.
-    on_event(VerbEvent::Banner(VerbBanner::Done {
+    fan_out(VerbEvent::Banner(VerbBanner::Done {
         wiki_path: paths.wiki.clone(),
     }));
 
@@ -316,7 +404,7 @@ pub fn run_goal(
         wiki_changed,
         lint_error_count: fix_lint_errors,
         lint_warn_count: fix_lint_warns,
-        started_at: invoke_report.started_at,
+        started_at: run_started_at,
         finished_at: invoke_report.finished_at,
         agent_exit_code: invoke_report.exit.code(),
         fix_post_lint_issues_remain,

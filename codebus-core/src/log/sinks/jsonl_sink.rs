@@ -91,6 +91,7 @@ mod tests {
             wiki_changed: false,
             lint_error_count: 0,
             lint_warn_count: 0,
+            outcome: "succeeded".into(),
         }
     }
 

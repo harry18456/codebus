@@ -70,6 +70,20 @@ pub struct RunLog {
     pub wiki_changed: bool,
     pub lint_error_count: usize,
     pub lint_warn_count: usize,
+    /// Verb termination outcome. Closed set of three values:
+    /// `"succeeded"` — agent exited zero + any post-spawn phases ok;
+    /// `"failed"` — agent exited non-zero or fix loop reported issues;
+    /// `"cancelled"` — caller cancel signal observed mid-run (RunLog
+    /// written before returning `VerbError::Cancelled` per the
+    /// `Cancellation Signal Polling` requirement of `verb-library`).
+    /// Serde default `"succeeded"` gives forward-compat for legacy
+    /// jsonl rows written before v3-run-log-events shipped.
+    #[serde(default = "default_outcome")]
+    pub outcome: String,
+}
+
+fn default_outcome() -> String {
+    "succeeded".to_string()
 }
 
 #[derive(Debug)]
@@ -258,6 +272,7 @@ mod tests {
             wiki_changed: true,
             lint_error_count: 0,
             lint_warn_count: 1,
+            outcome: "succeeded".into(),
         };
         let json = serde_json::to_string(&entry).unwrap();
         // Required fields present
@@ -266,11 +281,59 @@ mod tests {
         assert!(json.contains("\"input_tokens\":100"));
         assert!(json.contains("\"wiki_changed\":true"));
         assert!(json.contains("\"lint_error_count\":0"));
+        // outcome field is required (always serialized; serde default
+        // covers deserialize only).
+        assert!(json.contains("\"outcome\":\"succeeded\""));
         // None / null-extras fields skipped
         assert!(!json.contains("\"model\""));
         assert!(!json.contains("\"effort\""));
         assert!(!json.contains("\"cache_read_tokens\""));
         assert!(!json.contains("\"extras\""));
+    }
+
+    /// Legacy jsonl rows written before v3-run-log-events shipped omit
+    /// the `outcome` key. Serde default must restore it to "succeeded"
+    /// so existing reader pipelines do not break.
+    #[test]
+    fn legacy_run_log_without_outcome_deserializes_to_succeeded() {
+        let legacy = r#"{
+            "goal": "describe X",
+            "mode": "goal",
+            "started_at": "2026-05-10T00:00:00Z",
+            "finished_at": "2026-05-10T00:01:00Z",
+            "tokens": {"input_tokens": 10, "output_tokens": 5},
+            "wiki_changed": false,
+            "lint_error_count": 0,
+            "lint_warn_count": 0
+        }"#;
+        let parsed: RunLog = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.outcome, "succeeded");
+        assert_eq!(parsed.goal, "describe X");
+        assert_eq!(parsed.mode, "goal");
+    }
+
+    /// Three legal outcome values survive a serialize → deserialize
+    /// round-trip without translation or normalization.
+    #[test]
+    fn run_log_outcome_round_trips_for_three_legal_values() {
+        for outcome in ["succeeded", "failed", "cancelled"] {
+            let entry = RunLog {
+                goal: "x".into(),
+                mode: "goal".into(),
+                model: None,
+                effort: None,
+                started_at: "2026-05-10T00:00:00Z".into(),
+                finished_at: "2026-05-10T00:01:00Z".into(),
+                tokens: TokenUsage::default(),
+                wiki_changed: false,
+                lint_error_count: 0,
+                lint_warn_count: 0,
+                outcome: outcome.into(),
+            };
+            let json = serde_json::to_string(&entry).unwrap();
+            let parsed: RunLog = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed.outcome, outcome);
+        }
     }
 
     #[test]
@@ -293,12 +356,14 @@ mod tests {
             wiki_changed: false,
             lint_error_count: 1,
             lint_warn_count: 2,
+            outcome: "failed".into(),
         };
         let json = serde_json::to_string(&original).unwrap();
         let parsed: RunLog = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.goal, original.goal);
         assert_eq!(parsed.mode, original.mode);
         assert_eq!(parsed.model, original.model);
+        assert_eq!(parsed.outcome, "failed");
         assert_eq!(parsed.tokens.cache_read_tokens, Some(3));
         assert_eq!(parsed.tokens.extras, json!({"foo": "bar"}));
     }

@@ -28,15 +28,18 @@ use crate::config::{
     Verb, build_env_overrides, default_config_path, load_claude_code_config, load_lint_fix_config,
 };
 use crate::git::auto_commit;
+use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
+use crate::log::factory::build_events_sink;
 use crate::log::verb_log::{
     load_verb_log_config, resolve_sink_dir, wiki_changed_since_last_commit, write_run_log,
 };
-use crate::log::{RunLog, TokenUsage};
+use crate::log::{RunLog, SinkConfig, TokenUsage};
 use crate::stream::StreamEvent;
 use crate::vault::layout::vault_paths;
 use crate::verb::error::VerbError;
 use crate::verb::event::{VerbBanner, VerbEvent, VerbLifecycleEvent};
 use crate::wiki::fix::{TerminationReason, run_fix_loop};
+use chrono::SecondsFormat;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -100,6 +103,9 @@ pub fn run_fix(
 ) -> Result<FixReport, VerbError> {
     let paths = vault_paths(repo);
 
+    // Capture run started_at early for events.jsonl slug + RunLog row.
+    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+
     // Step 1: Start banner.
     on_event(VerbEvent::Banner(VerbBanner::Start {
         repo_path: repo.to_path_buf(),
@@ -129,6 +135,7 @@ pub fn run_fix(
         } else {
             SkipReason::DisabledByConfig
         };
+        // Skipped path: no agent spawn → no RunLog write per spec.
         return Ok(FixReport {
             accumulated_tokens: TokenUsage::default(),
             wiki_changed: false,
@@ -141,7 +148,7 @@ pub fn run_fix(
         });
     }
 
-    // Step 5: load claude_code config.
+    // Step 5: load claude_code + log config (log needed for events sink).
     let cc_cfg = match default_config_path() {
         Some(p) if p.exists() => {
             load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
@@ -151,51 +158,101 @@ pub fn run_fix(
         }
         _ => Default::default(),
     };
+    let log_cfg = load_verb_log_config().map_err(|e| VerbError::ConfigParse {
+        which: "log",
+        source: e,
+    })?;
+    let sink_cfg: SinkConfig = resolve_sink_dir(log_cfg, &paths.log);
+
+    // Build events sink. Failure → no-op fallback + stderr warn.
+    let mut events_sink: Box<dyn EventsSink> = match build_events_sink(&sink_cfg, &run_started_at) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("warning: events-log sink build failed (skipping persistence): {e}");
+            Box::new(EventsNullSink::new())
+        }
+    };
 
     // Step 6: resolve fix verb config + build env overrides.
     let fix_resolved = cc_cfg.resolve(Verb::Fix);
     let fix_env: EnvOverrides =
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
+    // Fan-out closure: emit each VerbEvent to events sink + caller.
+    let mut fan_out = |event: VerbEvent| {
+        let envelope = EventEnvelope {
+            ts: chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+            event: event.clone(),
+        };
+        if let Err(e) = events_sink.write_event(&envelope) {
+            eprintln!("warning: events-log write failed (non-fatal): {e}");
+        }
+        on_event(event);
+    };
+
     // Step 7: emit LintStart banner + SpawnStart lifecycle.
-    on_event(VerbEvent::Banner(VerbBanner::LintStart));
-    on_event(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
+    fan_out(VerbEvent::Banner(VerbBanner::LintStart));
+    fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Fix,
     }));
     let lint_started = Instant::now();
 
     // Step 8: run fix loop. Wrap StreamEvent in VerbEvent::Stream.
     let report = {
-        let on_event = &mut on_event;
+        let fan_out = &mut fan_out;
         run_fix_loop(
             paths.root.clone(),
             fix_resolved.model.clone(),
             fix_resolved.effort.clone(),
             fix_env,
-            |event: StreamEvent| on_event(VerbEvent::Stream(event)),
+            |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
         )
         .map_err(|e| match e {
             crate::wiki::fix::FixError::Spawn(io_err) => VerbError::Spawn { source: io_err },
         })?
     };
-    on_event(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnEnd {
+    fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnEnd {
         verb: Verb::Fix,
         exit_code: report.invoke.as_ref().and_then(|r| r.exit.code()),
     }));
     let lint_elapsed_ms = lint_started.elapsed().as_millis();
 
     // Step 9: emit LintDone banner.
-    on_event(VerbEvent::Banner(VerbBanner::LintDone {
+    fan_out(VerbEvent::Banner(VerbBanner::LintDone {
         errors: report.final_lint.error_count,
         warns: report.final_lint.warn_count,
         elapsed_ms: lint_elapsed_ms,
     }));
 
-    // Check cancel signal — if observed during the run, propagate.
+    // Cancel path: write RunLog with outcome cancelled BEFORE returning.
     if let Some(flag) = &cancel
         && flag.load(Ordering::Relaxed)
     {
+        let invoke_finished = report
+            .invoke
+            .as_ref()
+            .map(|r| r.finished_at.clone())
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true));
+        let accumulated = report
+            .invoke
+            .as_ref()
+            .map(|r| r.accumulated_tokens.clone())
+            .unwrap_or_default();
+        let cancel_run_log = RunLog {
+            goal: String::new(),
+            mode: "fix".into(),
+            model: fix_resolved.model.clone(),
+            effort: fix_resolved.effort.clone(),
+            started_at: run_started_at.clone(),
+            finished_at: invoke_finished,
+            tokens: accumulated,
+            wiki_changed: wiki_changed_since_last_commit(&paths.root),
+            lint_error_count: report.final_lint.error_count,
+            lint_warn_count: report.final_lint.warn_count,
+            outcome: "cancelled".into(),
+        };
+        write_run_log(sink_cfg.clone(), &cancel_run_log);
         return Err(VerbError::Cancelled);
     }
 
@@ -218,7 +275,7 @@ pub fn run_fix(
         Ok(sha) => {
             if !sha.is_empty() {
                 let sha7: String = sha.chars().take(7).collect();
-                on_event(VerbEvent::Banner(VerbBanner::CommitDone {
+                fan_out(VerbEvent::Banner(VerbBanner::CommitDone {
                     sha7: sha7.clone(),
                 }));
             }
@@ -231,18 +288,27 @@ pub fn run_fix(
     }
 
     // Step 12: write RunLog (only when invoke ran — InitialClean path
-    // returned earlier).
+    // returned earlier; cancel path also returned earlier).
     let invoke_report = report.invoke.clone();
-    let (started_at, finished_at, tokens) = match invoke_report {
+    let (started_at_opt, finished_at, tokens) = match invoke_report {
         Some(r) => (
-            Some(r.started_at),
+            Some(run_started_at.clone()),
             Some(r.finished_at),
             r.accumulated_tokens,
         ),
         None => (None, None, TokenUsage::default()),
     };
 
-    if let (Some(s), Some(f)) = (started_at.as_ref(), finished_at.as_ref()) {
+    if let (Some(s), Some(f)) = (started_at_opt.as_ref(), finished_at.as_ref()) {
+        // outcome: PostLintClean → "succeeded"; PostLintIssuesRemain →
+        // "failed". InitialClean / Skipped never reach this branch
+        // (no agent spawn, no RunLog). Cancel path returned earlier
+        // with Cancelled before this code.
+        let outcome = match report.termination {
+            TerminationReason::PostLintClean => "succeeded",
+            TerminationReason::PostLintIssuesRemain => "failed",
+            TerminationReason::InitialClean => "succeeded", // unreachable here
+        };
         let run_log = RunLog {
             goal: String::new(),
             mode: "fix".into(),
@@ -254,14 +320,11 @@ pub fn run_fix(
             wiki_changed: wiki_changed_since_last_commit(&paths.root),
             lint_error_count: report.final_lint.error_count,
             lint_warn_count: report.final_lint.warn_count,
+            outcome: outcome.into(),
         };
-        let log_cfg = load_verb_log_config().map_err(|e| VerbError::ConfigParse {
-            which: "log",
-            source: e,
-        })?;
-        let sink_cfg = resolve_sink_dir(log_cfg, &paths.log);
-        write_run_log(sink_cfg, &run_log);
+        write_run_log(sink_cfg.clone(), &run_log);
     }
+    let started_at = started_at_opt;
 
     // Step 13: return FixReport with status reflecting termination.
     let status = match report.termination {

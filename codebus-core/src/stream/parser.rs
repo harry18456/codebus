@@ -35,10 +35,10 @@
 //! consumer (verb commands) accumulates uniformly.
 
 use crate::log::TokenUsage;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamEvent {
     Thought { text: String },
