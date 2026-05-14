@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 
 import { BottomStrip } from "@/components/BottomStrip"
 import { DropTargetOverlay } from "@/components/DropTargetOverlay"
@@ -127,18 +127,10 @@ function AppShell() {
 
 async function revealInFiles(vault: VaultEntry) {
   try {
-    const mod = await import("@tauri-apps/plugin-fs")
-    void mod
-    // Tauri 2 ships `revealItemInDir` under @tauri-apps/api/opener in v2.x;
-    // not all installs have the opener plugin yet. Defer the actual reveal
-    // to the future task that wires the opener — for now we just no-op
-    // gracefully so the menu item is harmless.
-    console.info("reveal in files not yet wired:", vault.path)
+    const { revealItemInDir } = await import("@tauri-apps/plugin-opener")
+    await revealItemInDir(vault.path)
   } catch (err) {
     console.error("reveal failed", err)
   }
 }
 
-// Avoid an unused-import warning when the dynamic imports above are tree-shaken
-// by tsc's noUnusedLocals in CI; React.useEffect placeholder kept for parity.
-useEffect
