@@ -157,6 +157,112 @@ describe("EndpointSection", () => {
     }
   })
 
+  // Spec scenario: System effort dropdown lists exactly six options.
+  it("system effort dropdowns expose exactly six options per verb", async () => {
+    render(<EndpointSection claudeCode={defaultBlock()} onChange={() => {}} />)
+    fireEvent.click(screen.getByTestId("system-effort-goal"))
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "low" })).toBeInTheDocument()
+    })
+    for (const opt of ["low", "medium", "high", "xhigh", "max", "auto"]) {
+      expect(screen.getByRole("option", { name: opt })).toBeInTheDocument()
+    }
+    for (const forbidden of ["super-high", "extreme", ""]) {
+      expect(
+        screen.queryByRole("option", { name: forbidden }),
+      ).not.toBeInTheDocument()
+    }
+  })
+
+  // Spec scenario: Legacy invalid effort value renders empty select
+  // trigger and flags validation (system side).
+  it("legacy invalid system effort renders empty trigger and aria-invalid", () => {
+    const block = defaultBlock()
+    block.system.goal.effort = "super-high"
+    render(
+      <EndpointSection
+        claudeCode={block}
+        onChange={() => {}}
+        errors={[
+          {
+            field: "claude_code.system.goal.effort",
+            message: "goal effort must be one of high / low / medium",
+          },
+        ]}
+      />,
+    )
+    const trigger = screen.getByTestId("system-effort-goal")
+    expect(trigger).toHaveAttribute("aria-invalid", "true")
+    // The shadcn `<SelectValue />` renders no option label when the
+    // current value is outside the option set — trigger SHALL NOT
+    // contain `super-high` literal text either.
+    expect(trigger.textContent ?? "").not.toContain("super-high")
+    expect(trigger.textContent ?? "").not.toContain("high")
+    expect(
+      screen.getByTestId("endpoint-validation-summary"),
+    ).toHaveTextContent("goal effort must be one of")
+  })
+
+  // Spec scenario: Azure effort dropdown lists exactly six options.
+  it("azure effort dropdowns expose exactly six options per verb", async () => {
+    const block = defaultBlock()
+    block.active = "azure"
+    block.azure = {
+      base_url: "https://x.example.com/anthropic",
+      keyring_service: "codebus-azure",
+      goal: { model: "dep-x", effort: "high" },
+      query: { model: "dep-y", effort: "low" },
+      fix: { model: "dep-z", effort: "medium" },
+    }
+    render(<EndpointSection claudeCode={block} onChange={() => {}} />)
+    fireEvent.click(screen.getByTestId("azure-effort-goal"))
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "low" })).toBeInTheDocument()
+    })
+    for (const opt of ["low", "medium", "high", "xhigh", "max", "auto"]) {
+      expect(screen.getByRole("option", { name: opt })).toBeInTheDocument()
+    }
+    for (const forbidden of ["super-high", "extreme", ""]) {
+      expect(
+        screen.queryByRole("option", { name: forbidden }),
+      ).not.toBeInTheDocument()
+    }
+  })
+
+  // Spec scenario: Inactive profile invalid effort still blocks Save —
+  // azure side aria-invalid + validation summary entry when active=system.
+  it("invalid azure effort flags aria-invalid + validation summary while active=system", () => {
+    const block = defaultBlock()
+    block.active = "system"
+    block.azure = {
+      base_url: "https://x.example.com/anthropic",
+      keyring_service: "codebus-azure",
+      goal: { model: "dep-x", effort: "high" },
+      query: { model: "dep-y", effort: "low" },
+      fix: { model: "dep-z", effort: "extreme" },
+    }
+    render(
+      <EndpointSection
+        claudeCode={block}
+        onChange={() => {}}
+        errors={[
+          {
+            field: "claude_code.azure.fix.effort",
+            message: "fix effort must be one of high / low / medium",
+          },
+        ]}
+      />,
+    )
+    // Expand the azure (inactive) profile so its body is rendered.
+    fireEvent.click(screen.getByTestId("azure-profile-header"))
+    const trigger = screen.getByTestId("azure-effort-fix")
+    expect(trigger).toHaveAttribute("aria-invalid", "true")
+    expect(trigger.textContent ?? "").not.toContain("extreme")
+    expect(
+      screen.getByTestId("endpoint-validation-summary"),
+    ).toHaveTextContent("fix effort must be one of")
+  })
+
   it("azure keyring_service input pre-fills with codebus-azure when azure block is null", () => {
     const block = defaultBlock()
     block.azure = null

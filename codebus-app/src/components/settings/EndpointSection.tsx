@@ -15,6 +15,7 @@ import {
   type KeyStatus,
   type SystemModel,
   DEFAULT_AZURE_KEYRING_SERVICE,
+  SYSTEM_EFFORTS,
   SYSTEM_MODELS,
   deleteEndpointKey,
   getEndpointKey,
@@ -188,34 +189,53 @@ export function EndpointSection({
         expanded={systemExpanded}
         onToggleExpand={() => setSystemExpanded((v) => !v)}
       >
-        {VERBS.map((verb) => (
-          <VerbRow key={verb} verb={verb}>
-            <Select
-              value={claudeCode.system[verb].model}
-              onValueChange={(v) => setSystemModel(verb, v as SystemModel)}
-            >
-              <SelectTrigger
-                className="w-[140px]"
-                data-testid={`system-model-${verb}`}
+        {VERBS.map((verb) => {
+          const effortField = `claude_code.system.${verb}.effort`
+          const effortInvalid = hasError(effortField)
+          return (
+            <VerbRow key={verb} verb={verb}>
+              <Select
+                value={claudeCode.system[verb].model}
+                onValueChange={(v) => setSystemModel(verb, v as SystemModel)}
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SYSTEM_MODELS.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              data-testid={`system-effort-${verb}`}
-              className="w-[100px]"
-              value={claudeCode.system[verb].effort}
-              onChange={(e) => setSystemEffort(verb, e.target.value)}
-            />
-          </VerbRow>
-        ))}
+                <SelectTrigger
+                  className="w-[140px]"
+                  data-testid={`system-model-${verb}`}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SYSTEM_MODELS.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={claudeCode.system[verb].effort}
+                onValueChange={(v) => setSystemEffort(verb, v)}
+              >
+                <SelectTrigger
+                  className={`w-[100px] ${
+                    effortInvalid ? "border-error focus-visible:ring-error" : ""
+                  }`}
+                  data-testid={`system-effort-${verb}`}
+                  aria-invalid={effortInvalid || undefined}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SYSTEM_EFFORTS.map((e) => (
+                    <SelectItem key={e} value={e}>
+                      {e}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </VerbRow>
+          )
+        })}
       </ProfileBlock>
 
       <ProfileBlock
@@ -294,25 +314,42 @@ export function EndpointSection({
         </Field>
         {VERBS.map((verb) => {
           const modelField = `claude_code.azure.${verb}.model`
-          const invalid = hasError(modelField)
+          const effortField = `claude_code.azure.${verb}.effort`
+          const modelInvalid = hasError(modelField)
+          const effortInvalid = hasError(effortField)
           return (
             <VerbRow key={verb} verb={verb}>
               <Input
                 data-testid={`azure-deployment-${verb}`}
                 className={`w-[200px] ${
-                  invalid ? "border-error focus-visible:ring-error" : ""
+                  modelInvalid ? "border-error focus-visible:ring-error" : ""
                 }`}
-                aria-invalid={invalid || undefined}
+                aria-invalid={modelInvalid || undefined}
                 placeholder="<deployment name>"
                 value={azure[verb].model}
                 onChange={(e) => setAzureVerb(verb, { model: e.target.value })}
               />
-              <Input
-                data-testid={`azure-effort-${verb}`}
-                className="w-[100px]"
+              <Select
                 value={azure[verb].effort}
-                onChange={(e) => setAzureVerb(verb, { effort: e.target.value })}
-              />
+                onValueChange={(v) => setAzureVerb(verb, { effort: v })}
+              >
+                <SelectTrigger
+                  className={`w-[100px] ${
+                    effortInvalid ? "border-error focus-visible:ring-error" : ""
+                  }`}
+                  data-testid={`azure-effort-${verb}`}
+                  aria-invalid={effortInvalid || undefined}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SYSTEM_EFFORTS.map((e) => (
+                    <SelectItem key={e} value={e}>
+                      {e}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </VerbRow>
           )
         })}

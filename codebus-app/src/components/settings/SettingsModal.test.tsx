@@ -215,6 +215,51 @@ describe("SettingsModal", () => {
     )
   })
 
+  // Spec scenarios:
+  //   - "Legacy invalid effort value renders empty select trigger and flags validation"
+  //   - "Selecting a valid effort clears the invalid flag and enables Save"
+  it("selecting a valid effort clears the invalid flag and enables Save", async () => {
+    useSettingsStore.setState({
+      config: {
+        app: { quiz: { pass_threshold: 80, default_length: 5 } },
+        claude_code: {
+          active: "system",
+          system: {
+            // Legacy yaml value outside the SYSTEM_EFFORTS enum — UI
+            // SHALL surface as invalid and block Save until re-selected.
+            goal: { model: "opus-4-6", effort: "super-high" },
+            query: { model: "haiku-4-5", effort: "low" },
+            fix: { model: "sonnet-4-6", effort: "medium" },
+          },
+        },
+      },
+      initialConfig: { app: { quiz: { pass_threshold: 80, default_length: 5 } } },
+      dirty: true,
+      loading: false,
+      saving: false,
+      error: null,
+    })
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    const save = await waitFor(() => screen.getByTestId("settings-save"))
+    expect(save).toBeDisabled()
+    const trigger = screen.getByTestId("system-effort-goal")
+    expect(trigger).toHaveAttribute("aria-invalid", "true")
+
+    // Pick a valid value from the dropdown.
+    fireEvent.click(trigger)
+    const mediumOption = await waitFor(() =>
+      screen.getByRole("option", { name: "medium" }),
+    )
+    fireEvent.click(mediumOption)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-save")).not.toBeDisabled()
+    })
+    expect(screen.getByTestId("system-effort-goal")).not.toHaveAttribute(
+      "aria-invalid",
+    )
+  })
+
   it("threshold slider value renders with % unit, length renders with `questions` unit", () => {
     render(
       <SettingsModal open onClose={() => {}} piiPatternCount={14} />,

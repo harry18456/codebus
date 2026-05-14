@@ -113,6 +113,30 @@ export const SYSTEM_MODELS = [
 export type SystemModel = (typeof SYSTEM_MODELS)[number]
 
 /**
+ * Closed enum of valid `effort` values surfaced by the Settings UI
+ * dropdown — mirrors the Claude Code CLI `--effort` accepted set
+ * (low / medium / high / xhigh / max / auto). The Rust side keeps
+ * `effort: String` for yaml backward compatibility, so this enum is
+ * enforced only at the UI layer via `validateClaudeCodeBlock`. Order
+ * is fixed (ascending strength, with `auto` last as the "let the
+ * model decide" sentinel) and matches the option order rendered by
+ * the `<select>` per spec `Settings UI Endpoint Section` scenarios.
+ */
+export const SYSTEM_EFFORTS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "auto",
+] as const
+export type SystemEffort = (typeof SYSTEM_EFFORTS)[number]
+
+function isSystemEffort(value: string): value is SystemEffort {
+  return (SYSTEM_EFFORTS as readonly string[]).includes(value)
+}
+
+/**
  * Active profile of the `claude_code` config block.
  */
 export type ActiveProfile = "system" | "azure"
@@ -207,6 +231,27 @@ export function validateClaudeCodeBlock(
         errors.push({
           field: `claude_code.azure.${verb}.model`,
           message: `${verb} deployment name is required when active=azure`,
+        })
+      }
+    }
+  }
+  // Effort enum check applies to BOTH profiles regardless of `active`
+  // so cold-storage values cannot silently carry a legacy / non-enum
+  // value through Save (spec `Settings UI Endpoint Section`).
+  for (const verb of ["goal", "query", "fix"] as const) {
+    if (!isSystemEffort(block.system[verb].effort)) {
+      errors.push({
+        field: `claude_code.system.${verb}.effort`,
+        message: `${verb} effort must be one of ${SYSTEM_EFFORTS.join(" / ")}`,
+      })
+    }
+  }
+  if (block.azure) {
+    for (const verb of ["goal", "query", "fix"] as const) {
+      if (!isSystemEffort(block.azure[verb].effort)) {
+        errors.push({
+          field: `claude_code.azure.${verb}.effort`,
+          message: `${verb} effort must be one of ${SYSTEM_EFFORTS.join(" / ")}`,
         })
       }
     }

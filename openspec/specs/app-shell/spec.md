@@ -653,8 +653,8 @@ The Settings modal SHALL render an Endpoint section that lets the user configure
 The section SHALL contain three controls plus two sub-sections:
 
 1. An `active` radio group with exactly two options, `system` and `azure`. Selecting an option SHALL mutate the in-memory `claude_code.active` field; it SHALL NOT clear any field values in the non-selected profile sub-section.
-2. A System Profile sub-section containing three verb rows (`goal` / `query` / `fix`). Each row SHALL contain a `model` `<select>` with exactly four `<option>` values (`opus-4-7`, `opus-4-6`, `haiku-4-5`, `sonnet-4-6`) AND a free-text `effort` input.
-3. An Azure Profile sub-section containing: a `base_url` text input, a `keyring_service` text input (pre-filled with the default `codebus-azure` when the underlying config field is empty or absent), an API-key status indicator (`Set` / `Unset`) with `Set new...` and `Delete` action buttons, AND three verb rows each containing a free-text `model` (deployment name) input AND a free-text `effort` input.
+2. A System Profile sub-section containing three verb rows (`goal` / `query` / `fix`). Each row SHALL contain a `model` `<select>` with exactly four `<option>` values (`opus-4-7`, `opus-4-6`, `haiku-4-5`, `sonnet-4-6`) AND an `effort` `<select>` with exactly six `<option>` values (`low`, `medium`, `high`, `xhigh`, `max`, `auto`).
+3. An Azure Profile sub-section containing: a `base_url` text input, a `keyring_service` text input (pre-filled with the default `codebus-azure` when the underlying config field is empty or absent), an API-key status indicator (`Set` / `Unset`) with `Set new...` and `Delete` action buttons, AND three verb rows each containing a free-text `model` (deployment name) input AND an `effort` `<select>` with exactly six `<option>` values (`low`, `medium`, `high`, `xhigh`, `max`, `auto`).
 
 Both profile sub-sections SHALL be present in the DOM regardless of the `active` value, organised as an **accordion**: the sub-section whose name matches `active` SHALL be expanded; the other sub-section SHALL be collapsed showing only its header (which SHALL include an `(inactive)` label). The user SHALL be able to click the collapsed header to expand the inactive sub-section and edit cold-storage configuration. When the user toggles the `active` radio, the newly-active sub-section SHALL auto-expand AND the previously-active sub-section SHALL auto-collapse; this auto-folding SHALL NOT delete or reset any form input values (collapsed inputs remain in the DOM, hidden via CSS, so values persist).
 
@@ -662,7 +662,9 @@ The `Save` button at the Settings modal level SHALL persist only yaml content vi
 
 The Settings UI SHALL NOT include a Test Connection / endpoint reachability button — verification SHALL require running `codebus query "ping"` from the terminal.
 
-The Settings modal SHALL perform client-side validation of the `claude_code` block before allowing the user to save. Specifically: when `active === "azure"`, all of `base_url`, `keyring_service`, AND each verb's `model` (deployment name) SHALL be non-empty strings (trimmed). When any of these are empty, the modal SHALL disable the Save button AND SHALL render an inline validation summary listing each failing field AND SHALL apply `aria-invalid="true"` to the offending inputs. The validation rules SHALL match the codebus-core `Endpoint Profile Schema` validation so the frontend and `save_global_config` backend gate produce the same reject/accept decision.
+The Settings modal SHALL perform client-side validation of the `claude_code` block before allowing the user to save. Specifically: when `active === "azure"`, all of `base_url`, `keyring_service`, AND each verb's `model` (deployment name) SHALL be non-empty strings (trimmed). Additionally, every verb's `effort` field (in BOTH `system` and `azure` profiles, regardless of which is active) SHALL be one of the six values `low`, `medium`, `high`, `xhigh`, `max`, `auto` — values outside this set (including the empty string and any legacy value loaded from yaml) SHALL be treated as invalid. When any validation rule fails, the modal SHALL disable the Save button AND SHALL render an inline validation summary listing each failing field AND SHALL apply `aria-invalid="true"` to the offending inputs. The validation rules SHALL match the codebus-core `Endpoint Profile Schema` validation so the frontend and `save_global_config` backend gate produce the same reject/accept decision for fields covered by the backend (note: the backend keeps `effort` as a freeform `String` for yaml backward compatibility, so the effort enum constraint is enforced only at the UI layer).
+
+The Settings UI SHALL preserve a loaded `effort` value verbatim in in-memory state even when that value is not in the enum, so that legacy yaml content (e.g. `effort: super-high` written by an earlier version or hand-edit) is not silently coerced or discarded; the value SHALL surface through the validation summary so the user re-selects a valid value before Save becomes enabled. The `<select>` trigger for an invalid effort value SHALL render with no option visually selected (empty trigger label).
 
 #### Scenario: Save button is disabled when active=azure has empty required fields
 
@@ -676,7 +678,7 @@ The Settings modal SHALL perform client-side validation of the `claude_code` blo
 
 #### Scenario: Save button enables when active=azure becomes fully populated
 
-- **WHEN** `claude_code.active === "azure"` AND all azure required fields are non-empty AND the user has edited any setting (dirty)
+- **WHEN** `claude_code.active === "azure"` AND all azure required fields are non-empty AND every verb's effort in both profiles is one of `low` / `medium` / `high` / `xhigh` / `max` / `auto` AND the user has edited any setting (dirty)
 - **THEN** the Save button SHALL be enabled AND the Endpoint section SHALL NOT render a validation summary
 
 #### Scenario: Active radio switch preserves non-active profile inputs
@@ -697,12 +699,37 @@ The Settings modal SHALL perform client-side validation of the `claude_code` blo
 #### Scenario: Toggling active auto-collapses the previously-active sub-section
 
 - **WHEN** the System Profile is expanded (active) AND the user toggles `active` to `azure`
-- **THEN** the Azure Profile SHALL expand AND the System Profile SHALL collapse to its header — but the System Profile verb model dropdowns and effort inputs SHALL remain in the DOM (hidden via CSS) so their values persist across toggles
+- **THEN** the Azure Profile SHALL expand AND the System Profile SHALL collapse to its header — but the System Profile verb model dropdowns and effort dropdowns SHALL remain in the DOM (hidden via CSS) so their values persist across toggles
 
 #### Scenario: System model dropdown lists exactly four versioned options
 
 - **WHEN** the System Profile sub-section is rendered AND the user opens any of the three verb `model` dropdowns
 - **THEN** the dropdown SHALL list exactly four options whose `value` attributes are `opus-4-7`, `opus-4-6`, `haiku-4-5`, `sonnet-4-6` in that order
+
+#### Scenario: System effort dropdown lists exactly six options
+
+- **WHEN** the System Profile sub-section is rendered AND the user opens any of the three verb `effort` dropdowns
+- **THEN** the dropdown SHALL list exactly six options whose `value` attributes are `low`, `medium`, `high`, `xhigh`, `max`, `auto` in that order
+
+#### Scenario: Azure effort dropdown lists exactly six options
+
+- **WHEN** the Azure Profile sub-section is rendered AND the user opens any of the three verb `effort` dropdowns
+- **THEN** the dropdown SHALL list exactly six options whose `value` attributes are `low`, `medium`, `high`, `xhigh`, `max`, `auto` in that order AND the option set SHALL be identical to the System Profile effort dropdown
+
+#### Scenario: Legacy invalid effort value renders empty select trigger and flags validation
+
+- **WHEN** `~/.codebus/config.yaml` loads with `claude_code.system.goal.effort` set to `super-high` (a value outside the enum) AND the user opens the Settings modal
+- **THEN** the `system-effort-goal` `<select>` trigger SHALL render with no option visually selected (empty trigger label) AND the in-memory state SHALL retain the value `super-high` verbatim AND the validation summary SHALL list `claude_code.system.goal.effort` AND the `<select>` SHALL have `aria-invalid="true"` AND the Save button SHALL be disabled
+
+#### Scenario: Selecting a valid effort clears the invalid flag and enables Save
+
+- **WHEN** the Settings modal is open with `claude_code.system.goal.effort` equal to the invalid value `super-high` AND the Save button is disabled AND the user selects `medium` from the `system-effort-goal` dropdown AND no other fields are invalid
+- **THEN** the in-memory state SHALL update `claude_code.system.goal.effort` to `medium` AND the validation summary SHALL no longer list `claude_code.system.goal.effort` AND the `<select>` SHALL NOT have `aria-invalid` AND the Save button SHALL be enabled
+
+#### Scenario: Inactive profile invalid effort still blocks Save
+
+- **WHEN** `claude_code.active === "system"` AND every system verb effort is a valid enum value AND every azure required field is populated AND `claude_code.azure.fix.effort` equals `extreme` (a value outside the enum)
+- **THEN** the Save button SHALL be disabled AND the validation summary SHALL list `claude_code.azure.fix.effort` AND the `azure-effort-fix` `<select>` SHALL have `aria-invalid="true"`
 
 #### Scenario: Azure keyring_service input is pre-filled when config field is empty
 
@@ -728,3 +755,15 @@ The Settings modal SHALL perform client-side validation of the `claude_code` blo
 
 - **WHEN** the user has made any edits to the System / Azure profile fields AND clicks the `Save` button
 - **THEN** the resulting `save_global_config` payload SHALL contain the edited `claude_code` block AND SHALL NOT contain any key, field, or string value matching the Azure API key value
+
+<!-- @trace
+source: endpoint-effort-dropdown
+updated: 2026-05-14
+code:
+  - codebus-app/src/components/settings/EndpointSection.tsx
+  - codebus-app/src/lib/ipc.ts
+tests:
+  - codebus-app/src/lib/ipc.effort.test.ts
+  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/components/settings/EndpointSection.test.tsx
+-->
