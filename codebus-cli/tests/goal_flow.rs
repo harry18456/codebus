@@ -334,8 +334,15 @@ fn goal_propagates_fix_exit_one_when_post_spawn_lint_has_issues() {
     let tmp = TempDir::new().unwrap();
     fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
     assert!(run_init(tmp.path()).status.success());
-    // Vault is dirty (no nav files) — fix flow will run but mock-claude
-    // success-noop won't repair anything → post-spawn lint still has issues.
+    // v3-init-nav-stubs: init now pre-creates wiki/index.md and
+    // wiki/log.md so lint is clean on a freshly-inited vault. To
+    // recover the "dirty vault" invariant this test needs (post-spawn
+    // lint reports issues), delete the pre-created nav files so the
+    // `nav-missing` rule fires again. Mock-claude success-noop will
+    // not repair them → fix loop terminates with issues remaining.
+    let vault = tmp.path().join(".codebus");
+    fs::remove_file(vault.join("wiki/index.md")).unwrap();
+    fs::remove_file(vault.join("wiki/log.md")).unwrap();
     let out = run_goal_with_fix(tmp.path(), "willfail", &[], "success-noop");
     // Goal agent succeeded (mock returns 0) but fix's final lint reports
     // issues → goal exits 1 propagating the fix failure.

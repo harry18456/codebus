@@ -1057,3 +1057,49 @@ fn init_with_repo_root_skills_writes_both_locations_via_cli() {
         );
     }
 }
+
+// === v3-init-nav-stubs: init pre-creates wiki/index.md + wiki/log.md ===
+
+#[test]
+fn bare_init_creates_nav_stubs_so_subsequent_lint_is_clean() {
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+
+    // First: init.
+    let init_out = Command::new(BIN)
+        .args(["init", "--no-obsidian-register"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path())
+        .output()
+        .expect("run codebus init");
+    assert!(
+        init_out.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init_out.stderr)
+    );
+
+    // Nav stubs exist.
+    let index = repo.path().join(".codebus/wiki/index.md");
+    let log = repo.path().join(".codebus/wiki/log.md");
+    assert!(index.exists(), "wiki/index.md missing post-init");
+    assert!(log.exists(), "wiki/log.md missing post-init");
+    for path in [&index, &log] {
+        let body = std::fs::read_to_string(path).unwrap();
+        assert!(body.starts_with("---\n"));
+        assert!(body.contains("type: synthesis"));
+        assert!(!body.contains("[["), "nav stub body must not contain `[[` token");
+    }
+
+    // Lint the fresh vault: no `nav-missing` issues.
+    let lint_out = Command::new(BIN)
+        .args(["lint", "--format", "json"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path().join(".codebus"))
+        .output()
+        .expect("run codebus lint");
+    let stdout = String::from_utf8_lossy(&lint_out.stdout);
+    assert!(
+        !stdout.contains("nav-missing"),
+        "lint output unexpectedly contains `nav-missing`:\n{stdout}"
+    );
+}

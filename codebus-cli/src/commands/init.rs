@@ -229,6 +229,22 @@ fn handle_event(event: &InitEvent<'_>, debug: bool, render_opts: &RenderOptions)
                 );
             }
         }
+        InitEvent::NavStubsDone {
+            vault_root,
+            written,
+            preserved,
+        } => {
+            if debug {
+                eprintln!(
+                    "[debug] nav stubs: written={written}, preserved={preserved} at {}/wiki/{{index,log}}.md",
+                    vault_root.display()
+                );
+                println!(
+                    "✓ wiki nav stubs: {} written, {} already present",
+                    written, preserved
+                );
+            }
+        }
         InitEvent::SettingsDone {
             vault_root,
             outcome,

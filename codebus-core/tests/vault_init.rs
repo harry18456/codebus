@@ -625,3 +625,104 @@ fn settings_json_writer_preserves_existing_user_customization() {
     assert_eq!(outcome, SettingsOutcome::AlreadyPresent);
     assert_eq!(fs::read_to_string(&p).unwrap(), custom, "byte-identical");
 }
+
+// === v3-init-nav-stubs: init pre-creates wiki/index.md + wiki/log.md ===
+
+#[test]
+fn run_init_writes_both_nav_stubs_on_fresh_vault() {
+    use codebus_core::vault::init::{run_init, InitOptions};
+    let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    unsafe { std::env::set_var("CODEBUS_HOME", home.path()) };
+
+    let opts = InitOptions {
+        no_obsidian_register: true,
+        write_starter_config: false,
+        with_repo_root_skills: false,
+    };
+    run_init(tmp.path(), &opts, |_| {}).expect("run_init should succeed on fresh repo");
+
+    let index = tmp.path().join(".codebus/wiki/index.md");
+    let log = tmp.path().join(".codebus/wiki/log.md");
+    assert!(index.exists(), "index.md missing at {index:?}");
+    assert!(log.exists(), "log.md missing at {log:?}");
+
+    let index_body = fs::read_to_string(&index).unwrap();
+    let log_body = fs::read_to_string(&log).unwrap();
+    for body in [&index_body, &log_body] {
+        assert!(body.starts_with("---\n"), "nav stub must start with frontmatter delimiter");
+        assert!(body.contains("type: synthesis"));
+        // Spec scenario: no wikilink syntax in placeholder body.
+        assert!(!body.contains("[["), "nav stub body must not contain `[[`:\n{body}");
+        assert!(!body.contains("]]"));
+    }
+
+    unsafe { std::env::remove_var("CODEBUS_HOME") };
+}
+
+#[test]
+fn re_init_preserves_existing_nav_index() {
+    use codebus_core::vault::init::{run_init, InitOptions};
+    let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    unsafe { std::env::set_var("CODEBUS_HOME", home.path()) };
+
+    let opts = InitOptions {
+        no_obsidian_register: true,
+        write_starter_config: false,
+        with_repo_root_skills: false,
+    };
+    // First init creates stubs.
+    run_init(tmp.path(), &opts, |_| {}).expect("first run_init");
+    let index_path = tmp.path().join(".codebus/wiki/index.md");
+    // User edits the index.
+    let custom = "---\ntitle: My Custom Index\ntype: synthesis\nsources: []\ngoals: []\ncreated: '2026-01-01'\nupdated: '2026-01-01'\nrelated: []\nstale: false\n---\n\ncustom user body\n";
+    fs::write(&index_path, custom).unwrap();
+    let log_snapshot = fs::read(tmp.path().join(".codebus/wiki/log.md")).unwrap();
+
+    // Second init must preserve both files unchanged.
+    run_init(tmp.path(), &opts, |_| {}).expect("second run_init");
+    assert_eq!(
+        fs::read_to_string(&index_path).unwrap(),
+        custom,
+        "user-edited index.md must be byte-identical after re-init"
+    );
+    assert_eq!(
+        fs::read(tmp.path().join(".codebus/wiki/log.md")).unwrap(),
+        log_snapshot,
+        "log.md must be byte-identical across re-init"
+    );
+
+    unsafe { std::env::remove_var("CODEBUS_HOME") };
+}
+
+#[test]
+fn lint_on_freshly_inited_vault_reports_no_nav_missing() {
+    use codebus_core::vault::init::{run_init, InitOptions};
+    use codebus_core::wiki::lint::lint_wiki;
+
+    let tmp = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    unsafe { std::env::set_var("CODEBUS_HOME", home.path()) };
+
+    let opts = InitOptions {
+        no_obsidian_register: true,
+        write_starter_config: false,
+        with_repo_root_skills: false,
+    };
+    run_init(tmp.path(), &opts, |_| {}).expect("run_init should succeed");
+
+    let vault_root = tmp.path().join(".codebus");
+    let report = lint_wiki(&vault_root);
+    let nav_missing: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.rule_id == "nav-missing")
+        .collect();
+    assert!(
+        nav_missing.is_empty(),
+        "freshly-inited vault must NOT report nav-missing; got: {nav_missing:?}"
+    );
+
+    unsafe { std::env::remove_var("CODEBUS_HOME") };
+}

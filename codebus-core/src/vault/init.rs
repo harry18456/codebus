@@ -45,6 +45,7 @@ use crate::schema::NEUTRAL_RULES;
 use crate::skill_bundle::{self, BundleOutcome};
 use crate::vault::layout::{VaultPaths, create_vault_layout};
 use crate::vault::manifest::{self, ManifestOutcome, SourceSignal};
+use crate::vault::nav_stubs;
 use crate::vault::obsidian_register::{self, RegisterOutcome};
 use crate::vault::raw_sync::{SyncSummary, sync_with_scanner};
 use crate::vault::sanity_check::{VaultRefusal, check_repo_is_not_vault};
@@ -144,6 +145,9 @@ pub enum InitError {
     #[error("skill bundles: {0}")]
     SkillBundles(#[source] io::Error),
 
+    #[error("nav stubs: {0}")]
+    NavStubs(#[source] io::Error),
+
     #[error("vault settings.json: {0}")]
     Settings(#[source] io::Error),
 
@@ -200,6 +204,11 @@ pub enum InitEvent<'a> {
     SkillBundlesDone {
         vault_root: &'a Path,
         repo: &'a Path,
+        written: usize,
+        preserved: usize,
+    },
+    NavStubsDone {
+        vault_root: &'a Path,
         written: usize,
         preserved: usize,
     },
@@ -311,6 +320,15 @@ pub fn run_init(
         opts.with_repo_root_skills,
     )
     .map_err(InitError::SkillBundles)?;
+    let today_utc = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let (nav_written, nav_preserved) =
+        nav_stubs::write_nav_stubs_if_missing(&paths.root, &today_utc)
+            .map_err(InitError::NavStubs)?;
+    on_event(InitEvent::NavStubsDone {
+        vault_root: &paths.root,
+        written: nav_written,
+        preserved: nav_preserved,
+    });
     on_event(InitEvent::SkillBundlesDone {
         vault_root: &paths.root,
         repo,
@@ -597,6 +615,7 @@ mod tests {
             InitEvent::ManifestSignal { .. } => "ManifestSignal",
             InitEvent::ManifestDone { .. } => "ManifestDone",
             InitEvent::SkillBundlesDone { .. } => "SkillBundlesDone",
+            InitEvent::NavStubsDone { .. } => "NavStubsDone",
             InitEvent::SettingsDone { .. } => "SettingsDone",
             InitEvent::ObsidianResult { .. } => "ObsidianResult",
             InitEvent::ObsidianSkipped => "ObsidianSkipped",

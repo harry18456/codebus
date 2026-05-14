@@ -1,6 +1,7 @@
 pub mod init;
 pub mod layout;
 pub mod manifest;
+pub mod nav_stubs;
 pub mod obsidian_register;
 pub mod raw_sync;
 pub mod sanity_check;
