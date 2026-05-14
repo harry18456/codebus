@@ -1,26 +1,35 @@
 //! IPC command registry.
 //!
-//! The frontend MAY invoke only the nine commands listed in
-//! [`REGISTERED_COMMANDS`]. The spec ("IPC Command Registry") forbids any
-//! other command from being registered by this change. The constant is the
-//! source of truth checked by the unit test below, and is consumed by
-//! `lib::run` via [`generate_handler`] so the registration and the asserted
-//! list cannot drift in isolation.
+//! The frontend MAY invoke only the fifteen commands listed in
+//! [`REGISTERED_COMMANDS`]. The spec ("IPC Command Registry", modified
+//! by `v3-app-workspace-goal`) forbids any other command from being
+//! registered by this change. The constant is the source of truth
+//! checked by the unit test below, and is consumed by `lib::run` via
+//! [`generate_handler`] so the registration and the asserted list
+//! cannot drift in isolation.
 
 use crate::error::AppError;
 
 pub mod cli_status;
 pub mod config;
+pub mod goals;
 pub mod keyring;
 pub mod vault_list;
+pub mod wiki;
 
 pub use cli_status::check_cli_installed;
 pub use config::{load_global_config, save_global_config};
+pub use goals::{cancel_goal, get_run_detail, list_runs, spawn_goal};
 pub use keyring::{delete_endpoint_key, get_endpoint_key, set_endpoint_key};
 pub use vault_list::{add_vault, list_vaults, remove_vault};
+pub use wiki::{list_wiki_pages, read_wiki_page};
 
-/// Exactly the nine commands exposed by this Tauri app. Used by the
-/// `exactly_nine_commands_are_registered` test and consumed by `lib::run`.
+/// Exactly the fifteen commands exposed by this Tauri app. Used by
+/// the `exactly_fifteen_commands_are_registered` test and consumed
+/// by `lib::run`.
+///
+/// Foundation 9 + workspace 6 (`spawn_goal`, `cancel_goal`,
+/// `list_runs`, `get_run_detail`, `list_wiki_pages`, `read_wiki_page`).
 pub const REGISTERED_COMMANDS: &[&str] = &[
     "list_vaults",
     "add_vault",
@@ -31,6 +40,12 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
     "get_endpoint_key",
     "delete_endpoint_key",
     "check_cli_installed",
+    "spawn_goal",
+    "cancel_goal",
+    "list_runs",
+    "get_run_detail",
+    "list_wiki_pages",
+    "read_wiki_page",
 ];
 
 /// Sugar for `tauri::generate_handler!` so the registration is colocated
@@ -48,6 +63,12 @@ macro_rules! generate_ipc_handler {
             $crate::ipc::keyring::get_endpoint_key,
             $crate::ipc::keyring::delete_endpoint_key,
             $crate::ipc::cli_status::check_cli_installed,
+            $crate::ipc::goals::spawn_goal,
+            $crate::ipc::goals::cancel_goal,
+            $crate::ipc::goals::list_runs,
+            $crate::ipc::goals::get_run_detail,
+            $crate::ipc::wiki::list_wiki_pages,
+            $crate::ipc::wiki::read_wiki_page,
         ]
     };
 }
@@ -61,11 +82,11 @@ mod tests {
     use super::REGISTERED_COMMANDS;
 
     #[test]
-    fn exactly_nine_commands_are_registered() {
+    fn exactly_fifteen_commands_are_registered() {
         assert_eq!(
             REGISTERED_COMMANDS.len(),
-            9,
-            "IPC Command Registry requires exactly 9 commands"
+            15,
+            "IPC Command Registry requires exactly 15 commands (9 foundation + 6 workspace)"
         );
     }
 
@@ -81,6 +102,12 @@ mod tests {
             "get_endpoint_key",
             "delete_endpoint_key",
             "check_cli_installed",
+            "spawn_goal",
+            "cancel_goal",
+            "list_runs",
+            "get_run_detail",
+            "list_wiki_pages",
+            "read_wiki_page",
         ]
         .into_iter()
         .collect();

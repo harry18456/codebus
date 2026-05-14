@@ -9,11 +9,15 @@ export function LoadingOverlay() {
   return (
     <div
       data-testid="loading-overlay"
+      data-tauri-drag-region
       role="status"
       aria-live="polite"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/90 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex select-none items-center justify-center bg-bg/90 backdrop-blur-sm"
     >
-      <div className="flex flex-col items-center gap-4 px-6">
+      <div
+        data-tauri-drag-region
+        className="flex flex-col items-center gap-4 px-6"
+      >
         <div
           className="text-[72px] leading-none"
           aria-hidden="true"

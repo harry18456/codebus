@@ -8,7 +8,7 @@ import { WindowControls } from "@/components/WindowControls"
 import { Lobby } from "@/components/lobby/Lobby"
 import { DetectionDialog } from "@/components/lobby/NewVaultFlow"
 import { SettingsModal } from "@/components/settings/SettingsModal"
-import { WorkspaceStub } from "@/components/workspace/WorkspaceStub"
+import { Workspace } from "@/components/workspace/Workspace"
 import { useNewVaultShortcut } from "@/hooks/useNewVaultShortcut"
 import { useLobbyDragDrop } from "@/hooks/useLobbyDragDrop"
 import {
@@ -99,7 +99,7 @@ function AppShell() {
             onRevealInFiles={(v) => void revealInFiles(v)}
           />
         ) : (
-          <WorkspaceStub vault={route.vault} />
+          <Workspace vault={route.vault} />
         )}
       </div>
       <BottomStrip

@@ -1,20 +1,35 @@
-//! Read/write helper for `~/.codebus/app-state.json`.
+//! Read/write helper for `~/.codebus/app-state.json` plus the in-memory
+//! `AppRuntimeState` Tauri commands inject as managed state.
 //!
 //! Spec: `App-State Persistence` (see `openspec/changes/v3-app-foundation/specs/app-shell/spec.md`).
+//! Additional spec touchpoints (v3-app-workspace-goal):
+//! - `app-workspace § One Active Goal Run At A Time` — runtime-side
+//!   `AppRuntimeState.active_runs` enforces the v1 invariant.
+//! - design `Active runs 狀態存 AppState.active_runs` — design's informal
+//!   "AppState" naming maps to `AppRuntimeState` in code so the file-
+//!   persistent struct's serde schema does not inadvertently grow runtime
+//!   fields (which would violate the change's "do not modify
+//!   v3-app-foundation app-state.json schema" non-goal).
 //!
-//! - File schema: `{ "schema_version": 1, "vault_list": [...] }`
+//! File schema (`AppState`):
+//! - `{ "schema_version": 1, "vault_list": [...] }`
 //! - Missing file → write empty state and return it.
 //! - Parse failure OR `schema_version > CURRENT` → log warn to stderr,
 //!   return an in-memory empty state, and DO NOT touch the file on disk.
 //! - `CODEBUS_HOME` env var redirects the home root for tests / containers
 //!   (matches the `codebus-core::config::default_config_path` convention so
 //!   the CLI and app agree on home resolution).
+//!
+//! Runtime state (`AppRuntimeState`): non-persistent. Owns the
+//! `ActiveRuns` map of currently spawned goal-verb cancel flags.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use super::active_runs::ActiveRuns;
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
@@ -38,6 +53,26 @@ impl AppState {
             schema_version: CURRENT_SCHEMA_VERSION,
             vault_list: Vec::new(),
         }
+    }
+}
+
+/// Tauri-managed runtime state. Lives only in process memory — never
+/// serialized to disk. Owns mutable runtime concerns (active goal runs)
+/// distinct from the file-persistent [`AppState`] above. Tauri commands
+/// receive this as `tauri::State<AppRuntimeState>`.
+///
+/// `active_runs` is `Arc<ActiveRuns>` so the background goal thread can
+/// own a clone for its cleanup-on-completion path without borrowing
+/// from the Tauri-managed `State<'_, AppRuntimeState>` (which is
+/// short-lived per command invocation).
+#[derive(Debug, Default)]
+pub struct AppRuntimeState {
+    pub active_runs: std::sync::Arc<ActiveRuns>,
+}
+
+impl AppRuntimeState {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

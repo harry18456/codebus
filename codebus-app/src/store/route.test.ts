@@ -16,14 +16,25 @@ describe("route store", () => {
     useRouteStore.setState({ route: { kind: "lobby" } })
   })
 
-  it("transitions to workspace-stub on open with vault context", () => {
+  it("transitions to workspace on open with vault context", () => {
     const vault = makeEntry("/v")
     useRouteStore.getState().open(vault)
     const route = useRouteStore.getState().route
-    expect(route.kind).toBe("workspace-stub")
-    if (route.kind === "workspace-stub") {
+    expect(route.kind).toBe("workspace")
+    if (route.kind === "workspace") {
       expect(route.vault.path).toBe("/v")
     }
+  })
+
+  // Spec: app-shell § Workspace Stub Transition (modified) — the
+  // open(vault) path transitions to the real Workspace state, not the
+  // historical stub kind. This test pins the discriminator string so a
+  // future rename surfaces as a compile + test failure rather than
+  // silently breaking the App.tsx routing branch.
+  it("route_open_transitions_to_workspace", () => {
+    const vault = makeEntry("/v2")
+    useRouteStore.getState().open(vault)
+    expect(useRouteStore.getState().route.kind).toBe("workspace")
   })
 
   it("returns to lobby on back", () => {

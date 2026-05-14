@@ -1,0 +1,60 @@
+import { describe, expect, it } from "vitest"
+
+import { messages } from "./messages"
+
+/**
+ * Spec / task 10.1: every workspace-namespaced message key SHALL
+ * appear in both `en` and `zh` bundles so `useT` never falls back to
+ * the literal key string for either locale.
+ */
+const WORKSPACE_KEYS = [
+  "workspace.backToLobby",
+  "workspace.tab.goals",
+  "workspace.tab.wiki",
+  "workspace.tab.quiz",
+  "workspace.goals.newGoalButton",
+  "workspace.goals.emptyHint",
+  "workspace.goals.examplePlaceholder1",
+  "workspace.goals.examplePlaceholder2",
+  "workspace.goals.examplePlaceholder3",
+  "workspace.newGoalModal.title",
+  "workspace.newGoalModal.placeholder",
+  "workspace.newGoalModal.cancel",
+  "workspace.newGoalModal.run",
+  "workspace.newGoalModal.blockedHint",
+  "workspace.runDetail.backLink",
+  "workspace.runDetail.runningBadge",
+  "workspace.runDetail.cancelButton",
+  "workspace.runDetail.cancellingButton",
+  "workspace.runDetail.doneBadge",
+  "workspace.runDetail.coveredPagesLabel",
+  "workspace.runDetail.coveredPagesEmpty",
+  "workspace.runDetail.lintLabel",
+  "workspace.runDetail.cancelledBadge",
+  "workspace.runDetail.cancelledWarning",
+  "workspace.runDetail.interruptedBadge",
+  "workspace.runDetail.interruptedWarning",
+  "workspace.runDetail.partialTimelineLabel",
+  "workspace.runDetail.retryButton",
+  "workspace.wiki.empty",
+  "workspace.wiki.toggleTreeAria",
+  "workspace.wiki.pageNotFound",
+  "workspace.quiz.placeholder",
+] as const
+
+describe("i18n_has_workspace_messages_in_both_locales", () => {
+  for (const key of WORKSPACE_KEYS) {
+    it(`en: ${key}`, () => {
+      expect(messages.en).toHaveProperty(key)
+      const value = (messages.en as Record<string, string>)[key]
+      expect(typeof value).toBe("string")
+      expect(value.length).toBeGreaterThan(0)
+    })
+    it(`zh: ${key}`, () => {
+      expect(messages.zh).toHaveProperty(key)
+      const value = (messages.zh as Record<string, string>)[key]
+      expect(typeof value).toBe("string")
+      expect(value.length).toBeGreaterThan(0)
+    })
+  }
+})

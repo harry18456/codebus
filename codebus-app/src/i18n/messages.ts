@@ -108,11 +108,75 @@ const en = {
   "settings.reset.label": "Reset to default",
   "settings.reset.alreadyDefault": "Already at default",
 
-  // ---- Workspace stub ----
+  // ---- Workspace shell ----
   "workspace.backToLobby": "← Back to Lobby",
-  "workspace.coming.title": "Workspace coming in v3-app-workspace-goal",
-  "workspace.coming.subtitle":
-    "The vault is bound; full Workspace UI lands in the next change.",
+  "workspace.tab.goals": "Goals",
+  "workspace.tab.wiki": "Wiki",
+  "workspace.tab.quiz": "Quiz",
+
+  // ---- Workspace · Goals ----
+  "workspace.goals.newGoalButton": "+ New goal",
+  "workspace.goals.emptyHint":
+    "Click + New goal to ask codebus to ingest something into the wiki",
+  "workspace.goals.examplePlaceholder1": "describe the authentication flow",
+  "workspace.goals.examplePlaceholder2": "summarize the data ingestion pipeline",
+  "workspace.goals.examplePlaceholder3": "map the public API surface",
+
+  // ---- Workspace · New Goal modal ----
+  "workspace.newGoalModal.title": "New goal",
+  "workspace.newGoalModal.placeholder": "What should codebus document?",
+  "workspace.newGoalModal.cancel": "Cancel",
+  "workspace.newGoalModal.run": "Run",
+  "workspace.newGoalModal.blockedHint":
+    "Wait for current run to finish or cancel it before starting a new one.",
+
+  // ---- Workspace · Run detail · Running ----
+  "workspace.runDetail.backLink": "← back",
+  "workspace.runDetail.runningBadge": "⏺ Running",
+  "workspace.runDetail.cancelButton": "⏹ Cancel",
+  "workspace.runDetail.cancellingButton": "Cancelling…",
+
+  // ---- Workspace · Run detail · Done / Cancelled / Interrupted ----
+  "workspace.runDetail.doneBadge": "✓ Done",
+  "workspace.runDetail.coveredPagesLabel": "Covered pages",
+  "workspace.runDetail.coveredPagesEmpty": "No wiki pages changed",
+  "workspace.runDetail.lintLabel": "Lint",
+  "workspace.runDetail.activitySummaryLabel": "Activity summary",
+  "workspace.runDetail.toolReadLine": "{n} Read",
+  "workspace.runDetail.toolGlobLine": "{n} Glob",
+  "workspace.runDetail.toolGrepLine": "{n} Grep",
+  "workspace.runDetail.toolWriteLine": "{n} Write",
+  "workspace.runDetail.toolEditLine": "{n} Edit",
+  "workspace.runDetail.toolOtherLine": "{n} {tool}",
+  "workspace.runDetail.thinkingLabel": "Thinking",
+  "workspace.runDetail.showThinking": "Show thinking ▼",
+  "workspace.runDetail.hideThinking": "Hide thinking ▲",
+  "workspace.runDetail.showDetails": "Show run details ▼",
+  "workspace.runDetail.hideDetails": "Hide run details ▲",
+  "workspace.runDetail.phaseGoal": "goal phase",
+  "workspace.runDetail.phaseFix": "fix phase",
+  "workspace.runDetail.phaseQuery": "query phase",
+  "workspace.runDetail.phaseChat": "chat phase",
+  "workspace.runDetail.phaseOther": "{verb} phase",
+  "workspace.runDetail.phaseEmptyHint": "(no tools used)",
+  "workspace.runDetail.coveredPagesPhaseEmpty": "(no wiki pages changed)",
+  "workspace.runDetail.cancelledBadge": "⏹ Cancelled",
+  "workspace.runDetail.cancelledWarning":
+    "Wiki has uncommitted changes — not auto-committed. Review in terminal if needed.",
+  "workspace.runDetail.interruptedBadge": "⚠ Interrupted",
+  "workspace.runDetail.interruptedWarning":
+    "App was closed before this goal finished. Wiki state may be partial — review in terminal if needed.",
+  "workspace.runDetail.partialTimelineLabel": "Partial timeline",
+  "workspace.runDetail.retryButton": "Retry with same goal",
+
+  // ---- Workspace · Wiki ----
+  "workspace.wiki.empty":
+    "No wiki pages yet — run a goal to start documenting",
+  "workspace.wiki.toggleTreeAria": "Toggle Pages tree",
+  "workspace.wiki.pageNotFound": "Page not found",
+
+  // ---- Workspace · Quiz placeholder ----
+  "workspace.quiz.placeholder": "Coming soon — quiz flow ships in v3-app-quiz",
 
   // ---- Error messages (toast / inline) ----
   "errors.vaultAlreadyExists": "This vault is already in your list: {path}",
@@ -217,11 +281,76 @@ const zh: Record<keyof typeof en, string> = {
   "settings.reset.label": "還原預設",
   "settings.reset.alreadyDefault": "目前已是預設",
 
-  // ---- Workspace stub ----
+  // ---- Workspace shell ----
   "workspace.backToLobby": "← 回到 Lobby",
-  "workspace.coming.title": "Workspace 將在 v3-app-workspace-goal 推出",
-  "workspace.coming.subtitle":
-    "Vault 已綁定；完整的 Workspace UI 會在下一條 change 完成。",
+  "workspace.tab.goals": "Goals",
+  "workspace.tab.wiki": "Wiki",
+  "workspace.tab.quiz": "Quiz",
+
+  // ---- Workspace · Goals ----
+  "workspace.goals.newGoalButton": "+ 新增 Goal",
+  "workspace.goals.emptyHint":
+    "點 + 新增 Goal 讓 codebus 把某段內容整理進 wiki",
+  "workspace.goals.examplePlaceholder1": "說明認證流程",
+  "workspace.goals.examplePlaceholder2": "整理資料 ingest pipeline 概要",
+  "workspace.goals.examplePlaceholder3": "畫出公開 API surface",
+
+  // ---- Workspace · New Goal modal ----
+  "workspace.newGoalModal.title": "新增 Goal",
+  "workspace.newGoalModal.placeholder": "想讓 codebus 文件化什麼？",
+  "workspace.newGoalModal.cancel": "取消",
+  "workspace.newGoalModal.run": "執行",
+  "workspace.newGoalModal.blockedHint":
+    "請等目前的 goal 結束或先取消，再啟動新的 goal。",
+
+  // ---- Workspace · Run detail · Running ----
+  "workspace.runDetail.backLink": "← 回上頁",
+  "workspace.runDetail.runningBadge": "⏺ 進行中",
+  "workspace.runDetail.cancelButton": "⏹ 取消",
+  "workspace.runDetail.cancellingButton": "取消中…",
+
+  // ---- Workspace · Run detail · Done / Cancelled / Interrupted ----
+  "workspace.runDetail.doneBadge": "✓ 完成",
+  "workspace.runDetail.coveredPagesLabel": "更新到的 wiki page",
+  "workspace.runDetail.coveredPagesEmpty": "這次 run 沒更動到 wiki 頁面",
+  "workspace.runDetail.lintLabel": "Lint",
+  "workspace.runDetail.activitySummaryLabel": "活動摘要",
+  "workspace.runDetail.toolReadLine": "{n} 次 Read",
+  "workspace.runDetail.toolGlobLine": "{n} 次 Glob",
+  "workspace.runDetail.toolGrepLine": "{n} 次 Grep",
+  "workspace.runDetail.toolWriteLine": "{n} 次 Write",
+  "workspace.runDetail.toolEditLine": "{n} 次 Edit",
+  "workspace.runDetail.toolOtherLine": "{n} 次 {tool}",
+  "workspace.runDetail.thinkingLabel": "思考",
+  "workspace.runDetail.showThinking": "展開思考 ▼",
+  "workspace.runDetail.hideThinking": "收起思考 ▲",
+  "workspace.runDetail.showDetails": "展開完整 timeline ▼",
+  "workspace.runDetail.hideDetails": "收起完整 timeline ▲",
+  "workspace.runDetail.phaseGoal": "goal 階段",
+  "workspace.runDetail.phaseFix": "fix 階段",
+  "workspace.runDetail.phaseQuery": "query 階段",
+  "workspace.runDetail.phaseChat": "chat 階段",
+  "workspace.runDetail.phaseOther": "{verb} 階段",
+  "workspace.runDetail.phaseEmptyHint": "（無 tool 使用）",
+  "workspace.runDetail.coveredPagesPhaseEmpty": "（無 wiki page 變更）",
+  "workspace.runDetail.cancelledBadge": "⏹ 已取消",
+  "workspace.runDetail.cancelledWarning":
+    "Wiki 仍有未 commit 的變更 — 沒自動 commit。需要時請到 terminal 檢查。",
+  "workspace.runDetail.interruptedBadge": "⚠ 中斷",
+  "workspace.runDetail.interruptedWarning":
+    "App 被關閉，goal 沒完成。Wiki 可能停在中間狀態 — 需要時請到 terminal 檢查。",
+  "workspace.runDetail.partialTimelineLabel": "部分時間軸",
+  "workspace.runDetail.retryButton": "用相同 goal 再跑一次",
+
+  // ---- Workspace · Wiki ----
+  "workspace.wiki.empty":
+    "目前還沒有 wiki page — 跑一個 goal 開始整理文件",
+  "workspace.wiki.toggleTreeAria": "切換 Pages 樹狀結構",
+  "workspace.wiki.pageNotFound": "找不到頁面",
+
+  // ---- Workspace · Quiz placeholder ----
+  "workspace.quiz.placeholder":
+    "Coming soon — quiz flow ships in v3-app-quiz",
 
   // ---- Errors ----
   "errors.vaultAlreadyExists": "這個 vault 已經在清單裡了：{path}",

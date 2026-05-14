@@ -54,7 +54,7 @@ pub enum VerbBanner {
     SyncDone {
         files: usize,
         mib: f64,
-        elapsed_ms: u128,
+        elapsed_ms: u64,
     },
     PiiSummary {
         scanner: String,
@@ -66,7 +66,7 @@ pub enum VerbBanner {
     LintDone {
         errors: usize,
         warns: usize,
-        elapsed_ms: u128,
+        elapsed_ms: u64,
     },
     CommitDone {
         sha7: String,

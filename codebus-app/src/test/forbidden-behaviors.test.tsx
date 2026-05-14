@@ -4,11 +4,25 @@ import { render } from "@testing-library/react"
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }))
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(() => Promise.resolve(() => {})),
+}))
+vi.mock("@milkdown/core", () => ({
+  Editor: { make: vi.fn(() => ({
+    config: vi.fn(function (this: object) { return this }),
+    use: vi.fn(function (this: object) { return this }),
+    create: vi.fn(() => Promise.resolve({ destroy: vi.fn() })),
+  })) },
+  rootCtx: "rootCtx",
+  defaultValueCtx: "defaultValueCtx",
+  editorViewOptionsCtx: "editorViewOptionsCtx",
+}))
+vi.mock("@milkdown/preset-commonmark", () => ({ commonmark: () => ({}) }))
 
 import { invoke } from "@tauri-apps/api/core"
 import { Lobby } from "@/components/lobby/Lobby"
 import { SettingsModal } from "@/components/settings/SettingsModal"
-import { WorkspaceStub } from "@/components/workspace/WorkspaceStub"
+import { Workspace } from "@/components/workspace/Workspace"
 import { useVaultsStore } from "@/store/vaults"
 import { useRouteStore } from "@/store/route"
 import { useSettingsStore } from "@/store/settings"
@@ -87,9 +101,38 @@ describe("Forbidden Behaviors in v1", () => {
     assertNoForbidden("Settings modal", container.textContent ?? "")
   })
 
-  it("Workspace stub has no forbidden phrases", () => {
-    useRouteStore.setState({ route: { kind: "workspace-stub", vault: VAULT } })
-    const { container } = render(<WorkspaceStub vault={VAULT} />)
-    assertNoForbidden("Workspace stub", container.textContent ?? "")
+  it("workspace_has_no_forbidden_surfaces", () => {
+    useRouteStore.setState({ route: { kind: "workspace", vault: VAULT } })
+    const { container } = render(<Workspace vault={VAULT} />)
+    assertNoForbidden("Workspace", container.textContent ?? "")
+  })
+
+  // Spec: app-workspace § One Active Goal Run At A Time — frontend
+  // layer. When `activeRun` is non-null, the New Goal modal's Run
+  // button SHALL be disabled (the backend rejection scenario is
+  // covered by codebus-app-tauri's
+  // `spawn_goal_rejects_when_another_run_is_active` Rust test).
+  it("cannot_spawn_second_goal_run_while_active", async () => {
+    const { NewGoalModal } = await import(
+      "@/components/workspace/NewGoalModal"
+    )
+    const { useGoalsStore } = await import("@/store/goals")
+    useGoalsStore.setState({
+      activeRun: {
+        runId: "r-active",
+        goal: "first",
+        startedAt: "2026-05-13T00:00:00Z",
+        events: [],
+        cancelling: false,
+      },
+      runs: [],
+    })
+    const { screen } = await import("@testing-library/react")
+    render(
+      <NewGoalModal open vaultPath="/v" initialText="second" onClose={() => {}} />,
+    )
+    const runBtn = screen.getByTestId("new-goal-run") as HTMLButtonElement
+    expect(runBtn.disabled).toBe(true)
+    useGoalsStore.setState({ runs: [], activeRun: null })
   })
 })

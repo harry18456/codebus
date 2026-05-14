@@ -30,7 +30,7 @@ pub enum Banner<'a> {
     SyncDone {
         files: usize,
         mib: f64,
-        elapsed_ms: u128,
+        elapsed_ms: u64,
     },
     /// PII scan summary line. `action` is one of `"warn"` / `"skip"` / `"mask"`.
     PiiSummary {
@@ -45,7 +45,7 @@ pub enum Banner<'a> {
     LintDone {
         errors: usize,
         warns: usize,
-        elapsed_ms: u128,
+        elapsed_ms: u64,
     },
     /// Vault auto-commit produced a non-empty commit. `sha7` is the 7-char short SHA.
     CommitDone { sha7: &'a str },

@@ -224,7 +224,7 @@ pub fn run_goal(
             .map_err(|e| VerbError::Internal {
                 message: format!("raw mirror re-sync: {e}"),
             })?;
-        let sync_elapsed_ms = sync_started.elapsed().as_millis();
+        let sync_elapsed_ms = sync_started.elapsed().as_millis() as u64;
         fan_out(VerbEvent::Banner(VerbBanner::SyncDone {
             files: summary.files,
             mib: (summary.bytes as f64) / (1024.0 * 1024.0),
@@ -304,6 +304,14 @@ pub fn run_goal(
     let mut fix_post_lint_issues_remain = false;
     if fix_cfg.enabled {
         fan_out(VerbEvent::Banner(VerbBanner::LintStart));
+        // Emit a phase boundary marker for the fix loop so consumers
+        // (GUI Done detail, analytics) can group ToolUse events inside
+        // the loop under a `fix` phase distinct from the preceding
+        // `goal` agent invocation. The matching SpawnEnd fires after
+        // the loop returns (or on cancel observation below).
+        fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
+            verb: Verb::Fix,
+        }));
         let lint_started = Instant::now();
         let fix_resolved = cc_cfg.resolve(Verb::Fix);
         let fix_env =
@@ -326,7 +334,16 @@ pub fn run_goal(
         fix_lint_warns = report.final_lint.warn_count;
         fix_post_lint_issues_remain =
             !report.clean && report.termination == TerminationReason::PostLintIssuesRemain;
-        let lint_elapsed_ms = lint_started.elapsed().as_millis();
+        // run_fix_loop's internal report does not carry a child exit
+        // code (it iterates internally and reports termination reason
+        // rather than a single exit). Surface None — GUI phase
+        // grouping ignores exit_code; CLI thin wrappers that need it
+        // still propagate via the agent_exit_code field on GoalReport.
+        fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnEnd {
+            verb: Verb::Fix,
+            exit_code: None,
+        }));
+        let lint_elapsed_ms = lint_started.elapsed().as_millis() as u64;
         fan_out(VerbEvent::Banner(VerbBanner::LintDone {
             errors: fix_lint_errors,
             warns: fix_lint_warns,

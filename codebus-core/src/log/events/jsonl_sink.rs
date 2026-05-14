@@ -49,6 +49,7 @@ impl EventsJsonlSink {
     }
 
     /// Exposed for tests so they can inspect the resolved filename.
+    #[cfg(test)]
     pub(crate) fn target_path(&self) -> &PathBuf {
         &self.target_path
     }

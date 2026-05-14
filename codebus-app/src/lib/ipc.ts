@@ -79,6 +79,12 @@ export type IpcCommandName =
   | "get_endpoint_key"
   | "delete_endpoint_key"
   | "check_cli_installed"
+  | "spawn_goal"
+  | "cancel_goal"
+  | "list_runs"
+  | "get_run_detail"
+  | "list_wiki_pages"
+  | "read_wiki_page"
 
 /**
  * Endpoint profile selector. Currently only `"azure"` is wired up; future
@@ -302,4 +308,227 @@ export async function checkCliInstalled(
   provider: AgenticProvider,
 ): Promise<CliStatus> {
   return invokeTyped<CliStatus>("check_cli_installed", { provider })
+}
+
+// ===========================================================================
+// Workspace IPC surface (v3-app-workspace-goal)
+// ===========================================================================
+
+/**
+ * Token usage normalized across providers. Mirrors `codebus_core::log::TokenUsage`.
+ * The optional fields are absent when the provider does not have the
+ * corresponding concept (e.g., legacy OpenAI has no cache notion).
+ */
+export interface TokenUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens?: number
+  cache_write_tokens?: number
+  reasoning_tokens?: number
+  extras?: unknown
+}
+
+/**
+ * Run-log summary projection returned by `list_runs` / embedded in
+ * `RunDetail`. `run_id` is the run's `started_at` slug (`:` → `-`).
+ * Virtual interrupted entries (no on-disk RunLog row) project into the
+ * same shape with `outcome === "interrupted"` and empty `finished_at`.
+ */
+export interface RunLogSummary {
+  run_id: string
+  mode: string
+  goal: string
+  model?: string
+  effort?: string
+  started_at: string
+  finished_at: string
+  tokens: TokenUsage
+  wiki_changed: boolean
+  lint_error_count: number
+  lint_warn_count: number
+  outcome: string
+  session_id?: string
+}
+
+/** Closed set of legal RunLog outcomes the GUI distinguishes. */
+export type RunOutcome =
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted"
+
+/** Tagged stream payload type matching codebus-core `StreamEvent`. */
+export type StreamEvent =
+  | { kind: "thought"; text: string }
+  | { kind: "tool_use"; name: string; input: unknown }
+  | { kind: "tool_result"; output: string; is_error: boolean }
+  | ({ kind: "usage" } & TokenUsage)
+
+/** Tagged banner payload type matching codebus-core `VerbBanner`. */
+export type VerbBanner =
+  | { kind: "start"; repo_path: string }
+  | { kind: "goal"; goal_text: string }
+  | { kind: "sync_start" }
+  | {
+      kind: "sync_done"
+      files: number
+      mib: number
+      elapsed_ms: number
+    }
+  | {
+      kind: "pii_summary"
+      scanner: string
+      scanned: number
+      hits: number
+      action: string
+    }
+  | { kind: "lint_start" }
+  | {
+      kind: "lint_done"
+      errors: number
+      warns: number
+      elapsed_ms: number
+    }
+  | { kind: "commit_done"; sha7: string }
+  | { kind: "done"; wiki_path: string }
+  | { kind: "hint"; wiki_path: string }
+
+/** Tagged lifecycle payload type matching codebus-core `VerbLifecycleEvent`. */
+export type VerbLifecycleEvent =
+  | { kind: "spawn_start"; verb: string }
+  | { kind: "spawn_end"; verb: string; exit_code: number | null }
+  | { kind: "fix_iteration_start"; iteration: number }
+  | { kind: "lint_final"; error_count: number; warn_count: number }
+  | { kind: "promote_suggestion"; reason: string }
+
+/**
+ * Top-level event emitted by `verb::*::run_*` orchestration. Frontend
+ * receives this via the `goal-stream` Tauri event channel wrapped in a
+ * `GoalStreamPayload { run_id, event }`.
+ */
+export type VerbEvent =
+  | { kind: "banner"; data: VerbBanner }
+  | { kind: "stream"; data: StreamEvent }
+  | { kind: "lifecycle"; data: VerbLifecycleEvent }
+
+/**
+ * One line of an events-*.jsonl file. `ts` is captured at append time
+ * (RFC 3339 UTC); `event` is the originating `VerbEvent` payload.
+ */
+export interface EventEnvelope {
+  ts: string
+  event: VerbEvent
+}
+
+/** Payload of one `goal-stream` Tauri event tick. */
+export interface GoalStreamPayload {
+  run_id: string
+  event: VerbEvent
+}
+
+/**
+ * Payload emitted exactly once on the `goal-terminal` Tauri channel
+ * after a spawn's background thread exits (success / fail / cancel /
+ * panic). Frontend uses this to clear `useGoalsStore.activeRun` and
+ * refresh the runs list so the new RunLog row is picked up.
+ */
+export interface GoalTerminalPayload {
+  run_id: string
+}
+
+/** Detail bundle returned by `get_run_detail`. */
+export interface RunDetail {
+  summary: RunLogSummary
+  events: EventEnvelope[]
+}
+
+/** Tagged enum for `list_runs` mode filter. */
+export type ModeFilter = { kind: "goal" } | { kind: "all" }
+
+/** Wiki page metadata returned by `list_wiki_pages`. */
+export interface WikiPageMeta {
+  slug: string
+  path: string
+  title: string
+}
+
+/**
+ * Spawn a background goal run. Returns the run id (= started_at slug)
+ * so the caller can switch to the Running detail view before any
+ * `goal-stream` event has arrived. Rejects with `AppError::Invalid
+ * { field: "active_runs" }` when another goal run is already active.
+ */
+export async function spawnGoal(
+  vaultPath: string,
+  goalText: string,
+): Promise<string> {
+  return invokeTyped<string>("spawn_goal", {
+    vaultPath,
+    goalText,
+  })
+}
+
+/**
+ * Flip the cancel flag for a given run. Idempotent — succeeds even
+ * when the run has already terminated and the entry is gone from
+ * `active_runs`.
+ */
+export async function cancelGoal(runId: string): Promise<void> {
+  return invokeTyped<void>("cancel_goal", { runId })
+}
+
+/**
+ * List runs in a vault, optionally filtered by mode. Includes virtual
+ * `outcome === "interrupted"` entries synthesized from orphan
+ * events-*.jsonl files (no matching RunLog row).
+ */
+export async function listRuns(
+  vaultPath: string,
+  modeFilter: ModeFilter,
+): Promise<RunLogSummary[]> {
+  return invokeTyped<RunLogSummary[]>("list_runs", {
+    vaultPath,
+    modeFilter,
+  })
+}
+
+/**
+ * Load the full detail bundle for a single run: the summary plus a
+ * one-shot tail-replay of the corresponding events-*.jsonl file. v1
+ * reads the file synchronously (typical run is < 200 events / 500 KB).
+ */
+export async function getRunDetail(
+  vaultPath: string,
+  runId: string,
+): Promise<RunDetail> {
+  return invokeTyped<RunDetail>("get_run_detail", {
+    vaultPath,
+    runId,
+  })
+}
+
+/**
+ * Enumerate wiki pages in a vault. Files without a parseable
+ * frontmatter `title` fall back to the slug as the title.
+ */
+export async function listWikiPages(
+  vaultPath: string,
+): Promise<WikiPageMeta[]> {
+  return invokeTyped<WikiPageMeta[]>("list_wiki_pages", { vaultPath })
+}
+
+/**
+ * Read a wiki page's body with the leading `---\n...\n---\n`
+ * frontmatter block stripped. Rejects with `AppError::Invalid
+ * { field: "page_slug" }` when no file matches the slug.
+ */
+export async function readWikiPage(
+  vaultPath: string,
+  pageSlug: string,
+): Promise<string> {
+  return invokeTyped<string>("read_wiki_page", {
+    vaultPath,
+    pageSlug,
+  })
 }

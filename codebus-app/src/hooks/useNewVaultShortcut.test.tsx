@@ -36,12 +36,12 @@ describe("useNewVaultShortcut", () => {
     expect(onFire).toHaveBeenCalledTimes(1)
   })
 
-  it("does not fire when route is workspace-stub", () => {
+  it("does not fire when route is workspace", () => {
     const onFire = vi.fn()
     render(<Harness onFire={onFire} />)
     useRouteStore.setState({
       route: {
-        kind: "workspace-stub",
+        kind: "workspace",
         vault: {
           path: "/v",
           display_name: "v",

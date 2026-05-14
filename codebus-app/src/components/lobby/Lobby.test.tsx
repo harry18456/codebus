@@ -66,8 +66,8 @@ describe("Lobby", () => {
     render(<Lobby onNewVault={() => {}} onRevealInFiles={() => {}} />)
     fireEvent.click(screen.getByTestId("vault-card-/alpha"))
     const route = useRouteStore.getState().route
-    expect(route.kind).toBe("workspace-stub")
-    if (route.kind === "workspace-stub") {
+    expect(route.kind).toBe("workspace")
+    if (route.kind === "workspace") {
       expect(route.vault.path).toBe("/alpha")
     }
   })

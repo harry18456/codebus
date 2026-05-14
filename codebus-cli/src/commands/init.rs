@@ -122,7 +122,7 @@ fn handle_event(event: &InitEvent<'_>, debug: bool, render_opts: &RenderOptions)
                 Banner::SyncDone {
                     files: summary.files,
                     mib: bytes_to_mib(summary.bytes),
-                    elapsed_ms: *elapsed_ms,
+                    elapsed_ms: *elapsed_ms as u64,
                 },
                 render_opts,
             );

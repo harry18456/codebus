@@ -63,10 +63,10 @@ describe("useLobbyDragDrop", () => {
     )
   })
 
-  it("does not subscribe when route is workspace-stub", async () => {
+  it("dragdrop_disabled_in_workspace_state", async () => {
     useRouteStore.setState({
       route: {
-        kind: "workspace-stub",
+        kind: "workspace",
         vault: {
           path: "/v",
           display_name: "v",

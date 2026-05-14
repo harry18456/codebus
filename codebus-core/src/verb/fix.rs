@@ -217,7 +217,7 @@ pub fn run_fix(
         verb: Verb::Fix,
         exit_code: report.invoke.as_ref().and_then(|r| r.exit.code()),
     }));
-    let lint_elapsed_ms = lint_started.elapsed().as_millis();
+    let lint_elapsed_ms = lint_started.elapsed().as_millis() as u64;
 
     // Step 9: emit LintDone banner.
     fan_out(VerbEvent::Banner(VerbBanner::LintDone {
