@@ -7,11 +7,14 @@ import {
   type VaultEntry,
 } from "@/lib/ipc"
 import { cn } from "@/lib/cn"
+import { useChatStore } from "@/store/chat"
 import { useGoalsStore } from "@/store/goals"
 import { useRouteStore } from "@/store/route"
 import { useVaultsStore } from "@/store/vaults"
 import { useWikiStore } from "@/store/wiki"
+import { useChatShortcut } from "@/hooks/useChatShortcut"
 
+import { ChatWidget } from "./ChatWidget"
 import { GoalsTab } from "./GoalsTab"
 import { QuizTab } from "./QuizTab"
 import { RunDetailCancelled, RunDetailInterrupted } from "./RunDetailCancelled"
@@ -50,12 +53,23 @@ export function Workspace({ vault }: WorkspaceProps) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<RunDetail | null>(null)
 
+  // Bind Cmd+K / Ctrl+K to toggle the chat widget. The hook scopes the
+  // window listener to Workspace mount/unmount so the shortcut is inert in
+  // the Lobby — see `useChatShortcut` for the spec scenario this enforces.
+  useChatShortcut()
+
   useEffect(() => {
     void refreshRuns(vault.path).catch(() => {})
     void listPages(vault.path).catch(() => {})
+    const vaultPath = vault.path
     return () => {
       goalsReset()
       wikiReset()
+      // Drop chat session + transcript + token tally + pending promote
+      // suggestion when the user leaves the vault. Widget UI prefs
+      // (expanded, width, height, onboardedVaults) intentionally survive
+      // per spec's `Session Reset Behaviors` table.
+      useChatStore.getState().resetForVault(vaultPath)
     }
   }, [vault.path, refreshRuns, listPages, goalsReset, wikiReset])
 
@@ -122,6 +136,18 @@ export function Workspace({ vault }: WorkspaceProps) {
     },
     [vault.path, loadPage],
   )
+
+  /**
+   * After an inline `[Promote to goal]` click in the chat transcript
+   * resolves, jump the user into RunDetailRunning for the freshly
+   * spawned goal. The chat store has already collapsed the widget +
+   * cleared the suggestion, so Workspace only owns the routing bits.
+   */
+  const handlePromoteSuccess = useCallback((runId: string) => {
+    setActiveTab("goals")
+    setSelectedRunId(runId)
+    setSelectedDetail(null)
+  }, [])
 
   function handleBack() {
     back()
@@ -204,6 +230,20 @@ export function Workspace({ vault }: WorkspaceProps) {
         {activeTab === "wiki" && <WikiTab vaultPath={vault.path} />}
         {activeTab === "quiz" && <QuizTab />}
       </section>
+      {/*
+       * ChatWidget lives at Workspace level (sibling of the tab-bound
+       * `<section>`) so it survives tab switches — collapsing the widget,
+       * opening Wiki, then returning to Goals keeps the transcript,
+       * sessionId, and `expanded` state intact. The widget pins itself via
+       * fixed position so this DOM placement does not affect layout, but
+       * the React subtree must NOT live inside an `activeTab` conditional
+       * or it would unmount and lose its state.
+       */}
+      <ChatWidget
+        vaultPath={vault.path}
+        onPromoteSuccess={handlePromoteSuccess}
+        onWikiLinkClick={onSelectPage}
+      />
     </main>
   )
 }

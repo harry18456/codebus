@@ -45,11 +45,31 @@ impl ActiveRuns {
         map.get(run_id).cloned()
     }
 
-    /// Whether any goal run is currently active. Used by `spawn_goal`'s
-    /// pre-spawn invariant check (`AppError::Invalid { field: "active_runs", ... }`).
+    /// Whether the map is empty (no active goal AND no active chat turn).
+    /// Kept for backward compat; new code SHOULD prefer the prefix-specific
+    /// helpers below.
     pub fn is_empty(&self) -> bool {
         let map = self.0.lock().expect("active_runs mutex poisoned");
         map.is_empty()
+    }
+
+    /// Whether any chat turn (RunId keyed with the `chat-` prefix) is
+    /// currently active. Used by `spawn_chat_turn`'s pre-spawn check —
+    /// chat session semantics disallow two concurrent turns even though
+    /// chat and goal can coexist (see `Chat Turn Lifecycle` requirement).
+    pub fn has_chat_turn(&self) -> bool {
+        let map = self.0.lock().expect("active_runs mutex poisoned");
+        map.keys().any(|k| k.starts_with("chat-"))
+    }
+
+    /// Whether any goal run (RunId NOT prefixed `chat-`) is currently
+    /// active. Used by `spawn_goal`'s pre-spawn check — chat turns SHALL
+    /// NOT block goal spawn per the `One Active Goal Run At A Time`
+    /// requirement (chat is read-only and cannot conflict with goal's
+    /// writes).
+    pub fn has_goal_run(&self) -> bool {
+        let map = self.0.lock().expect("active_runs mutex poisoned");
+        map.keys().any(|k| !k.starts_with("chat-"))
     }
 }
 
@@ -88,5 +108,34 @@ mod tests {
     fn active_runs_get_unknown_returns_none() {
         let runs = ActiveRuns::new();
         assert!(runs.get("nothing").is_none());
+    }
+
+    #[test]
+    fn has_chat_turn_detects_chat_prefix() {
+        let runs = ActiveRuns::new();
+        assert!(!runs.has_chat_turn());
+        runs.insert("chat-2026-05-14T10-20-30Z".into(), Arc::new(AtomicBool::new(false)));
+        assert!(runs.has_chat_turn());
+        assert!(!runs.has_goal_run(), "chat entry SHALL NOT register as goal");
+    }
+
+    #[test]
+    fn has_goal_run_ignores_chat_prefix() {
+        let runs = ActiveRuns::new();
+        assert!(!runs.has_goal_run());
+        // Goal RunId is the started_at slug without prefix.
+        runs.insert("2026-05-14T10-20-30Z".into(), Arc::new(AtomicBool::new(false)));
+        assert!(runs.has_goal_run());
+        assert!(!runs.has_chat_turn(), "goal entry SHALL NOT register as chat");
+    }
+
+    #[test]
+    fn chat_and_goal_can_coexist() {
+        let runs = ActiveRuns::new();
+        runs.insert("chat-2026-05-14T10-20-30Z".into(), Arc::new(AtomicBool::new(false)));
+        runs.insert("2026-05-14T10-25-00Z".into(), Arc::new(AtomicBool::new(false)));
+        assert!(runs.has_chat_turn());
+        assert!(runs.has_goal_run());
+        assert!(!runs.is_empty());
     }
 }

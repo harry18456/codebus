@@ -182,7 +182,10 @@ where
         + 'static,
 {
     // Spec: app-workspace § One Active Goal Run At A Time — backend layer.
-    if !active_runs.is_empty() {
+    // Chat turns (keyed `chat-<slug>`) SHALL NOT block goal spawn — chat
+    // is read-only and cannot conflict with goal's writes, so the two
+    // can coexist in `active_runs`. Only another goal-mode entry blocks.
+    if active_runs.has_goal_run() {
         return Err(AppError::Invalid {
             field: "active_runs".into(),
             message: "another goal run is already active".into(),
@@ -606,6 +609,47 @@ mod tests {
             }
             other => panic!("expected Invalid, got {other:?}"),
         }
+    }
+
+    /// Spec: app-workspace § One Active Goal Run At A Time —
+    /// "Chat turn does not block concurrent goal spawn" scenario.
+    /// Chat runs (key prefix `chat-`) MUST NOT register as goal runs.
+    #[test]
+    fn spawn_goal_succeeds_with_concurrent_chat_turn() {
+        let runtime = AppRuntimeState::new();
+        let active_runs = runtime.active_runs.clone();
+        // Simulate an active chat turn already running.
+        active_runs.insert(
+            "chat-2026-05-14T10-20-30Z".into(),
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let run_id = spawn_goal_with_runner(
+            active_runs.clone(),
+            temp.path().to_path_buf(),
+            "concurrent goal".into(),
+            |_p| {},
+            |_terminal| {},
+            |_repo, _opts, _on_event, _cancel| Ok(fake_report()),
+        )
+        .expect("goal spawn MUST succeed when only a chat turn is active");
+
+        // Both entries SHALL coexist in active_runs.
+        assert!(active_runs.has_chat_turn(), "chat entry preserved");
+        // Wait for the runner thread to complete so the goal entry gets
+        // cleaned up; meanwhile the chat entry stays.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while active_runs.get(&run_id).is_some() {
+            if std::time::Instant::now() > deadline {
+                panic!("goal entry not removed");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            active_runs.has_chat_turn(),
+            "chat entry SHALL persist after goal completes"
+        );
     }
 
     /// Task 3.2 acceptance: cancel_goal is idempotent on unknown run.

@@ -1,8 +1,9 @@
 //! IPC command registry.
 //!
-//! The frontend MAY invoke only the fifteen commands listed in
+//! The frontend MAY invoke only the seventeen commands listed in
 //! [`REGISTERED_COMMANDS`]. The spec ("IPC Command Registry", modified
-//! by `v3-app-workspace-goal`) forbids any other command from being
+//! by `v3-app-workspace-goal` for goal lifecycle and by `v3-app-chat-cmdk`
+//! for chat-turn lifecycle) forbids any other command from being
 //! registered by this change. The constant is the source of truth
 //! checked by the unit test below, and is consumed by `lib::run` via
 //! [`generate_handler`] so the registration and the asserted list
@@ -10,6 +11,7 @@
 
 use crate::error::AppError;
 
+pub mod chats;
 pub mod cli_status;
 pub mod config;
 pub mod goals;
@@ -17,6 +19,7 @@ pub mod keyring;
 pub mod vault_list;
 pub mod wiki;
 
+pub use chats::{cancel_chat_turn, spawn_chat_turn};
 pub use cli_status::check_cli_installed;
 pub use config::{load_global_config, save_global_config};
 pub use goals::{cancel_goal, get_run_detail, list_runs, spawn_goal};
@@ -24,12 +27,13 @@ pub use keyring::{delete_endpoint_key, get_endpoint_key, set_endpoint_key};
 pub use vault_list::{add_vault, list_vaults, remove_vault};
 pub use wiki::{list_wiki_pages, read_wiki_page};
 
-/// Exactly the fifteen commands exposed by this Tauri app. Used by
-/// the `exactly_fifteen_commands_are_registered` test and consumed
+/// Exactly the seventeen commands exposed by this Tauri app. Used by
+/// the `exactly_seventeen_commands_are_registered` test and consumed
 /// by `lib::run`.
 ///
-/// Foundation 9 + workspace 6 (`spawn_goal`, `cancel_goal`,
-/// `list_runs`, `get_run_detail`, `list_wiki_pages`, `read_wiki_page`).
+/// Foundation 9 + workspace 6 (`spawn_goal`, `cancel_goal`, `list_runs`,
+/// `get_run_detail`, `list_wiki_pages`, `read_wiki_page`) + chat 2
+/// (`spawn_chat_turn`, `cancel_chat_turn`).
 pub const REGISTERED_COMMANDS: &[&str] = &[
     "list_vaults",
     "add_vault",
@@ -46,6 +50,8 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
     "get_run_detail",
     "list_wiki_pages",
     "read_wiki_page",
+    "spawn_chat_turn",
+    "cancel_chat_turn",
 ];
 
 /// Sugar for `tauri::generate_handler!` so the registration is colocated
@@ -69,6 +75,8 @@ macro_rules! generate_ipc_handler {
             $crate::ipc::goals::get_run_detail,
             $crate::ipc::wiki::list_wiki_pages,
             $crate::ipc::wiki::read_wiki_page,
+            $crate::ipc::chats::spawn_chat_turn,
+            $crate::ipc::chats::cancel_chat_turn,
         ]
     };
 }
@@ -82,11 +90,11 @@ mod tests {
     use super::REGISTERED_COMMANDS;
 
     #[test]
-    fn exactly_fifteen_commands_are_registered() {
+    fn exactly_seventeen_commands_are_registered() {
         assert_eq!(
             REGISTERED_COMMANDS.len(),
-            15,
-            "IPC Command Registry requires exactly 15 commands (9 foundation + 6 workspace)"
+            17,
+            "IPC Command Registry requires exactly 17 commands (9 foundation + 6 workspace + 2 chat)"
         );
     }
 
@@ -108,6 +116,8 @@ mod tests {
             "get_run_detail",
             "list_wiki_pages",
             "read_wiki_page",
+            "spawn_chat_turn",
+            "cancel_chat_turn",
         ]
         .into_iter()
         .collect();

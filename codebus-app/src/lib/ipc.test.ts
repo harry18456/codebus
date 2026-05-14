@@ -5,15 +5,20 @@ vi.mock("@tauri-apps/api/core", () => ({
 }))
 
 import {
+  cancelChatTurn,
   cancelGoal,
   getRunDetail,
   listRuns,
   listWikiPages,
   readWikiPage,
+  spawnChatTurn,
   spawnGoal,
+  type ChatStreamPayload,
+  type ChatTurnRunId,
   type ModeFilter,
   type RunDetail,
   type RunLogSummary,
+  type VerbEvent,
   type WikiPageMeta,
 } from "./ipc"
 
@@ -53,5 +58,42 @@ describe("workspace IPC wrappers", () => {
     void _bodyRet
 
     expect(true).toBe(true)
+  })
+
+  // Spec: app-workspace § Tauri IPC Commands for Chat Turn Lifecycle.
+  it("chat_ipc_wrappers_have_correct_return_types", () => {
+    const turn: ReturnType<typeof spawnChatTurn> = spawnChatTurn("/v", "hi", null)
+    const turnWithResume: ReturnType<typeof spawnChatTurn> = spawnChatTurn(
+      "/v",
+      "hi",
+      "sess-123",
+    )
+    const cancel: ReturnType<typeof cancelChatTurn> = cancelChatTurn("chat-2026-05-14T10-20-30Z")
+
+    // Assignment-style: drift in spawnChatTurn return type breaks compile.
+    const _turnRet: Promise<ChatTurnRunId> = turn
+    const _turnResumeRet: Promise<ChatTurnRunId> = turnWithResume
+    const _cancelRet: Promise<void> = cancel
+
+    void _turnRet
+    void _turnResumeRet
+    void _cancelRet
+
+    expect(true).toBe(true)
+  })
+
+  it("chat_stream_payload_shape", () => {
+    // Construct a synthetic payload so the structural type check covers
+    // the on-wire contract: `{ run_id: string starting "chat-", event: VerbEvent }`.
+    const event: VerbEvent = {
+      kind: "lifecycle",
+      data: { kind: "spawn_start", verb: "chat" },
+    }
+    const payload: ChatStreamPayload = {
+      run_id: "chat-2026-05-14T10-20-30Z",
+      event,
+    }
+    expect(payload.run_id.startsWith("chat-")).toBe(true)
+    expect(payload.event.kind).toBe("lifecycle")
   })
 })

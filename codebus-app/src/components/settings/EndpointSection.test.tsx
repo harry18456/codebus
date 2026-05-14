@@ -146,7 +146,7 @@ describe("EndpointSection", () => {
     await waitFor(() => {
       expect(screen.getByRole("option", { name: "opus-4-7" })).toBeInTheDocument()
     })
-    for (const opt of ["opus-4-7", "opus-4-6", "haiku-4-5", "sonnet-4-6"]) {
+    for (const opt of ["opus-4-7", "opus-4-6", "sonnet-4-6", "haiku-4-5"]) {
       expect(screen.getByRole("option", { name: opt })).toBeInTheDocument()
     }
     // Forbidden unversioned aliases SHALL NOT appear.

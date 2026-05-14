@@ -85,6 +85,8 @@ export type IpcCommandName =
   | "get_run_detail"
   | "list_wiki_pages"
   | "read_wiki_page"
+  | "spawn_chat_turn"
+  | "cancel_chat_turn"
 
 /**
  * Endpoint profile selector. Currently only `"azure"` is wired up; future
@@ -107,8 +109,8 @@ export type KeyStatus = { kind: "set" } | { kind: "unset" }
 export const SYSTEM_MODELS = [
   "opus-4-7",
   "opus-4-6",
-  "haiku-4-5",
   "sonnet-4-6",
+  "haiku-4-5",
 ] as const
 export type SystemModel = (typeof SYSTEM_MODELS)[number]
 
@@ -482,6 +484,44 @@ export interface GoalTerminalPayload {
   run_id: string
 }
 
+/**
+ * RunId issued by `spawn_chat_turn` — always prefixed with `chat-` so
+ * the same `active_runs` map can hold goal and chat entries side-by-side
+ * (spec `Tauri IPC Commands for Chat Turn Lifecycle`).
+ */
+export type ChatTurnRunId = string
+
+/** Payload of one `chat-stream` Tauri event tick. */
+export interface ChatStreamPayload {
+  run_id: ChatTurnRunId
+  event: VerbEvent
+}
+
+/**
+ * Coarse outcome classification surfaced from the Rust side. Mirrors
+ * `chats::ChatTurnOutcome` and matches `RunLog.outcome` values for the
+ * chat mode: `succeeded` when the turn completed cleanly, `cancelled`
+ * when the cancel flag fired, `failed` for any other error or panic.
+ */
+export type ChatTurnOutcome = "succeeded" | "cancelled" | "failed"
+
+/**
+ * Payload emitted exactly once on the `chat-terminal` Tauri channel
+ * after a chat turn's background thread exits (success / fail / cancel /
+ * panic). Frontend uses this to flip `useChatStore.activeTurn` to null,
+ * finalize the turn in the transcript, AND record the claude
+ * `session_id` so the next `spawnChatTurn` can pass it back for
+ * `--resume <id>`. `session_id` is `null` on terminal paths that never
+ * reached the init phase (e.g., spawn failure before stream-json
+ * init); the frontend keeps any previously known sessionId in that
+ * case.
+ */
+export interface ChatTerminalPayload {
+  run_id: ChatTurnRunId
+  session_id: string | null
+  outcome: ChatTurnOutcome
+}
+
 /** Detail bundle returned by `get_run_detail`. */
 export interface RunDetail {
   summary: RunLogSummary
@@ -521,6 +561,39 @@ export async function spawnGoal(
  */
 export async function cancelGoal(runId: string): Promise<void> {
   return invokeTyped<void>("cancel_goal", { runId })
+}
+
+/**
+ * Spawn one chat turn in the given vault. Pass `null` for `sessionId`
+ * on the first turn of a REPL session; pass the `sessionId` returned by
+ * the previous turn for subsequent turns so the backend issues
+ * `--resume <id>` to the claude CLI. Returns the new chat run id
+ * (always prefixed `chat-`).
+ *
+ * Rejects with `AppError::Invalid { field: "active_runs" }` when another
+ * chat turn is already active in the session; chat turns DO NOT block on
+ * a concurrent active goal run (and vice versa).
+ */
+export async function spawnChatTurn(
+  vaultPath: string,
+  text: string,
+  sessionId: string | null,
+): Promise<ChatTurnRunId> {
+  return invokeTyped<ChatTurnRunId>("spawn_chat_turn", {
+    vaultPath,
+    text,
+    sessionId,
+  })
+}
+
+/**
+ * Flip the cancel flag for an in-progress chat turn. Idempotent — the
+ * call succeeds whether or not the turn has already terminated. The
+ * session itself (claude `session_id`) is NOT discarded by cancel; the
+ * next `spawnChatTurn` call MAY pass the same session id to resume.
+ */
+export async function cancelChatTurn(runId: ChatTurnRunId): Promise<void> {
+  return invokeTyped<void>("cancel_chat_turn", { runId })
 }
 
 /**

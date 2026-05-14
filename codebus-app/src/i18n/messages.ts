@@ -178,6 +178,29 @@ const en = {
   // ---- Workspace · Quiz placeholder ----
   "workspace.quiz.placeholder": "Coming soon — quiz flow ships in v3-app-quiz",
 
+  // ---- Chat (cmdk) ----
+  "chat.onboarding.hintEn":
+    "Ask anything about this vault. AI will suggest [Promote to goal] when it fits, or you can ask AI to promote a message to a goal.",
+  "chat.onboarding.hintTw":
+    "可以問任何關於此 vault 的事。AI 覺得適合時會主動建議 [Promote to goal]，你也可以主動跟 AI 講想做成 goal（例如「幫我把這段寫成 goal」）。",
+  "chat.placeholder.en": "Ask anything…",
+  "chat.placeholder.tw": "輸入訊息…",
+  "chat.button.newChat": "+ New chat",
+  "chat.button.stop": "⏹ Stop",
+  "chat.button.send": "Send",
+  "chat.button.promote": "Promote to goal",
+  "chat.button.dismiss": "Dismiss",
+  "chat.toast.startedNewChat": "Started a new chat.",
+  "chat.toast.undo": "Undo",
+  "chat.error.anotherGoalRunning":
+    "Another goal is running — wait for it to finish.",
+  "chat.token.tooltip.cacheRead": "Cache read",
+  "chat.token.tooltip.cacheCreate": "Cache create",
+  "chat.token.tooltip.input": "Input",
+  "chat.token.tooltip.output": "Output",
+  "chat.widget.aria.openChat": "Open chat",
+  "chat.widget.aria.closeChat": "Close chat",
+
   // ---- Error messages (toast / inline) ----
   "errors.vaultAlreadyExists": "This vault is already in your list: {path}",
   "errors.vaultNotFound": "Path no longer exists: {path}",
@@ -351,6 +374,28 @@ const zh: Record<keyof typeof en, string> = {
   // ---- Workspace · Quiz placeholder ----
   "workspace.quiz.placeholder":
     "Coming soon — quiz flow ships in v3-app-quiz",
+
+  // ---- Chat (cmdk) ----
+  "chat.onboarding.hintEn":
+    "Ask anything about this vault. AI will suggest [Promote to goal] when it fits, or you can ask AI to promote a message to a goal.",
+  "chat.onboarding.hintTw":
+    "可以問任何關於此 vault 的事。AI 覺得適合時會主動建議 [Promote to goal]，你也可以主動跟 AI 講想做成 goal（例如「幫我把這段寫成 goal」）。",
+  "chat.placeholder.en": "Ask anything…",
+  "chat.placeholder.tw": "輸入訊息…",
+  "chat.button.newChat": "+ 新對話",
+  "chat.button.stop": "⏹ 停止",
+  "chat.button.send": "送出",
+  "chat.button.promote": "設為 goal",
+  "chat.button.dismiss": "忽略",
+  "chat.toast.startedNewChat": "已開始新對話。",
+  "chat.toast.undo": "復原",
+  "chat.error.anotherGoalRunning": "目前有其他 goal 在執行，等它結束。",
+  "chat.token.tooltip.cacheRead": "快取讀取",
+  "chat.token.tooltip.cacheCreate": "快取建立",
+  "chat.token.tooltip.input": "輸入",
+  "chat.token.tooltip.output": "輸出",
+  "chat.widget.aria.openChat": "開啟對話",
+  "chat.widget.aria.closeChat": "關閉對話",
 
   // ---- Errors ----
   "errors.vaultAlreadyExists": "這個 vault 已經在清單裡了：{path}",
