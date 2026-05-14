@@ -254,6 +254,7 @@ fn init_opts() -> InitOptions {
     InitOptions {
         no_obsidian_register: true,
         write_starter_config: true,
+        with_repo_root_skills: false,
     }
 }
 

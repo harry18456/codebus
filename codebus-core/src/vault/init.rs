@@ -80,6 +80,17 @@ pub struct InitOptions {
     /// new users get a documented `~/.codebus/config.yaml`. CLI and app
     /// both want this; tests may want to skip.
     pub write_starter_config: bool,
+    /// When true, ALSO materialize skill bundles at the repo-root location
+    /// (`<repo>/.claude/skills/codebus-*/`) AND add the corresponding
+    /// `.gitignore` patterns. The vault-internal location is always
+    /// written; this flag only toggles the secondary copy.
+    ///
+    /// Defaults to `false` because the GUI and CLI default spawn paths
+    /// both run agents with cwd = `.codebus/`, so the repo-root copy is
+    /// only useful when a user opens a raw Claude Code session at the
+    /// source repository root and invokes `/codebus-<verb>` interactively
+    /// — a power-user workflow distinct from the default flows.
+    pub with_repo_root_skills: bool,
 }
 
 impl Default for InitOptions {
@@ -87,6 +98,7 @@ impl Default for InitOptions {
         Self {
             no_obsidian_register: false,
             write_starter_config: true,
+            with_repo_root_skills: false,
         }
     }
 }
@@ -238,8 +250,11 @@ pub fn run_init(
     let paths = create_vault_layout(repo).map_err(InitError::Layout)?;
     on_event(InitEvent::LayoutCreated { paths: &paths });
 
-    let gitignore_outcome =
-        source_gitignore::ensure_codebus_in_gitignore(repo).map_err(InitError::SourceGitignore)?;
+    let gitignore_outcome = source_gitignore::ensure_codebus_in_gitignore(
+        repo,
+        opts.with_repo_root_skills,
+    )
+    .map_err(InitError::SourceGitignore)?;
     on_event(InitEvent::SourceGitignore {
         outcome: gitignore_outcome,
     });
@@ -290,8 +305,12 @@ pub fn run_init(
         outcome: manifest_outcome,
     });
 
-    let (written, preserved) =
-        write_skill_bundles(&paths.root, repo).map_err(InitError::SkillBundles)?;
+    let (written, preserved) = write_skill_bundles(
+        &paths.root,
+        repo,
+        opts.with_repo_root_skills,
+    )
+    .map_err(InitError::SkillBundles)?;
     on_event(InitEvent::SkillBundlesDone {
         vault_root: &paths.root,
         repo,
@@ -429,8 +448,13 @@ fn write_schema_if_missing(schema_md: &Path) -> io::Result<bool> {
     Ok(true)
 }
 
-fn write_skill_bundles(vault_root: &Path, repo_root: &Path) -> io::Result<(usize, usize)> {
-    let outcomes = skill_bundle::write_bundles_if_missing(vault_root, repo_root)?;
+fn write_skill_bundles(
+    vault_root: &Path,
+    repo_root: &Path,
+    write_repo_root: bool,
+) -> io::Result<(usize, usize)> {
+    let outcomes =
+        skill_bundle::write_bundles_if_missing(vault_root, repo_root, write_repo_root)?;
     let written = outcomes
         .iter()
         .filter(|o| **o == BundleOutcome::Written)
@@ -470,6 +494,19 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Spec scenario (skill-bundles "Init default creates only
+    /// vault-internal skill bundles" — InitOptions side): `Default`
+    /// MUST disable repo-root skill bundles so the GUI / CLI default
+    /// spawn paths get vault-only by construction.
+    #[test]
+    fn init_options_default_disables_repo_root_skills() {
+        let opts = InitOptions::default();
+        assert!(
+            !opts.with_repo_root_skills,
+            "InitOptions::default().with_repo_root_skills must be false"
+        );
+    }
+
     /// Smoke: silent mode produces a usable vault layout and commit.
     /// Cross-platform git availability is assumed (matches existing
     /// codebus-core tests).
@@ -482,6 +519,7 @@ mod tests {
         let opts = InitOptions {
             no_obsidian_register: true,
             write_starter_config: false,
+            with_repo_root_skills: false,
         };
         let outcome =
             run_init(tmp.path(), &opts, |_event| {}).expect("init should succeed in tempdir");
@@ -511,6 +549,7 @@ mod tests {
         let opts = InitOptions {
             no_obsidian_register: true,
             write_starter_config: false,
+            with_repo_root_skills: false,
         };
         let err = run_init(tmp.path(), &opts, |_| {}).expect_err("expected refusal");
         assert!(matches!(err, InitError::Refused(_)));
@@ -526,6 +565,7 @@ mod tests {
         let opts = InitOptions {
             no_obsidian_register: true,
             write_starter_config: false,
+            with_repo_root_skills: false,
         };
         run_init(tmp.path(), &opts, |event| {
             order.push(event_label(&event));

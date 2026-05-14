@@ -25,37 +25,50 @@ pub enum BundleOutcome {
 
 pub const VERBS: &[&str] = &["goal", "query", "fix", "chat"];
 
-/// Materialize the three skill bundle stubs at BOTH the vault-internal and
-/// the source repo-root locations.
+/// Materialize the skill bundle stubs at the vault-internal location, and
+/// optionally ALSO at the source repo-root location.
 ///
 /// - `vault_root`: the `.codebus/` directory (e.g. `<repo>/.codebus`). Stubs
-///   land at `<vault_root>/.claude/skills/codebus-{verb}/SKILL.md`.
-/// - `repo_root`: the source repository root (e.g. `<repo>`). Stubs ALSO land
-///   at `<repo_root>/.claude/skills/codebus-{verb}/SKILL.md` so users opening
-///   Claude Code at repo root discover the skill via `<cwd>/.claude/skills/`.
+///   ALWAYS land at `<vault_root>/.claude/skills/codebus-{verb}/SKILL.md`
+///   because this is the cwd the codebus binary and the codebus-app GUI use
+///   when they spawn agents.
+/// - `repo_root`: the source repository root (e.g. `<repo>`). Stubs land
+///   at `<repo_root>/.claude/skills/codebus-{verb}/SKILL.md` ONLY when
+///   `write_repo_root` is `true`. This secondary copy is for the
+///   power-user workflow of opening a raw Claude Code session at the
+///   source repo root and invoking `/codebus-<verb>` interactively.
 ///
 /// Each location is checked independently for write-if-missing — preserving
 /// user customizations at one location doesn't block writing the missing
 /// peer at the other location.
 ///
-/// Returns 6 outcomes: 3 for vault-internal followed by 3 for repo-root, in
-/// `VERBS` order at each location.
+/// Returns 4 outcomes (one per verb at vault-internal) when `write_repo_root`
+/// is `false`, OR 8 outcomes (4 vault-internal followed by 4 repo-root, in
+/// `VERBS` order at each location) when `write_repo_root` is `true`.
 pub fn write_bundles_if_missing(
     vault_root: &Path,
     repo_root: &Path,
+    write_repo_root: bool,
 ) -> io::Result<Vec<BundleOutcome>> {
-    let mut outcomes = Vec::with_capacity(VERBS.len() * 2);
+    let capacity = if write_repo_root {
+        VERBS.len() * 2
+    } else {
+        VERBS.len()
+    };
+    let mut outcomes = Vec::with_capacity(capacity);
     for verb in VERBS {
         outcomes.push(write_bundle_if_missing(
             &skill_bundle_path(vault_root, verb),
             verb,
         )?);
     }
-    for verb in VERBS {
-        outcomes.push(write_bundle_if_missing(
-            &skill_bundle_path(repo_root, verb),
-            verb,
-        )?);
+    if write_repo_root {
+        for verb in VERBS {
+            outcomes.push(write_bundle_if_missing(
+                &skill_bundle_path(repo_root, verb),
+                verb,
+            )?);
+        }
     }
     Ok(outcomes)
 }
@@ -345,12 +358,37 @@ mod tests {
         (vault_root, repo_root)
     }
 
+    /// Spec scenario: "Init default creates only vault-internal skill
+    /// bundles" — default `write_repo_root: false` returns exactly 4
+    /// outcomes covering the 4 verbs at the vault-internal location,
+    /// and zero files at the repo-root location.
     #[test]
-    fn first_time_writes_four_bundles_at_both_locations() {
+    fn write_bundles_default_vault_only_returns_four_outcomes() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
-        let outcomes = write_bundles_if_missing(&vault, &repo).unwrap();
-        // v3-chat-verb: 8 outcomes — 4 verbs (goal/query/fix/chat) × 2 locations.
+        let outcomes = write_bundles_if_missing(&vault, &repo, false).unwrap();
+        assert_eq!(outcomes, vec![BundleOutcome::Written; 4]);
+        for verb in VERBS {
+            assert!(
+                skill_bundle_path(&vault, verb).exists(),
+                "vault-internal bundle for verb `{verb}` must exist in default mode"
+            );
+            assert!(
+                !skill_bundle_path(&repo, verb).exists(),
+                "repo-root bundle for verb `{verb}` MUST NOT exist in default mode"
+            );
+        }
+    }
+
+    /// Spec scenario: "Init with --with-repo-root-skills creates both
+    /// locations" + "byte-identical when both are written" — opt-in
+    /// `write_repo_root: true` returns 8 outcomes, all files exist, and
+    /// the vault / repo-root pairs are byte-identical per verb.
+    #[test]
+    fn write_bundles_with_repo_root_returns_eight_outcomes_byte_identical() {
+        let tmp = TempDir::new().unwrap();
+        let (vault, repo) = dual_layout(&tmp);
+        let outcomes = write_bundles_if_missing(&vault, &repo, true).unwrap();
         assert_eq!(outcomes, vec![BundleOutcome::Written; 8]);
         for verb in VERBS {
             for base in [&vault, &repo] {
@@ -365,9 +403,6 @@ mod tests {
                 let body = fs::read_to_string(&p).unwrap();
                 assert!(body.starts_with("---\n"));
                 assert!(body.contains(&format!("name: codebus-{verb}")));
-                // chat SKILL is intentionally longer than goal/query/fix
-                // (it carries the full emission examples + read-only
-                // invariant + MCP exclusion), so widen the line cap.
                 let line_cap = if *verb == "chat" { 120 } else { 80 };
                 assert!(
                     body.lines().count() <= line_cap,
@@ -375,15 +410,6 @@ mod tests {
                     body.lines().count()
                 );
             }
-        }
-    }
-
-    #[test]
-    fn vault_and_repo_root_skill_md_byte_identical() {
-        let tmp = TempDir::new().unwrap();
-        let (vault, repo) = dual_layout(&tmp);
-        write_bundles_if_missing(&vault, &repo).unwrap();
-        for verb in VERBS {
             let vault_body = fs::read(skill_bundle_path(&vault, verb)).unwrap();
             let repo_body = fs::read(skill_bundle_path(&repo, verb)).unwrap();
             assert_eq!(
@@ -397,13 +423,15 @@ mod tests {
     fn does_not_create_codebus_lint_bundle_at_either_location() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
-        write_bundles_if_missing(&vault, &repo).unwrap();
+        write_bundles_if_missing(&vault, &repo, true).unwrap();
         assert!(!vault.join(".claude/skills/codebus-lint").exists());
         assert!(!repo.join(".claude/skills/codebus-lint").exists());
     }
 
+    /// With opt-in dual-write, an already-customized vault SKILL.md is
+    /// preserved AND each repo-root location is still freshly written.
     #[test]
-    fn write_if_missing_skips_existing_at_vault_only() {
+    fn write_if_missing_skips_existing_at_vault_only_with_opt_in() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
         let goal_vault = skill_bundle_path(&vault, "goal");
@@ -411,19 +439,16 @@ mod tests {
         let custom = "---\nname: codebus-goal\ndescription: my custom\n---\n\n# my workflow\n";
         fs::write(&goal_vault, custom).unwrap();
 
-        let outcomes = write_bundles_if_missing(&vault, &repo).unwrap();
-        // v3-chat-verb: 8 outcomes — vault 4 (indices 0-3), repo 4 (4-7).
-        // Vault: goal AlreadyPresent, query/fix/chat Written
+        let outcomes = write_bundles_if_missing(&vault, &repo, true).unwrap();
+        // 8 outcomes — vault 4 (indices 0-3), repo 4 (4-7).
         assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent);
         assert_eq!(outcomes[1], BundleOutcome::Written);
         assert_eq!(outcomes[2], BundleOutcome::Written);
         assert_eq!(outcomes[3], BundleOutcome::Written);
-        // Repo-root: all Written (independent check)
         assert_eq!(outcomes[4], BundleOutcome::Written);
         assert_eq!(outcomes[5], BundleOutcome::Written);
         assert_eq!(outcomes[6], BundleOutcome::Written);
         assert_eq!(outcomes[7], BundleOutcome::Written);
-        // Custom vault content preserved
         assert_eq!(fs::read_to_string(&goal_vault).unwrap(), custom);
     }
 
@@ -431,13 +456,10 @@ mod tests {
     fn write_if_missing_only_fills_missing_repo_root_when_vault_exists() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
-        // Pre-populate full vault (all 4 verbs at v3-chat-verb).
-        write_bundles_if_missing(&vault, &repo).unwrap();
-        // Wipe repo-root copy of one verb
+        // Pre-populate full vault + repo-root (8 bundles).
+        write_bundles_if_missing(&vault, &repo, true).unwrap();
         fs::remove_file(skill_bundle_path(&repo, "query")).unwrap();
-        // Re-run: vault all AlreadyPresent, repo-root: query Written, others
-        // AlreadyPresent
-        let outcomes = write_bundles_if_missing(&vault, &repo).unwrap();
+        let outcomes = write_bundles_if_missing(&vault, &repo, true).unwrap();
         assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent); // vault goal
         assert_eq!(outcomes[1], BundleOutcome::AlreadyPresent); // vault query
         assert_eq!(outcomes[2], BundleOutcome::AlreadyPresent); // vault fix
@@ -448,15 +470,36 @@ mod tests {
         assert_eq!(outcomes[7], BundleOutcome::AlreadyPresent); // repo chat
     }
 
+    /// Spec scenario: "Existing repo-root bundles are preserved across
+    /// re-init even without opt-in" — when the source repo already has
+    /// a repo-root copy from a prior install and the caller now runs
+    /// in default mode, the existing bundle stays untouched and is NOT
+    /// reflected in outcomes (the loop simply doesn't visit that path).
+    #[test]
+    fn default_mode_does_not_touch_pre_existing_repo_root_bundles() {
+        let tmp = TempDir::new().unwrap();
+        let (vault, repo) = dual_layout(&tmp);
+        // Pre-seed repo-root bundle from a hypothetical prior --with-repo-root-skills run.
+        let repo_goal = skill_bundle_path(&repo, "goal");
+        fs::create_dir_all(repo_goal.parent().unwrap()).unwrap();
+        let prior =
+            "---\nname: codebus-goal\ndescription: prior install\n---\n\n# prior body\n";
+        fs::write(&repo_goal, prior).unwrap();
+
+        let outcomes = write_bundles_if_missing(&vault, &repo, false).unwrap();
+        assert_eq!(outcomes, vec![BundleOutcome::Written; 4]);
+        // The pre-existing repo-root bundle SHALL be untouched (default
+        // mode never iterates over repo-root paths).
+        assert_eq!(fs::read_to_string(&repo_goal).unwrap(), prior);
+    }
+
     #[test]
     fn each_stub_body_uses_cwd_relative_paths_not_dot_codebus_prefixed() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
-        write_bundles_if_missing(&vault, &repo).unwrap();
+        write_bundles_if_missing(&vault, &repo, false).unwrap();
         for verb in VERBS {
             let body = fs::read_to_string(skill_bundle_path(&vault, verb)).unwrap();
-            // Hard-scope must reference cwd-relative paths, NOT `.codebus/`-prefixed
-            // (the agent's cwd IS the vault root, so `.codebus/` prefix is wrong)
             assert!(
                 !body.contains(".codebus/raw/code/") && !body.contains(".codebus/wiki/"),
                 "verb `{verb}` body uses .codebus/-prefixed paths but should be cwd-relative: {body}"
@@ -469,10 +512,6 @@ mod tests {
                 body.contains("`wiki/`"),
                 "verb `{verb}` missing cwd-relative wiki scope `wiki/`"
             );
-            // chat is read-only and uses a slightly different escape-prohibition
-            // wording ("MUST NOT read any path that escapes the cwd"); the
-            // other three verbs share the "read or write" form. Assert on
-            // the common substring instead of the exact phrase.
             assert!(
                 body.contains("MUST NOT") && body.contains("escapes the cwd"),
                 "verb `{verb}` missing escape-prohibition"
@@ -484,12 +523,7 @@ mod tests {
     fn each_stub_body_declares_path_translation_rule() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
-        write_bundles_if_missing(&vault, &repo).unwrap();
-        // Path translation is meaningful only for write-capable verbs
-        // (goal writes wiki frontmatter `sources[].path`; query/fix also
-        // touch the path layout). chat is read-only multi-turn — it never
-        // cites a source path in a wiki frontmatter, so the rule does not
-        // apply. Skip chat here.
+        write_bundles_if_missing(&vault, &repo, false).unwrap();
         for verb in VERBS.iter().filter(|v| **v != "chat") {
             let body = fs::read_to_string(skill_bundle_path(&vault, verb)).unwrap();
             assert!(body.contains("repo-relative logical path"));

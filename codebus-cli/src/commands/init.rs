@@ -23,12 +23,13 @@ use codebus_core::vault::source_gitignore::GitignoreOutcome;
 pub async fn run(
     repo: &Path,
     no_obsidian_register: bool,
+    with_repo_root_skills: bool,
     debug: bool,
     render_opts: &RenderOptions,
 ) -> ExitCode {
     if debug {
         eprintln!(
-            "[debug] init: repo={}, no_obsidian_register={no_obsidian_register}",
+            "[debug] init: repo={}, no_obsidian_register={no_obsidian_register}, with_repo_root_skills={with_repo_root_skills}",
             repo.display()
         );
     }
@@ -36,6 +37,7 @@ pub async fn run(
     let opts = InitOptions {
         no_obsidian_register,
         write_starter_config: true,
+        with_repo_root_skills,
     };
 
     match run_init(repo, &opts, |event| {

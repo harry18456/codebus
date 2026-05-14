@@ -97,6 +97,7 @@ pub fn run_goal(
         let init_opts = InitOptions {
             no_obsidian_register: options.no_obsidian_register,
             write_starter_config: true,
+            with_repo_root_skills: false,
         };
         // Silent auto-init: library doesn't render init banners. CLI's
         // direct `codebus init` invocation still emits banners via its

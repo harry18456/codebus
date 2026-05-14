@@ -25,6 +25,14 @@ struct Cli {
     #[arg(long = "no-obsidian-register", global = true)]
     no_obsidian_register: bool,
 
+    /// Also materialize codebus skill bundles at the source repo root
+    /// (`<repo>/.claude/skills/codebus-*/`) so a raw Claude Code session
+    /// opened at the repo root can invoke `/codebus-<verb>` directly.
+    /// Default off: the vault-internal copy alone covers the codebus
+    /// binary / GUI spawn paths.
+    #[arg(long = "with-repo-root-skills", global = true)]
+    with_repo_root_skills: bool,
+
     /// Skip the lint-and-fix phase for this invocation (overrides `lint.fix.enabled`).
     /// Affects both `goal` (post-agent fix phase) and `fix` (whole flow).
     #[arg(long = "no-fix", global = true)]
@@ -74,6 +82,7 @@ async fn main() -> ExitCode {
             commands::init::run(
                 &repo_default,
                 cli.no_obsidian_register,
+                cli.with_repo_root_skills,
                 cli.debug,
                 &render_opts,
             )

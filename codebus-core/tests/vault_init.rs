@@ -215,7 +215,7 @@ fn raw_sync_emits_warnings_for_known_pii_patterns() {
 fn source_gitignore_creates_when_missing_in_git_repo() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".git")).unwrap();
-    let outcome = ensure_codebus_in_gitignore(tmp.path()).unwrap();
+    let outcome = ensure_codebus_in_gitignore(tmp.path(), true).unwrap();
     assert_eq!(outcome, GitignoreOutcome::Created);
     let body = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
     // v3-lint added 4 required lines: .codebus/ + 3 skill bundle paths
@@ -230,7 +230,7 @@ fn source_gitignore_appends_to_existing() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".git")).unwrap();
     fs::write(tmp.path().join(".gitignore"), "node_modules\n").unwrap();
-    ensure_codebus_in_gitignore(tmp.path()).unwrap();
+    ensure_codebus_in_gitignore(tmp.path(), true).unwrap();
     let body = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
     assert!(body.starts_with("node_modules\n"));
     assert!(body.contains(".codebus/\n"));
@@ -240,7 +240,7 @@ fn source_gitignore_appends_to_existing() {
 #[test]
 fn source_gitignore_skips_non_git_directory() {
     let tmp = TempDir::new().unwrap();
-    let outcome = ensure_codebus_in_gitignore(tmp.path()).unwrap();
+    let outcome = ensure_codebus_in_gitignore(tmp.path(), true).unwrap();
     assert_eq!(outcome, GitignoreOutcome::NotAGitRepo);
     assert!(!tmp.path().join(".gitignore").exists());
 }
@@ -448,7 +448,7 @@ fn dual_layout(tmp: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
 fn skill_bundles_creates_eight_outcomes_no_lint_at_either_location() {
     let tmp = TempDir::new().unwrap();
     let (vault, repo) = dual_layout(&tmp);
-    let outcomes = skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
+    let outcomes = skill_bundle::write_bundles_if_missing(&vault, &repo, true).unwrap();
     // v3-chat-verb: 4 verbs (goal/query/fix/chat) × 2 locations = 8 outcomes.
     assert_eq!(outcomes.len(), 8);
     for outcome in &outcomes {
@@ -475,7 +475,7 @@ fn skill_bundles_creates_eight_outcomes_no_lint_at_either_location() {
 fn skill_bundle_stub_content_has_required_format_at_both_locations() {
     let tmp = TempDir::new().unwrap();
     let (vault, repo) = dual_layout(&tmp);
-    skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
+    skill_bundle::write_bundles_if_missing(&vault, &repo, true).unwrap();
     for verb in VERBS {
         for base in [&vault, &repo] {
             let path = base.join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
@@ -501,7 +501,7 @@ fn skill_bundle_stub_content_has_required_format_at_both_locations() {
 fn skill_bundle_stub_body_declares_hard_scope() {
     let tmp = TempDir::new().unwrap();
     let (vault, repo) = dual_layout(&tmp);
-    skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
+    skill_bundle::write_bundles_if_missing(&vault, &repo, true).unwrap();
     for verb in VERBS {
         let path = vault.join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
         let body = fs::read_to_string(&path).unwrap();
@@ -532,7 +532,7 @@ fn skill_bundle_stub_body_declares_hard_scope() {
 fn skill_bundle_stub_body_declares_path_translation_rule() {
     let tmp = TempDir::new().unwrap();
     let (vault, repo) = dual_layout(&tmp);
-    skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
+    skill_bundle::write_bundles_if_missing(&vault, &repo, true).unwrap();
     // Path translation is meaningful only for write-capable verbs; chat is
     // multi-turn read-only and never cites a source path in wiki frontmatter,
     // so the rule does not apply.
@@ -555,7 +555,7 @@ fn skill_bundle_write_if_missing_preserves_existing_at_each_location() {
         "---\nname: codebus-goal\n---\nuser custom",
     )
     .unwrap();
-    let outcomes = skill_bundle::write_bundles_if_missing(&vault, &repo).unwrap();
+    let outcomes = skill_bundle::write_bundles_if_missing(&vault, &repo, true).unwrap();
     // Vault: goal preserved (idx 0), query/fix written (idx 1, 2)
     assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent);
     assert_eq!(outcomes[1], BundleOutcome::Written);

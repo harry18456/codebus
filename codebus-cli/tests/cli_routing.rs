@@ -145,10 +145,10 @@ fn bare_invocation_routes_to_init_handler_and_creates_per_project_bundles() {
     assert!(stdout.contains("駛入"), "missing Start banner: {stdout}");
     assert!(stdout.contains("下車"), "missing Done banner: {stdout}");
     assert!(tmp.path().join(".codebus").is_dir());
-    // v3-lint: skill bundles are written at BOTH locations (vault-internal
-    // + repo-root) so both CLI-spawn-with-cwd-vault AND user-direct-from-
-    // repo-root paths discover the skill.
-    for verb in ["goal", "query", "fix"] {
+    // v3-skill-bundles-vault-only: default `codebus init` writes only the
+    // vault-internal copies. Repo-root copies are opt-in via the
+    // `--with-repo-root-skills` flag (covered by separate test cases).
+    for verb in ["goal", "query", "fix", "chat"] {
         let vault_path = tmp
             .path()
             .join(".codebus/.claude/skills")
@@ -164,8 +164,8 @@ fn bare_invocation_routes_to_init_handler_and_creates_per_project_bundles() {
             .join(format!("codebus-{verb}"))
             .join("SKILL.md");
         assert!(
-            repo_path.exists(),
-            "missing repo-root bundle for {verb}: {repo_path:?}"
+            !repo_path.exists(),
+            "repo-root bundle for {verb} MUST NOT exist in default mode: {repo_path:?}"
         );
     }
     // v3-fix-trust-agent: vault-internal settings.json with PreToolUse Bash hook.
@@ -961,4 +961,99 @@ fn cli_does_not_call_run_fix_loop_directly() {
          delegate via codebus_core::verb::{{goal,fix}}::run_*. \
          Forbidden references found in: {hits:?}"
     );
+}
+
+// === v3-skill-bundles-vault-only: `--with-repo-root-skills` flag ===
+
+/// Spec scenario: "Init default creates only vault-internal skill bundles"
+/// — `codebus init <repo>` without the flag writes only the 4 vault-internal
+/// SKILL.md files and adds NO `.claude/skills/codebus-*/` patterns to the
+/// source `.gitignore`.
+#[test]
+fn init_without_flag_writes_only_vault_internal_via_cli() {
+    let repo = TempDir::new().unwrap();
+    // Pretend this is a git repo so source_gitignore mutation fires.
+    std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+
+    let output = run_init(repo.path());
+    assert!(
+        output.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Vault-internal: 4 SKILL.md present.
+    for verb in ["goal", "query", "fix", "chat"] {
+        let p = repo
+            .path()
+            .join(".codebus/.claude/skills")
+            .join(format!("codebus-{verb}"))
+            .join("SKILL.md");
+        assert!(p.exists(), "vault-internal SKILL missing for {verb}: {p:?}");
+    }
+    // Repo-root: nothing.
+    for verb in ["goal", "query", "fix", "chat"] {
+        let p = repo
+            .path()
+            .join(".claude/skills")
+            .join(format!("codebus-{verb}"))
+            .join("SKILL.md");
+        assert!(
+            !p.exists(),
+            "repo-root SKILL must NOT exist for {verb} without flag: {p:?}"
+        );
+    }
+    // .gitignore: contains `.codebus/` but NOT `.claude/skills/codebus-*` patterns.
+    let gi = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap();
+    assert!(gi.contains(".codebus/"), ".gitignore must list .codebus/");
+    assert!(
+        !gi.contains(".claude/skills/codebus-"),
+        ".gitignore must NOT list `.claude/skills/codebus-*` patterns in default mode, got:\n{gi}"
+    );
+}
+
+/// Spec scenario: "Init with --with-repo-root-skills creates both locations"
+/// + "Init adds repo-root skill bundle gitignore patterns only with opt-in".
+#[test]
+fn init_with_repo_root_skills_writes_both_locations_via_cli() {
+    let repo = TempDir::new().unwrap();
+    std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+    let home = TempDir::new().unwrap();
+
+    let output = Command::new(BIN)
+        .args(["init", "--no-obsidian-register", "--with-repo-root-skills"])
+        .env("CODEBUS_HOME", home.path())
+        .current_dir(repo.path())
+        .output()
+        .expect("run codebus init --with-repo-root-skills");
+    assert!(
+        output.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Both locations populated.
+    for verb in ["goal", "query", "fix", "chat"] {
+        let vault_p = repo
+            .path()
+            .join(".codebus/.claude/skills")
+            .join(format!("codebus-{verb}"))
+            .join("SKILL.md");
+        let repo_p = repo
+            .path()
+            .join(".claude/skills")
+            .join(format!("codebus-{verb}"))
+            .join("SKILL.md");
+        assert!(vault_p.exists(), "vault-internal SKILL missing for {verb}");
+        assert!(repo_p.exists(), "repo-root SKILL missing for {verb}");
+    }
+    // .gitignore now contains the 4 skill-bundle patterns.
+    let gi = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap();
+    for verb in ["goal", "query", "fix", "chat"] {
+        let pat = format!(".claude/skills/codebus-{verb}/");
+        assert!(
+            gi.contains(&pat),
+            ".gitignore must list `{pat}` after opt-in, got:\n{gi}"
+        );
+    }
 }
