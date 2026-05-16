@@ -445,12 +445,12 @@ fn dual_layout(tmp: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
-fn skill_bundles_creates_eight_outcomes_no_lint_at_either_location() {
+fn skill_bundles_creates_ten_outcomes_no_lint_at_either_location() {
     let tmp = TempDir::new().unwrap();
     let (vault, repo) = dual_layout(&tmp);
     let outcomes = skill_bundle::write_bundles_if_missing(&vault, &repo, true).unwrap();
-    // v3-chat-verb: 4 verbs (goal/query/fix/chat) × 2 locations = 8 outcomes.
-    assert_eq!(outcomes.len(), 8);
+    // v3-app-quiz: 5 verbs (goal/query/fix/chat/quiz) × 2 locations = 10.
+    assert_eq!(outcomes.len(), 10);
     for outcome in &outcomes {
         assert_eq!(*outcome, BundleOutcome::Written);
     }
@@ -485,9 +485,14 @@ fn skill_bundle_stub_content_has_required_format_at_both_locations() {
             assert!(body.contains("description:"));
             assert!(body.contains("CLAUDE.md"));
             assert!(!body.contains(".codebus/CLAUDE.md"));
-            // chat SKILL is intentionally longer than goal/query/fix; widen
-            // the line cap accordingly.
-            let line_cap = if *verb == "chat" { 120 } else { 80 };
+            // chat and quiz SKILLs are intentionally longer than
+            // goal/query/fix (distinct read-only structures); widen the
+            // line cap accordingly.
+            let line_cap = if *verb == "chat" || *verb == "quiz" {
+                120
+            } else {
+                80
+            };
             assert!(
                 body.lines().count() <= line_cap,
                 "verb `{verb}` SKILL.md too long ({} > {line_cap})",
@@ -533,10 +538,11 @@ fn skill_bundle_stub_body_declares_path_translation_rule() {
     let tmp = TempDir::new().unwrap();
     let (vault, repo) = dual_layout(&tmp);
     skill_bundle::write_bundles_if_missing(&vault, &repo, true).unwrap();
-    // Path translation is meaningful only for write-capable verbs; chat is
-    // multi-turn read-only and never cites a source path in wiki frontmatter,
-    // so the rule does not apply.
-    for verb in VERBS.iter().filter(|v| **v != "chat") {
+    // Path translation is meaningful only for write-capable verbs; chat
+    // (multi-turn read-only) and quiz (read-only, caller-owned
+    // frontmatter) never cite a source path in wiki frontmatter, so the
+    // rule does not apply to them.
+    for verb in VERBS.iter().filter(|v| **v != "chat" && **v != "quiz") {
         let path = vault.join(format!(".claude/skills/codebus-{verb}/SKILL.md"));
         let body = fs::read_to_string(&path).unwrap();
         assert!(body.contains("repo-relative logical path"));

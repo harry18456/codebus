@@ -29,6 +29,7 @@ pub mod chat;
 pub mod fix;
 pub mod goal;
 pub mod query;
+pub mod quiz;
 
 pub use error::VerbError;
 pub use event::{VerbBanner, VerbEvent, VerbLifecycleEvent};

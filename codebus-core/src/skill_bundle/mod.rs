@@ -1,5 +1,7 @@
-//! Write 3 skill bundle stubs to TWO locations per v3-lint Skill Bundle Layout:
-//! - vault-internal: `<repo>/.codebus/.claude/skills/codebus-{goal,query,fix}/`
+//! Write the skill bundle stubs to TWO locations per the Skill Bundle
+//! Layout requirement. As of v3-app-quiz there are five verbs
+//! (goal/query/fix/chat/quiz):
+//! - vault-internal: `<repo>/.codebus/.claude/skills/codebus-{goal,query,fix,chat,quiz}/`
 //!   (used when CLI spawns agent with cwd=vault root)
 //! - repo-root: `<repo>/.claude/skills/codebus-{goal,query,fix}/`
 //!   (used when user opens Claude Code at source repo root and invokes
@@ -23,7 +25,7 @@ pub enum BundleOutcome {
     AlreadyPresent,
 }
 
-pub const VERBS: &[&str] = &["goal", "query", "fix", "chat"];
+pub const VERBS: &[&str] = &["goal", "query", "fix", "chat", "quiz"];
 
 /// Materialize the skill bundle stubs at the vault-internal location, and
 /// optionally ALSO at the source repo-root location.
@@ -101,6 +103,12 @@ fn stub_content(verb: &str) -> String {
     // rather than shoe-horning it into the goal/query/fix shell.
     if verb == "chat" {
         return CHAT_SKILL_CONTENT.to_string();
+    }
+    // v3-app-quiz: quiz is also a distinct SKILL structure (two prompt
+    // modes, scope/no-match/violation line markers, wiki-only read scope,
+    // caller-owned frontmatter) — separate body like chat.
+    if verb == "quiz" {
+        return QUIZ_SKILL_CONTENT.to_string();
     }
     let description = match verb {
         "goal" => "Trigger codebus goal-ingest workflow on the active codebus vault",
@@ -312,6 +320,104 @@ Then continue normally explaining what the page would cover.
 The user's language SHALL override any other language in the conversation. Match the user's language for the answer body. The marker prefix `[CODEBUS_PROMOTE_SUGGESTION]` is always literal English (it is parsed by codebus CLI, not displayed to the user verbatim); only the `<reason>` portion follows the user's language.
 ";
 
+/// v3-app-quiz `Quiz Skill Bundle Content` requirement. Production form of
+/// the spike v0 draft, corrected to design D4: the agent emits ONLY the
+/// question body (no frontmatter at all) — `quiz_id` / `topic` /
+/// `generation_token_usage` / `planned_pages` are caller-injected on
+/// persistence (spike ❾ found LLM-authored `quiz_id` unreliable). Two
+/// prompt modes, three line markers, wiki-only read scope, Language
+/// Override. raw-scope enforcement is prompt-only (spike ❽).
+const QUIZ_SKILL_CONTENT: &str = r#"---
+name: codebus-quiz
+description: Trigger codebus read-only quiz workflow on the active codebus vault
+---
+
+# codebus-quiz
+
+Trigger this skill when the user types `/codebus-quiz` (typically the codebus binary spawns the agentic CLI with cwd at this vault root for you).
+
+## Schema rules
+
+The current working directory is the codebus vault root. Read `CLAUDE.md` here for taxonomy, frontmatter, and wikilinks rules — that file is the single source of truth for vault structure.
+
+## Read-Only Invariant
+
+This workflow is **strictly read-only**. The agent MUST NOT call `Write`, `Edit`, `NotebookEdit`, or any tool whose name begins with `mcp_`. The binary-layer toolset is gated at spawn time (`--tools Read,Glob,Grep`); the `mcp_*` family is NOT covered by that flag and is forbidden only by this prompt-layer constraint. Treat this rule as load-bearing even when an `mcp_*` tool appears available.
+
+## Hard scope
+
+Read scope: `wiki/` (relative to cwd) — wiki pages ONLY. You MUST NOT read `raw/`, `raw/code/`, `log/`, or any path that escapes the cwd (no `..`, no absolute paths). The user's source-code mirror under `raw/` is explicitly off-limits for the quiz workflow.
+
+If the user prompt asks you to look at source code or `raw/`, refuse and redirect to the corresponding `wiki/` page — do NOT issue any tool call whose path resolves under `raw/`.
+
+## Two modes
+
+The user prompt begins with one of two mode keywords. Pick the mode by the prefix; treat the rest of the prompt as the mode payload.
+
+### Mode A — `plan: <topic>`
+
+Given a free-text learning topic, determine which `wiki/` pages a quiz on that topic should draw from. You MAY use Glob to enumerate `wiki/**/*.md` and Read to skim candidate pages.
+
+Emit, as the FIRST line of your response (the message's first character SHALL be `[`), exactly one of:
+
+    [CODEBUS_QUIZ_SCOPE] <wiki/path>, <wiki/path>, ...
+
+Rules for the scope marker:
+- First line, column 0, at most once.
+- Paths relative to the vault root, each starting with `wiki/` (e.g. `wiki/modules/auth-middleware.md`).
+- 2-5 pages, most directly relevant first, comma-space separated.
+- After the marker line you MAY emit one short rationale paragraph (no more than 60 words). No further content.
+
+If no `wiki/` page covers the topic, emit instead and then stop:
+
+    [CODEBUS_QUIZ_NO_MATCH] <short reason, no more than 20 words>
+
+### Mode B — `generate: pages=[<path1>,<path2>,...] count=<N>`
+
+Given a fixed page list and question count, produce the quiz body. Read each listed page. You MAY also Read pages those pages wikilink to for context.
+
+Emit ONLY the question body — NO frontmatter, NO code fence, NO surrounding ``` markers. The body is exactly `<N>` question sections in this shape:
+
+    ## Q1. <stem>
+
+    - A) <choice>
+    - B) <choice>
+    - C) <choice>
+    - D) <choice>
+
+    ## Answer: <A|B|C|D>
+
+    ## Explanation: <1-3 sentences citing source via [[slug]] wikilink>
+
+    ## Q2. <stem>
+    ...
+
+Rules:
+- Exactly `<N>` `## Q<i>.` sections, numbered 1 through N.
+- Exactly 4 choices labelled `A)` through `D)` per question.
+- Exactly one `## Answer: X` (X is A/B/C/D) and one `## Explanation:` (no more than 60 words, citing `[[slug]]`) per question.
+- Questions test understanding, not trivia, and MUST be answerable from the listed pages.
+- Distractors must be plausible — wrong answers reflect realistic misunderstandings.
+
+## Caller-owned frontmatter
+
+You MUST NOT author `quiz_id`, `topic`, `trigger`, `planned_pages`, `generation_token_usage`, `events_log`, or any YAML frontmatter block. The caller (codebus CLI / GUI) injects all frontmatter on persistence. Your Mode B output starts directly at `## Q1.`.
+
+## Language Override
+
+- All markers and structural tokens are ALWAYS literal English (`[CODEBUS_QUIZ_SCOPE]`, `[CODEBUS_QUIZ_NO_MATCH]`, `[CODEBUS_QUIZ_VIOLATION]`, `## Answer:`, `## Explanation:`).
+- Question stems, choices, explanations, and the no-match reason follow the language of the quizzed wiki pages (auto-detect; if mixed, prefer the dominant language).
+
+## Forbidden behaviors
+
+- Reading any file under `raw/`, `log/`, or outside `wiki/`. If compelled, emit `[CODEBUS_QUIZ_VIOLATION] <attempted-path>` as the first line and stop.
+- Mode A emitting anything before the `[CODEBUS_QUIZ_SCOPE]` / `[CODEBUS_QUIZ_NO_MATCH]` line.
+- Mode B without a `pages=[...]` input list (refuse and ask for an explicit page list).
+- Mode B emitting any frontmatter or wrapping the body in a code fence.
+- Generating questions that need external knowledge absent from the listed pages.
+- Generating fewer or more than `count=N` questions.
+"#;
+
 const FIX_WORKFLOW: &str = "## Workflow (self-directed repair)
 
 When this skill is activated, follow these steps:
@@ -363,11 +469,12 @@ mod tests {
     /// outcomes covering the 4 verbs at the vault-internal location,
     /// and zero files at the repo-root location.
     #[test]
-    fn write_bundles_default_vault_only_returns_four_outcomes() {
+    fn write_bundles_default_vault_only_returns_five_outcomes() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
         let outcomes = write_bundles_if_missing(&vault, &repo, false).unwrap();
-        assert_eq!(outcomes, vec![BundleOutcome::Written; 4]);
+        // v3-app-quiz: 5 verbs (goal/query/fix/chat/quiz), vault-only.
+        assert_eq!(outcomes, vec![BundleOutcome::Written; 5]);
         for verb in VERBS {
             assert!(
                 skill_bundle_path(&vault, verb).exists(),
@@ -385,11 +492,12 @@ mod tests {
     /// `write_repo_root: true` returns 8 outcomes, all files exist, and
     /// the vault / repo-root pairs are byte-identical per verb.
     #[test]
-    fn write_bundles_with_repo_root_returns_eight_outcomes_byte_identical() {
+    fn write_bundles_with_repo_root_returns_ten_outcomes_byte_identical() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
         let outcomes = write_bundles_if_missing(&vault, &repo, true).unwrap();
-        assert_eq!(outcomes, vec![BundleOutcome::Written; 8]);
+        // v3-app-quiz: 5 verbs × 2 locations = 10 outcomes.
+        assert_eq!(outcomes, vec![BundleOutcome::Written; 10]);
         for verb in VERBS {
             for base in [&vault, &repo] {
                 let p = skill_bundle_path(base, verb);
@@ -403,7 +511,12 @@ mod tests {
                 let body = fs::read_to_string(&p).unwrap();
                 assert!(body.starts_with("---\n"));
                 assert!(body.contains(&format!("name: codebus-{verb}")));
-                let line_cap = if *verb == "chat" { 120 } else { 80 };
+                // chat and quiz are distinct, longer read-only structures.
+                let line_cap = if *verb == "chat" || *verb == "quiz" {
+                    120
+                } else {
+                    80
+                };
                 assert!(
                     body.lines().count() <= line_cap,
                     "verb `{verb}` SKILL too long ({} > {line_cap})",
@@ -456,18 +569,21 @@ mod tests {
     fn write_if_missing_only_fills_missing_repo_root_when_vault_exists() {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
-        // Pre-populate full vault + repo-root (8 bundles).
+        // Pre-populate full vault + repo-root (v3-app-quiz: 10 bundles).
         write_bundles_if_missing(&vault, &repo, true).unwrap();
         fs::remove_file(skill_bundle_path(&repo, "query")).unwrap();
         let outcomes = write_bundles_if_missing(&vault, &repo, true).unwrap();
+        // Order: vault loop over VERBS (0-4), then repo loop (5-9).
         assert_eq!(outcomes[0], BundleOutcome::AlreadyPresent); // vault goal
         assert_eq!(outcomes[1], BundleOutcome::AlreadyPresent); // vault query
         assert_eq!(outcomes[2], BundleOutcome::AlreadyPresent); // vault fix
         assert_eq!(outcomes[3], BundleOutcome::AlreadyPresent); // vault chat
-        assert_eq!(outcomes[4], BundleOutcome::AlreadyPresent); // repo goal
-        assert_eq!(outcomes[5], BundleOutcome::Written); // repo query (refilled)
-        assert_eq!(outcomes[6], BundleOutcome::AlreadyPresent); // repo fix
-        assert_eq!(outcomes[7], BundleOutcome::AlreadyPresent); // repo chat
+        assert_eq!(outcomes[4], BundleOutcome::AlreadyPresent); // vault quiz
+        assert_eq!(outcomes[5], BundleOutcome::AlreadyPresent); // repo goal
+        assert_eq!(outcomes[6], BundleOutcome::Written); // repo query (refilled)
+        assert_eq!(outcomes[7], BundleOutcome::AlreadyPresent); // repo fix
+        assert_eq!(outcomes[8], BundleOutcome::AlreadyPresent); // repo chat
+        assert_eq!(outcomes[9], BundleOutcome::AlreadyPresent); // repo quiz
     }
 
     /// Spec scenario: "Existing repo-root bundles are preserved across
@@ -487,7 +603,8 @@ mod tests {
         fs::write(&repo_goal, prior).unwrap();
 
         let outcomes = write_bundles_if_missing(&vault, &repo, false).unwrap();
-        assert_eq!(outcomes, vec![BundleOutcome::Written; 4]);
+        // v3-app-quiz: 5 verbs, vault-only default mode.
+        assert_eq!(outcomes, vec![BundleOutcome::Written; 5]);
         // The pre-existing repo-root bundle SHALL be untouched (default
         // mode never iterates over repo-root paths).
         assert_eq!(fs::read_to_string(&repo_goal).unwrap(), prior);
@@ -524,7 +641,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (vault, repo) = dual_layout(&tmp);
         write_bundles_if_missing(&vault, &repo, false).unwrap();
-        for verb in VERBS.iter().filter(|v| **v != "chat") {
+        // chat and quiz are distinct read-only structures that never cite
+        // a source path in wiki frontmatter, so the path-translation rule
+        // does not apply to them.
+        for verb in VERBS.iter().filter(|v| **v != "chat" && **v != "quiz") {
             let body = fs::read_to_string(skill_bundle_path(&vault, verb)).unwrap();
             assert!(body.contains("repo-relative logical path"));
             assert!(body.contains("NOT the mirrored path"));
@@ -821,5 +941,69 @@ mod tests {
         let body = stub_content("chat");
         assert!(body.contains("`Write`"));
         assert!(body.contains("`Edit`"));
+    }
+
+    /// v3-app-quiz task 3.1 — executable "content review against spec"
+    /// for the `Quiz Skill Bundle Content` requirement. Each assertion
+    /// pins a spec/D4 clause so a future edit cannot silently drop it.
+    #[test]
+    fn stub_content_quiz_satisfies_skill_bundle_spec() {
+        let body = stub_content("quiz");
+
+        // frontmatter name/description
+        assert!(body.contains("name: codebus-quiz"));
+
+        // wiki-only read scope; raw/log/cwd-escape forbidden
+        assert!(body.contains("`wiki/`"));
+        assert!(body.contains("MUST NOT read `raw/`, `raw/code/`, `log/`"));
+
+        // two prompt modes
+        assert!(body.contains("`plan: <topic>`"));
+        assert!(body.contains("`generate: pages=["));
+
+        // three line markers (literal English)
+        assert!(body.contains("[CODEBUS_QUIZ_SCOPE]"));
+        assert!(body.contains("[CODEBUS_QUIZ_NO_MATCH]"));
+        assert!(body.contains("[CODEBUS_QUIZ_VIOLATION]"));
+
+        // quiz-md question structure
+        assert!(body.contains("## Q1."));
+        assert!(body.contains("- A) <choice>"));
+        assert!(body.contains("## Answer: <A|B|C|D>"));
+        assert!(body.contains("## Explanation:"));
+        assert!(body.contains("[[slug]]"));
+
+        // design D4: agent must NOT author frontmatter (caller-owned);
+        // no code fence around the body
+        assert!(body.contains("MUST NOT author `quiz_id`"));
+        assert!(body.contains("caller (codebus CLI / GUI) injects all frontmatter"));
+        assert!(body.contains("NO frontmatter, NO code fence"));
+
+        // Language Override: markers always English, content follows page
+        assert!(body.contains("Language Override"));
+        assert!(body.contains("ALWAYS literal English"));
+
+        // read-only tool gate + mcp prompt-layer exclusion
+        assert!(body.contains("`Write`"));
+        assert!(body.contains("`Edit`"));
+        assert!(body.contains("`NotebookEdit`"));
+        assert!(body.contains("mcp_"));
+    }
+
+    /// Spike v0 → production correction: the quiz SKILL must NOT instruct
+    /// the agent to emit a `quiz_id:` / `generation_token_usage:`
+    /// frontmatter block (design D4 — caller owns frontmatter; spike ❾
+    /// found LLM-authored quiz_id unreliable).
+    #[test]
+    fn stub_content_quiz_does_not_instruct_agent_frontmatter() {
+        let body = stub_content("quiz");
+        assert!(
+            !body.contains("quiz_id: <ISO timestamp"),
+            "quiz SKILL must not template an agent-authored quiz_id frontmatter"
+        );
+        assert!(
+            !body.contains("generation_token_usage:\n  input:"),
+            "quiz SKILL must not template agent-authored token usage frontmatter"
+        );
     }
 }

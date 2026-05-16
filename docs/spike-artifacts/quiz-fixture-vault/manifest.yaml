@@ -1,0 +1,4 @@
+schema_version: 1
+vault_name: quiz-fixture-vault
+created: 2026-05-15
+purpose: v3-app-quiz spike fixture (simplified web auth)

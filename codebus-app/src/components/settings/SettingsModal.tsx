@@ -117,11 +117,16 @@ export function SettingsModal({
 
   const safeConfig = (config ?? {}) as {
     app?: { quiz?: { pass_threshold?: number; default_length?: number } }
+    quiz?: { default_length?: number }
     pii?: { scanner?: string }
     log?: { sink?: string; dir?: string }
   }
   const passThreshold = safeConfig.app?.quiz?.pass_threshold ?? 80
-  const defaultLength = safeConfig.app?.quiz?.default_length ?? 5
+  // default_length moved to the shared top-level `quiz.*` namespace
+  // (v3-app-quiz). Prefer the shared key; fall back to a legacy
+  // app.quiz.default_length still present in an un-migrated config; then 5.
+  const defaultLength =
+    safeConfig.quiz?.default_length ?? safeConfig.app?.quiz?.default_length ?? 5
   const claudeCode = getClaudeCodeBlock()
   const claudeCodeErrors = validateClaudeCodeBlock(claudeCode)
   const claudeCodeValid = claudeCodeErrors.length === 0
@@ -348,7 +353,7 @@ export function SettingsModal({
                 step={1}
                 onValueChange={([v]) =>
                   update({
-                    app: { quiz: { default_length: v } } as Record<string, unknown>,
+                    quiz: { default_length: v } as Record<string, unknown>,
                   } as never)
                 }
                 className="flex-1"
@@ -363,8 +368,8 @@ export function SettingsModal({
                 isDefault={defaultLength === FIELD_DEFAULTS.defaultLength}
                 onReset={() =>
                   update({
-                    app: {
-                      quiz: { default_length: FIELD_DEFAULTS.defaultLength },
+                    quiz: {
+                      default_length: FIELD_DEFAULTS.defaultLength,
                     } as Record<string, unknown>,
                   } as never)
                 }

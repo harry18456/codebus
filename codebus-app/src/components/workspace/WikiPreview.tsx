@@ -3,12 +3,26 @@ import type { ComponentPropsWithoutRef, ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
+import { Button } from "@/components/ui/button"
 import { transformBodyWikilinks } from "@/lib/milkdown-wikilink"
 import { useWikiStore } from "@/store/wiki"
 
 interface WikiPreviewProps {
   vaultPath: string
   body: string | null
+  /**
+   * v3-app-quiz task 5.3 — invoked when the user clicks
+   * `[Quiz me on this]` on a wiki **content** page preview. Receives
+   * the current page path. Nav pages (`index.md` / `log.md`) never
+   * render the control, so the callback is only ever called with a
+   * content page path.
+   */
+  onQuizMeOnThis?: (pagePath: string) => void
+}
+
+/** Nav pages are metadata, not content to quiz on (spec §4.5). */
+function isNavPage(path: string): boolean {
+  return path.endsWith("index.md") || path.endsWith("log.md")
 }
 
 /**
@@ -31,9 +45,14 @@ interface WikiPreviewProps {
  * routes through `useWikiStore.loadPage` rather than navigating
  * the browser.
  */
-export function WikiPreview({ vaultPath, body }: WikiPreviewProps) {
+export function WikiPreview({
+  vaultPath,
+  body,
+  onQuizMeOnThis,
+}: WikiPreviewProps) {
   const loadPage = useWikiStore((s) => s.loadPage)
   const pages = useWikiStore((s) => s.pages)
+  const currentPath = useWikiStore((s) => s.currentPath)
 
   const { transformed } = useMemo(
     () => transformBodyWikilinks(body ?? ""),
@@ -215,6 +234,16 @@ export function WikiPreview({ vaultPath, body }: WikiPreviewProps) {
       >
         {transformed}
         </ReactMarkdown>
+        {currentPath && !isNavPage(currentPath) && (
+          <div className="mt-10 border-t border-border pt-5">
+            <Button
+              data-testid="quiz-me-on-this"
+              onClick={() => onQuizMeOnThis?.(currentPath)}
+            >
+              Quiz me on this
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )

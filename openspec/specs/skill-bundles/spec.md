@@ -8,9 +8,9 @@ The materialization of three Claude Code skill bundles (`codebus-goal`, `codebus
 
 ### Requirement: Skill Bundle Layout
 
-The system SHALL create four skill bundles for each verb at the **vault-internal location** under `<repo>/.codebus/.claude/skills/codebus-{goal,query,fix,chat}/` by default. This location is discovered when the agentic CLI runs with cwd at the vault root (`<repo>/.codebus/`) — used by the `codebus goal`, `codebus query`, `codebus fix`, and `codebus chat` subcommands and by the `codebus-app` GUI when it spawns agents through `codebus_core::verb::*::run_*`.
+The system SHALL create five skill bundles for each verb at the **vault-internal location** under `<repo>/.codebus/.claude/skills/codebus-{goal,query,fix,chat,quiz}/` by default. This location is discovered when the agentic CLI runs with cwd at the vault root (`<repo>/.codebus/`) — used by the `codebus goal`, `codebus query`, `codebus fix`, `codebus chat`, and `codebus quiz` subcommands and by the `codebus-app` GUI when it spawns agents through `codebus_core::verb::*::run_*`.
 
-The system SHALL ALSO create the same four skill bundles at the **repo-root location** under `<repo>/.claude/skills/codebus-{goal,query,fix,chat}/` ONLY WHEN the caller explicitly requests it (via `codebus init --with-repo-root-skills`, or programmatically by passing `with_repo_root_skills: true` to `vault::init::run_init`'s `InitOptions`). The repo-root location is discovered when a user opens a Claude Code session with cwd at the source repository root and invokes `/codebus-goal`, `/codebus-query`, `/codebus-fix`, or `/codebus-chat` interactively — a power-user workflow distinct from the default GUI / CLI spawn path.
+The system SHALL ALSO create the same five skill bundles at the **repo-root location** under `<repo>/.claude/skills/codebus-{goal,query,fix,chat,quiz}/` ONLY WHEN the caller explicitly requests it (via `codebus init --with-repo-root-skills`, or programmatically by passing `with_repo_root_skills: true` to `vault::init::run_init`'s `InitOptions`). The repo-root location is discovered when a user opens a Claude Code session with cwd at the source repository root and invokes `/codebus-goal`, `/codebus-query`, `/codebus-fix`, `/codebus-chat`, or `/codebus-quiz` interactively — a power-user workflow distinct from the default GUI / CLI spawn path.
 
 Each bundle directory at each written location SHALL contain at minimum a `SKILL.md` file at its root. When both locations are written in the same init invocation, the SKILL.md content SHALL be byte-identical between the vault-internal and repo-root copies for each verb (the write helper produces the bytes once and writes the same buffer to both targets). When only the vault-internal location is written (the default), no byte-identity claim applies.
 
@@ -21,16 +21,16 @@ The source repository's `.gitignore` mutation step SHALL add `.claude/skills/cod
 #### Scenario: Init default creates only vault-internal skill bundles
 
 - **WHEN** init runs against `<repo>` with no existing skill bundles AND the caller does NOT request repo-root skills (default behavior; e.g., plain `codebus init <path>` or `codebus-app` add-vault flow)
-- **THEN** the system SHALL create `<repo>/.codebus/.claude/skills/codebus-goal/SKILL.md`, `<repo>/.codebus/.claude/skills/codebus-query/SKILL.md`, `<repo>/.codebus/.claude/skills/codebus-fix/SKILL.md`, AND `<repo>/.codebus/.claude/skills/codebus-chat/SKILL.md` AND SHALL NOT create any path under `<repo>/.claude/skills/codebus-*/`
+- **THEN** the system SHALL create `<repo>/.codebus/.claude/skills/codebus-goal/SKILL.md`, `<repo>/.codebus/.claude/skills/codebus-query/SKILL.md`, `<repo>/.codebus/.claude/skills/codebus-fix/SKILL.md`, `<repo>/.codebus/.claude/skills/codebus-chat/SKILL.md`, AND `<repo>/.codebus/.claude/skills/codebus-quiz/SKILL.md` AND SHALL NOT create any path under `<repo>/.claude/skills/codebus-*/`
 
 #### Scenario: Init with --with-repo-root-skills creates both locations
 
 - **WHEN** init runs against `<repo>` with no existing skill bundles AND the caller requests repo-root skills (e.g., `codebus init <path> --with-repo-root-skills`)
-- **THEN** the system SHALL create the four vault-internal SKILL.md files as in the default case AND SHALL ALSO create `<repo>/.claude/skills/codebus-goal/SKILL.md`, `<repo>/.claude/skills/codebus-query/SKILL.md`, `<repo>/.claude/skills/codebus-fix/SKILL.md`, AND `<repo>/.claude/skills/codebus-chat/SKILL.md`
+- **THEN** the system SHALL create the five vault-internal SKILL.md files as in the default case AND SHALL ALSO create `<repo>/.claude/skills/codebus-goal/SKILL.md`, `<repo>/.claude/skills/codebus-query/SKILL.md`, `<repo>/.claude/skills/codebus-fix/SKILL.md`, `<repo>/.claude/skills/codebus-chat/SKILL.md`, AND `<repo>/.claude/skills/codebus-quiz/SKILL.md`
 
 #### Scenario: Vault and repo-root SKILL.md content are byte-identical when both are written
 
-- **WHEN** init runs against `<repo>` with the repo-root-skills opt-in AND writes both the vault-internal and repo-root copies of the SKILL.md for any of the four verbs
+- **WHEN** init runs against `<repo>` with the repo-root-skills opt-in AND writes both the vault-internal and repo-root copies of the SKILL.md for any of the five verbs
 - **THEN** for each verb, the bytes of `<repo>/.codebus/.claude/skills/codebus-{verb}/SKILL.md` SHALL equal the bytes of `<repo>/.claude/skills/codebus-{verb}/SKILL.md`
 
 #### Scenario: Init does not create codebus-lint bundle at either location
@@ -43,45 +43,80 @@ The source repository's `.gitignore` mutation step SHALL add `.claude/skills/cod
 - **WHEN** init runs against `<repo>` (with or without the repo-root-skills opt-in)
 - **THEN** the system SHALL NOT create or modify any path under `~/.claude/skills/codebus-*/`
 
-#### Scenario: Init adds repo-root skill bundle gitignore patterns only with opt-in
-
-- **WHEN** init runs against `<repo>` with the repo-root-skills opt-in AND reaches the source-gitignore mutation step
-- **THEN** the source repository's `.gitignore` SHALL include patterns that exclude `<repo>/.claude/skills/codebus-goal/`, `<repo>/.claude/skills/codebus-query/`, `<repo>/.claude/skills/codebus-fix/`, AND `<repo>/.claude/skills/codebus-chat/` from source version control
-
-#### Scenario: Init does not add repo-root skill bundle gitignore patterns by default
-
-- **WHEN** init runs against `<repo>` without the repo-root-skills opt-in (default) AND reaches the source-gitignore mutation step
-- **THEN** the source repository's `.gitignore` SHALL NOT have repo-root `codebus-*` skill bundle exclusion patterns added by this mutation step (other unrelated mutation patterns are unaffected)
-
-#### Scenario: Skill bundle directory creation handles missing parents
-
-- **WHEN** init runs against `<repo>` whose `.codebus/.claude/` parent chain (or, when opted in, the `<repo>/.claude/` parent chain) does not yet exist
-- **THEN** the system SHALL create the needed parent chain before writing the SKILL.md files
-
-#### Scenario: Codebus-chat bundle materialized at vault-internal by default
-
-- **WHEN** init runs against `<repo>` with no existing `codebus-chat` skill bundle (default, no repo-root opt-in)
-- **THEN** the system SHALL create `<repo>/.codebus/.claude/skills/codebus-chat/SKILL.md` AND SHALL NOT create `<repo>/.claude/skills/codebus-chat/SKILL.md` AND the vault-internal content SHALL satisfy the `Chat Skill Bundle Content` requirement defined in the `chat-verb` capability
-
-#### Scenario: Existing repo-root bundles are preserved across re-init even without opt-in
-
-- **WHEN** init runs against `<repo>` whose `<repo>/.claude/skills/codebus-{verb}/SKILL.md` already exists from a prior install AND the current invocation does NOT pass the repo-root-skills opt-in
-- **THEN** the system SHALL NOT delete or modify the existing repo-root SKILL.md files (Write-If-Missing Semantics continue to apply per-path independently of the new flag)
-
 
 <!-- @trace
-source: v3-skill-bundles-vault-only
-updated: 2026-05-14
+source: v3-app-quiz
+updated: 2026-05-16
 code:
-  - codebus-cli/src/commands/init.rs
+  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/lib/ipc.ts
+  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
+  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
+  - codebus-app/src-tauri/src/ipc/quiz.rs
   - codebus-cli/src/main.rs
-  - codebus-app/src-tauri/src/ipc/vault_list.rs
+  - codebus-core/src/config/quiz.rs
+  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - docs/2026-05-15-v3-app-quiz-spike-plan.md
+  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
+  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
+  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
+  - codebus-core/src/verb/quiz.rs
+  - docs/v3-app-roadmap.md
+  - codebus-cli/src/commands/mod.rs
+  - codebus-core/src/config/claude_code.rs
+  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
+  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
+  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
+  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
+  - codebus-app/src-tauri/src/config.rs
+  - codebus-app/src/lib/quiz-parse.ts
   - codebus-core/src/skill_bundle/mod.rs
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
+  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
+  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
+  - codebus-app/src/components/workspace/QuizAnswering.tsx
+  - docs/2026-05-15-v3-app-quiz-discussion.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
+  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
+  - codebus-cli/src/commands/quiz.rs
+  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
+  - codebus-core/src/config/mod.rs
+  - codebus-core/src/log/events/sink.rs
+  - codebus-app/src/components/workspace/WikiPreview.tsx
+  - docs/spike-artifacts/spike-quiz-runbook.md
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-core/src/verb/mod.rs
+  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
+  - codebus-core/src/verb/event.rs
+  - codebus-app/src/components/settings/SettingsModal.tsx
+  - codebus-core/src/log/events/jsonl_sink.rs
+  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
+  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
+  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
+  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
   - codebus-core/src/vault/source_gitignore.rs
-  - codebus-core/src/verb/goal.rs
-  - codebus-core/src/vault/init.rs
+  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
+  - codebus-app/src/components/workspace/Workspace.tsx
+  - codebus-app/src-tauri/src/ipc/mod.rs
+  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
 tests:
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
   - codebus-core/tests/vault_init.rs
+  - codebus-cli/tests/bins/mock_claude.rs
+  - codebus-cli/tests/quiz_flow.rs
+  - codebus-app/src/components/workspace/WikiPreview.test.tsx
+  - codebus-core/tests/verb_library_surface.rs
+  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
+  - codebus-app/src-tauri/tests/keyring_ipc.rs
   - codebus-cli/tests/cli_routing.rs
 -->
 
@@ -320,4 +355,95 @@ code:
 tests:
   - codebus-cli/tests/cli_routing.rs
   - codebus-cli/tests/query_flow.rs
+-->
+
+---
+### Requirement: Quiz Skill Bundle Content
+
+The `codebus-quiz` SKILL.md SHALL declare a read scope of `wiki/` only and SHALL forbid reading `raw/`, `log/`, and any path escaping the vault root. It SHALL define two prompt modes selected by the prompt prefix: `plan:` (emit `[CODEBUS_QUIZ_SCOPE]` or `[CODEBUS_QUIZ_NO_MATCH]` as the first line, then stop) and `generate:` (emit the quiz markdown body). It SHALL require the `[CODEBUS_QUIZ_VIOLATION] <path>` marker when forced toward `raw/`. It SHALL forbid the agent from authoring `quiz_id`, `topic`, or `generation_token_usage`, and forbid wrapping the whole output in a code fence. Markers and structural tokens SHALL always be English; question stems, choices, and explanations SHALL follow the language of the quizzed wiki pages (Language Override).
+
+#### Scenario: Quiz bundle declares wiki-only read scope
+
+- **WHEN** the `codebus-quiz/SKILL.md` is materialized
+- **THEN** its body SHALL state that read scope is `wiki/` only AND SHALL explicitly forbid reading `raw/`
+
+#### Scenario: Quiz bundle defines plan and generate modes
+
+- **WHEN** the `codebus-quiz/SKILL.md` is materialized
+- **THEN** it SHALL define the `plan:` mode emitting `[CODEBUS_QUIZ_SCOPE]`/`[CODEBUS_QUIZ_NO_MATCH]` and the `generate:` mode emitting the question body without agent-authored frontmatter
+
+<!-- @trace
+source: v3-app-quiz
+updated: 2026-05-16
+code:
+  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/lib/ipc.ts
+  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
+  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
+  - codebus-app/src-tauri/src/ipc/quiz.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/config/quiz.rs
+  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - docs/2026-05-15-v3-app-quiz-spike-plan.md
+  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
+  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
+  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
+  - codebus-core/src/verb/quiz.rs
+  - docs/v3-app-roadmap.md
+  - codebus-cli/src/commands/mod.rs
+  - codebus-core/src/config/claude_code.rs
+  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
+  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
+  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
+  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
+  - codebus-app/src-tauri/src/config.rs
+  - codebus-app/src/lib/quiz-parse.ts
+  - codebus-core/src/skill_bundle/mod.rs
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
+  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
+  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
+  - codebus-app/src/components/workspace/QuizAnswering.tsx
+  - docs/2026-05-15-v3-app-quiz-discussion.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
+  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
+  - codebus-cli/src/commands/quiz.rs
+  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
+  - codebus-core/src/config/mod.rs
+  - codebus-core/src/log/events/sink.rs
+  - codebus-app/src/components/workspace/WikiPreview.tsx
+  - docs/spike-artifacts/spike-quiz-runbook.md
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-core/src/verb/mod.rs
+  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
+  - codebus-core/src/verb/event.rs
+  - codebus-app/src/components/settings/SettingsModal.tsx
+  - codebus-core/src/log/events/jsonl_sink.rs
+  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
+  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
+  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
+  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
+  - codebus-core/src/vault/source_gitignore.rs
+  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
+  - codebus-app/src/components/workspace/Workspace.tsx
+  - codebus-app/src-tauri/src/ipc/mod.rs
+  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
+tests:
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-core/tests/vault_init.rs
+  - codebus-cli/tests/bins/mock_claude.rs
+  - codebus-cli/tests/quiz_flow.rs
+  - codebus-app/src/components/workspace/WikiPreview.test.tsx
+  - codebus-core/tests/verb_library_surface.rs
+  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
+  - codebus-app/src-tauri/tests/keyring_ipc.rs
+  - codebus-cli/tests/cli_routing.rs
 -->

@@ -34,6 +34,7 @@ pub const SKILL_BUNDLE_IGNORE_LINES: &[&str] = &[
     ".claude/skills/codebus-query/",
     ".claude/skills/codebus-fix/",
     ".claude/skills/codebus-chat/",
+    ".claude/skills/codebus-quiz/",
 ];
 
 pub fn ensure_codebus_in_gitignore(

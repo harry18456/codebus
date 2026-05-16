@@ -42,6 +42,15 @@ pub trait EventsSink: Send + Sync {
     fn flush(&mut self) -> Result<(), LogError> {
         Ok(())
     }
+
+    /// The on-disk path this sink appends to, when it has one. Default
+    /// `None` for path-less sinks (e.g. the null sink). The jsonl sink
+    /// returns its resolved `events-<slug>.jsonl` path. Used by the
+    /// quiz verb to record an `events_log` pointer in the persisted
+    /// quiz frontmatter (v3-app-quiz design D4).
+    fn events_path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 #[cfg(test)]

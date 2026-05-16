@@ -269,4 +269,48 @@ describe("SettingsModal", () => {
       "5 questions",
     )
   })
+
+  it("reads legacy app.quiz.default_length via fallback and writes the shared quiz.* key", () => {
+    useSettingsStore.setState({
+      config: {
+        // Un-migrated legacy config: default_length still under app.quiz,
+        // no top-level quiz.* key yet.
+        app: { quiz: { pass_threshold: 80, default_length: 8 } },
+        claude_code: {
+          active: "system",
+          system: {
+            goal: { model: "opus-4-6", effort: "high" },
+            query: { model: "haiku-4-5", effort: "low" },
+            fix: { model: "sonnet-4-6", effort: "medium" },
+          },
+        },
+        pii: { scanner: "regex_basic" },
+        log: { sink: "~/.codebus/logs/" },
+      },
+      initialConfig: {
+        app: { quiz: { pass_threshold: 80, default_length: 8 } },
+      },
+      dirty: false,
+      loading: false,
+      saving: false,
+      error: null,
+    })
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+
+    // Legacy app.quiz.default_length is read via the fallback path.
+    expect(screen.getByTestId("quiz-length-value")).toHaveTextContent(
+      "8 questions",
+    )
+
+    // Reset writes the value to the shared top-level quiz.* namespace.
+    fireEvent.click(screen.getByTestId("reset-quiz-length"))
+    const cfg = useSettingsStore.getState().config as {
+      quiz?: { default_length?: number }
+      app?: { quiz?: { default_length?: number } }
+    }
+    expect(cfg.quiz?.default_length).toBe(5)
+    // The control does not touch app.* — the legacy value is dropped only
+    // later by the backend save migration, not by the frontend.
+    expect(cfg.app?.quiz?.default_length).toBe(8)
+  })
 })

@@ -87,6 +87,11 @@ export type IpcCommandName =
   | "read_wiki_page"
   | "spawn_chat_turn"
   | "cancel_chat_turn"
+  | "spawn_quiz_plan"
+  | "spawn_quiz_generate"
+  | "cancel_quiz"
+  | "list_quiz_attempts"
+  | "read_quiz_attempt"
 
 /**
  * Endpoint profile selector. Currently only `"azure"` is wired up; future
@@ -448,6 +453,8 @@ export type VerbLifecycleEvent =
   | { kind: "fix_iteration_start"; iteration: number }
   | { kind: "lint_final"; error_count: number; warn_count: number }
   | { kind: "promote_suggestion"; reason: string }
+  | { kind: "quiz_scope_planned"; pages: string[] }
+  | { kind: "quiz_no_match"; reason: string }
 
 /**
  * Top-level event emitted by `verb::*::run_*` orchestration. Frontend
@@ -594,6 +601,133 @@ export async function spawnChatTurn(
  */
 export async function cancelChatTurn(runId: ChatTurnRunId): Promise<void> {
   return invokeTyped<void>("cancel_chat_turn", { runId })
+}
+
+// ---- Quiz (v3-app-quiz task 5.2) ------------------------------------------
+
+/** Payload of one `quiz-stream` Tauri event tick (plan or generate). */
+export interface QuizStreamPayload {
+  run_id: string
+  event: VerbEvent
+}
+
+/**
+ * Terminal payload on `quiz-plan-terminal`. `result.kind` drives the
+ * frontend: `scope` → show the page list with confirm/revise controls;
+ * `no_match` → show the reason and stop (no generate, no file);
+ * `failed`/`cancelled` → surface the failure.
+ */
+export type QuizPlanResult =
+  | { kind: "scope"; pages: string[] }
+  | { kind: "no_match"; reason: string }
+  | { kind: "failed"; message: string }
+  | { kind: "cancelled" }
+
+export interface QuizPlanTerminalPayload {
+  run_id: string
+  result: QuizPlanResult
+}
+
+/**
+ * Terminal payload on `quiz-generate-terminal`. On success carries the
+ * fence-stripped `quiz_md` (for the answering view, task 5.4),
+ * `planned_pages`, and `events_log` (for history persistence, task 5.5).
+ */
+export type QuizGenerateResult =
+  | {
+      kind: "succeeded"
+      quiz_md: string
+      planned_pages: string[]
+      events_log: string | null
+      /** Persisted attempt path; null if the write failed (non-fatal). */
+      quiz_file: string | null
+    }
+  | { kind: "failed"; message: string }
+  | { kind: "cancelled" }
+
+/**
+ * Trigger provenance for `spawnQuizGenerate` — mapped server-side to the
+ * core `QuizTrigger` for slug + frontmatter (design D4/D7). Goal flow
+ * passes `ai_planned` with the topic; the wiki-preview Page flow passes
+ * `wiki_preview` with the target page path.
+ */
+export type QuizTriggerArg =
+  | { kind: "ai_planned"; topic: string }
+  | { kind: "wiki_preview"; target_page: string }
+
+export interface QuizGenerateTerminalPayload {
+  run_id: string
+  result: QuizGenerateResult
+}
+
+/**
+ * Start the quiz plan spawn (Goal flow). Streams `VerbEvent`s on
+ * `quiz-stream`; emits one `QuizPlanTerminalPayload` on
+ * `quiz-plan-terminal`. Does NOT start generation — the frontend
+ * interposes the confirm gate and calls `spawnQuizGenerate` separately.
+ */
+export async function spawnQuizPlan(
+  vaultPath: string,
+  topic: string,
+): Promise<string> {
+  return invokeTyped<string>("spawn_quiz_plan", { vaultPath, topic })
+}
+
+/**
+ * Start the quiz generate spawn against a confirmed page list. Streams
+ * `VerbEvent`s on `quiz-stream`; emits one `QuizGenerateTerminalPayload`
+ * on `quiz-generate-terminal`.
+ */
+export async function spawnQuizGenerate(
+  vaultPath: string,
+  pages: string[],
+  questionCount: number,
+  trigger: QuizTriggerArg,
+): Promise<string> {
+  return invokeTyped<string>("spawn_quiz_generate", {
+    vaultPath,
+    pages,
+    questionCount,
+    trigger,
+  })
+}
+
+/** Flip the cancel flag for a quiz plan/generate run. Idempotent. */
+export async function cancelQuiz(runId: string): Promise<void> {
+  return invokeTyped<void>("cancel_quiz", { runId })
+}
+
+/**
+ * One persisted quiz attempt's metadata (task 5.5). The frontend groups
+ * these by `slug` (page or topic). `path` opens the attempt markdown;
+ * `events_log` drives the view-generation-log affordance.
+ */
+export interface QuizAttemptMeta {
+  slug: string
+  quiz_id: string
+  trigger: string
+  topic: string | null
+  target_page: string | null
+  events_log: string | null
+  path: string
+}
+
+/**
+ * Scan `<vault>/.codebus/quiz/` and return attempt metadata, newest
+ * first. A missing quiz directory yields an empty list.
+ */
+export async function listQuizAttempts(
+  vaultPath: string,
+): Promise<QuizAttemptMeta[]> {
+  return invokeTyped<QuizAttemptMeta[]>("list_quiz_attempts", { vaultPath })
+}
+
+/** Read a persisted quiz attempt's markdown (path must be under quiz/). */
+export async function readQuizAttempt(
+  vaultPath: string,
+  path: string,
+): Promise<string> {
+  return invokeTyped<string>("read_quiz_attempt", { vaultPath, path })
 }
 
 /**

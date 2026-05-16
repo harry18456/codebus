@@ -15,7 +15,7 @@ use codebus_core::config::default_config_path;
 use codebus_core::config::endpoint::{ParseOutcome, parse_claude_code_yaml};
 
 use super::IpcResult;
-use crate::config::{AppConfig, read_app_config};
+use crate::config::{AppConfig, read_app_config, resolve_quiz_default_length};
 use crate::error::AppError;
 
 /// Frontend-facing payload. Mirrors the on-disk YAML shape as a JSON tree.
@@ -30,6 +30,7 @@ pub type GlobalConfig = serde_json::Value;
 fn default_payload() -> GlobalConfig {
     serde_json::json!({
         "app": serde_json::to_value(AppConfig::default()).unwrap(),
+        "quiz": { "default_length": codebus_core::config::quiz::DEFAULT_QUIZ_LENGTH },
     })
 }
 
@@ -58,6 +59,10 @@ pub(crate) fn load_global_config_at(path: &Path) -> IpcResult<GlobalConfig> {
         Err(err) => return Err(AppError::from(err)),
     };
     let _ = read_app_config(&payload)?;
+    // Validate the shared quiz.default_length (incl. a legacy
+    // app.quiz.default_length still on disk) so an out-of-range value
+    // surfaces on load rather than silently defaulting.
+    let _ = resolve_quiz_default_length(&payload)?;
     Ok(payload)
 }
 
@@ -65,6 +70,10 @@ pub(crate) fn save_global_config_at(path: &Path, payload: &GlobalConfig) -> IpcR
     // Validate first — surfaces `AppError::Invalid` / `ConfigParse` to the
     // caller without ever touching disk.
     let app_cfg = read_app_config(payload)?;
+    // Resolve the shared quiz length (migrating a legacy
+    // app.quiz.default_length forward) and reject an out-of-range value
+    // before any disk write.
+    let quiz_default_length = resolve_quiz_default_length(payload)?;
     // Also validate the `claude_code.*` block via codebus-core's
     // endpoint parser so an incomplete azure profile (active=azure with
     // empty base_url, deployment names, etc.) is rejected at write time
@@ -81,7 +90,15 @@ pub(crate) fn save_global_config_at(path: &Path, payload: &GlobalConfig) -> IpcR
         message: format!("app→json: {e}"),
     })?;
     if let Some(obj) = enriched.as_object_mut() {
+        // Enriched `app` comes from an AppConfig that no longer carries
+        // `default_length`, so a legacy `app.quiz.default_length` is
+        // dropped here. Write the resolved length to the shared top-level
+        // `quiz.*` key — this is the one-time migration landing point.
         obj.insert("app".to_string(), enriched_app);
+        obj.insert(
+            "quiz".to_string(),
+            serde_json::json!({ "default_length": quiz_default_length }),
+        );
     }
 
     if let Some(parent) = path.parent() {
@@ -177,7 +194,8 @@ mod tests {
         let path = config_path(&tmp);
         let payload = load_global_config_at(&path).unwrap();
         assert_eq!(payload["app"]["quiz"]["pass_threshold"], json!(80));
-        assert_eq!(payload["app"]["quiz"]["default_length"], json!(5));
+        // default_length moved out of app.* into the shared quiz.* key.
+        assert_eq!(payload["quiz"]["default_length"], json!(5));
     }
 
     #[test]
@@ -282,9 +300,9 @@ mod tests {
     fn save_with_partial_app_payload_enriches_to_full_yaml() {
         let tmp = TempDir::new().unwrap();
         let path = config_path(&tmp);
-        // Frontend may patch just `pass_threshold` — the on-disk YAML
-        // MUST still contain both fields after save so the next load does
-        // not stumble on a half-populated quiz section.
+        // Frontend may patch just `pass_threshold`. After save the on-disk
+        // YAML MUST carry the enriched `app.quiz.pass_threshold` AND the
+        // shared `quiz.default_length` so the next load is well-formed.
         let payload = json!({ "app": { "quiz": { "pass_threshold": 70 } } });
 
         save_global_config_at(&path, &payload).unwrap();
@@ -293,12 +311,35 @@ mod tests {
         assert!(on_disk.contains("pass_threshold"));
         assert!(
             on_disk.contains("default_length"),
-            "save must enrich app.* with both fields, got: {on_disk}"
+            "save must write shared quiz.default_length, got: {on_disk}"
         );
 
         let reloaded = load_global_config_at(&path).unwrap();
         assert_eq!(reloaded["app"]["quiz"]["pass_threshold"], json!(70));
-        assert_eq!(reloaded["app"]["quiz"]["default_length"], json!(5));
+        // default_length now lives in the shared quiz.* namespace.
+        assert_eq!(reloaded["quiz"]["default_length"], json!(5));
+    }
+
+    /// Migration: a stale pre-v3-app-quiz config with
+    /// `app.quiz.default_length` is migrated forward on save — the value
+    /// lands in the shared `quiz.default_length` and the legacy
+    /// `app.quiz.default_length` is dropped.
+    #[test]
+    fn save_migrates_legacy_app_default_length_to_shared_key() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        let legacy = json!({ "app": { "quiz": { "pass_threshold": 80, "default_length": 7 } } });
+
+        save_global_config_at(&path, &legacy).unwrap();
+        let reloaded = load_global_config_at(&path).unwrap();
+
+        assert_eq!(reloaded["quiz"]["default_length"], json!(7));
+        assert!(
+            reloaded["app"]["quiz"].get("default_length").is_none(),
+            "legacy app.quiz.default_length must be dropped, got: {}",
+            reloaded["app"]["quiz"]
+        );
+        assert_eq!(reloaded["app"]["quiz"]["pass_threshold"], json!(80));
     }
 
     #[test]

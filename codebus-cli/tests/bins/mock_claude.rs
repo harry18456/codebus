@@ -180,11 +180,113 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
 
+        // v3-app-quiz: two-shot quiz. The behavior inspects the prompt
+        // arg to tell the plan spawn (`/codebus-quiz plan:`) from the
+        // generate spawn (`/codebus-quiz generate:`) since codebus spawns
+        // claude once per phase with the same CODEBUS_MOCK_BEHAVIOR.
+        "quiz-goal-match" => {
+            let sid = session_id();
+            match quiz_mode(&args) {
+                QuizMode::Plan => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(
+                        "[CODEBUS_QUIZ_SCOPE] wiki/concepts/jwt-token-lifecycle.md, \
+                         wiki/modules/auth-middleware.md",
+                    );
+                    emit_quiz_result();
+                }
+                QuizMode::Generate | QuizMode::Unknown => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(MOCK_QUIZ_BODY);
+                    emit_quiz_result();
+                }
+            }
+            ExitCode::SUCCESS
+        }
+
+        // Plan spawn emits a no-match marker; run_quiz then performs no
+        // generate spawn, so only the plan invocation is ever made.
+        "quiz-no-match" => {
+            let sid = session_id();
+            emit_quiz_init(&sid);
+            emit_assistant_text("[CODEBUS_QUIZ_NO_MATCH] mock: vault does not cover that topic");
+            emit_quiz_result();
+            ExitCode::SUCCESS
+        }
+
+        // Plan returns scope (like quiz-goal-match); generate wraps the
+        // body in a ```markdown fence so the caller's tolerant fence
+        // strip can be asserted end-to-end.
+        "quiz-fenced" => {
+            let sid = session_id();
+            match quiz_mode(&args) {
+                QuizMode::Plan => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(
+                        "[CODEBUS_QUIZ_SCOPE] wiki/concepts/jwt-token-lifecycle.md, \
+                         wiki/modules/auth-middleware.md",
+                    );
+                    emit_quiz_result();
+                }
+                QuizMode::Generate | QuizMode::Unknown => {
+                    emit_quiz_init(&sid);
+                    // Use literal `\n` (JSON escape), not a raw newline —
+                    // a raw newline inside the JSON string is invalid and
+                    // the stream parser would skip the whole event.
+                    emit_assistant_text(&format!("```markdown\\n{MOCK_QUIZ_BODY}\\n```"));
+                    emit_quiz_result();
+                }
+            }
+            ExitCode::SUCCESS
+        }
+
         other => {
             eprintln!("mock-claude: unknown behavior `{other}`");
             ExitCode::from(2)
         }
     }
+}
+
+/// One well-formed quiz question body (no frontmatter, no fence) — the
+/// post-D4 shape the agent is instructed to emit. Integration tests
+/// assert the caller flow / persistence / exit code, not LLM question
+/// quality, so a single question suffices.
+const MOCK_QUIZ_BODY: &str = "## Q1. What does the quiz integration mock validate?\\n\\n- A) the language model\\n- B) the caller two-shot flow and persistence\\n- C) the network stack\\n- D) nothing\\n\\n## Answer: B\\n\\n## Explanation: The mock pins the caller plan/generate flow and frontmatter injection, see [[auth-middleware]].";
+
+#[derive(PartialEq)]
+enum QuizMode {
+    Plan,
+    Generate,
+    Unknown,
+}
+
+/// Classify the spawn by scanning argv for the `/codebus-quiz` slash
+/// command's mode prefix.
+fn quiz_mode(args: &[String]) -> QuizMode {
+    let joined = args.join(" ");
+    if joined.contains("/codebus-quiz plan:") {
+        QuizMode::Plan
+    } else if joined.contains("/codebus-quiz generate:") {
+        QuizMode::Generate
+    } else {
+        QuizMode::Unknown
+    }
+}
+
+fn emit_quiz_init(sid: &str) {
+    println!(
+        r#"{{"type":"system","subtype":"init","session_id":"{sid}","tools":["Read","Glob","Grep"]}}"#
+    );
+}
+
+fn emit_assistant_text(text: &str) {
+    println!(
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"{text}"}}]}}}}"#
+    );
+}
+
+fn emit_quiz_result() {
+    println!(r#"{{"type":"result","usage":{{"input_tokens":7,"output_tokens":4}}}}"#);
 }
 
 fn session_id() -> String {

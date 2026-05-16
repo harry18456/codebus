@@ -4,6 +4,7 @@
 //! - `lint.fix.*` — fix-loop config (see [`lint_fix`])
 //! - `pii.*` — PII scanner config (see [`pii`])
 //! - `claude_code.*` — per-verb agent model/effort (see [`claude_code`])
+//! - `quiz.*` — shared quiz length config (see [`quiz`])
 //!
 //! Each sub-module owns its own `Default`, loader, and forward-compat
 //! tolerance (missing file / missing section / missing field / unknown
@@ -19,6 +20,7 @@ pub mod keyring;
 pub mod lint_fix;
 pub mod log;
 pub mod pii;
+pub mod quiz;
 
 pub use claude_code::{
     LEGACY_MIGRATION_WARNING, ResolvedVerb, Verb, build_env_overrides, load_claude_code_config,
@@ -33,6 +35,7 @@ pub use keyring::KeyringError;
 pub use lint_fix::{LintFixConfig, load_lint_fix_config};
 pub use log::{LogConfig, load_log_config};
 pub use pii::{PiiConfig, PiiScannerKind, load_pii_config};
+pub use quiz::{QuizConfig, load_quiz_config};
 
 use std::path::PathBuf;
 

@@ -50,6 +50,9 @@ export function Workspace({ vault }: WorkspaceProps) {
   const wikiReset = useWikiStore((s) => s.reset)
 
   const [activeTab, setActiveTab] = useState<TabId>("goals")
+  // task 5.3 — when set (via wiki preview [Quiz me on this]), the Quiz
+  // tab consumes it to start the Page flow (skip planning).
+  const [pendingQuizPage, setPendingQuizPage] = useState<string | null>(null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<RunDetail | null>(null)
 
@@ -227,8 +230,22 @@ export function Workspace({ vault }: WorkspaceProps) {
             onSelectPage={onSelectPage}
           />
         )}
-        {activeTab === "wiki" && <WikiTab vaultPath={vault.path} />}
-        {activeTab === "quiz" && <QuizTab />}
+        {activeTab === "wiki" && (
+          <WikiTab
+            vaultPath={vault.path}
+            onQuizMeOnThis={(path) => {
+              setPendingQuizPage(path)
+              setActiveTab("quiz")
+            }}
+          />
+        )}
+        {activeTab === "quiz" && (
+          <QuizTab
+            vaultPath={vault.path}
+            pendingPage={pendingQuizPage}
+            onPendingConsumed={() => setPendingQuizPage(null)}
+          />
+        )}
       </section>
       {/*
        * ChatWidget lives at Workspace level (sibling of the tab-bound

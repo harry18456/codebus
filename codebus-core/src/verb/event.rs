@@ -158,6 +158,21 @@ pub enum VerbLifecycleEvent {
     PromoteSuggestion {
         reason: String,
     },
+    /// v3-app-quiz: the quiz plan spawn emitted a `[CODEBUS_QUIZ_SCOPE]`
+    /// marker. `pages` is the parsed list of vault-relative `wiki/` paths
+    /// (most relevant first, 2–5 entries). The GUI shows this list for
+    /// user confirmation before the generate spawn; the CLI prints it and
+    /// proceeds directly. Emitted exclusively by `verb::quiz::run_quiz`
+    /// when its plan-spawn stream parser detects the marker.
+    QuizScopePlanned {
+        pages: Vec<String>,
+    },
+    /// v3-app-quiz: the quiz plan spawn emitted `[CODEBUS_QUIZ_NO_MATCH]`.
+    /// `reason` is the literal substring after the marker up to end of
+    /// line. No generate spawn runs; CLI / GUI surface the reason and stop.
+    QuizNoMatch {
+        reason: String,
+    },
 }
 
 #[cfg(test)]
@@ -228,6 +243,15 @@ mod tests {
         let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::PromoteSuggestion {
             reason: "auth lifecycle including JWT issuance".into(),
         });
+        let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::QuizScopePlanned {
+            pages: vec![
+                "wiki/concepts/jwt-token-lifecycle.md".into(),
+                "wiki/modules/auth-middleware.md".into(),
+            ],
+        });
+        let _ = VerbEvent::Lifecycle(VerbLifecycleEvent::QuizNoMatch {
+            reason: "vault only covers web auth".into(),
+        });
     }
 
     /// v3-chat-verb: pin the `PromoteSuggestion` payload shape so the chat
@@ -262,6 +286,54 @@ mod tests {
                 assert_eq!(reason, "auth flow");
             }
             other => panic!("expected PromoteSuggestion after round-trip, got {other:?}"),
+        }
+    }
+
+    /// v3-app-quiz: pin `QuizScopePlanned` serde shape — GUI / CLI consume
+    /// the parsed `pages` list from the plan-spawn stream.
+    #[test]
+    fn verb_lifecycle_event_quiz_scope_planned_serde_round_trip() {
+        let event = VerbLifecycleEvent::QuizScopePlanned {
+            pages: vec![
+                "wiki/concepts/jwt-token-lifecycle.md".into(),
+                "wiki/modules/auth-middleware.md".into(),
+            ],
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("quiz_scope_planned"));
+        let parsed: VerbLifecycleEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            VerbLifecycleEvent::QuizScopePlanned { pages } => {
+                assert_eq!(
+                    pages,
+                    vec![
+                        "wiki/concepts/jwt-token-lifecycle.md".to_string(),
+                        "wiki/modules/auth-middleware.md".to_string(),
+                    ]
+                );
+            }
+            other => panic!("expected QuizScopePlanned after round-trip, got {other:?}"),
+        }
+    }
+
+    /// v3-app-quiz: pin `QuizNoMatch` serde shape — CLI / GUI surface the
+    /// reason and stop without a generate spawn.
+    #[test]
+    fn verb_lifecycle_event_quiz_no_match_serde_round_trip() {
+        let event = VerbLifecycleEvent::QuizNoMatch {
+            reason: "vault only covers web auth; no page relates to baking".into(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("quiz_no_match"));
+        let parsed: VerbLifecycleEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            VerbLifecycleEvent::QuizNoMatch { reason } => {
+                assert_eq!(
+                    reason,
+                    "vault only covers web auth; no page relates to baking"
+                );
+            }
+            other => panic!("expected QuizNoMatch after round-trip, got {other:?}"),
         }
     }
 }

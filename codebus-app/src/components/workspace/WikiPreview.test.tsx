@@ -115,4 +115,45 @@ describe("WikiPreview", () => {
     expect(screen.getByText("inline").tagName).toBe("CODE")
     expect(screen.getByText("block").tagName).toBe("CODE")
   })
+
+  // --- task 5.3: [Quiz me on this] trigger ---
+  // Spec: app-workspace § Quiz Tab Plan-Confirm-Generate Flow —
+  // "Quiz-me-on-this" appears on content pages only (index.md / log.md
+  // excluded) and starts the Page flow with the current page path.
+
+  it("shows [Quiz me on this] on a content page and reports its path", () => {
+    useWikiStore.setState({
+      currentPath: "/v/.codebus/wiki/modules/auth-middleware.md",
+    })
+    const onQuiz = vi.fn()
+    render(
+      <WikiPreview
+        vaultPath="/v"
+        body={"# Auth\n\nbody"}
+        onQuizMeOnThis={onQuiz}
+      />,
+    )
+    const btn = screen.getByTestId("quiz-me-on-this")
+    expect(btn).toBeInTheDocument()
+    fireEvent.click(btn)
+    expect(onQuiz).toHaveBeenCalledWith(
+      "/v/.codebus/wiki/modules/auth-middleware.md",
+    )
+  })
+
+  it("hides [Quiz me on this] on index.md nav page", () => {
+    useWikiStore.setState({
+      currentPath: "/v/.codebus/wiki/index.md",
+    })
+    render(<WikiPreview vaultPath="/v" body={"# Index"} />)
+    expect(screen.queryByTestId("quiz-me-on-this")).not.toBeInTheDocument()
+  })
+
+  it("hides [Quiz me on this] on log.md nav page", () => {
+    useWikiStore.setState({
+      currentPath: "/v/.codebus/wiki/log.md",
+    })
+    render(<WikiPreview vaultPath="/v" body={"# Log"} />)
+    expect(screen.queryByTestId("quiz-me-on-this")).not.toBeInTheDocument()
+  })
 })

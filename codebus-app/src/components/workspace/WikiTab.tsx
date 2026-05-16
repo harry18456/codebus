@@ -9,6 +9,8 @@ import { WikiTree } from "./WikiTree"
 
 interface WikiTabProps {
   vaultPath: string
+  /** task 5.3 — forwarded to WikiPreview's `[Quiz me on this]`. */
+  onQuizMeOnThis?: (pagePath: string) => void
 }
 
 /**
@@ -21,7 +23,7 @@ interface WikiTabProps {
  * - When the vault has zero wiki pages, render the centered hint
  *   `No wiki pages yet — run a goal to start documenting`.
  */
-export function WikiTab({ vaultPath }: WikiTabProps) {
+export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
   const pages = useWikiStore((s) => s.pages)
   const currentPath = useWikiStore((s) => s.currentPath)
   const body = useWikiStore((s) => s.body)
@@ -87,7 +89,11 @@ export function WikiTab({ vaultPath }: WikiTabProps) {
           />
         )}
         <div className="flex-1 overflow-auto">
-          <WikiPreview vaultPath={vaultPath} body={body} />
+          <WikiPreview
+            vaultPath={vaultPath}
+            body={body}
+            onQuizMeOnThis={onQuizMeOnThis}
+          />
         </div>
       </div>
     </div>

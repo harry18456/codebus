@@ -408,17 +408,100 @@ No additional fields SHALL be present in v1 (no theme toggle, no language switch
 ---
 ### Requirement: AppConfig Namespace Isolation
 
-The system SHALL introduce an `app.*` namespace inside `~/.codebus/config.yaml`. The namespace SHALL contain `app.quiz.pass_threshold` (integer, 50–100, default 80) and `app.quiz.default_length` (integer, 3–10, default 5). The codebus CLI binaries (`init`, `goal`, `query`, `lint`, `fix`) SHALL NOT read, write, or otherwise depend on the `app.*` namespace.
+The system SHALL maintain an `app.*` namespace inside `~/.codebus/config.yaml`. After this change the namespace SHALL contain only `app.quiz.pass_threshold` (integer, 50–100, default 80). The `app.quiz.default_length` key SHALL NO LONGER live in `app.*`; the default quiz length is relocated to the shared `quiz.default_length` key defined by the `quiz` capability's Shared Quiz Config Namespace requirement. The codebus CLI binaries (`init`, `goal`, `query`, `lint`, `fix`, `quiz`) SHALL NOT read, write, or otherwise depend on the `app.*` namespace; the `codebus quiz` subcommand obtains its question count from the shared `quiz.*` namespace, never from `app.*`.
 
 #### Scenario: CLI ignores app namespace
 
-- **WHEN** any codebus CLI verb runs against a `~/.codebus/config.yaml` containing the `app.*` namespace
+- **WHEN** any codebus CLI verb (including `quiz`) runs against a `~/.codebus/config.yaml` containing the `app.*` namespace
 - **THEN** the CLI executes normally with no warnings about `app.*` and no modification to `app.*` values
 
-#### Scenario: App reads app namespace defaults
+#### Scenario: App reads pass_threshold default
 
 - **WHEN** the app loads global config and `app.quiz.pass_threshold` is absent from the YAML
-- **THEN** the loaded `GlobalConfig` returns `app.quiz.pass_threshold = 80` (default) and `app.quiz.default_length = 5` (default)
+- **THEN** the loaded `GlobalConfig` returns `app.quiz.pass_threshold = 80` (default)
+
+#### Scenario: default_length no longer read from app namespace
+
+- **GIVEN** a `~/.codebus/config.yaml` that still contains a stale `app.quiz.default_length: 7` from a prior version
+- **WHEN** the app resolves the default quiz length
+- **THEN** the value SHALL be sourced from the shared `quiz.default_length` key (or its default of 5 when that shared key is absent) AND the stale `app.quiz.default_length` SHALL NOT be the source of truth
+
+
+<!-- @trace
+source: v3-app-quiz
+updated: 2026-05-16
+code:
+  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/lib/ipc.ts
+  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
+  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
+  - codebus-app/src-tauri/src/ipc/quiz.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/config/quiz.rs
+  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - docs/2026-05-15-v3-app-quiz-spike-plan.md
+  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
+  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
+  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
+  - codebus-core/src/verb/quiz.rs
+  - docs/v3-app-roadmap.md
+  - codebus-cli/src/commands/mod.rs
+  - codebus-core/src/config/claude_code.rs
+  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
+  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
+  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
+  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
+  - codebus-app/src-tauri/src/config.rs
+  - codebus-app/src/lib/quiz-parse.ts
+  - codebus-core/src/skill_bundle/mod.rs
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
+  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
+  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
+  - codebus-app/src/components/workspace/QuizAnswering.tsx
+  - docs/2026-05-15-v3-app-quiz-discussion.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
+  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
+  - codebus-cli/src/commands/quiz.rs
+  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
+  - codebus-core/src/config/mod.rs
+  - codebus-core/src/log/events/sink.rs
+  - codebus-app/src/components/workspace/WikiPreview.tsx
+  - docs/spike-artifacts/spike-quiz-runbook.md
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-core/src/verb/mod.rs
+  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
+  - codebus-core/src/verb/event.rs
+  - codebus-app/src/components/settings/SettingsModal.tsx
+  - codebus-core/src/log/events/jsonl_sink.rs
+  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
+  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
+  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
+  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
+  - codebus-core/src/vault/source_gitignore.rs
+  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
+  - codebus-app/src/components/workspace/Workspace.tsx
+  - codebus-app/src-tauri/src/ipc/mod.rs
+  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
+tests:
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-core/tests/vault_init.rs
+  - codebus-cli/tests/bins/mock_claude.rs
+  - codebus-cli/tests/quiz_flow.rs
+  - codebus-app/src/components/workspace/WikiPreview.test.tsx
+  - codebus-core/tests/verb_library_surface.rs
+  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
+  - codebus-app/src-tauri/tests/keyring_ipc.rs
+  - codebus-cli/tests/cli_routing.rs
+-->
 
 ---
 ### Requirement: Workspace Stub Transition

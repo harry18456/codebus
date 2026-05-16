@@ -67,6 +67,64 @@ fn help_lists_exactly_the_six_subcommands() {
     }
 }
 
+// v3-app-quiz: `cli` spec "Subcommand Registration" now lists eight
+// user-facing subcommands (hook is hidden).
+#[test]
+fn help_lists_all_eight_subcommands() {
+    let out = Command::new(BIN)
+        .arg("--help")
+        .output()
+        .expect("run binary");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for verb in [
+        "init", "goal", "query", "lint", "fix", "config", "chat", "quiz",
+    ] {
+        assert!(
+            combined.contains(verb),
+            "help missing `{verb}`:\n{combined}"
+        );
+    }
+}
+
+// v3-app-quiz: `cli` spec scenario "Quiz subcommand help describes quiz
+// generation" — help text mentions quiz generation, documents `--count`,
+// and exits zero.
+#[test]
+fn quiz_help_describes_generation_and_count() {
+    let out = Command::new(BIN)
+        .args(["quiz", "--help"])
+        .output()
+        .expect("run binary");
+    assert!(
+        out.status.success(),
+        "`quiz --help` must exit zero; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let lower = combined.to_lowercase();
+    assert!(
+        lower.contains("quiz"),
+        "quiz --help missing 'quiz':\n{combined}"
+    );
+    assert!(
+        combined.contains("--count"),
+        "quiz --help must document `--count`:\n{combined}"
+    );
+}
+
 #[test]
 fn config_help_lists_three_sub_actions() {
     let out = Command::new(BIN)

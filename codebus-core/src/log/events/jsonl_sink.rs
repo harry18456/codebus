@@ -60,6 +60,10 @@ impl EventsSink for EventsJsonlSink {
         "jsonl"
     }
 
+    fn events_path(&self) -> Option<PathBuf> {
+        Some(self.target_path.clone())
+    }
+
     fn write_event(&mut self, envelope: &EventEnvelope) -> Result<(), LogError> {
         if self.writer.is_none() {
             fs::create_dir_all(&self.dir)?;

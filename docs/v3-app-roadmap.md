@@ -34,6 +34,12 @@ CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 
 
 各 change 的 tasks.md 在 §13 不另列 macOS / Linux acceptance 條目（如 `v3-app-foundation` 13.2 已改為「在 roadmap 登記 deferral」的 documentation 任務）；polish-ship 屆時負責統整。
 
+### Deferred acceptance registry
+
+各 change 在此登記其延後到 `v3-app-polish-ship` 的 macOS / Linux 手動驗收範圍：
+
+- **`v3-app-quiz` (E)** — macOS / Linux 手動驗收 deferred to `v3-app-polish-ship`。polish-ship 屆時需在 macOS + Linux 重跑：(1) CLI `codebus quiz "<topic>"` 端到端（plan→generate→落檔 `<vault>/.codebus/quiz/<slug>/<id>.md` 含 caller frontmatter；no-match exit 0 不落檔；retry 非破壞兩檔）；(2) GUI Quiz tab plan-confirm-generate flow（topic 輸入→plan live stream→scope 確認 gate→generate→一題一畫面 client-side 評分→summary pass/fail by `app.quiz.pass_threshold`）；(3) wiki preview `[Quiz me on this]` Page flow（nav 頁不顯示、內容頁跳 plan 直接 generate）；(4) Quiz history（掃 `.codebus/quiz/` 依 slug group、retry 兩 row、`[看過程]` events.jsonl）；(5) 共用 `quiz.default_length` config 與 `app.*` namespace isolation（CLI 不讀 app.*）。Windows MSVC 上述皆已於本 change 必跑必過（Rust core / CLI / Tauri / vitest 全綠）。
+
 ## 為什麼切 8 條而不是一條
 
 7-8 週工作量。單一巨大 change 的歷史教訓：apply 失焦、review 不可行、in-flight spec drift。本 roadmap 的切點來自 2026-05-11 brainstorming session（原本 4 條 / 2026-05-12 把 quiz-cmdk 拆成 query-cmdk + quiz 兩條 / 2026-05-12 #2 動工前發現 CLI 缺基建再前插 A + B 兩條 / 2026-05-13 B propose 前 user push back single-shot query 再前插 chat 一條，總計 8 條），每一條落點都是「換到下一條時，前一條跑得起來的 demo」（不是「實作了某個檔案」），所以 archive 任一條後都可以對外展示一個可用的 app 子集。

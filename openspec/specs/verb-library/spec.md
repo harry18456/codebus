@@ -8,12 +8,12 @@ TBD - created by archiving change 'v3-goal-library'. Update Purpose after archiv
 
 ### Requirement: Verb Library Module Surface
 
-The system SHALL expose a public module `codebus_core::verb` containing four sub-modules `goal`, `query`, `fix`, and `chat`. Each sub-module SHALL export exactly one public orchestration function (`run_goal`, `run_query`, `run_fix`, `run_chat_turn`) plus the verb-specific options and report structs. The `codebus_core::verb` parent module SHALL also export the cross-verb types `VerbEvent`, `VerbLifecycleEvent`, and `VerbError`. No other public surface SHALL be exposed under `codebus_core::verb` by this change. The `codebus_core::vault::init::run_init` function defined by foundation SHALL remain in its existing location and SHALL NOT be moved into `codebus_core::verb`.
+The system SHALL expose a public module `codebus_core::verb` containing five sub-modules `goal`, `query`, `fix`, `chat`, and `quiz`. The `goal`, `query`, `fix`, and `chat` sub-modules SHALL each export exactly one public orchestration function (`run_goal`, `run_query`, `run_fix`, `run_chat_turn`) plus the verb-specific options and report structs. The `quiz` sub-module SHALL export exactly **two** public orchestration functions — `run_quiz_plan` and `run_quiz_generate` — plus its option/report structs; this is the documented exception to the one-function rule, required because the GUI confirm gate (`app-workspace` Quiz Tab Plan-Confirm-Generate Flow, design D1) demands the plan and generate spawns be separately invokable and a single connected call cannot pause mid-flight for an asynchronous confirmation. The `codebus_core::verb` parent module SHALL also export the cross-verb types `VerbEvent`, `VerbLifecycleEvent`, and `VerbError`. No other public surface SHALL be exposed under `codebus_core::verb` by this change. The `codebus_core::vault::init::run_init` function defined by foundation SHALL remain in its existing location and SHALL NOT be moved into `codebus_core::verb`.
 
 #### Scenario: Verb library module path exists
 
-- **WHEN** a downstream crate (codebus-cli or codebus-app) writes `use codebus_core::verb::{goal, query, fix, chat};`
-- **THEN** the compilation SHALL succeed AND the four sub-modules SHALL resolve to public modules each exporting one public orchestration function
+- **WHEN** a downstream crate (codebus-cli or codebus-app) writes `use codebus_core::verb::{goal, query, fix, chat, quiz};`
+- **THEN** the compilation SHALL succeed AND the five sub-modules SHALL resolve to public modules (goal/query/fix/chat each exporting one orchestration function; quiz exporting `run_quiz_plan` + `run_quiz_generate`)
 
 #### Scenario: Init verb is not moved
 
@@ -24,6 +24,88 @@ The system SHALL expose a public module `codebus_core::verb` containing four sub
 
 - **WHEN** a downstream crate writes `use codebus_core::verb::chat::{run_chat_turn, ChatTurnOptions, ChatTurnReport, CHAT_TOOLSET};`
 - **THEN** the compilation SHALL succeed AND `run_chat_turn` SHALL resolve to a function with the signature defined by the `chat-verb` capability
+
+#### Scenario: Quiz sub-module exports plan and generate functions
+
+- **WHEN** a downstream crate writes `use codebus_core::verb::quiz::{run_quiz_plan, run_quiz_generate, QuizPlanOptions, QuizGenerateOptions, QuizPlanOutcome, QuizReport};`
+- **THEN** the compilation SHALL succeed AND `run_quiz_plan` / `run_quiz_generate` SHALL resolve to functions with the signatures defined by the `quiz` capability
+
+
+<!-- @trace
+source: v3-app-quiz
+updated: 2026-05-16
+code:
+  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/lib/ipc.ts
+  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
+  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
+  - codebus-app/src-tauri/src/ipc/quiz.rs
+  - codebus-cli/src/main.rs
+  - codebus-core/src/config/quiz.rs
+  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - docs/2026-05-15-v3-app-quiz-spike-plan.md
+  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
+  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
+  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
+  - codebus-core/src/verb/quiz.rs
+  - docs/v3-app-roadmap.md
+  - codebus-cli/src/commands/mod.rs
+  - codebus-core/src/config/claude_code.rs
+  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
+  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
+  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
+  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
+  - codebus-app/src-tauri/src/config.rs
+  - codebus-app/src/lib/quiz-parse.ts
+  - codebus-core/src/skill_bundle/mod.rs
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
+  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
+  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
+  - codebus-app/src/components/workspace/QuizAnswering.tsx
+  - docs/2026-05-15-v3-app-quiz-discussion.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
+  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
+  - codebus-cli/src/commands/quiz.rs
+  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
+  - codebus-core/src/config/mod.rs
+  - codebus-core/src/log/events/sink.rs
+  - codebus-app/src/components/workspace/WikiPreview.tsx
+  - docs/spike-artifacts/spike-quiz-runbook.md
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-core/src/verb/mod.rs
+  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
+  - codebus-core/src/verb/event.rs
+  - codebus-app/src/components/settings/SettingsModal.tsx
+  - codebus-core/src/log/events/jsonl_sink.rs
+  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
+  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
+  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
+  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
+  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
+  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
+  - codebus-core/src/vault/source_gitignore.rs
+  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
+  - codebus-app/src/components/workspace/Workspace.tsx
+  - codebus-app/src-tauri/src/ipc/mod.rs
+  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
+tests:
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-core/tests/vault_init.rs
+  - codebus-cli/tests/bins/mock_claude.rs
+  - codebus-cli/tests/quiz_flow.rs
+  - codebus-app/src/components/workspace/WikiPreview.test.tsx
+  - codebus-core/tests/verb_library_surface.rs
+  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
+  - codebus-app/src-tauri/tests/keyring_ipc.rs
+  - codebus-cli/tests/cli_routing.rs
+-->
 
 ---
 ### Requirement: Goal Verb Library Function
