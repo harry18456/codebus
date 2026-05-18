@@ -78,4 +78,17 @@
 
 **Next step**：`/spectra-propose quiz-attempt-progress`（feature change），以本討論結論為輸入。**不**動已 archive 的 v3-app-quiz / fix-app-quiz。
 
-**Open（propose 時定）**：score 是否寫入 sidecar 或每次由 answers 重算（傾向重算，單一真相）；review 模式要不要也允許「只看錯題」；progress.json 原子寫策略（temp+rename）。
+## 6. UX 決策（2026-05-18 第二輪 discuss，user 拍板）
+
+關鍵叉路釐清：生成 md **沒有**「使用者選了什麼」，且無處可推 → 要清單進度/分數/續答/Review，使用者作答**必須持久化**；「不存」= 清單只能顯示「N 題」、無續答、無 Review（等於沒解決原訴求）。兩者本質衝突。
+
+**user 決定：要存（sidecar）**，換得清單進度、續答、Review、重做的完整體驗。
+
+定案：
+- **持久化**：採 progress sidecar（§3 模型）。
+- **寫入時機**：**每題送出即寫**（原子 temp+rename）。理由：唯有如此「續答」才能精準接續、關 app/中途離開不丟；只在完成時寫等於沒有真正續答。
+- **已完成 attempt 點入**：進 **Review 逐題對照**（你的選擇 vs 正解 + 解釋），**取代現行 raw `<pre>` md**（user 確認使用者不該看到 raw md）。Review 內含 `[重做此份]` `[看過程]`。
+- **score 不寫死於 sidecar**：由 `answers` 每次重算（單一真相，避免 sidecar 內欄位互相矛盾）。sidecar 只存 `answers` + `status` + 時戳；`answered/correct/score` 皆衍生。
+- **Review 是否「只看錯題」**：propose 時定（傾向預設全列、提供「只看錯題」filter），非阻斷。
+
+**Open（縮到 propose 時定，皆非阻斷）**：Review 的「只看錯題」filter 要不要做；progress.json 原子寫的具體實作（temp+rename vs 既有 sink 模式）；`schema_version` 容錯策略對齊 codebus config tolerance。
