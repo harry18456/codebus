@@ -35,6 +35,14 @@ interface SettingsState {
    * Marks the store dirty so the Save button enables.
    */
   updateClaudeCode: (block: ClaudeCodeBlock) => void
+  /**
+   * Quiz summary pass/fail threshold (percent), read from
+   * `app.quiz.pass_threshold` — the same key the Settings modal binds.
+   * Defaults to 80 only when the key is absent (mirrors the
+   * default-when-absent pattern used for the shared `quiz.default_length`).
+   * The Quiz tab uses this instead of a hardcoded component constant.
+   */
+  getPassThreshold: () => number
   reset: () => void
   save: () => Promise<void>
   clearError: () => void
@@ -77,6 +85,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   updateClaudeCode(block) {
     const next = { ...get().config, claude_code: block } as GlobalConfig
     set({ config: next, dirty: true })
+  },
+
+  getPassThreshold() {
+    return get().config.app?.quiz?.pass_threshold ?? 80
   },
 
   reset() {

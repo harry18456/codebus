@@ -53,6 +53,22 @@ describe("settings store", () => {
     expect(useSettingsStore.getState().dirty).toBe(false)
   })
 
+  it("getPassThreshold defaults to 80 when app.quiz.pass_threshold is absent", () => {
+    useSettingsStore.setState({ config: {} })
+    expect(useSettingsStore.getState().getPassThreshold()).toBe(80)
+  })
+
+  it("getPassThreshold reads app.quiz.pass_threshold verbatim when present", () => {
+    useSettingsStore.setState({
+      config: { app: { quiz: { pass_threshold: 90 } } },
+    })
+    expect(useSettingsStore.getState().getPassThreshold()).toBe(90)
+    useSettingsStore.setState({
+      config: { app: { quiz: { pass_threshold: 55 } } },
+    })
+    expect(useSettingsStore.getState().getPassThreshold()).toBe(55)
+  })
+
   it("keeps dirty=false on a failed save and surfaces error", async () => {
     mockedInvoke.mockRejectedValueOnce({ kind: "io", message: "fs" })
     useSettingsStore.setState({ config: { app: { quiz: { pass_threshold: 70, default_length: 5 } } }, dirty: true })

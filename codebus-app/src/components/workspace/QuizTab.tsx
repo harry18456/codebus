@@ -23,7 +23,21 @@ import { useEffect, useRef, useState } from "react"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 
 import { Button } from "@/components/ui/button"
+import { useSettingsStore } from "@/store/settings"
 import { QuizAnswering } from "./QuizAnswering"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { QuizGenerationLog } from "./QuizGenerationLog"
+import {
+  ActivityStreamItem,
+  ThoughtItem,
+  foldTimeline,
+} from "./ActivityStreamItem"
 import {
   spawnQuizGenerate,
   spawnQuizPlan,
@@ -32,10 +46,13 @@ import {
   type QuizAttemptMeta,
   type QuizGenerateTerminalPayload,
   type QuizPlanTerminalPayload,
+  type QuizStreamPayload,
   type QuizTriggerArg,
+  type VerbEvent,
 } from "@/lib/ipc"
 
 type Phase =
+  | "history"
   | "idle"
   | "planning"
   | "confirm"
@@ -60,10 +77,30 @@ interface QuizTabProps {
 // task 5.2 uses the default question count; wiring it to the shared
 // `quiz.default_length` config is part of the settings/answering scope.
 const DEFAULT_QUESTION_COUNT = 5
-// task 5.4 default; wiring to `app.quiz.pass_threshold` (settings store)
-// is a follow-up — the spec pass-threshold scenario is verified in
-// QuizAnswering.test via the prop.
-const DEFAULT_PASS_THRESHOLD = 80
+
+/**
+ * Live plan/generate agent activity, rendered through the SAME stream
+ * rendering used by the run detail / quiz generation-log views
+ * (design D8). Nothing is shown until the first event arrives.
+ */
+function QuizLiveStream({ events }: { events: VerbEvent[] }) {
+  if (events.length === 0) return null
+  const folded = foldTimeline(events)
+  return (
+    <div
+      data-testid="quiz-live-stream"
+      className="flex flex-col gap-0.5 rounded-md border border-border bg-bg-sunken p-3"
+    >
+      {folded.map((item, i) =>
+        item.kind === "thought_block" ? (
+          <ThoughtItem key={i} text={item.text} />
+        ) : (
+          <ActivityStreamItem key={i} event={item.event} />
+        ),
+      )}
+    </div>
+  )
+}
 
 /** Group history attempts by slug, preserving the (newest-first) order. */
 function groupBySlug(
@@ -83,7 +120,10 @@ export function QuizTab({
   pendingPage,
   onPendingConsumed,
 }: QuizTabProps) {
-  const [phase, setPhase] = useState<Phase>("idle")
+  // Summary pass/fail threshold comes from app.quiz.pass_threshold via
+  // the settings store (design D1) — never a hardcoded constant.
+  const passThreshold = useSettingsStore((s) => s.getPassThreshold())
+  const [phase, setPhase] = useState<Phase>("history")
   const [topic, setTopic] = useState("")
   const [pages, setPages] = useState<string[]>([])
   const [reason, setReason] = useState("")
@@ -91,13 +131,23 @@ export function QuizTab({
   const [quizMd, setQuizMd] = useState("")
   const [attempts, setAttempts] = useState<QuizAttemptMeta[]>([])
   const [attemptMd, setAttemptMd] = useState("")
-  const [viewLog, setViewLog] = useState<string | null>(null)
+  // The opened attempt's metadata (carries `events_log` so the attempt
+  // detail view can offer the modal view-generation-log — design D9).
+  const [attemptMeta, setAttemptMeta] = useState<QuizAttemptMeta | null>(null)
+  const [logOpen, setLogOpen] = useState(false)
+  // Live agent activity for the plan/generate spawn (design D8): the
+  // `quiz-stream` VerbEvents, rendered through the existing stream
+  // rendering during the planning/generating phases.
+  const [liveEvents, setLiveEvents] = useState<VerbEvent[]>([])
   const unlistenRef = useRef<UnlistenFn | null>(null)
+  const streamUnlistenRef = useRef<UnlistenFn | null>(null)
 
   async function openAttempt(a: QuizAttemptMeta) {
     try {
       const md = await readQuizAttempt(vaultPath, a.path)
       setAttemptMd(md)
+      setAttemptMeta(a)
+      setLogOpen(false)
       setPhase("attempt")
     } catch (e) {
       setErrorMsg(String(e))
@@ -105,10 +155,10 @@ export function QuizTab({
     }
   }
 
-  // task 5.5 — refresh the history list whenever the tab is idle (mount,
-  // back from an attempt, or after a generated quiz returns to idle).
+  // task 5.5 — refresh the history list whenever the history view is
+  // shown (mount default, back from an attempt / input / answering).
   useEffect(() => {
-    if (phase !== "idle") return
+    if (phase !== "history") return
     let alive = true
     void listQuizAttempts(vaultPath)
       .then((a) => {
@@ -127,16 +177,33 @@ export function QuizTab({
       unlistenRef.current()
       unlistenRef.current = null
     }
+    if (streamUnlistenRef.current) {
+      streamUnlistenRef.current()
+      streamUnlistenRef.current = null
+    }
+  }
+
+  // Subscribe to the live `quiz-stream` VerbEvents for the active
+  // plan/generate spawn (design D8). Resets the accumulator so each
+  // new run starts clean.
+  async function subscribeQuizStream() {
+    setLiveEvents([])
+    streamUnlistenRef.current = await listen<QuizStreamPayload>(
+      "quiz-stream",
+      (event) => {
+        setLiveEvents((prev) => [...prev, event.payload.event])
+      },
+    )
   }
 
   // task 5.3 Page flow: a content page's [Quiz me on this] sets
   // `pendingPage`. Skip planning entirely and generate directly with
-  // pages=[pendingPage]. Guarded on idle so a re-render mid-flow does
-  // not re-trigger; consumed immediately so the same page can be
-  // re-quizzed later.
+  // pages=[pendingPage]. Fires on mount / prop change regardless of the
+  // history default (design D5); consumed immediately (one-shot via
+  // onPendingConsumed) so the same page can be re-quizzed later.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (pendingPage && phase === "idle") {
+    if (pendingPage) {
       onPendingConsumed?.()
       void startGenerate([pendingPage], {
         kind: "wiki_preview",
@@ -169,6 +236,7 @@ export function QuizTab({
       },
     )
     unlistenRef.current = handle
+    await subscribeQuizStream()
     try {
       await spawnQuizPlan(vaultPath, topic.trim())
     } catch (e) {
@@ -207,6 +275,7 @@ export function QuizTab({
       },
     )
     unlistenRef.current = handle
+    await subscribeQuizStream()
     try {
       await spawnQuizGenerate(
         vaultPath,
@@ -237,23 +306,82 @@ export function QuizTab({
   return (
     <div
       data-testid="quiz-tab"
-      className="flex h-full w-full flex-col px-8 py-6"
+      className="flex h-full w-full flex-col"
     >
-      <div className="mb-4 flex items-center justify-between">
+      {/* Header mirrors GoalsTab exactly (full-width, border-b, p-3,
+          pr-[160px] for the fixed WindowControls) so + New quiz lands
+          in the same screen position/style as + New goal across tabs. */}
+      <div
+        data-tauri-drag-region
+        className="flex items-center justify-between border-b border-border p-3 pr-[160px]"
+      >
         <h2 className="text-[15px] font-medium text-fg-primary">
           Quiz history
         </h2>
-        <Button
-          data-testid="new-quiz"
-          onClick={() => setPhase("idle")}
-          disabled={phase !== "idle" && phase !== "ready"}
-        >
-          + New quiz
-        </Button>
+        {(phase === "history" || phase === "idle") && (
+          <Button
+            variant="primary"
+            data-testid="new-quiz"
+            onClick={() => setPhase("idle")}
+          >
+            + New quiz
+          </Button>
+        )}
       </div>
+
+      <div className="flex flex-1 flex-col overflow-auto px-8 py-6">
+
+      {phase === "history" && (
+        <div
+          data-testid="quiz-history"
+          className="flex flex-1 flex-col overflow-auto"
+        >
+          {attempts.length === 0 ? (
+            <p className="text-[14px] text-fg-secondary">
+              No quizzes yet — start one with + New quiz
+            </p>
+          ) : (
+            groupBySlug(attempts).map(([slug, rows]) => (
+              <div
+                key={slug}
+                data-testid="quiz-history-group"
+                className="mb-3"
+              >
+                <p className="text-[13px] font-medium text-fg-primary">
+                  {slug}
+                </p>
+                {rows.map((a) => (
+                  <div
+                    key={a.path}
+                    data-testid="quiz-attempt-row"
+                    className="flex items-center gap-2 py-1 text-[13px]"
+                  >
+                    <button
+                      type="button"
+                      data-testid="quiz-attempt-open"
+                      className="flex-1 text-left text-fg-secondary hover:text-fg-primary"
+                      onClick={() => void openAttempt(a)}
+                    >
+                      {a.topic ?? a.target_page ?? a.slug} · {a.quiz_id}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {phase === "idle" && (
         <div data-testid="quiz-idle" className="flex flex-col gap-3">
+          <div>
+            <Button
+              data-testid="quiz-back-to-history"
+              onClick={() => setPhase("history")}
+            >
+              ← History
+            </Button>
+          </div>
           <input
             data-testid="quiz-topic-input"
             className="rounded border border-border bg-bg-secondary px-3 py-2 text-[14px]"
@@ -270,63 +398,6 @@ export function QuizTab({
               Start
             </Button>
           </div>
-          <div
-            data-testid="quiz-history"
-            className="mt-4 flex-1 overflow-auto"
-          >
-            {attempts.length === 0 ? (
-              <p className="text-[14px] text-fg-secondary">
-                No quizzes yet — start one above
-              </p>
-            ) : (
-              groupBySlug(attempts).map(([slug, rows]) => (
-                <div
-                  key={slug}
-                  data-testid="quiz-history-group"
-                  className="mb-3"
-                >
-                  <p className="text-[13px] font-medium text-fg-primary">
-                    {slug}
-                  </p>
-                  {rows.map((a) => (
-                    <div
-                      key={a.path}
-                      data-testid="quiz-attempt-row"
-                      className="flex items-center gap-2 py-1 text-[13px]"
-                    >
-                      <button
-                        type="button"
-                        data-testid="quiz-attempt-open"
-                        className="flex-1 text-left text-fg-secondary hover:text-fg-primary"
-                        onClick={() => void openAttempt(a)}
-                      >
-                        {a.topic ?? a.target_page ?? a.slug} · {a.quiz_id}
-                      </button>
-                      {a.events_log && (
-                        <button
-                          type="button"
-                          data-testid="quiz-view-log"
-                          title={a.events_log}
-                          className="text-fg-secondary hover:text-fg-primary"
-                          onClick={() => setViewLog(a.events_log)}
-                        >
-                          view log
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ))
-            )}
-            {viewLog && (
-              <p
-                data-testid="quiz-view-log-path"
-                className="mt-2 text-[12px] text-fg-secondary"
-              >
-                Generation log: {viewLog}
-              </p>
-            )}
-          </div>
         </div>
       )}
 
@@ -335,27 +406,65 @@ export function QuizTab({
           data-testid="quiz-attempt-view"
           className="flex flex-1 flex-col gap-2"
         >
-          <div>
+          <div className="flex gap-2">
             <Button
               data-testid="quiz-attempt-back"
               onClick={() => {
                 setAttemptMd("")
-                setPhase("idle")
+                setPhase("history")
               }}
             >
               ← Back to history
             </Button>
+            {attemptMeta?.events_log && (
+              <Button
+                variant="secondary"
+                data-testid="quiz-view-log"
+                onClick={() => setLogOpen(true)}
+              >
+                看過程
+              </Button>
+            )}
           </div>
           <pre className="flex-1 overflow-auto rounded bg-bg-secondary p-3 text-[12px]">
             {attemptMd}
           </pre>
+          {attemptMeta?.events_log && (
+            <Dialog
+              open={logOpen}
+              onOpenChange={(o) => setLogOpen(o)}
+            >
+              <DialogContent data-testid="quiz-view-log-modal">
+                <DialogHeader>
+                  <DialogTitle>Generation log</DialogTitle>
+                </DialogHeader>
+                <div className="max-h-[60vh] overflow-auto">
+                  <QuizGenerationLog
+                    vaultPath={vaultPath}
+                    eventsLog={attemptMeta.events_log}
+                  />
+                </div>
+                <DialogClose asChild>
+                  <Button
+                    variant="secondary"
+                    data-testid="quiz-view-log-close"
+                  >
+                    關閉
+                  </Button>
+                </DialogClose>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
       )}
 
       {phase === "planning" && (
-        <p data-testid="quiz-planning" className="text-[14px] text-fg-secondary">
-          Planning quiz scope…
-        </p>
+        <div data-testid="quiz-planning" className="flex flex-col gap-2">
+          <p className="text-[14px] text-fg-secondary">
+            Planning quiz scope…
+          </p>
+          <QuizLiveStream events={liveEvents} />
+        </div>
       )}
 
       {phase === "confirm" && (
@@ -382,19 +491,19 @@ export function QuizTab({
       )}
 
       {phase === "generating" && (
-        <p
-          data-testid="quiz-generating"
-          className="text-[14px] text-fg-secondary"
-        >
-          Generating questions…
-        </p>
+        <div data-testid="quiz-generating" className="flex flex-col gap-2">
+          <p className="text-[14px] text-fg-secondary">
+            Generating questions…
+          </p>
+          <QuizLiveStream events={liveEvents} />
+        </div>
       )}
 
       {phase === "ready" && (
         <div data-testid="quiz-ready" className="flex flex-1 flex-col">
           <QuizAnswering
             quizMd={quizMd}
-            passThreshold={DEFAULT_PASS_THRESHOLD}
+            passThreshold={passThreshold}
           />
         </div>
       )}
@@ -422,6 +531,7 @@ export function QuizTab({
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

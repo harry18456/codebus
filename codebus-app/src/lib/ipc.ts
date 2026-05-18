@@ -92,6 +92,7 @@ export type IpcCommandName =
   | "cancel_quiz"
   | "list_quiz_attempts"
   | "read_quiz_attempt"
+  | "read_quiz_events"
 
 /**
  * Endpoint profile selector. Currently only `"azure"` is wired up; future
@@ -728,6 +729,19 @@ export async function readQuizAttempt(
   path: string,
 ): Promise<string> {
   return invokeTyped<string>("read_quiz_attempt", { vaultPath, path })
+}
+
+/**
+ * Read an attempt's generate-spawn events.jsonl as an ordered
+ * `EventEnvelope` list so the view-generation-log affordance can replay
+ * it through the existing agent stream rendering. `path` must resolve
+ * under the vault `.codebus/` tree (backend rejects otherwise).
+ */
+export async function readQuizEvents(
+  vaultPath: string,
+  path: string,
+): Promise<EventEnvelope[]> {
+  return invokeTyped<EventEnvelope[]>("read_quiz_events", { vaultPath, path })
 }
 
 /**

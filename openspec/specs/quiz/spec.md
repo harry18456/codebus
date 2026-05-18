@@ -12,6 +12,8 @@ The system SHALL provide a `quiz` verb that produces a multiple-choice quiz from
 
 The plan spawn SHALL take a free-text topic and emit, as the first line of its response, either `[CODEBUS_QUIZ_SCOPE] <wiki-path>, <wiki-path>, ...` (2–5 vault-relative `wiki/` paths, most relevant first) when matching pages exist, or `[CODEBUS_QUIZ_NO_MATCH] <reason>` when no wiki page covers the topic. The generate spawn SHALL emit a quiz markdown document body (no agent-authored frontmatter).
 
+The caller's plan-marker parser SHALL tolerantly recover the marker rather than hard-failing on minor agent deviations, mirroring the tolerant leading/trailing code-fence handling already applied to the generate body: it SHALL strip a leading Markdown code fence, and it SHALL accept the first line that begins with `[CODEBUS_QUIZ_SCOPE]` or `[CODEBUS_QUIZ_NO_MATCH]` even when the agent emitted preamble lines before it. The SKILL still instructs the agent to emit the marker as the very first line; tolerant recovery is a caller-side robustness measure, not a relaxation of the agent-side contract. When no marker is recoverable from the spawn output, `run_quiz_plan` SHALL return an error whose message includes a truncated head (at most 200 characters) of the actual spawn output, so the failure is diagnosable rather than opaque.
+
 `run_quiz_plan` SHALL NOT continue to generation; the caller decides whether/when to call `run_quiz_generate` (CLI proceeds immediately with no gate; GUI waits for the user to confirm or revise the scope).
 
 Answer grading SHALL be performed by the caller comparing the user's selected choice against the quiz markdown `Answer` field. The agent SHALL NOT grade and SHALL NOT receive the user's answers.
@@ -37,81 +39,43 @@ Answer grading SHALL be performed by the caller comparing the user's selected ch
 - **WHEN** `run_quiz_generate` is invoked with `QuizGenerateOptions { pages: [target], question_count }` (the wiki-preview Page flow)
 - **THEN** no plan spawn SHALL run AND the generate spawn SHALL build its context from `target` plus the pages `target` wikilinks to (one hop)
 
+#### Scenario: Plan marker recovered despite agent preamble
+
+- **GIVEN** a plan spawn whose response is `Sure, here is the scope.\n[CODEBUS_QUIZ_SCOPE] wiki/a.md`
+- **WHEN** the caller parses the plan output
+- **THEN** `run_quiz_plan` SHALL return `QuizPlanOutcome::Scope(["wiki/a.md"])` (the preamble line is tolerated, not a hard failure)
+
+#### Scenario: Plan marker recovered despite a wrapping code fence
+
+- **GIVEN** a plan spawn whose response is a Markdown code fence wrapping `[CODEBUS_QUIZ_NO_MATCH] vault only covers web auth`
+- **WHEN** the caller parses the plan output
+- **THEN** `run_quiz_plan` SHALL return `QuizPlanOutcome::NoMatch("vault only covers web auth")`
+
+#### Scenario: Unrecoverable plan output surfaces a diagnostic head
+
+- **WHEN** the plan spawn output contains neither marker on any line
+- **THEN** `run_quiz_plan` SHALL return an error whose message includes a truncated head (≤200 chars) of the actual spawn output AND SHALL NOT silently succeed
+
 
 <!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
+source: fix-app-quiz
+updated: 2026-05-18
 code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/components/workspace/QuizGenerationLog.tsx
+  - codebus-app/src/store/settings.ts
   - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
   - codebus-core/src/verb/quiz.rs
   - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
   - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-app/src-tauri/src/ipc/quiz.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
 tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
   - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
+  - codebus-app/src/components/workspace/QuizGenerationLog.test.tsx
+  - codebus-app/src/store/settings.test.ts
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-cli/tests/quiz_flow.rs
 -->
 
 ---
@@ -213,7 +177,7 @@ tests:
 
 The generate spawn SHALL emit a markdown body containing exactly `count` question sections. Each question SHALL be a `## Q<i>.` heading (i from 1 to count) followed by exactly four choices labelled `A)` through `D)`, exactly one `## Answer: <A|B|C|D>` line, and exactly one `## Explanation:` line citing a source via `[[slug]]` wikilink syntax. The agent SHALL NOT wrap the whole output in a code fence. The agent SHALL NOT author `quiz_id`, `topic`, `planned_pages`, `generation_token_usage`, or any frontmatter.
 
-The caller SHALL inject frontmatter on persistence: `quiz_id` (real ISO timestamp), `trigger` (`ai_planned` or `wiki_preview`), `topic` (plan topic) or `target_page` (page-scope target), `planned_pages` (list), `generation_token_usage` (from the report), and `events_log` (the generate spawn's events.jsonl path). The caller parser SHALL tolerantly strip a leading/trailing code fence if the agent emits one despite the prohibition.
+The caller SHALL inject frontmatter on persistence: `quiz_id` (real ISO timestamp), `trigger` (`ai_planned` or `wiki_preview`), `topic` (plan topic) or `target_page` (page-scope target), `planned_pages` (list), `generation_token_usage` (from the report), and `events_log` (the generate spawn's events.jsonl path). The caller parser SHALL tolerantly strip a leading/trailing code fence if the agent emits one despite the prohibition. The caller parser SHALL ALSO tolerantly discard any preamble text that precedes the first `## Q1.` question heading — including a preamble that the agent placed on the same line as `## Q1.` — so the cleaned body begins exactly at the first question heading and `## Q1.` starts a line. This mirrors the tolerant code-fence handling: the SKILL still prohibits any preamble; tolerant stripping is a caller-side robustness measure, not a relaxation of the agent contract.
 
 #### Scenario: Question block well-formed
 
@@ -230,81 +194,32 @@ The caller SHALL inject frontmatter on persistence: `quiz_id` (real ISO timestam
 - **WHEN** the agent emits the body wrapped in a leading and trailing markdown code fence despite the prohibition
 - **THEN** the caller SHALL strip the surrounding fence before persisting AND the persisted file SHALL begin with caller frontmatter, not a fence
 
+#### Scenario: Tolerant preamble stripping before the first question
+
+- **GIVEN** a generate spawn body whose first line is `讀取三個指定的 wiki 頁面以產生測驗題目。## Q1. <stem>` (an agent preamble glued onto the first question heading)
+- **WHEN** the caller cleans the body before persisting and before parsing
+- **THEN** the cleaned body SHALL begin with `## Q1.` at the start of a line AND the preamble text SHALL NOT appear in the persisted file AND the first question SHALL parse correctly
+
 
 <!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
+source: fix-app-quiz
+updated: 2026-05-18
 code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/components/workspace/QuizGenerationLog.tsx
+  - codebus-app/src/store/settings.ts
   - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
   - codebus-core/src/verb/quiz.rs
   - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
   - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-app/src-tauri/src/ipc/quiz.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
 tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
   - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
+  - codebus-app/src/components/workspace/QuizGenerationLog.test.tsx
+  - codebus-app/src/store/settings.test.ts
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-cli/tests/quiz_flow.rs
 -->
 
 ---

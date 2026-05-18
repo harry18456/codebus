@@ -2024,7 +2024,7 @@ tests:
 ---
 ### Requirement: Quiz Tab Plan-Confirm-Generate Flow
 
-The Quiz tab SHALL offer two entry points that converge after generation. `+ New quiz` SHALL open a free-text topic input; submitting it SHALL run a plan spawn whose agent activity is rendered live via the existing agent stream rendering. When the plan spawn yields a planned scope, the system SHALL display the planned `wiki/` page list with a `[改]` (revise) and `[確認]` (confirm) control and SHALL NOT start the generate spawn until the user confirms. On confirm, the system SHALL run the generate spawn with live activity rendering, then transition to the answering view. When the plan spawn yields no match, the system SHALL display the no-match reason and SHALL NOT start a generate spawn.
+The Quiz tab SHALL offer two entry points that converge after generation. `+ New quiz` SHALL open a free-text topic input; submitting it SHALL run a plan spawn whose agent activity is rendered live via the existing agent stream rendering. When the plan spawn yields a planned scope, the system SHALL display the planned `wiki/` page list with a `[改]` (revise) and `[確認]` (confirm) control and SHALL NOT start the generate spawn until the user confirms. On confirm, the system SHALL run the generate spawn with live activity rendering, then transition to the answering view. When the plan spawn yields no match, the system SHALL display the no-match reason and SHALL NOT start a generate spawn. While the plan or generate spawn is running, the system SHALL subscribe to the `quiz-stream` channel and render the streamed `VerbEvent`s through the existing agent stream rendering (the same `foldTimeline` + thought / activity-item pipeline used by the run detail view); a static "planning…" / "generating…" label alone SHALL NOT satisfy this — the live agent activity SHALL be visible as it happens, mirroring the goal flow.
 
 The `[Quiz me on this]` control SHALL appear at the bottom of a wiki content page preview (it SHALL NOT appear for `index.md` or `log.md`). Activating it SHALL skip the plan spawn and run the generate spawn directly using that page plus its one-hop wikilinked pages.
 
@@ -2048,87 +2048,44 @@ The `[Quiz me on this]` control SHALL appear at the bottom of a wiki content pag
 - **WHEN** the wiki preview shows `index.md` or `log.md`
 - **THEN** the `[Quiz me on this]` control SHALL NOT be rendered
 
+#### Scenario: Plan/generate agent activity is rendered live
+
+- **GIVEN** the user submitted a topic via `+ New quiz` (or activated `[Quiz me on this]`)
+- **WHEN** the plan or generate spawn emits `VerbEvent`s on the `quiz-stream` channel before its terminal payload
+- **THEN** the Quiz tab SHALL render those events through the existing agent stream rendering (thought / tool-use / result items appear as they stream) AND SHALL NOT show only a static placeholder label
+
+#### Scenario: + New quiz is not shown while inside a quiz
+
+- **GIVEN** the Quiz tab is in a quiz flow or attempt view (planning, confirm, generating, answering, no-match, error, or an opened attempt)
+- **THEN** the `+ New quiz` control SHALL NOT be rendered
+- **AND** the `+ New quiz` control SHALL be rendered only in the history list and the topic-input compose screen
+
 
 <!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
+source: fix-app-quiz
+updated: 2026-05-18
 code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/components/workspace/QuizGenerationLog.tsx
+  - codebus-app/src/store/settings.ts
   - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
   - codebus-core/src/verb/quiz.rs
   - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
   - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-app/src-tauri/src/ipc/quiz.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
 tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
   - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
+  - codebus-app/src/components/workspace/QuizGenerationLog.test.tsx
+  - codebus-app/src/store/settings.test.ts
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-cli/tests/quiz_flow.rs
 -->
 
 ---
 ### Requirement: Quiz Answering and Summary
 
-The answering view SHALL present one question per screen with four choices. After the user selects a choice and submits, the system SHALL reveal whether it was correct by comparing the selection to the quiz markdown `Answer` field client-side (no agent spawn) and SHALL show the `Explanation`. For an incorrect answer the system SHALL additionally render a `[← Back to wiki page]` affordance. After the final question, a summary SHALL display the score and a pass/fail outcome computed client-side using `app.quiz.pass_threshold`.
+The answering view SHALL present one question per screen with four choices. After the user selects a choice and submits, the system SHALL reveal whether it was correct by comparing the selection to the quiz markdown `Answer` field client-side (no agent spawn) and SHALL show the `Explanation`. For an incorrect answer the system SHALL additionally render a `[← Back to wiki page]` affordance. After the final question, a summary SHALL display the score and a pass/fail outcome computed client-side using `app.quiz.pass_threshold`. The threshold value SHALL be sourced from the application settings store (the same `app.quiz.pass_threshold` key the Settings modal binds); it SHALL NOT be a hardcoded component constant. When the `app.quiz.pass_threshold` key is absent the value SHALL default to 80; changing the setting SHALL change the summary pass/fail boundary on the next finished quiz.
 
 #### Scenario: Correct answer revealed without spawn
 
@@ -2146,181 +2103,94 @@ The answering view SHALL present one question per screen with four choices. Afte
 - **WHEN** the user finishes a 5-question quiz with 4 correct (80%)
 - **THEN** the summary SHALL show a passing outcome
 
+#### Scenario: Changing the threshold setting changes the outcome
+
+- **GIVEN** `app.quiz.pass_threshold` is set to 90 in the settings store
+- **WHEN** the user finishes a 5-question quiz with 4 correct (80%)
+- **THEN** the summary SHALL show a failing outcome
+
 
 <!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
+source: fix-app-quiz
+updated: 2026-05-18
 code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/components/workspace/QuizGenerationLog.tsx
+  - codebus-app/src/store/settings.ts
   - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
   - codebus-core/src/verb/quiz.rs
   - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
   - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-app/src-tauri/src/ipc/quiz.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
 tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
   - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
+  - codebus-app/src/components/workspace/QuizGenerationLog.test.tsx
+  - codebus-app/src/store/settings.test.ts
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-cli/tests/quiz_flow.rs
 -->
 
 ---
 ### Requirement: Quiz History List
 
-The Quiz tab SHALL list prior attempts grouped by page or topic slug, derived by scanning `<vault>/.codebus/quiz/`. Each attempt row SHALL expose a view-generation-log affordance that opens the events.jsonl timeline for that attempt's generate spawn using the existing agent stream rendering. Selecting an attempt row SHALL open that attempt's persisted markdown.
+The Quiz tab SHALL list prior attempts grouped by page or topic slug, derived by scanning `<vault>/.codebus/quiz/`. Selecting an attempt row SHALL open that attempt's persisted markdown (the attempt detail view). The view-generation-log affordance SHALL live inside that opened attempt detail view (not on the history row) and SHALL be present only when the attempt has a non-null `events_log`. Activating it SHALL open a centered modal dialog (with a backdrop, dismissible, consistent with the app's existing modal pattern) that renders that attempt's generate-spawn events through the existing agent stream rendering pipeline; displaying only the `events_log` file path SHALL NOT satisfy this requirement. Dismissing the modal SHALL return to the attempt detail view. The history row itself SHALL NOT inline-expand a generation-log panel.
 
 #### Scenario: History reflects non-destructive retries
 
 - **WHEN** two quizzes have been generated for the same topic slug
 - **THEN** the history SHALL list two distinct attempt rows under that slug AND opening either SHALL show that attempt's own questions and answers
 
-#### Scenario: View-generation-log opens the events timeline
+#### Scenario: View-generation-log lives in the attempt detail view
 
-- **WHEN** the user activates the view-generation-log affordance on an attempt row
-- **THEN** the system SHALL render that attempt's generate-spawn events.jsonl through the existing agent stream rendering
+- **WHEN** the user opens an attempt that has a non-null `events_log`
+- **THEN** the attempt detail view SHALL expose a view-generation-log affordance AND the history row SHALL NOT itself render or inline-expand a generation-log panel
+
+#### Scenario: View-generation-log opens a modal timeline
+
+- **WHEN** the user activates the view-generation-log affordance inside an opened attempt
+- **THEN** the system SHALL open a centered modal dialog rendering that attempt's generate-spawn events.jsonl through the existing agent stream rendering AND dismissing the modal SHALL return to the attempt detail view
+
+#### Scenario: View-generation-log is not a bare path
+
+- **WHEN** the user activates the view-generation-log affordance inside an opened attempt
+- **THEN** the modal content SHALL contain stream-rendered event items (thought / tool-use / result) AND SHALL NOT be limited to the events.jsonl path string
+
+#### Scenario: No view-generation-log affordance without an events log
+
+- **WHEN** the user opens an attempt whose `events_log` is null
+- **THEN** the attempt detail view SHALL NOT render a view-generation-log affordance
 
 
 <!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
+source: fix-app-quiz
+updated: 2026-05-18
 code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/components/workspace/QuizGenerationLog.tsx
+  - codebus-app/src/store/settings.ts
   - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
   - codebus-core/src/verb/quiz.rs
   - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
   - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-app/src-tauri/src/ipc/quiz.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
 tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
   - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
+  - codebus-app/src/components/workspace/QuizGenerationLog.test.tsx
+  - codebus-app/src/store/settings.test.ts
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-cli/tests/quiz_flow.rs
 -->
 
 ---
 ### Requirement: Tauri IPC Commands for Quiz Plan and Generate Lifecycle
 
-The system SHALL register exactly five Tauri commands for the quiz GUI flow — `spawn_quiz_plan`, `spawn_quiz_generate`, `cancel_quiz` (lifecycle, mirroring the goal/chat background-thread + `quiz-stream` + terminal-channel pattern), plus `list_quiz_attempts` and `read_quiz_attempt` (history). The `app-shell` IPC Command Registry total count SHALL account for these five (foundation 9 + workspace 6 + chat 2 + quiz 5 = 22); no other Tauri command SHALL be registered by this change.
+The system SHALL register exactly six Tauri commands for the quiz GUI flow — `spawn_quiz_plan`, `spawn_quiz_generate`, `cancel_quiz` (lifecycle, mirroring the goal/chat background-thread + `quiz-stream` + terminal-channel pattern), `list_quiz_attempts` and `read_quiz_attempt` (history), plus `read_quiz_events` (history-log timeline). The `app-shell` IPC Command Registry total count SHALL account for these six (foundation 9 + workspace 6 + chat 2 + quiz 6 = 23); no other Tauri command SHALL be registered by this change.
 
 `list_quiz_attempts(vault_path)` SHALL scan `<vault>/.codebus/quiz/<slug>/*.md`, parse each attempt's frontmatter, and return a newest-first list of attempt metadata (`slug`, `quiz_id`, `trigger`, `topic`/`target_page`, `events_log`, `path`); a missing quiz directory SHALL yield an empty list (not an error). `read_quiz_attempt(vault_path, path)` SHALL return the attempt markdown, rejecting any `path` that does not resolve under the vault's `.codebus/quiz/` tree with `AppError::Invalid { field: "path" }`.
+
+`read_quiz_events(vault_path, path)` SHALL read the events.jsonl file at `path` and return its contents parsed as an ordered list of `EventEnvelope` (one per line, malformed lines skipped rather than failing the whole read), so the history view-generation-log affordance can replay the attempt's generate spawn through the existing agent stream rendering. It SHALL reject any `path` that does not resolve under the vault's `.codebus/` tree with `AppError::Invalid { field: "path" }` (mirroring the `read_quiz_attempt` containment guard). A missing file SHALL yield `AppError::Invalid { field: "path" }` rather than a panic.
 
 `spawn_quiz_plan(vault_path, topic)` SHALL run `run_quiz_plan` on a background thread, emit each `VerbEvent` as a `QuizStreamPayload` on the `quiz-stream` channel, and on completion emit exactly one `QuizPlanTerminalPayload` on the `quiz-plan-terminal` channel whose `result` is `Scope { pages }`, `NoMatch { reason }`, `Failed { message }`, or `Cancelled`. It SHALL return a `quiz-plan-<slug>` run id synchronously. It SHALL NOT start a generate spawn — the frontend interposes the confirm gate and separately calls `spawn_quiz_generate`.
 
@@ -2343,83 +2213,38 @@ The system SHALL register exactly five Tauri commands for the quiz GUI flow — 
 - **WHEN** the frontend calls `spawn_quiz_generate` with a confirmed page list and it succeeds
 - **THEN** a `QuizGenerateTerminalPayload` with `result: Succeeded { quiz_md, planned_pages, events_log }` SHALL be emitted on `quiz-generate-terminal`
 
+#### Scenario: Read quiz events returns the parsed timeline
+
+- **WHEN** the frontend calls `read_quiz_events` with an attempt's `events_log` path that resolves under the vault `.codebus/` tree
+- **THEN** the command SHALL return an ordered `EventEnvelope` list parsed from the file's lines so the timeline can be rendered through the existing agent stream rendering
+
+#### Scenario: Read quiz events rejects an out-of-tree path
+
+- **WHEN** the frontend calls `read_quiz_events` with a `path` that does not resolve under the vault `.codebus/` tree
+- **THEN** the command SHALL reject with `AppError` having `kind: "invalid"` and `field: "path"`
+
 #### Scenario: cancel_quiz idempotent on unknown run
 
 - **WHEN** the frontend calls `cancel_quiz` with a run id that is not active
 - **THEN** the command SHALL return `Ok(())` without error
 
 <!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
+source: fix-app-quiz
+updated: 2026-05-18
 code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
+  - codebus-app/src/components/workspace/QuizGenerationLog.tsx
+  - codebus-app/src/store/settings.ts
   - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
   - codebus-core/src/verb/quiz.rs
   - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
   - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
+  - codebus-app/src/components/workspace/QuizTab.tsx
+  - codebus-app/src-tauri/src/ipc/quiz.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
 tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
   - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
+  - codebus-app/src/components/workspace/QuizGenerationLog.test.tsx
+  - codebus-app/src/store/settings.test.ts
+  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-cli/tests/quiz_flow.rs
 -->

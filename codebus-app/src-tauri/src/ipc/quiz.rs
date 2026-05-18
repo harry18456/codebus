@@ -24,6 +24,7 @@ use codebus_core::verb::quiz::{
     QuizGenerateOptions, QuizPlanOptions, QuizPlanOutcome, QuizPlanReport, QuizReport,
     QuizTrigger, persist_quiz, run_quiz_generate, run_quiz_plan,
 };
+use codebus_core::log::events::sink::EventEnvelope;
 use codebus_core::verb::{VerbError, VerbEvent};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -470,6 +471,35 @@ pub fn read_quiz_attempt(vault_path: String, path: String) -> IpcResult<String> 
     Ok(std::fs::read_to_string(target)?)
 }
 
+/// Read an attempt's generate-spawn events.jsonl into an ordered
+/// `EventEnvelope` list so the history view-generation-log affordance can
+/// replay it through the existing agent stream rendering. The path MUST
+/// resolve under the vault's `.codebus/` tree (same containment guard
+/// strength as `read_quiz_attempt`; an unbounded read would be a
+/// path-traversal sink — audit Scoundrel lens). A missing file is an
+/// `Invalid { field: "path" }` (not an empty timeline, not a panic).
+#[tauri::command]
+pub fn read_quiz_events(
+    vault_path: String,
+    path: String,
+) -> IpcResult<Vec<EventEnvelope>> {
+    let codebus_root = Path::new(&vault_path).join(".codebus");
+    let target = Path::new(&path);
+    if !target.starts_with(&codebus_root) {
+        return Err(AppError::Invalid {
+            field: "path".into(),
+            message: "path is outside the vault .codebus directory".into(),
+        });
+    }
+    if !target.exists() {
+        return Err(AppError::Invalid {
+            field: "path".into(),
+            message: "events file does not exist".into(),
+        });
+    }
+    Ok(crate::ipc::goals::read_events_jsonl(target)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -638,6 +668,67 @@ mod tests {
     #[test]
     fn read_quiz_attempt_rejects_path_outside_quiz_dir() {
         let r = read_quiz_attempt("/v".into(), "/etc/passwd".into());
+        assert!(matches!(
+            r,
+            Err(AppError::Invalid { ref field, .. }) if field == "path"
+        ));
+    }
+
+    // --- fix-app-quiz task 2.1/2.2: read_quiz_events ---
+
+    fn write_events_file(path: &Path, events: &[VerbEvent]) {
+        use codebus_core::log::events::sink::EventEnvelope;
+        let mut body = String::new();
+        for e in events {
+            let env = EventEnvelope {
+                ts: "2026-05-17T00:00:00Z".into(),
+                event: e.clone(),
+            };
+            body.push_str(&serde_json::to_string(&env).unwrap());
+            body.push('\n');
+        }
+        std::fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn read_quiz_events_parses_envelopes_under_vault() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let log_dir = tmp.path().join(".codebus").join("log");
+        std::fs::create_dir_all(&log_dir).unwrap();
+        let events_file = log_dir.join("events-q.jsonl");
+        write_events_file(
+            &events_file,
+            &[VerbEvent::Lifecycle(
+                codebus_core::verb::VerbLifecycleEvent::QuizScopePlanned {
+                    pages: vec!["wiki/a.md".into()],
+                },
+            )],
+        );
+        let got = read_quiz_events(
+            tmp.path().to_string_lossy().into_owned(),
+            events_file.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        assert_eq!(got.len(), 1);
+    }
+
+    #[test]
+    fn read_quiz_events_rejects_path_outside_vault_codebus() {
+        let r = read_quiz_events("/v".into(), "/etc/passwd".into());
+        assert!(matches!(
+            r,
+            Err(AppError::Invalid { ref field, .. }) if field == "path"
+        ));
+    }
+
+    #[test]
+    fn read_quiz_events_missing_file_is_invalid() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let missing = tmp.path().join(".codebus").join("log").join("nope.jsonl");
+        let r = read_quiz_events(
+            tmp.path().to_string_lossy().into_owned(),
+            missing.to_string_lossy().into_owned(),
+        );
         assert!(matches!(
             r,
             Err(AppError::Invalid { ref field, .. }) if field == "path"

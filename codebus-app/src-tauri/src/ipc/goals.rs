@@ -465,7 +465,7 @@ pub(crate) fn get_run_detail_impl(
     Ok(RunDetail { summary, events })
 }
 
-fn read_events_jsonl(path: &Path) -> Result<Vec<EventEnvelope>, AppError> {
+pub(crate) fn read_events_jsonl(path: &Path) -> Result<Vec<EventEnvelope>, AppError> {
     if !path.exists() {
         return Ok(Vec::new());
     }

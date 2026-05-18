@@ -117,6 +117,73 @@ fn quiz_goal_match_writes_file_with_caller_frontmatter() {
     assert!(body.contains("## Answer: B"));
 }
 
+/// Extract a scalar frontmatter value (`key: value`, optional quotes)
+/// from a persisted quiz markdown body.
+fn frontmatter_value(body: &str, key: &str) -> Option<String> {
+    for line in body.lines() {
+        if line == "---" && !body.starts_with(&format!("---\n{key}")) {
+            // keep scanning; frontmatter block only
+        }
+        if let Some(rest) = line.strip_prefix(&format!("{key}:")) {
+            let v = rest.trim().trim_matches('"').trim().to_string();
+            if !v.is_empty() {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+/// fix-app-quiz task 3.1/3.2 — the `events_log` frontmatter pointer MUST
+/// resolve to a real on-disk file containing that generate spawn's
+/// events (not a mock/placeholder path). Design D3 / spec `quiz`
+/// Quiz Storage Layout.
+#[test]
+fn quiz_events_log_points_to_real_generate_events_file() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success(), "setup init");
+
+    let (out, _log) = run_quiz(tmp.path(), "how does auth work", "quiz-goal-match", None);
+    assert!(
+        out.status.success(),
+        "quiz goal-match should exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let file = find_quiz_file(tmp.path()).expect("a quiz .md file must be written");
+    let body = fs::read_to_string(&file).unwrap();
+
+    let events_log =
+        frontmatter_value(&body, "events_log").expect("events_log frontmatter value");
+    let events_path = Path::new(&events_log);
+    assert!(
+        events_path.is_absolute(),
+        "events_log should be an absolute path, got: {events_log}"
+    );
+    assert!(
+        events_path.exists(),
+        "events_log must point to a real on-disk file, missing: {events_log}"
+    );
+    let events_body = fs::read_to_string(events_path).unwrap();
+    let lines: Vec<&str> = events_body
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    assert!(
+        !lines.is_empty(),
+        "events.jsonl must contain this generate spawn's events, was empty: {events_log}"
+    );
+    assert!(
+        lines.iter().all(|l| serde_json::from_str::<serde_json::Value>(l).is_ok()),
+        "every events.jsonl line must be valid JSON (an event envelope)"
+    );
+    assert!(
+        events_body.contains("\"event\""),
+        "events.jsonl lines must be EventEnvelope records (have an \"event\" field)"
+    );
+}
+
 #[test]
 fn quiz_no_match_exits_zero_without_file() {
     let tmp = TempDir::new().unwrap();

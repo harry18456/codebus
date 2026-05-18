@@ -23,8 +23,8 @@ pub mod wiki;
 
 pub use chats::{cancel_chat_turn, spawn_chat_turn};
 pub use quiz::{
-    cancel_quiz, list_quiz_attempts, read_quiz_attempt, spawn_quiz_generate,
-    spawn_quiz_plan,
+    cancel_quiz, list_quiz_attempts, read_quiz_attempt, read_quiz_events,
+    spawn_quiz_generate, spawn_quiz_plan,
 };
 pub use cli_status::check_cli_installed;
 pub use config::{load_global_config, save_global_config};
@@ -33,15 +33,15 @@ pub use keyring::{delete_endpoint_key, get_endpoint_key, set_endpoint_key};
 pub use vault_list::{add_vault, list_vaults, remove_vault};
 pub use wiki::{list_wiki_pages, read_wiki_page};
 
-/// Exactly the twenty-two commands exposed by this Tauri app. Used by
-/// the `exactly_twenty_two_commands_are_registered` test and consumed
+/// Exactly the twenty-three commands exposed by this Tauri app. Used by
+/// the `exactly_twenty_three_commands_are_registered` test and consumed
 /// by `lib::run`.
 ///
 /// Foundation 9 + workspace 6 (`spawn_goal`, `cancel_goal`, `list_runs`,
 /// `get_run_detail`, `list_wiki_pages`, `read_wiki_page`) + chat 2
-/// (`spawn_chat_turn`, `cancel_chat_turn`) + quiz 5 (`spawn_quiz_plan`,
+/// (`spawn_chat_turn`, `cancel_chat_turn`) + quiz 6 (`spawn_quiz_plan`,
 /// `spawn_quiz_generate`, `cancel_quiz`, `list_quiz_attempts`,
-/// `read_quiz_attempt`).
+/// `read_quiz_attempt`, `read_quiz_events`).
 pub const REGISTERED_COMMANDS: &[&str] = &[
     "list_vaults",
     "add_vault",
@@ -65,6 +65,7 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
     "cancel_quiz",
     "list_quiz_attempts",
     "read_quiz_attempt",
+    "read_quiz_events",
 ];
 
 /// Sugar for `tauri::generate_handler!` so the registration is colocated
@@ -95,6 +96,7 @@ macro_rules! generate_ipc_handler {
             $crate::ipc::quiz::cancel_quiz,
             $crate::ipc::quiz::list_quiz_attempts,
             $crate::ipc::quiz::read_quiz_attempt,
+            $crate::ipc::quiz::read_quiz_events,
         ]
     };
 }
@@ -108,11 +110,11 @@ mod tests {
     use super::REGISTERED_COMMANDS;
 
     #[test]
-    fn exactly_twenty_two_commands_are_registered() {
+    fn exactly_twenty_three_commands_are_registered() {
         assert_eq!(
             REGISTERED_COMMANDS.len(),
-            22,
-            "IPC Command Registry requires exactly 22 commands (9 foundation + 6 workspace + 2 chat + 5 quiz)"
+            23,
+            "IPC Command Registry requires exactly 23 commands (9 foundation + 6 workspace + 2 chat + 6 quiz)"
         );
     }
 
@@ -141,6 +143,7 @@ mod tests {
             "cancel_quiz",
             "list_quiz_attempts",
             "read_quiz_attempt",
+            "read_quiz_events",
         ]
         .into_iter()
         .collect();

@@ -40,6 +40,11 @@ CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 
 
 - **`v3-app-quiz` (E)** — macOS / Linux 手動驗收 deferred to `v3-app-polish-ship`。polish-ship 屆時需在 macOS + Linux 重跑：(1) CLI `codebus quiz "<topic>"` 端到端（plan→generate→落檔 `<vault>/.codebus/quiz/<slug>/<id>.md` 含 caller frontmatter；no-match exit 0 不落檔；retry 非破壞兩檔）；(2) GUI Quiz tab plan-confirm-generate flow（topic 輸入→plan live stream→scope 確認 gate→generate→一題一畫面 client-side 評分→summary pass/fail by `app.quiz.pass_threshold`）；(3) wiki preview `[Quiz me on this]` Page flow（nav 頁不顯示、內容頁跳 plan 直接 generate）；(4) Quiz history（掃 `.codebus/quiz/` 依 slug group、retry 兩 row、`[看過程]` events.jsonl）；(5) 共用 `quiz.default_length` config 與 `app.*` namespace isolation（CLI 不讀 app.*）。Windows MSVC 上述皆已於本 change 必跑必過（Rust core / CLI / Tauri / vitest 全綠）。
 
+- **`fix-app-quiz`** — `v3-app-quiz` archive 後的 Windows 人工驗收補做 + compliance 修正容器。實況（誠實登記，取代 v3-app-quiz「Windows 皆已必跑必過」的過度宣稱）：
+  - **CLI 區塊**：由 assistant 端到端實跑驗證（真 claude spawn，throwaway vault `quiz-e2e`）—— plan→generate→落檔 caller frontmatter、no-match exit0 不落檔、retry 非破壞兩檔、`--count`/`quiz.default_length` fallback、不 auto-commit、`events_log` 絕對路徑、body 無 preamble。**Pass。**
+  - **GUI 區塊**：本 change 期間以**互動式人工驗收**進行（user 實機 `cargo tauri dev`），共抓出並修復 7 個 defect（#1 header 碰撞 / #2 +New quiz 無反應 / #3 plan-marker 過脆+不可診斷 / #4 generate preamble 漏檔 / #5 plan/generate 未 live render / #6 view-log 改 attempt-modal / #7 +New quiz 進 quiz 內隱藏），全部 TDD 修正並有自動測試覆蓋（core 452 / cli 123 / vitest 353 全綠）。
+  - **Deferred**：(a) 對「最終 build」由人從頭到尾再跑一次完整 GUI checklist —— 因 quiz GUI 互動/持久化模型即將於後續 redesign change 重做，對即將被取代的 UI 再做整輪人工 sweep 屬低價值，故延後到該 redesign change 的驗收一併處理；(b) macOS / Linux 手動驗收仍 deferred to `v3-app-polish-ship`（沿用上面 v3-app-quiz (E) 五區塊範圍，含 fix-app-quiz 的修正）。
+
 ## 為什麼切 8 條而不是一條
 
 7-8 週工作量。單一巨大 change 的歷史教訓：apply 失焦、review 不可行、in-flight spec drift。本 roadmap 的切點來自 2026-05-11 brainstorming session（原本 4 條 / 2026-05-12 把 quiz-cmdk 拆成 query-cmdk + quiz 兩條 / 2026-05-12 #2 動工前發現 CLI 缺基建再前插 A + B 兩條 / 2026-05-13 B propose 前 user push back single-shot query 再前插 chat 一條，總計 8 條），每一條落點都是「換到下一條時，前一條跑得起來的 demo」（不是「實作了某個檔案」），所以 archive 任一條後都可以對外展示一個可用的 app 子集。

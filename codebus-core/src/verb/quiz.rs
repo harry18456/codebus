@@ -121,27 +121,54 @@ pub struct QuizReport {
 /// `[CODEBUS_QUIZ_NO_MATCH]` yields the trimmed reason. Anything else —
 /// including a marker that is not at the start — returns `None`.
 pub(crate) fn parse_plan_outcome(text: &str) -> Option<QuizPlanOutcome> {
-    let t = text.trim_start();
-    if let Some(rest) = t.strip_prefix(QUIZ_SCOPE_MARKER) {
-        let line = rest.split('\n').next().unwrap_or(rest).trim();
-        let pages: Vec<String> = line
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if pages.is_empty() {
-            return None;
+    // Tolerant recovery (design D6, mirroring the D4 generate-body fence
+    // tolerance): strip a leading/trailing code fence the agent may have
+    // wrapped its response in, then accept the FIRST line that begins
+    // with either marker even when the agent emitted preamble lines
+    // before it. The SKILL still mandates the marker on line 1; this is
+    // caller-side robustness, not a relaxation of the agent contract.
+    let stripped = strip_code_fence(text);
+    for raw in stripped.lines() {
+        let line = raw.trim();
+        if let Some(rest) = line.strip_prefix(QUIZ_SCOPE_MARKER) {
+            let pages: Vec<String> = rest
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if pages.is_empty() {
+                return None;
+            }
+            return Some(QuizPlanOutcome::Scope(pages));
         }
-        return Some(QuizPlanOutcome::Scope(pages));
-    }
-    if let Some(rest) = t.strip_prefix(QUIZ_NO_MATCH_MARKER) {
-        let reason = rest.split('\n').next().unwrap_or(rest).trim().to_string();
-        if reason.is_empty() {
-            return None;
+        if let Some(rest) = line.strip_prefix(QUIZ_NO_MATCH_MARKER) {
+            let reason = rest.trim().to_string();
+            if reason.is_empty() {
+                return None;
+            }
+            return Some(QuizPlanOutcome::NoMatch(reason));
         }
-        return Some(QuizPlanOutcome::NoMatch(reason));
     }
     None
+}
+
+/// Build the no-marker plan error WITH a truncated head (≤200 chars) of
+/// the actual spawn output, so the failure is self-diagnosing instead of
+/// opaque (design D6). Used on the `parse_plan_outcome` → `None` path.
+pub(crate) fn plan_no_marker_error(plan_text: &str) -> VerbError {
+    let head: String = plan_text.chars().take(200).collect();
+    let suffix = if plan_text.chars().nth(200).is_some() {
+        " …(truncated)"
+    } else {
+        ""
+    };
+    VerbError::Internal {
+        message: format!(
+            "quiz plan spawn produced no [CODEBUS_QUIZ_SCOPE]/\
+             [CODEBUS_QUIZ_NO_MATCH] marker on any line; spawn output \
+             head: {head}{suffix}"
+        ),
+    }
 }
 
 /// Strip a leading+trailing markdown code fence the agent may have
@@ -159,6 +186,43 @@ pub(crate) fn strip_code_fence(body: &str) -> String {
         }
     }
     trimmed.to_string()
+}
+
+/// Byte offset of the first `## Q<digits>.` question heading, wherever
+/// it appears (even glued mid-line behind agent preamble). `## Q` is
+/// ASCII so the returned index is always a valid char boundary.
+fn first_question_index(body: &str) -> Option<usize> {
+    let bytes = body.as_bytes();
+    const PAT: &[u8] = b"## Q";
+    let mut i = 0usize;
+    while i + PAT.len() <= bytes.len() {
+        if &bytes[i..i + PAT.len()] == PAT {
+            let mut j = i + PAT.len();
+            let digits_start = j;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > digits_start && j < bytes.len() && bytes[j] == b'.' {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Discard any agent preamble that precedes the first `## Q<n>.`
+/// question heading — including a preamble the agent glued onto the
+/// same line as `## Q1.` — so the cleaned body begins exactly at the
+/// first question and `## Q1.` starts a line (design D7 / defect #4,
+/// same tolerant-cleanup shape as `strip_code_fence`). When no question
+/// heading exists at all, the body is returned unchanged so the
+/// downstream "no well-formed questions" handling still owns that case.
+pub(crate) fn strip_preamble_before_first_question(body: &str) -> String {
+    match first_question_index(body) {
+        Some(idx) => body[idx..].trim().to_string(),
+        None => body.to_string(),
+    }
 }
 
 fn is_cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
@@ -292,12 +356,7 @@ pub fn run_quiz_plan<F: FnMut(VerbEvent)>(
             QuizPlanOutcome::NoMatch(reason)
         }
         None => {
-            return Err(VerbError::Internal {
-                message: "quiz plan spawn produced no \
-                          [CODEBUS_QUIZ_SCOPE]/[CODEBUS_QUIZ_NO_MATCH] \
-                          marker on its first line"
-                    .to_string(),
-            });
+            return Err(plan_no_marker_error(&plan_text));
         }
     };
 
@@ -343,9 +402,17 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
             Box::new(EventsNullSink::new())
         }
     };
-    let events_log: Option<String> = events_sink
-        .events_path()
-        .map(|p| p.display().to_string());
+    // Absolutize the events.jsonl pointer: the sink path is relative to
+    // the CLI cwd, but `events_log` is persisted into the quiz markdown
+    // and later read by the GUI (`read_quiz_events`) from a different
+    // cwd, whose containment guard requires a vault-rooted path. Resolve
+    // against cwd now so the pointer is stable regardless of reader cwd.
+    let events_log: Option<String> = events_sink.events_path().map(|p| {
+        std::path::absolute(&p)
+            .unwrap_or(p)
+            .display()
+            .to_string()
+    });
 
     let mut fan_out = |event: VerbEvent| {
         let envelope = EventEnvelope {
@@ -371,7 +438,8 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         env,
         cancel.clone(),
     )?;
-    let quiz_md = strip_code_fence(&gen_text);
+    let quiz_md =
+        strip_preamble_before_first_question(&strip_code_fence(&gen_text));
 
     let outcome = if is_cancelled(&cancel) {
         "cancelled"
@@ -595,10 +663,48 @@ mod tests {
         );
     }
 
+    // fix-app-quiz defect #3 / design D6: the parser tolerantly
+    // recovers the marker (strip leading fence, accept first marker
+    // line despite preamble) — mirroring the D4 generate-body fence
+    // tolerance. The SKILL still mandates the marker on line 1.
+
     #[test]
-    fn parse_marker_not_at_start_is_none() {
+    fn parse_marker_after_preamble_is_recovered() {
         let text = "Sure, here is the scope.\n[CODEBUS_QUIZ_SCOPE] wiki/a.md";
-        assert_eq!(parse_plan_outcome(text), None);
+        assert_eq!(
+            parse_plan_outcome(text),
+            Some(QuizPlanOutcome::Scope(vec!["wiki/a.md".into()]))
+        );
+    }
+
+    #[test]
+    fn parse_marker_inside_code_fence_is_recovered() {
+        let text = "```\n[CODEBUS_QUIZ_NO_MATCH] vault only covers web auth\n```";
+        assert_eq!(
+            parse_plan_outcome(text),
+            Some(QuizPlanOutcome::NoMatch(
+                "vault only covers web auth".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn plan_no_marker_error_includes_truncated_output_head() {
+        let junk = "x".repeat(500);
+        let err = plan_no_marker_error(&junk);
+        let msg = match err {
+            VerbError::Internal { message } => message,
+            other => panic!("expected Internal, got {other:?}"),
+        };
+        assert!(
+            msg.contains("xxxxx"),
+            "error must include a head of the spawn output: {msg}"
+        );
+        // Head is truncated (≤200 chars of output), not the full 500.
+        assert!(
+            !msg.contains(&junk),
+            "error must NOT embed the full spawn output"
+        );
     }
 
     #[test]
@@ -641,6 +747,35 @@ mod tests {
     fn strip_fence_only_opening_is_not_stripped() {
         let body = "```\n## Q1. only opening";
         assert_eq!(strip_code_fence(body), "```\n## Q1. only opening");
+    }
+
+    // --- strip_preamble_before_first_question (defect #4 / design D7) ---
+
+    #[test]
+    fn strip_preamble_glued_onto_first_question() {
+        let body = "讀取三個指定的 wiki 頁面以產生測驗題目。## Q1. stem\n\
+                    - A) a\n## Answer: A\n## Explanation: e";
+        let out = strip_preamble_before_first_question(body);
+        assert!(
+            out.starts_with("## Q1. stem"),
+            "cleaned body must begin at the first question: {out:?}"
+        );
+        assert!(
+            !out.contains("讀取三個指定的 wiki 頁面以產生測驗題目。"),
+            "agent preamble must be discarded: {out:?}"
+        );
+    }
+
+    #[test]
+    fn strip_preamble_noop_when_already_clean() {
+        let body = "## Q1. x\n## Answer: A\n## Explanation: e";
+        assert_eq!(strip_preamble_before_first_question(body), body);
+    }
+
+    #[test]
+    fn strip_preamble_noop_when_no_question_heading() {
+        let body = "random text with no question heading at all";
+        assert_eq!(strip_preamble_before_first_question(body), body);
     }
 
     // --- vault preconditions (no spawn) ---
