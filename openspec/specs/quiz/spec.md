@@ -225,7 +225,11 @@ tests:
 ---
 ### Requirement: Quiz Storage Layout and Retry Semantics
 
-Each quiz attempt SHALL be persisted as one file at `<vault>/.codebus/quiz/<slug>/<iso-timestamp>.md`, where `<slug>` is the page slug for `wiki_preview` trigger or the topic slug for `ai_planned` trigger. Persisting an attempt SHALL NOT overwrite or delete any prior attempt file. Quiz history SHALL be derived by scanning this directory tree, not by correlating run-log entries.
+Each quiz attempt SHALL be persisted as one file at `<vault>/.codebus/quiz/<slug>/<iso-timestamp>.md`, where `<slug>` is the page slug for `wiki_preview` trigger or the topic slug for `ai_planned` trigger. Persisting an attempt SHALL NOT overwrite or delete any prior attempt file. The generated attempt markdown SHALL remain immutable after persistence. Quiz history SHALL be derived by scanning this directory tree, not by correlating run-log entries.
+
+Each attempt MAY additionally have a sibling progress sidecar at `<vault>/.codebus/quiz/<slug>/<iso-timestamp>.progress.json` recording the user's answering state for that attempt. The sidecar SHALL store ONLY the non-derivable data: `schema_version` (integer), `answers` (ordered list of `{ q: 1-based integer, selected: "A"|"B"|"C"|"D", correct: boolean }`), `status` (`in_progress` or `completed`), `started_at`, `completed_at` (RFC3339; `completed_at` null until completed), and an OPTIONAL `cursor` (`{ q: 1-based integer, revealed: boolean }`) recording the question the user is currently viewing and whether it was already submitted. Derived quantities — total question count, answered count, correct count, score, pass/fail — SHALL NOT be stored in the sidecar; they SHALL be recomputed from `answers` and the attempt markdown so the sidecar has a single source of truth and cannot hold self-contradictory fields. `cursor` is navigation state (not a derived quantity) and MAY be absent: a sidecar without `cursor` SHALL remain valid and SHALL be read by treating the resume position as the last answered question in its submitted state. An absent sidecar SHALL mean the attempt is not started (answered 0; total parsed from the markdown body's `## Q` headings).
+
+The sidecar SHALL be written atomically (write to a temporary file in the same directory, then rename over the target) so an interrupted write cannot corrupt it. Reading the sidecar SHALL be tolerant: a missing file yields the not-started state (not an error); a malformed or unparseable file SHALL be treated as not-started rather than panicking; unknown JSON keys SHALL be ignored; a `schema_version` newer than known SHALL still best-effort read the known fields. The sidecar is additive — it SHALL NOT modify or replace the immutable attempt markdown, and the retry semantics below are unchanged by it.
 
 Retry SHALL be a plain re-invocation of the same flow (Goal: `run_quiz_plan` then `run_quiz_generate`; Page: `run_quiz_generate`) with the same inputs. The system SHALL NOT inject previous question stems as negative context and SHALL NOT guarantee that a retry produces different questions. User-facing surfaces SHALL NOT claim that retry always yields new questions.
 
@@ -239,81 +243,34 @@ Retry SHALL be a plain re-invocation of the same flow (Goal: `run_quiz_plan` the
 - **WHEN** the same flow is re-invoked with identical inputs
 - **THEN** the system SHALL NOT pass any record of the prior questions into the second invocation AND the second quiz MAY repeat questions from the first
 
+#### Scenario: Absent sidecar means not started
+
+- **GIVEN** an attempt markdown with 5 `## Q` headings and no sidecar file
+- **WHEN** the attempt's progress is read
+- **THEN** the result SHALL be the not-started state with total 5 and answered 0
+
+#### Scenario: Sidecar stores only non-derivable data
+
+- **WHEN** the user has answered 3 of 5 questions and the sidecar is written
+- **THEN** the sidecar SHALL contain `answers` with 3 entries, `status: in_progress`, `started_at`, and `completed_at: null` AND SHALL NOT contain stored `answered`, `correct`, `score`, or pass/fail fields
+
+#### Scenario: Malformed sidecar is treated as not started
+
+- **GIVEN** a `*.progress.json` whose contents are not valid progress JSON
+- **WHEN** the attempt's progress is read
+- **THEN** the read SHALL NOT panic AND SHALL yield the not-started state
+
+#### Scenario: Sidecar write is atomic and non-destructive to markdown
+
+- **WHEN** progress is written twice for the same attempt
+- **THEN** the final sidecar SHALL reflect the second write AND no temporary file SHALL remain AND the attempt's `.md` file SHALL be byte-unchanged
+
 
 <!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
+source: quiz-attempt-progress
+updated: 2026-05-19
 code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
-  - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
   - codebus-core/src/verb/quiz.rs
-  - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
-tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
 -->
 
 ---
