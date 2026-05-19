@@ -46,16 +46,30 @@ use crate::log::{RunLog, SinkConfig, TokenUsage};
 use crate::stream::StreamEvent;
 use crate::vault::layout::vault_paths;
 use crate::verb::error::VerbError;
-use crate::verb::event::{VerbEvent, VerbLifecycleEvent};
+use crate::verb::event::{VerbBanner, VerbEvent, VerbLifecycleEvent};
+use crate::verb::quiz_validate::validate_quiz_body;
 use chrono::SecondsFormat;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Read-only toolset for the quiz verb. Excludes Write / Edit / Bash —
-/// quiz only reads `wiki/`; raw-scope enforcement is the SKILL prompt
-/// invariant (design D3, spike ❽ verified prompt-only is sufficient).
+/// Read-only toolset for the quiz **plan** spawn. Excludes Write / Edit
+/// / Bash — planning only reads `wiki/`; raw-scope enforcement is the
+/// SKILL prompt invariant (design D3, spike ❽ verified prompt-only is
+/// sufficient).
 pub const QUIZ_TOOLSET: &[&str] = &["Read", "Glob", "Grep"];
+
+/// Toolset for the quiz **generate** spawn: read-only plus a Bash tool
+/// hard-gated to the quiz validator (design «Bash sandbox»). The agent
+/// self-validates its in-context draft via stdin — it has no scratch
+/// file to write, so Write / Edit are deliberately NOT added (this is a
+/// process-shape consequence, not a least-privilege claim).
+pub const QUIZ_GENERATE_TOOLSET: &[&str] = &["Read", "Glob", "Grep", "Bash"];
+
+/// `--allowedTools` fine-grained Bash specifier for the generate spawn:
+/// the agent may invoke only `codebus quiz validate ...` (mirrors
+/// `wiki::fix::FIX_BASH_WHITELIST`'s `Bash(codebus lint *)` shape).
+pub const QUIZ_BASH_WHITELIST: &str = "Bash(codebus quiz validate *)";
 
 const QUIZ_SCOPE_MARKER: &str = "[CODEBUS_QUIZ_SCOPE] ";
 const QUIZ_NO_MATCH_MARKER: &str = "[CODEBUS_QUIZ_NO_MATCH] ";
@@ -113,6 +127,30 @@ pub struct QuizReport {
     /// is active (`None` under `log.sink: none`). Caller writes this as
     /// the `events_log` frontmatter pointer (design D4).
     pub events_log: Option<String>,
+    /// Deterministic final-verify outcome over `quiz_md` (design D4).
+    /// `Ok` when the validator found zero issues; `Failed` when residual
+    /// schema / broken-citation findings remain. The caller persists
+    /// this as the `validation:` frontmatter field; an absent field is
+    /// "not validated" and MUST NOT be read as `Ok`.
+    pub validation: QuizValidation,
+}
+
+/// Final-verify status carried on [`QuizReport`] and persisted as the
+/// `validation:` frontmatter field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuizValidation {
+    Ok,
+    Failed,
+}
+
+impl QuizValidation {
+    /// Frontmatter scalar (`validation: ok` / `validation: failed`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QuizValidation::Ok => "ok",
+            QuizValidation::Failed => "failed",
+        }
+    }
 }
 
 /// Parse the plan-spawn marker. Per spec the marker MUST be the first
@@ -262,6 +300,8 @@ fn run_spawn(
     fan_out: &mut dyn FnMut(VerbEvent),
     slash_command: String,
     vault_root: std::path::PathBuf,
+    toolset: &'static [&'static str],
+    bash_whitelist: Option<&'static str>,
     resolved: &crate::config::ResolvedVerb,
     env: crate::agent::EnvOverrides,
     cancel: Option<Arc<AtomicBool>>,
@@ -277,8 +317,8 @@ fn run_spawn(
             InvokeAgentOptions {
                 slash_command,
                 vault_root,
-                toolset: QUIZ_TOOLSET,
-                bash_whitelist: None,
+                toolset,
+                bash_whitelist,
                 model: resolved.model.clone(),
                 effort: resolved.effort.clone(),
                 env,
@@ -337,6 +377,8 @@ pub fn run_quiz_plan<F: FnMut(VerbEvent)>(
         &mut fan_out,
         format!("/codebus-quiz plan: {}", options.topic),
         paths.root.clone(),
+        QUIZ_TOOLSET,
+        None,
         &resolved,
         env,
         cancel.clone(),
@@ -438,12 +480,42 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
             options.question_count
         ),
         paths.root.clone(),
+        QUIZ_GENERATE_TOOLSET,
+        Some(QUIZ_BASH_WHITELIST),
         &resolved,
         env,
         cancel.clone(),
     )?;
     let quiz_md =
         strip_preamble_before_first_question(&strip_code_fence(&gen_text));
+
+    // Deterministic final verify (design D1/D3/D4). Run the same
+    // validator the `codebus quiz validate` sub-action / agent
+    // self-check use, over the fence/preamble-stripped body. Surface the
+    // outcome through the same `fan_out` (events.jsonl + on_event) using
+    // the existing lint-outcome banner shape — no new VerbEvent variant,
+    // mirroring how `wiki::fix` surfaces lint. Residual findings are
+    // best-effort: the quiz is still persisted (caller side) with a
+    // `validation: failed` marker, a non-fatal warning is surfaced, no
+    // question is dropped, and the verb does NOT fail for this reason.
+    let findings = validate_quiz_body(&quiz_md, &paths.wiki);
+    fan_out(VerbEvent::Banner(VerbBanner::LintDone {
+        errors: findings.len(),
+        warns: 0,
+        elapsed_ms: 0,
+    }));
+    let validation = if findings.is_empty() {
+        QuizValidation::Ok
+    } else {
+        eprintln!(
+            "warning: quiz validation found {} issue(s) (non-fatal; quiz persisted with validation: failed):",
+            findings.len()
+        );
+        for f in &findings {
+            eprintln!("  [{}] {}: {}", f.rule_id, f.path, f.message);
+        }
+        QuizValidation::Failed
+    };
 
     let outcome = if is_cancelled(&cancel) {
         "cancelled"
@@ -459,7 +531,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         finished_at: gen_report.finished_at.clone(),
         tokens: gen_report.accumulated_tokens.clone(),
         wiki_changed: false,
-        lint_error_count: 0,
+        lint_error_count: findings.len(),
         lint_warn_count: 0,
         outcome: outcome.into(),
         session_id: gen_report.session_id.clone(),
@@ -481,6 +553,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         finished_at: gen_report.finished_at,
         agent_exit_code: gen_report.exit.code(),
         events_log,
+        validation,
     })
 }
 
@@ -591,6 +664,9 @@ pub fn persist_quiz(
         Some(p) => fm.push_str(&format!("events_log: {}\n", yaml_quote(p))),
         None => fm.push_str("events_log: null\n"),
     }
+    // Deterministic final-verify outcome (design D4). Absent field =
+    // "not validated"; readers MUST NOT treat absent as `ok`.
+    fm.push_str(&format!("validation: {}\n", report.validation.as_str()));
     fm.push_str("---\n\n");
     fm.push_str(report.quiz_md.trim());
     fm.push('\n');
@@ -637,6 +713,21 @@ mod tests {
         assert_eq!(QUIZ_TOOLSET, &["Read", "Glob", "Grep"]);
         assert!(!QUIZ_TOOLSET.contains(&"Write"));
         assert!(!QUIZ_TOOLSET.contains(&"Edit"));
+        assert!(!QUIZ_TOOLSET.contains(&"Bash"));
+    }
+
+    /// design «Bash sandbox» + spec `cli` / Quiz Validate Sub-Action
+    /// Behavior: the generate spawn (only) gets Bash hard-gated to
+    /// `codebus quiz validate *`, and it MUST NOT gain Write/Edit (the
+    /// agent self-validates via stdin, not a scratch file).
+    #[test]
+    fn quiz_generate_toolset_has_gated_bash_no_write() {
+        assert_eq!(QUIZ_BASH_WHITELIST, "Bash(codebus quiz validate *)");
+        assert!(QUIZ_GENERATE_TOOLSET.contains(&"Bash"));
+        assert!(QUIZ_GENERATE_TOOLSET.contains(&"Read"));
+        assert!(!QUIZ_GENERATE_TOOLSET.contains(&"Write"));
+        assert!(!QUIZ_GENERATE_TOOLSET.contains(&"Edit"));
+        // plan spawn stays read-only (no Bash).
         assert!(!QUIZ_TOOLSET.contains(&"Bash"));
     }
 
@@ -885,6 +976,7 @@ mod tests {
             finished_at: "t1".into(),
             agent_exit_code: Some(0),
             events_log: Some("/v/.codebus/log/events-x.jsonl".into()),
+            validation: QuizValidation::Ok,
         }
     }
 

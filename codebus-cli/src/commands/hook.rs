@@ -20,8 +20,9 @@ use std::process::ExitCode;
 
 #[derive(Subcommand, Debug)]
 pub enum HookArgs {
-    /// PreToolUse Bash hook: allow `codebus lint *`, block everything else.
-    /// Reads JSON from stdin, prints decision JSON to stdout, always exits 0.
+    /// PreToolUse Bash hook: allow `codebus lint *` or
+    /// `codebus quiz validate *`, block everything else. Reads JSON from
+    /// stdin, prints decision JSON to stdout, always exits 0.
     CheckBash,
 }
 
@@ -55,12 +56,12 @@ async fn check_bash() -> ExitCode {
         return emit_block("hook: tool_input.command absent or empty");
     }
 
-    if is_codebus_lint_command(cmd) {
+    if is_allowed_bash_command(cmd) {
         // Allow: exit 0 with no decision JSON.
         ExitCode::from(0)
     } else {
         emit_block(&format!(
-            "hook: only `codebus lint *` is permitted by codebus fix sandbox; received `{cmd}`"
+            "hook: only `codebus lint *` or `codebus quiz validate *` is permitted by the codebus agent sandbox; received `{cmd}`"
         ))
     }
 }
@@ -95,6 +96,29 @@ fn is_codebus_lint_command(cmd: &str) -> bool {
         return false;
     }
     matches!(parts.next(), Some("lint"))
+}
+
+/// `codebus quiz validate ...` — the codebus-quiz generate agent's
+/// self-validation form (spec `lint-feedback-loop` / Fix Bash Hook
+/// Installation, allow rule (b)). Same argv strictness as the lint
+/// form: binary basename must be `codebus`, then exactly `quiz` then
+/// `validate`. `codebus quiz "<topic>"` (generate) does NOT match.
+fn is_codebus_quiz_validate_command(cmd: &str) -> bool {
+    let mut parts = cmd.split_whitespace();
+    let Some(binary) = parts.next() else {
+        return false;
+    };
+    if !is_codebus_binary(binary) {
+        return false;
+    }
+    matches!(parts.next(), Some("quiz")) && matches!(parts.next(), Some("validate"))
+}
+
+/// Combined PreToolUse allow predicate: the codebus-fix agent's
+/// `codebus lint ...` OR the codebus-quiz generate agent's
+/// `codebus quiz validate ...`. Everything else is blocked.
+fn is_allowed_bash_command(cmd: &str) -> bool {
+    is_codebus_lint_command(cmd) || is_codebus_quiz_validate_command(cmd)
 }
 
 fn is_codebus_binary(token: &str) -> bool {
@@ -153,6 +177,42 @@ mod tests {
         assert!(is_codebus_lint_command("codebus lint"));
         assert!(is_codebus_lint_command("codebus lint --format json"));
         assert!(is_codebus_lint_command("codebus lint --repo /some/path"));
+    }
+
+    // --- quiz-validate-repair task 3.3: hook also allows
+    // `codebus quiz validate ...` (spec lint-feedback-loop / Fix Bash
+    // Hook Installation, new allow form). `is_allowed_bash_command` is
+    // the combined predicate; `codebus lint *` OR `codebus quiz
+    // validate *` is allowed, everything else blocked.
+
+    #[test]
+    fn allow_codebus_quiz_validate() {
+        assert!(is_allowed_bash_command("codebus quiz validate -"));
+        assert!(is_allowed_bash_command(
+            "codebus quiz validate draft.md --json"
+        ));
+        if !cfg!(target_os = "windows") {
+            assert!(is_allowed_bash_command(
+                "/usr/local/bin/codebus quiz validate draft.md"
+            ));
+        }
+    }
+
+    #[test]
+    fn block_codebus_quiz_generate_form() {
+        // `codebus quiz "topic"` (generate) is NOT the validate
+        // sub-action and MUST stay blocked.
+        assert!(!is_allowed_bash_command("codebus quiz topic"));
+        assert!(!is_allowed_bash_command("codebus quiz \"some topic\""));
+        assert!(!is_allowed_bash_command("codebus quiz"));
+    }
+
+    #[test]
+    fn combined_predicate_keeps_lint_allow_and_other_block() {
+        assert!(is_allowed_bash_command("codebus lint --format json"));
+        assert!(!is_allowed_bash_command("codebus fix --no-fix"));
+        assert!(!is_allowed_bash_command("echo MARKER"));
+        assert!(!is_allowed_bash_command(""));
     }
 
     #[test]

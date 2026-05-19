@@ -117,6 +117,63 @@ fn quiz_goal_match_writes_file_with_caller_frontmatter() {
     assert!(body.contains("## Answer: B"));
 }
 
+// --- quiz-validate-repair task 4.1: run_quiz_generate final-verify ---
+// (design D1/D3/D4; spec quiz / Quiz Output Validation and Repair).
+
+#[test]
+fn quiz_clean_body_marks_validation_ok() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success(), "setup init");
+
+    let (out, _log) = run_quiz(tmp.path(), "validator topic", "quiz-clean-body", None);
+    assert!(
+        out.status.success(),
+        "clean quiz should exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let file = find_quiz_file(tmp.path()).expect("quiz file written");
+    let body = fs::read_to_string(&file).unwrap();
+    assert_eq!(
+        frontmatter_value(&body, "validation").as_deref(),
+        Some("ok"),
+        "structurally valid, citation-free quiz must persist validation: ok:\n{body}"
+    );
+}
+
+#[test]
+fn quiz_bad_body_marks_validation_failed_best_effort() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success(), "setup init");
+
+    let (out, _log) = run_quiz(tmp.path(), "validator topic", "quiz-bad-body", None);
+    // Best-effort: residual validation failure does NOT change exit code.
+    assert!(
+        out.status.success(),
+        "bad quiz must still exit 0 (best-effort persist); stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let file = find_quiz_file(tmp.path()).expect("quiz file still written best-effort");
+    let body = fs::read_to_string(&file).unwrap();
+    assert_eq!(
+        frontmatter_value(&body, "validation").as_deref(),
+        Some("failed"),
+        "residual finding must persist validation: failed:\n{body}"
+    );
+    // Question NOT dropped — the malformed block is still in the file.
+    assert!(
+        body.contains("## Q1."),
+        "the question block must not be dropped:\n{body}"
+    );
+    // Non-fatal warning surfaced to stderr.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("validation"),
+        "a non-fatal validation warning must be surfaced; stderr:\n{stderr}"
+    );
+}
+
 /// Extract a scalar frontmatter value (`key: value`, optional quotes)
 /// from a persisted quiz markdown body.
 fn frontmatter_value(body: &str, key: &str) -> Option<String> {

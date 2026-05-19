@@ -240,12 +240,67 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
 
+        // quiz-validate-repair: generate emits a structurally valid body
+        // with NO `[[wikilink]]` citations (a fresh-init vault has no
+        // content pages, so any citation would be flagged broken). The
+        // caller final-verify SHALL find zero issues → `validation: ok`.
+        "quiz-clean-body" => {
+            let sid = session_id();
+            match quiz_mode(&args) {
+                QuizMode::Plan => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(
+                        "[CODEBUS_QUIZ_SCOPE] wiki/concepts/jwt-token-lifecycle.md",
+                    );
+                    emit_quiz_result();
+                }
+                QuizMode::Generate | QuizMode::Unknown => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(MOCK_QUIZ_CLEAN);
+                    emit_quiz_result();
+                }
+            }
+            ExitCode::SUCCESS
+        }
+
+        // quiz-validate-repair: generate emits a body whose only
+        // question is missing its `## Answer:` line. Caller final-verify
+        // SHALL produce a schema finding → quiz still persisted
+        // best-effort with `validation: failed`, a non-fatal warning is
+        // surfaced, the question is NOT dropped, verb still exits 0.
+        "quiz-bad-body" => {
+            let sid = session_id();
+            match quiz_mode(&args) {
+                QuizMode::Plan => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(
+                        "[CODEBUS_QUIZ_SCOPE] wiki/concepts/jwt-token-lifecycle.md",
+                    );
+                    emit_quiz_result();
+                }
+                QuizMode::Generate | QuizMode::Unknown => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(MOCK_QUIZ_BAD);
+                    emit_quiz_result();
+                }
+            }
+            ExitCode::SUCCESS
+        }
+
         other => {
             eprintln!("mock-claude: unknown behavior `{other}`");
             ExitCode::from(2)
         }
     }
 }
+
+/// Structurally valid, citation-free quiz body for the
+/// `validation: ok` path.
+const MOCK_QUIZ_CLEAN: &str = "## Q1. What does the validator check?\\n\\n- A) nothing\\n- B) schema and wikilink existence\\n- C) the network\\n- D) the model\\n\\n## Answer: B\\n\\n## Explanation: The deterministic validator checks question schema and citation existence.";
+
+/// Malformed body — the single question has no `## Answer:` line — for
+/// the residual-failure best-effort `validation: failed` path.
+const MOCK_QUIZ_BAD: &str = "## Q1. What is missing from this question?\\n\\n- A) the stem\\n- B) the choices\\n- C) the answer line\\n- D) nothing\\n\\n## Explanation: This block intentionally omits the Answer line.";
 
 /// One well-formed quiz question body (no frontmatter, no fence) — the
 /// post-D4 shape the agent is instructed to emit. Integration tests

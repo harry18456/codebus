@@ -31,6 +31,7 @@ pub mod goal;
 pub mod query;
 pub mod quiz;
 pub mod quiz_progress;
+pub mod quiz_validate;
 
 pub use error::VerbError;
 pub use event::{VerbBanner, VerbEvent, VerbLifecycleEvent};

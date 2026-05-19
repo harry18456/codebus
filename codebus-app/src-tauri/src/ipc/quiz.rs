@@ -638,6 +638,7 @@ mod tests {
                     finished_at: "t1".into(),
                     agent_exit_code: Some(0),
                     events_log: Some("/v/.codebus/log/events-x.jsonl".into()),
+                    validation: codebus_core::verb::quiz::QuizValidation::Ok,
                 })
             },
         )

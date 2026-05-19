@@ -342,7 +342,9 @@ The current working directory is the codebus vault root. Read `CLAUDE.md` here f
 
 ## Read-Only Invariant
 
-This workflow is **strictly read-only**. The agent MUST NOT call `Write`, `Edit`, `NotebookEdit`, or any tool whose name begins with `mcp_`. The binary-layer toolset is gated at spawn time (`--tools Read,Glob,Grep`); the `mcp_*` family is NOT covered by that flag and is forbidden only by this prompt-layer constraint. Treat this rule as load-bearing even when an `mcp_*` tool appears available.
+This workflow does NOT modify the vault. The agent MUST NOT call `Write`, `Edit`, `NotebookEdit`, or any tool whose name begins with `mcp_`. The `mcp_*` family is forbidden only by this prompt-layer constraint — treat this rule as load-bearing even when an `mcp_*` tool appears available.
+
+`plan:` mode is gated read-only at spawn (`--tools Read,Glob,Grep`). `generate:` mode additionally has a `Bash` tool that is hard-gated at spawn to exactly one command — `codebus quiz validate ...` — used only for the Mode B self-validation step below. No other `Bash` command will be permitted (the PreToolUse hook blocks it); do not attempt any other shell command.
 
 ## Hard scope
 
@@ -398,6 +400,22 @@ Rules:
 - Exactly one `## Answer: X` (X is A/B/C/D) and one `## Explanation:` (no more than 60 words, citing `[[slug]]`) per question.
 - Questions test understanding, not trivia, and MUST be answerable from the listed pages.
 - Distractors must be plausible — wrong answers reflect realistic misunderstandings.
+
+### Self-validate before emitting (Mode B only)
+
+Before you emit the final body, verify it deterministically:
+
+1. Validate your draft via the Bash tool using a heredoc fed straight into codebus — the command MUST start with `codebus` (the sandbox hook only permits a Bash command whose first word is `codebus`):
+
+       codebus quiz validate - <<'CBQZ'
+       ## Q1. ...
+       ... your entire draft body ...
+       CBQZ
+
+   `-` means read the body from stdin; the heredoc supplies it. It exits 0 with no findings when the draft is structurally sound and every `[[slug]]` citation resolves; otherwise it lists findings (add `--json` before the heredoc for machine-readable output). Do NOT use `cat ... | codebus quiz validate -` (a pipeline's first word is `cat`, which the sandbox hook blocks) and do NOT try to write the draft to a temp file first (you have no file-writing tool — the heredoc is the only way).
+2. If it reports findings, fix exactly the questions it names, then run it again.
+3. Repeat this validate→fix→re-validate loop **at most 3** times. When that cap is reached, emit your best current body rather than looping further — do not keep iterating past the cap.
+4. `codebus quiz validate` is the sole authority for structural and citation correctness. Act on its findings; do NOT reproduce, restate, or argue its rules here — the rules live in the validator, not in this skill.
 
 ## Caller-owned frontmatter
 
@@ -945,6 +963,42 @@ mod tests {
 
     /// v3-app-quiz task 3.1 — executable "content review against spec"
     /// for the `Quiz Skill Bundle Content` requirement. Each assertion
+    /// quiz-validate-repair task 5.1 (design D1/D5; spec skill-bundles /
+    /// Quiz Skill Bundle Content): the `generate:` mode SHALL define a
+    /// bounded self-validate / self-repair loop that calls
+    /// `codebus quiz validate`, states an explicit internal iteration
+    /// cap, emits the best body on cap exhaustion, and references the
+    /// validator as the authority WITHOUT restating its rule
+    /// definitions (no schema double-delivery, roadmap anti-pattern #2).
+    #[test]
+    fn quiz_skill_defines_bounded_self_validate_loop() {
+        let body = stub_content("quiz");
+
+        // references the validator command for self-checking
+        assert!(
+            body.contains("codebus quiz validate"),
+            "generate mode must instruct self-validation via `codebus quiz validate`"
+        );
+        // an explicit numeric internal cap is stated
+        assert!(
+            body.contains("at most 3") || body.contains("up to 3"),
+            "the SKILL must state an explicit internal iteration cap (3)"
+        );
+        // emit best-effort body when the cap is hit
+        assert!(
+            body.to_lowercase().contains("emit")
+                && body.to_lowercase().contains("cap"),
+            "the SKILL must instruct emitting the best current body when the cap is reached"
+        );
+        // does NOT restate the validator's internal rule_ids (authority,
+        // not a parallel schema copy)
+        assert!(
+            !body.contains("quiz-schema-answer")
+                && !body.contains("quiz-broken-wikilink"),
+            "the SKILL must not duplicate the validator's rule definitions"
+        );
+    }
+
     /// pins a spec/D4 clause so a future edit cannot silently drop it.
     #[test]
     fn stub_content_quiz_satisfies_skill_bundle_spec() {
