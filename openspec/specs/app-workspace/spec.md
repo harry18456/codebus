@@ -2028,6 +2028,10 @@ The Quiz tab SHALL offer two entry points that converge after generation. `+ New
 
 The `[Quiz me on this]` control SHALL appear at the bottom of a wiki content page preview (it SHALL NOT appear for `index.md` or `log.md`). Activating it SHALL skip the plan spawn and run the generate spawn directly using that page plus its one-hop wikilinked pages.
 
+While inside any in-quiz phase — answering or the post-quiz summary — the Quiz tab SHALL render a back-to-quiz-history control that returns to the quiz history list. Activating it SHALL NOT spawn an agent, and SHALL be non-destructive: answering progress is persisted, so reopening the attempt resumes at the saved position. This control is distinct from `+ New quiz` (which remains hidden inside a quiz). Additionally, selecting the Quiz tab while it is already the active workspace tab SHALL return the Quiz tab to its quiz-history view; selecting the Quiz tab from a different tab SHALL NOT reset an in-progress quiz.
+
+The Quiz tab's pass/fail threshold and generated question count SHALL be sourced from the persisted application configuration loaded at workspace startup, and SHALL NOT require the Settings modal to have been opened in the session: the pass threshold SHALL come from `app.quiz.pass_threshold` (default 80 only when truly unset), and the generated question count SHALL come from the shared quiz length configuration (see capability `quiz`).
+
 #### Scenario: New quiz shows planned scope before generating
 
 - **WHEN** the user submits a topic via `+ New quiz` and the plan spawn emits a scope
@@ -2062,17 +2066,33 @@ The `[Quiz me on this]` control SHALL appear at the bottom of a wiki content pag
 
 #### Scenario: + New quiz is not shown while inside a quiz
 
-- **GIVEN** the Quiz tab is in a quiz flow or attempt view (planning, confirm, generating, answering, no-match, error, or an opened attempt)
+- **GIVEN** the Quiz tab is in a quiz flow or attempt view (planning, confirm, generating, answering, summary, no-match, error, or an opened attempt)
 - **THEN** the `+ New quiz` control SHALL NOT be rendered
 - **AND** the `+ New quiz` control SHALL be rendered only in the history list and the topic-input compose screen
 
+#### Scenario: Back-to-history from the answering view
 
-<!-- @trace
-source: quiz-attempt-progress
-updated: 2026-05-19
-code:
-  - codebus-core/src/verb/quiz.rs
--->
+- **GIVEN** the user is answering a quiz (not yet on the summary)
+- **WHEN** the user activates the back-to-quiz-history control
+- **THEN** the Quiz tab SHALL show the quiz history list AND no `spawn_quiz_plan` or `spawn_quiz_generate` SHALL be invoked AND reopening that attempt SHALL resume at the saved position
+
+#### Scenario: Back-to-history from the summary
+
+- **GIVEN** the user has finished a quiz and the summary screen is shown
+- **WHEN** the user activates the back-to-quiz-history control
+- **THEN** the Quiz tab SHALL show the quiz history list AND no agent SHALL be spawned
+
+#### Scenario: Re-selecting the Quiz tab returns to quiz history
+
+- **GIVEN** the Quiz tab is the active workspace tab and is inside a quiz flow or attempt view
+- **WHEN** the user selects the Quiz tab again
+- **THEN** the Quiz tab SHALL return to its quiz-history view
+
+#### Scenario: Threshold reflects persisted config without opening Settings
+
+- **GIVEN** the persisted config has `app.quiz.pass_threshold` of 75 and the Settings modal has not been opened in this session
+- **WHEN** the user finishes a 5-question quiz with 4 correct (80%)
+- **THEN** the summary SHALL show a passing outcome (evaluated against 75, not the 80 default)
 
 ---
 ### Requirement: Quiz Answering and Summary

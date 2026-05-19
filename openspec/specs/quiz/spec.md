@@ -12,11 +12,7 @@ The system SHALL provide a `quiz` verb that produces a multiple-choice quiz from
 
 The plan spawn SHALL take a free-text topic and emit, as the first line of its response, either `[CODEBUS_QUIZ_SCOPE] <wiki-path>, <wiki-path>, ...` (2–5 vault-relative `wiki/` paths, most relevant first) when matching pages exist, or `[CODEBUS_QUIZ_NO_MATCH] <reason>` when no wiki page covers the topic. The generate spawn SHALL emit a quiz markdown document body (no agent-authored frontmatter).
 
-The caller's plan-marker parser SHALL tolerantly recover the marker rather than hard-failing on minor agent deviations, mirroring the tolerant leading/trailing code-fence handling already applied to the generate body: it SHALL strip a leading Markdown code fence, and it SHALL accept the first line that begins with `[CODEBUS_QUIZ_SCOPE]` or `[CODEBUS_QUIZ_NO_MATCH]` even when the agent emitted preamble lines before it. The SKILL still instructs the agent to emit the marker as the very first line; tolerant recovery is a caller-side robustness measure, not a relaxation of the agent-side contract. When no marker is recoverable from the spawn output, `run_quiz_plan` SHALL return an error whose message includes a truncated head (at most 200 characters) of the actual spawn output, so the failure is diagnosable rather than opaque.
-
-`run_quiz_plan` SHALL NOT continue to generation; the caller decides whether/when to call `run_quiz_generate` (CLI proceeds immediately with no gate; GUI waits for the user to confirm or revise the scope).
-
-Answer grading SHALL be performed by the caller comparing the user's selected choice against the quiz markdown `Answer` field. The agent SHALL NOT grade and SHALL NOT receive the user's answers.
+The caller's plan-marker parser SHALL tolerantly recover the marker rather than hard-failing on minor agent deviations, mirroring the tolerant leading/trailing code-fence handling and the same-line preamble tolerance already applied to the generate body: it SHALL strip a leading Markdown code fence, and it SHALL accept the first line that **contains** `[CODEBUS_QUIZ_SCOPE]` or `[CODEBUS_QUIZ_NO_MATCH]` — taking the payload after the first marker occurrence — even when the agent emitted preamble lines before it OR glued a preamble sentence onto the same line as the marker with no intervening newline. The SKILL still instructs the agent to emit the marker as the very first line; tolerant recovery is a caller-side robustness measure, not a relaxation of the agent-side contract. When no marker is recoverable from the spawn output, `run_quiz_plan` SHALL return an error whose message includes a truncated head (at most 200 characters) of the actual spawn output, so the failure is diagnosable rather than opaque.
 
 #### Scenario: Goal flow runs plan then (on scope) generate
 
@@ -28,7 +24,7 @@ Answer grading SHALL be performed by the caller comparing the user's selected ch
 - **WHEN** `run_quiz_plan` is invoked with `QuizPlanOptions { topic }` and no wiki page covers the topic
 - **THEN** the plan spawn SHALL emit `[CODEBUS_QUIZ_NO_MATCH] <reason>` as its first line AND `run_quiz_plan` SHALL return `QuizPlanOutcome::NoMatch(reason)` AND surface a `QuizNoMatch { reason }` lifecycle event AND no generate spawn SHALL run
 
-##### Example: off-topic plan request
+#### Scenario: No-match reason is specific
 
 - **GIVEN** a vault whose wiki only covers web auth
 - **WHEN** the plan spawn receives topic "how to bake sourdough bread"
@@ -45,6 +41,12 @@ Answer grading SHALL be performed by the caller comparing the user's selected ch
 - **WHEN** the caller parses the plan output
 - **THEN** `run_quiz_plan` SHALL return `QuizPlanOutcome::Scope(["wiki/a.md"])` (the preamble line is tolerated, not a hard failure)
 
+#### Scenario: Plan marker recovered despite a same-line preamble
+
+- **GIVEN** a plan spawn whose response is `先掃描 wiki 找相關頁面。[CODEBUS_QUIZ_SCOPE] wiki/synthesis/jwt-auth-system.md, wiki/concepts/jwt-pitfalls.md` (a preamble glued onto the marker line with no newline)
+- **WHEN** the caller parses the plan output
+- **THEN** `run_quiz_plan` SHALL return `QuizPlanOutcome::Scope(["wiki/synthesis/jwt-auth-system.md", "wiki/concepts/jwt-pitfalls.md"])` (the inline preamble is tolerated, not a hard failure)
+
 #### Scenario: Plan marker recovered despite a wrapping code fence
 
 - **GIVEN** a plan spawn whose response is a Markdown code fence wrapping `[CODEBUS_QUIZ_NO_MATCH] vault only covers web auth`
@@ -55,28 +57,6 @@ Answer grading SHALL be performed by the caller comparing the user's selected ch
 
 - **WHEN** the plan spawn output contains neither marker on any line
 - **THEN** `run_quiz_plan` SHALL return an error whose message includes a truncated head (≤200 chars) of the actual spawn output AND SHALL NOT silently succeed
-
-
-<!-- @trace
-source: fix-app-quiz
-updated: 2026-05-18
-code:
-  - codebus-app/src/components/workspace/QuizGenerationLog.tsx
-  - codebus-app/src/store/settings.ts
-  - codebus-app/src/lib/ipc.ts
-  - codebus-core/src/verb/quiz.rs
-  - docs/v3-app-roadmap.md
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-app/src-tauri/src/ipc/goals.rs
-tests:
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-app/src/components/workspace/QuizGenerationLog.test.tsx
-  - codebus-app/src/store/settings.test.ts
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-cli/tests/quiz_flow.rs
--->
 
 ---
 ### Requirement: Quiz Read Scope Enforcement
@@ -278,6 +258,8 @@ code:
 
 The system SHALL introduce a shared `quiz.*` namespace in `~/.codebus/config.yaml` containing `quiz.default_length` (integer, 3–10, default 5). Both the `codebus quiz` CLI and the codebus-app SHALL read this key. A missing `quiz.default_length` SHALL resolve to default 5. Neither `run_quiz_plan` nor `run_quiz_generate` SHALL read config; `question_count` SHALL be supplied by the caller to `run_quiz_generate`.
 
+The codebus-app SHALL supply the generate spawn's `question_count` from this shared configuration: it SHALL resolve the value as the shared top-level `quiz.default_length`, falling back to a legacy `app.quiz.default_length` for un-migrated configs, then to 5, clamped to the inclusive 3–10 range. This resolved value SHALL come from the persisted configuration without requiring the Settings modal to have been opened in the session. The app SHALL NOT pass a hardcoded constant question count when a configured value exists.
+
 #### Scenario: Missing key resolves to default
 
 - **WHEN** config is loaded and `quiz.default_length` is absent
@@ -288,82 +270,17 @@ The system SHALL introduce a shared `quiz.*` namespace in `~/.codebus/config.yam
 - **WHEN** `run_quiz_generate` is invoked
 - **THEN** it SHALL use the caller-supplied `question_count` from `QuizGenerateOptions` AND SHALL NOT read `quiz.default_length` or any config key itself
 
+#### Scenario: App generate uses the configured length
 
-<!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
-code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
-  - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
-  - codebus-core/src/verb/quiz.rs
-  - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
-tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
--->
+- **GIVEN** the persisted config has `quiz.default_length` of 10 and the Settings modal has not been opened this session
+- **WHEN** the codebus-app starts a quiz generate spawn
+- **THEN** the spawn's `question_count` SHALL be 10
+
+#### Scenario: App clamps an out-of-range configured length
+
+- **GIVEN** the persisted config has a quiz length of 2 (or 99)
+- **WHEN** the codebus-app resolves the generate question count
+- **THEN** the value SHALL be clamped to 3 (or 10 respectively)
 
 ---
 ### Requirement: Quiz Verb Library Functions
