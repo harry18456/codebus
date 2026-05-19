@@ -43,12 +43,18 @@ CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 
 - **`fix-app-quiz`** — `v3-app-quiz` archive 後的 Windows 人工驗收補做 + compliance 修正容器。實況（誠實登記，取代 v3-app-quiz「Windows 皆已必跑必過」的過度宣稱）：
   - **CLI 區塊**：由 assistant 端到端實跑驗證（真 claude spawn，throwaway vault `quiz-e2e`）—— plan→generate→落檔 caller frontmatter、no-match exit0 不落檔、retry 非破壞兩檔、`--count`/`quiz.default_length` fallback、不 auto-commit、`events_log` 絕對路徑、body 無 preamble。**Pass。**
   - **GUI 區塊**：本 change 期間以**互動式人工驗收**進行（user 實機 `cargo tauri dev`），共抓出並修復 7 個 defect（#1 header 碰撞 / #2 +New quiz 無反應 / #3 plan-marker 過脆+不可診斷 / #4 generate preamble 漏檔 / #5 plan/generate 未 live render / #6 view-log 改 attempt-modal / #7 +New quiz 進 quiz 內隱藏），全部 TDD 修正並有自動測試覆蓋（core 452 / cli 123 / vitest 353 全綠）。
-  - **Deferred**：(a) 對「最終 build」由人從頭到尾再跑一次完整 GUI checklist —— 因 quiz GUI 互動/持久化模型即將於後續 redesign change 重做，對即將被取代的 UI 再做整輪人工 sweep 屬低價值，故延後到該 redesign change 的驗收一併處理；(b) macOS / Linux 手動驗收仍 deferred to `v3-app-polish-ship`（沿用上面 v3-app-quiz (E) 五區塊範圍，含 fix-app-quiz 的修正）。
+  - **Deferred (a) — RESOLVED 2026-05-19**：完整 GUI checklist 由 user 實機 `cargo tauri dev` 跑過合併 sweep（quiz-attempt-progress + fix-quiz-ux-wiring 的 redesign 驗收一併做，見下方 `quiz-attempt-progress` / `fix-quiz-ux-wiring` 兩條 GUI 區塊）。**Windows Pass。** 原延後理由（即將被 redesign 取代）已不成立——redesign 已 ship 且本次 sweep 即針對 redesign 後的 UI。
+  - **Deferred (b)**：macOS / Linux 手動驗收仍 deferred to `v3-app-polish-ship`（沿用上面 v3-app-quiz (E) 五區塊範圍，含 fix-app-quiz 的修正）。
 
 - **`quiz-attempt-progress`** — `v3-app-quiz` / `fix-app-quiz` 之後的 quiz 進度持久化 redesign（不可變 attempt md + sibling `<id>.progress.json` sidecar；history 徽章/路由；completed→QuizReview 取代 raw md；`重做此份`）。實況（誠實登記）：
   - **自動測試範圍（Windows MSVC，本 change 必跑必過）**：core sidecar 容錯讀+atomic write 單元（`quiz_progress.rs` 5 案：缺檔/壞檔/round-trip/未知 key+新 schema_version/atomic 覆寫無 .tmp 殘留）；Tauri `read_quiz_progress`/`write_quiz_progress` containment + round-trip + registry 23→25；vitest QuizAnswering 每題持久化+resume、QuizTab history 徽章衍生/狀態路由/`重做此份` 不 spawn、QuizReview 逐題 user-choice vs 正解+解釋+看過程 modal。彙總 0 failed：`cargo test -p codebus-core -p codebus-cli`、`cargo test`（tauri）、`npx vitest run`（361 passed）、`npm run typecheck`（乾淨）。
-  - **GUI 互動驗收**：本 change 僅以自動測試覆蓋；尚未由人實機 `cargo tauri dev` 跑整輪 quiz 答題→關閉→重開續答→completed Review→`重做此份` 的互動 sweep（改了 core/IPC 需完全重啟才生效）。延後到 `fix-app-quiz` Deferred (a) 所指的「該 redesign change 驗收」一併由人工處理，或併入 `v3-app-polish-ship` 最終 build sweep。
+  - **GUI 互動驗收 — Pass 2026-05-19**：user 實機 `cargo tauri dev`（throwaway vault `quiz-e2e`，完整重啟）跑過整輪互動 sweep，**全 pass**：答題中途「← History」離開非破壞 → history 點回 attempt **接續在未答題**（題目不變、已答保留）→ 答完 → completed 點開進 **QuizReview**（逐題 user-choice vs 正解 + 解釋，非 raw md）→ 解釋 `[[wikilink]]` 可點跳 wiki → 「看過程」開 generation log modal → 「重做此份」同題重答**不 spawn**、非破壞。與 fix-quiz-ux-wiring 合併於同一 sweep（見下條）。
   - **macOS / Linux**：手動驗收 deferred to `v3-app-polish-ship`。特別項：sidecar atomic write 的 `fs::rename` 覆寫語意在 Windows 已有測試覆蓋，macOS/Linux 需於 polish-ship 一併實機確認（沿用 v3-app-quiz (E) 五區塊範圍 + 本 change 的 sidecar/Review/resume 行為）。
+
+- **`fix-quiz-ux-wiring`** — `quiz-attempt-progress` 之後修 5 項 v3-app-quiz / fix-app-quiz 既有缺口（D1 答題/summary 返回鈕、D2 已 active Quiz 分頁再點回 history、D3 啟動載入 config 不需開 Settings、D4 出題數接 shared/legacy `quiz.default_length` clamp 3..10、D5 plan-marker 行內前言容忍）。實況（誠實登記）：
+  - **自動測試（Windows MSVC，本 change 必跑必過）**：彙總 0 failed —— `cargo test -p codebus-core -p codebus-cli`、`cargo test`（tauri manifest，順手補一行 archived `quiz-attempt-progress` 漏掉的 `cursor: None,` 測試 initializer 才能編譯）、`npx vitest run`（380 passed）、`npm run typecheck`（乾淨）。commit `685f78f` 實作 + `3c5a9c8` archive（2026-05-19）。
+  - **GUI 互動驗收 — Pass 2026-05-19**：user 實機 `cargo tauri dev`（vault `quiz-e2e`，config `app.quiz.default_length:10`/`pass_threshold:75`，全程不開 Settings），合併 sweep Journey A–D **全 pass**：D4 新 quiz 出 **10 題**（非 5）；D1 答題中＋summary 皆有「← History」且非破壞、不 spawn；D2 已 active Quiz 分頁再點回 history、進行中不破壞；D3 答對 8/10=80% summary 顯示**通過**（75 門檻、未開 Settings 即生效）；D5 happy（JWT 題目 → SCOPE）＋ no-match（酸種麵包 → 顯示理由不落檔）；wiki page flow `[Quiz me on this]` 內容頁可觸發、nav 頁隱藏未回歸。
+  - **macOS / Linux**：手動驗收 deferred to `v3-app-polish-ship`（沿用 v3-app-quiz (E) 五區塊 + 本 change 的 D1–D5 行為）。
 
 ## 為什麼切 8 條而不是一條
 
