@@ -47,6 +47,7 @@ export function Workspace({ vault }: WorkspaceProps) {
   const activeRun = useGoalsStore((s) => s.activeRun)
   const listPages = useWikiStore((s) => s.listPages)
   const loadPage = useWikiStore((s) => s.loadPage)
+  const wikiPages = useWikiStore((s) => s.pages)
   const wikiReset = useWikiStore((s) => s.reset)
 
   const [activeTab, setActiveTab] = useState<TabId>("goals")
@@ -244,6 +245,8 @@ export function Workspace({ vault }: WorkspaceProps) {
             vaultPath={vault.path}
             pendingPage={pendingQuizPage}
             onPendingConsumed={() => setPendingQuizPage(null)}
+            wikiPages={wikiPages}
+            onOpenWikiPage={onSelectPage}
           />
         )}
       </section>

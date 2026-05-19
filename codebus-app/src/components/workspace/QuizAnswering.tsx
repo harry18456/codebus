@@ -18,26 +18,101 @@ import {
   parseQuiz,
   type ChoiceKey,
 } from "@/lib/quiz-parse"
+import type { QuizAnswer, QuizProgress, WikiPageMeta } from "@/lib/ipc"
+import { ExplanationText } from "./ExplanationText"
 
 const CHOICE_KEYS: ChoiceKey[] = ["A", "B", "C", "D"]
 
 interface QuizAnsweringProps {
   quizMd: string
   passThreshold: number
-  /** task 5.4 — wiki-return affordance for an incorrect answer. */
-  onBackToWiki?: () => void
+  /**
+   * quiz-attempt-progress (design D6): wiki page index (keyed by slug)
+   * for resolving the explanation's `[[slug]]` citations, and the
+   * navigate handler invoked when a resolvable citation is activated.
+   * Replaces the removed `[← Back to wiki page]` button.
+   */
+  pages?: Record<string, WikiPageMeta>
+  onOpenWikiPage?: (slug: string) => void
+  /**
+   * quiz-attempt-progress (design D3): the attempt's saved sidecar state.
+   * When present with prior `answers`, answering resumes at the first
+   * question whose 1-based number is absent from them.
+   */
+  initialProgress?: QuizProgress | null
+  /**
+   * Called on every submission with the full updated [`QuizProgress`]
+   * (status `in_progress`, or `completed` on the final question). The
+   * caller persists it via `write_quiz_progress` — answering never spawns.
+   */
+  onPersist?: (progress: QuizProgress) => void
+}
+
+/**
+ * Legacy resume fallback (design D3 interim): restore the LAST answered
+ * question (highest `q` in `answers`) in its submitted state. Used only
+ * when the sidecar has no `cursor` (legacy / prior-build attempts).
+ */
+function lastAnsweredIndex(answers: QuizAnswer[], total: number): number {
+  if (answers.length === 0) return 0
+  const maxQ = Math.max(...answers.map((a) => a.q))
+  return Math.min(Math.max(maxQ, 1), total) - 1
+}
+
+/**
+ * Resolve the resume position (design D3 final). A `cursor` restores the
+ * exact spot (`q`/`revealed`); without one, fall back to last-answered.
+ */
+function resolveResume(
+  initialProgress: QuizProgress | null | undefined,
+  seededAnswers: QuizAnswer[],
+  total: number,
+): { idx: number; revealed: boolean } {
+  const cursor = initialProgress?.cursor
+  if (cursor) {
+    const idx = Math.min(Math.max(cursor.q, 1), total) - 1
+    return { idx, revealed: cursor.revealed }
+  }
+  const idx = lastAnsweredIndex(seededAnswers, total)
+  return { idx, revealed: seededAnswers.some((a) => a.q === idx + 1) }
 }
 
 export function QuizAnswering({
   quizMd,
   passThreshold,
-  onBackToWiki,
+  pages,
+  onOpenWikiPage,
+  initialProgress,
+  onPersist,
 }: QuizAnsweringProps) {
   const questions = useMemo(() => parseQuiz(quizMd), [quizMd])
-  const [idx, setIdx] = useState(0)
-  const [selected, setSelected] = useState<ChoiceKey | null>(null)
-  const [revealed, setRevealed] = useState(false)
-  const [correctCount, setCorrectCount] = useState(0)
+  const seededAnswers = useMemo<QuizAnswer[]>(
+    () => initialProgress?.answers ?? [],
+    [initialProgress],
+  )
+  const [answers, setAnswers] = useState<QuizAnswer[]>(seededAnswers)
+  // Resume to the exact cursor position (design D3 final); a sidecar
+  // without a cursor falls back to last-answered-revealed. A fresh
+  // attempt (no answers, no cursor) starts at Q1 blank.
+  const resume = resolveResume(
+    initialProgress,
+    seededAnswers,
+    questions.length || 1,
+  )
+  const restoredAnswer = resume.revealed
+    ? seededAnswers.find((a) => a.q === resume.idx + 1)
+    : undefined
+  const [idx, setIdx] = useState(resume.idx)
+  const [selected, setSelected] = useState<ChoiceKey | null>(
+    restoredAnswer ? restoredAnswer.selected : null,
+  )
+  const [revealed, setRevealed] = useState(resume.revealed)
+  const [correctCount, setCorrectCount] = useState(
+    () => seededAnswers.filter((a) => a.correct).length,
+  )
+  const [startedAt] = useState(
+    () => initialProgress?.started_at ?? new Date().toISOString(),
+  )
   const [done, setDone] = useState(false)
 
   if (questions.length === 0) {
@@ -76,7 +151,30 @@ export function QuizAnswering({
   function onSubmit() {
     if (selected == null) return
     setRevealed(true)
-    if (selected === q.answer) setCorrectCount((c) => c + 1)
+    const correct = selected === q.answer
+    if (correct) setCorrectCount((c) => c + 1)
+
+    // design D3: persist this submission to the attempt sidecar. The
+    // final question's submission marks the attempt completed. Recompute
+    // `answers` (replace any prior entry for this q — resume safety),
+    // never store derived counts (single source of truth — design D1).
+    const qNum = idx + 1
+    const nextAnswers: QuizAnswer[] = [
+      ...answers.filter((a) => a.q !== qNum),
+      { q: qNum, selected, correct },
+    ].sort((a, b) => a.q - b.q)
+    setAnswers(nextAnswers)
+    const isFinal = idx + 1 >= questions.length
+    // design D3 final: cursor records the just-submitted question as
+    // revealed, so reopening restores exactly this submitted screen.
+    onPersist?.({
+      schema_version: initialProgress?.schema_version ?? 1,
+      answers: nextAnswers,
+      status: isFinal ? "completed" : "in_progress",
+      started_at: startedAt,
+      completed_at: isFinal ? new Date().toISOString() : null,
+      cursor: { q: qNum, revealed: true },
+    })
   }
 
   function onNext() {
@@ -84,9 +182,21 @@ export function QuizAnswering({
       setDone(true)
       return
     }
-    setIdx((i) => i + 1)
+    const nextIdx = idx + 1
+    setIdx(nextIdx)
     setSelected(null)
     setRevealed(false)
+    // design D3 final: persist the advanced cursor (answers unchanged)
+    // so reopening lands on the blank next question, not the previous
+    // already-answered one.
+    onPersist?.({
+      schema_version: initialProgress?.schema_version ?? 1,
+      answers,
+      status: "in_progress",
+      started_at: startedAt,
+      completed_at: null,
+      cursor: { q: nextIdx + 1, revealed: false },
+    })
   }
 
   return (
@@ -143,18 +253,12 @@ export function QuizAnswering({
             {isCorrect ? "Correct" : "Incorrect"}
           </p>
           <p data-testid="quiz-explanation" className="text-[14px]">
-            {q.explanation}
+            <ExplanationText
+              text={q.explanation}
+              pages={pages ?? {}}
+              onOpenWikiPage={onOpenWikiPage}
+            />
           </p>
-          {!isCorrect && (
-            <div>
-              <Button
-                data-testid="quiz-back-to-wiki"
-                onClick={() => onBackToWiki?.()}
-              >
-                ← Back to wiki page
-              </Button>
-            </div>
-          )}
           <div>
             <Button data-testid="quiz-next" onClick={onNext}>
               {idx + 1 >= questions.length ? "Finish" : "Next"}

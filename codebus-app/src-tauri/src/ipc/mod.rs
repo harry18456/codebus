@@ -1,10 +1,11 @@
 //! IPC command registry.
 //!
-//! The frontend MAY invoke only the twenty-two commands listed in
+//! The frontend MAY invoke only the twenty-five commands listed in
 //! [`REGISTERED_COMMANDS`]. The spec ("IPC Command Registry", modified
 //! by `v3-app-workspace-goal` for goal lifecycle, by `v3-app-chat-cmdk`
-//! for chat-turn lifecycle, and by `v3-app-quiz` for quiz plan/generate
-//! lifecycle) forbids any other command from being
+//! for chat-turn lifecycle, by `v3-app-quiz` for quiz plan/generate
+//! lifecycle, and by `quiz-attempt-progress` for the two progress-sidecar
+//! commands) forbids any other command from being
 //! registered by this change. The constant is the source of truth
 //! checked by the unit test below, and is consumed by `lib::run` via
 //! [`generate_handler`] so the registration and the asserted list
@@ -24,7 +25,7 @@ pub mod wiki;
 pub use chats::{cancel_chat_turn, spawn_chat_turn};
 pub use quiz::{
     cancel_quiz, list_quiz_attempts, read_quiz_attempt, read_quiz_events,
-    spawn_quiz_generate, spawn_quiz_plan,
+    read_quiz_progress, spawn_quiz_generate, spawn_quiz_plan, write_quiz_progress,
 };
 pub use cli_status::check_cli_installed;
 pub use config::{load_global_config, save_global_config};
@@ -33,15 +34,16 @@ pub use keyring::{delete_endpoint_key, get_endpoint_key, set_endpoint_key};
 pub use vault_list::{add_vault, list_vaults, remove_vault};
 pub use wiki::{list_wiki_pages, read_wiki_page};
 
-/// Exactly the twenty-three commands exposed by this Tauri app. Used by
-/// the `exactly_twenty_three_commands_are_registered` test and consumed
+/// Exactly the twenty-five commands exposed by this Tauri app. Used by
+/// the `exactly_twenty_five_commands_are_registered` test and consumed
 /// by `lib::run`.
 ///
 /// Foundation 9 + workspace 6 (`spawn_goal`, `cancel_goal`, `list_runs`,
 /// `get_run_detail`, `list_wiki_pages`, `read_wiki_page`) + chat 2
-/// (`spawn_chat_turn`, `cancel_chat_turn`) + quiz 6 (`spawn_quiz_plan`,
+/// (`spawn_chat_turn`, `cancel_chat_turn`) + quiz 8 (`spawn_quiz_plan`,
 /// `spawn_quiz_generate`, `cancel_quiz`, `list_quiz_attempts`,
-/// `read_quiz_attempt`, `read_quiz_events`).
+/// `read_quiz_attempt`, `read_quiz_events`, `read_quiz_progress`,
+/// `write_quiz_progress`).
 pub const REGISTERED_COMMANDS: &[&str] = &[
     "list_vaults",
     "add_vault",
@@ -66,6 +68,8 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
     "list_quiz_attempts",
     "read_quiz_attempt",
     "read_quiz_events",
+    "read_quiz_progress",
+    "write_quiz_progress",
 ];
 
 /// Sugar for `tauri::generate_handler!` so the registration is colocated
@@ -97,6 +101,8 @@ macro_rules! generate_ipc_handler {
             $crate::ipc::quiz::list_quiz_attempts,
             $crate::ipc::quiz::read_quiz_attempt,
             $crate::ipc::quiz::read_quiz_events,
+            $crate::ipc::quiz::read_quiz_progress,
+            $crate::ipc::quiz::write_quiz_progress,
         ]
     };
 }
@@ -110,11 +116,11 @@ mod tests {
     use super::REGISTERED_COMMANDS;
 
     #[test]
-    fn exactly_twenty_three_commands_are_registered() {
+    fn exactly_twenty_five_commands_are_registered() {
         assert_eq!(
             REGISTERED_COMMANDS.len(),
-            23,
-            "IPC Command Registry requires exactly 23 commands (9 foundation + 6 workspace + 2 chat + 6 quiz)"
+            25,
+            "IPC Command Registry requires exactly 25 commands (9 foundation + 6 workspace + 2 chat + 8 quiz)"
         );
     }
 
@@ -144,6 +150,8 @@ mod tests {
             "list_quiz_attempts",
             "read_quiz_attempt",
             "read_quiz_events",
+            "read_quiz_progress",
+            "write_quiz_progress",
         ]
         .into_iter()
         .collect();

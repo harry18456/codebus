@@ -93,6 +93,8 @@ export type IpcCommandName =
   | "list_quiz_attempts"
   | "read_quiz_attempt"
   | "read_quiz_events"
+  | "read_quiz_progress"
+  | "write_quiz_progress"
 
 /**
  * Endpoint profile selector. Currently only `"azure"` is wired up; future
@@ -742,6 +744,69 @@ export async function readQuizEvents(
   path: string,
 ): Promise<EventEnvelope[]> {
   return invokeTyped<EventEnvelope[]>("read_quiz_events", { vaultPath, path })
+}
+
+/** The user's choice for a question — the exact spec letters. */
+export type Choice = "A" | "B" | "C" | "D"
+
+/** Answering lifecycle. An absent sidecar reads as `"not_started"`. */
+export type QuizStatus = "not_started" | "in_progress" | "completed"
+
+/** One answered question (1-based `q`, client-side `correct` grade). */
+export interface QuizAnswer {
+  q: number
+  selected: Choice
+  correct: boolean
+}
+
+/**
+ * The per-attempt progress sidecar's non-derivable state (design D1).
+ * Total / answered / correct / score / pass-fail are NOT here — recompute
+ * them from `answers` + the attempt markdown.
+ */
+/** Precise resume position (design D3 final). Optional/legacy-tolerant. */
+export interface QuizCursor {
+  q: number
+  revealed: boolean
+}
+
+export interface QuizProgress {
+  schema_version: number
+  answers: QuizAnswer[]
+  status: QuizStatus
+  started_at: string | null
+  completed_at: string | null
+  /**
+   * Question the user is viewing + whether it was submitted. Written on
+   * every submit and every Next; absent on legacy/prior-build sidecars
+   * (callers then fall back to "last answered, revealed").
+   */
+  cursor?: QuizCursor | null
+}
+
+/**
+ * Read the progress sidecar for an attempt. An absent or malformed
+ * sidecar resolves to the not-started state (never throws for that).
+ * `path` must resolve under the vault `.codebus/` tree.
+ */
+export async function readQuizProgress(
+  vaultPath: string,
+  path: string,
+): Promise<QuizProgress> {
+  return invokeTyped<QuizProgress>("read_quiz_progress", { vaultPath, path })
+}
+
+/**
+ * Atomically persist answering progress to an attempt's sidecar. `path`
+ * must resolve under the vault `.codebus/` tree (backend rejects
+ * otherwise).
+ */
+export async function writeQuizProgress(
+  vaultPath: string,
+  path: string,
+  progress: QuizProgress,
+): Promise<void> {
+  return invokeTyped<void>("write_quiz_progress", { vaultPath, path, progress })
 }
 
 /**

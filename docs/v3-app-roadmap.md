@@ -45,6 +45,11 @@ CLI 主線（`docs/v3-roadmap.md`）2026-05-10 全 ship 後，app 層 v1 切成 
   - **GUI 區塊**：本 change 期間以**互動式人工驗收**進行（user 實機 `cargo tauri dev`），共抓出並修復 7 個 defect（#1 header 碰撞 / #2 +New quiz 無反應 / #3 plan-marker 過脆+不可診斷 / #4 generate preamble 漏檔 / #5 plan/generate 未 live render / #6 view-log 改 attempt-modal / #7 +New quiz 進 quiz 內隱藏），全部 TDD 修正並有自動測試覆蓋（core 452 / cli 123 / vitest 353 全綠）。
   - **Deferred**：(a) 對「最終 build」由人從頭到尾再跑一次完整 GUI checklist —— 因 quiz GUI 互動/持久化模型即將於後續 redesign change 重做，對即將被取代的 UI 再做整輪人工 sweep 屬低價值，故延後到該 redesign change 的驗收一併處理；(b) macOS / Linux 手動驗收仍 deferred to `v3-app-polish-ship`（沿用上面 v3-app-quiz (E) 五區塊範圍，含 fix-app-quiz 的修正）。
 
+- **`quiz-attempt-progress`** — `v3-app-quiz` / `fix-app-quiz` 之後的 quiz 進度持久化 redesign（不可變 attempt md + sibling `<id>.progress.json` sidecar；history 徽章/路由；completed→QuizReview 取代 raw md；`重做此份`）。實況（誠實登記）：
+  - **自動測試範圍（Windows MSVC，本 change 必跑必過）**：core sidecar 容錯讀+atomic write 單元（`quiz_progress.rs` 5 案：缺檔/壞檔/round-trip/未知 key+新 schema_version/atomic 覆寫無 .tmp 殘留）；Tauri `read_quiz_progress`/`write_quiz_progress` containment + round-trip + registry 23→25；vitest QuizAnswering 每題持久化+resume、QuizTab history 徽章衍生/狀態路由/`重做此份` 不 spawn、QuizReview 逐題 user-choice vs 正解+解釋+看過程 modal。彙總 0 failed：`cargo test -p codebus-core -p codebus-cli`、`cargo test`（tauri）、`npx vitest run`（361 passed）、`npm run typecheck`（乾淨）。
+  - **GUI 互動驗收**：本 change 僅以自動測試覆蓋；尚未由人實機 `cargo tauri dev` 跑整輪 quiz 答題→關閉→重開續答→completed Review→`重做此份` 的互動 sweep（改了 core/IPC 需完全重啟才生效）。延後到 `fix-app-quiz` Deferred (a) 所指的「該 redesign change 驗收」一併由人工處理，或併入 `v3-app-polish-ship` 最終 build sweep。
+  - **macOS / Linux**：手動驗收 deferred to `v3-app-polish-ship`。特別項：sidecar atomic write 的 `fs::rename` 覆寫語意在 Windows 已有測試覆蓋，macOS/Linux 需於 polish-ship 一併實機確認（沿用 v3-app-quiz (E) 五區塊範圍 + 本 change 的 sidecar/Review/resume 行為）。
+
 ## 為什麼切 8 條而不是一條
 
 7-8 週工作量。單一巨大 change 的歷史教訓：apply 失焦、review 不可行、in-flight spec drift。本 roadmap 的切點來自 2026-05-11 brainstorming session（原本 4 條 / 2026-05-12 把 quiz-cmdk 拆成 query-cmdk + quiz 兩條 / 2026-05-12 #2 動工前發現 CLI 缺基建再前插 A + B 兩條 / 2026-05-13 B propose 前 user push back single-shot query 再前插 chat 一條，總計 8 條），每一條落點都是「換到下一條時，前一條跑得起來的 demo」（不是「實作了某個檔案」），所以 archive 任一條後都可以對外展示一個可用的 app 子集。

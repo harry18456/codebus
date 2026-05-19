@@ -500,6 +500,58 @@ pub fn read_quiz_events(
     Ok(crate::ipc::goals::read_events_jsonl(target)?)
 }
 
+// ---- quiz-attempt-progress: read/write_quiz_progress ----------------------
+
+use codebus_core::verb::quiz_progress::{
+    QuizProgress, read_progress, write_progress,
+};
+
+/// Resolve `path` for a progress sidecar, rejecting anything that does not
+/// resolve under `<vault>/.codebus/` with `AppError::Invalid { field:
+/// "path" }` (same containment-guard strength as `read_quiz_attempt` /
+/// `read_quiz_events`; an unbounded read/write would be a path-traversal
+/// sink — audit Scoundrel lens).
+fn guard_progress_path<'a>(
+    vault_path: &str,
+    path: &'a str,
+) -> Result<&'a Path, AppError> {
+    let codebus_root = Path::new(vault_path).join(".codebus");
+    let target = Path::new(path);
+    if !target.starts_with(&codebus_root) {
+        return Err(AppError::Invalid {
+            field: "path".into(),
+            message: "path is outside the vault .codebus directory".into(),
+        });
+    }
+    Ok(target)
+}
+
+/// Read the progress sidecar at `path`. An absent sidecar yields the
+/// not-started state (not an error); a malformed one is tolerantly read as
+/// not-started (see `codebus_core::verb::quiz_progress`).
+#[tauri::command]
+pub fn read_quiz_progress(
+    vault_path: String,
+    path: String,
+) -> IpcResult<QuizProgress> {
+    let target = guard_progress_path(&vault_path, &path)?;
+    Ok(read_progress(target))
+}
+
+/// Atomically persist `progress` to the sidecar at `path` (temp + rename
+/// in the same dir — an interrupted write cannot corrupt an existing
+/// sidecar).
+#[tauri::command]
+pub fn write_quiz_progress(
+    vault_path: String,
+    path: String,
+    progress: QuizProgress,
+) -> IpcResult<()> {
+    let target = guard_progress_path(&vault_path, &path)?;
+    write_progress(target, &progress)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -731,6 +783,85 @@ mod tests {
         );
         assert!(matches!(
             r,
+            Err(AppError::Invalid { ref field, .. }) if field == "path"
+        ));
+    }
+
+    // --- quiz-attempt-progress task 2.1: read/write_quiz_progress ----------
+
+    use codebus_core::verb::quiz_progress::{Choice, QuizAnswer, QuizProgress, QuizStatus};
+
+    /// Spec: "Read quiz progress returns not-started when sidecar absent".
+    #[test]
+    fn read_quiz_progress_missing_sidecar_is_not_started() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sidecar = tmp
+            .path()
+            .join(".codebus")
+            .join("quiz")
+            .join("auth-x")
+            .join("2026-05-18T10-00-00Z.progress.json");
+        std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        let got = read_quiz_progress(
+            tmp.path().to_string_lossy().into_owned(),
+            sidecar.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        assert_eq!(got.status, QuizStatus::NotStarted);
+        assert!(got.answers.is_empty());
+    }
+
+    /// Spec: "Write then read quiz progress round-trips".
+    #[test]
+    fn write_then_read_quiz_progress_round_trips() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sidecar = tmp
+            .path()
+            .join(".codebus")
+            .join("quiz")
+            .join("auth-x")
+            .join("2026-05-18T10-00-00Z.progress.json");
+        std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        let progress = QuizProgress {
+            schema_version: 1,
+            answers: vec![QuizAnswer {
+                q: 1,
+                selected: Choice::B,
+                correct: true,
+            }],
+            status: QuizStatus::InProgress,
+            started_at: Some("2026-05-18T10:00:00Z".into()),
+            completed_at: None,
+        };
+        write_quiz_progress(
+            tmp.path().to_string_lossy().into_owned(),
+            sidecar.to_string_lossy().into_owned(),
+            progress.clone(),
+        )
+        .unwrap();
+        let got = read_quiz_progress(
+            tmp.path().to_string_lossy().into_owned(),
+            sidecar.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        assert_eq!(got, progress);
+    }
+
+    /// Spec: "Quiz progress commands reject out-of-tree paths".
+    #[test]
+    fn quiz_progress_commands_reject_out_of_tree_paths() {
+        let r = read_quiz_progress("/v".into(), "/etc/passwd".into());
+        assert!(matches!(
+            r,
+            Err(AppError::Invalid { ref field, .. }) if field == "path"
+        ));
+        let w = write_quiz_progress(
+            "/v".into(),
+            "/etc/passwd".into(),
+            QuizProgress::not_started(),
+        );
+        assert!(matches!(
+            w,
             Err(AppError::Invalid { ref field, .. }) if field == "path"
         ));
     }

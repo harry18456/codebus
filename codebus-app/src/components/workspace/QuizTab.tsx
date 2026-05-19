@@ -24,6 +24,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 
 import { Button } from "@/components/ui/button"
 import { useSettingsStore } from "@/store/settings"
+import { useT } from "@/i18n/useT"
 import { QuizAnswering } from "./QuizAnswering"
 import {
   Dialog,
@@ -33,6 +34,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { QuizGenerationLog } from "./QuizGenerationLog"
+import { QuizReview } from "./QuizReview"
+import { parseQuiz, quizBadge } from "@/lib/quiz-parse"
 import {
   ActivityStreamItem,
   ThoughtItem,
@@ -43,13 +46,22 @@ import {
   spawnQuizPlan,
   listQuizAttempts,
   readQuizAttempt,
+  readQuizProgress,
+  writeQuizProgress,
   type QuizAttemptMeta,
   type QuizGenerateTerminalPayload,
   type QuizPlanTerminalPayload,
+  type QuizProgress,
   type QuizStreamPayload,
   type QuizTriggerArg,
   type VerbEvent,
+  type WikiPageMeta,
 } from "@/lib/ipc"
+
+/** Sidecar path for an attempt markdown (`<id>.md` → `<id>.progress.json`). */
+function sidecarPath(mdPath: string): string {
+  return mdPath.replace(/\.md$/, ".progress.json")
+}
 
 type Phase =
   | "history"
@@ -61,6 +73,7 @@ type Phase =
   | "no_match"
   | "error"
   | "attempt"
+  | "review"
 
 interface QuizTabProps {
   vaultPath: string
@@ -72,6 +85,13 @@ interface QuizTabProps {
    */
   pendingPage?: string | null
   onPendingConsumed?: () => void
+  /**
+   * quiz-attempt-progress (design D6): wiki page index + navigate
+   * handler, threaded to `QuizAnswering`/`QuizReview` so explanation
+   * `[[slug]]` citations resolve and navigate to the wiki page.
+   */
+  wikiPages?: Record<string, WikiPageMeta>
+  onOpenWikiPage?: (slug: string) => void
 }
 
 // task 5.2 uses the default question count; wiring it to the shared
@@ -119,10 +139,13 @@ export function QuizTab({
   vaultPath,
   pendingPage,
   onPendingConsumed,
+  wikiPages,
+  onOpenWikiPage,
 }: QuizTabProps) {
   // Summary pass/fail threshold comes from app.quiz.pass_threshold via
   // the settings store (design D1) — never a hardcoded constant.
   const passThreshold = useSettingsStore((s) => s.getPassThreshold())
+  const t = useT()
   const [phase, setPhase] = useState<Phase>("history")
   const [topic, setTopic] = useState("")
   const [pages, setPages] = useState<string[]>([])
@@ -130,10 +153,19 @@ export function QuizTab({
   const [errorMsg, setErrorMsg] = useState("")
   const [quizMd, setQuizMd] = useState("")
   const [attempts, setAttempts] = useState<QuizAttemptMeta[]>([])
+  // Derived per-attempt history badge keyed by attempt md path (design
+  // D4). Recomputed from each attempt's sidecar + parsed question count
+  // whenever the history list refreshes — never stored.
+  const [badges, setBadges] = useState<Record<string, string>>({})
   const [attemptMd, setAttemptMd] = useState("")
   // The opened attempt's metadata (carries `events_log` so the attempt
   // detail view can offer the modal view-generation-log — design D9).
   const [attemptMeta, setAttemptMeta] = useState<QuizAttemptMeta | null>(null)
+  // quiz-attempt-progress (design D3): the attempt md path whose sidecar
+  // answering persists to, and the loaded progress to resume from.
+  const [attemptPath, setAttemptPath] = useState("")
+  const [attemptProgress, setAttemptProgress] =
+    useState<QuizProgress | null>(null)
   const [logOpen, setLogOpen] = useState(false)
   // Live agent activity for the plan/generate spawn (design D8): the
   // `quiz-stream` VerbEvents, rendered through the existing stream
@@ -142,13 +174,62 @@ export function QuizTab({
   const unlistenRef = useRef<UnlistenFn | null>(null)
   const streamUnlistenRef = useRef<UnlistenFn | null>(null)
 
+  // Persist a submission to the open attempt's sidecar (design D3).
+  // No-op when no attempt path is known (e.g. a generate whose persist
+  // failed) — answering still works in-memory; only history loses it.
+  function persistProgress(p: QuizProgress) {
+    if (!attemptPath) return
+    void writeQuizProgress(vaultPath, sidecarPath(attemptPath), p).catch(() => {
+      /* sidecar write is best-effort — never break answering */
+    })
+  }
+
+  // design D5 "Redo this": reset THIS attempt's sidecar to not-started
+  // and re-enter answering at Q1 with the SAME generated questions. It
+  // never re-spawns an agent (distinct from `+ New quiz`).
+  async function redoThisAttempt() {
+    const reset: QuizProgress = {
+      schema_version: 1,
+      answers: [],
+      status: "not_started",
+      started_at: null,
+      completed_at: null,
+    }
+    if (attemptPath) {
+      try {
+        await writeQuizProgress(vaultPath, sidecarPath(attemptPath), reset)
+      } catch {
+        /* best-effort — still let the user re-answer in-memory */
+      }
+    }
+    setAttemptProgress(null)
+    setPhase("ready")
+  }
+
   async function openAttempt(a: QuizAttemptMeta) {
     try {
       const md = await readQuizAttempt(vaultPath, a.path)
-      setAttemptMd(md)
-      setAttemptMeta(a)
-      setLogOpen(false)
-      setPhase("attempt")
+      const progress = await readQuizProgress(
+        vaultPath,
+        sidecarPath(a.path),
+      )
+      // Route by derived status (design D4): a completed attempt opens
+      // the read-only attempt view; not-started / in-progress resumes
+      // answering at the first unanswered question (design D3).
+      if (progress.status === "completed") {
+        setQuizMd(md)
+        setAttemptPath(a.path)
+        setAttemptProgress(progress)
+        setAttemptMeta(a)
+        setLogOpen(false)
+        setPhase("review")
+      } else {
+        setQuizMd(md)
+        setAttemptPath(a.path)
+        setAttemptProgress(progress)
+        setAttemptMeta(a)
+        setPhase("ready")
+      }
     } catch (e) {
       setErrorMsg(String(e))
       setPhase("error")
@@ -161,8 +242,38 @@ export function QuizTab({
     if (phase !== "history") return
     let alive = true
     void listQuizAttempts(vaultPath)
-      .then((a) => {
-        if (alive) setAttempts(a)
+      .then(async (a) => {
+        if (!alive) return
+        setAttempts(a)
+        // Derive each row's badge: parse the attempt md for the question
+        // count (N), read its sidecar for status/answers (design D4).
+        // Per-row reads run in parallel (design Risks: small JSON, same
+        // order as the existing per-row reads — batching is later YAGNI).
+        const entries = await Promise.all(
+          a.map(async (m) => {
+            try {
+              const [md, prog] = await Promise.all([
+                readQuizAttempt(vaultPath, m.path),
+                readQuizProgress(vaultPath, sidecarPath(m.path)),
+              ])
+              const total = parseQuiz(md).length
+              const correct = prog.answers.filter((x) => x.correct).length
+              return [
+                m.path,
+                quizBadge(
+                  prog.status,
+                  prog.answers.length,
+                  correct,
+                  total,
+                  passThreshold,
+                ),
+              ] as const
+            } catch {
+              return [m.path, ""] as const
+            }
+          }),
+        )
+        if (alive) setBadges(Object.fromEntries(entries))
       })
       .catch(() => {
         /* missing dir / read error → leave list empty */
@@ -170,7 +281,7 @@ export function QuizTab({
     return () => {
       alive = false
     }
-  }, [phase, vaultPath])
+  }, [phase, vaultPath, passThreshold])
 
   function clearListener() {
     if (unlistenRef.current) {
@@ -265,6 +376,11 @@ export function QuizTab({
         const r = event.payload.result
         if (r.kind === "succeeded") {
           setQuizMd(r.quiz_md)
+          // A fresh attempt starts not-started; its sidecar lives beside
+          // the persisted md (design D3). `quiz_file` is null if persist
+          // failed — then answering still works, just unpersisted.
+          setAttemptPath(r.quiz_file ?? "")
+          setAttemptProgress(null)
           setPhase("ready")
         } else if (r.kind === "failed") {
           setErrorMsg(r.message)
@@ -301,6 +417,8 @@ export function QuizTab({
     setReason("")
     setErrorMsg("")
     setQuizMd("")
+    setAttemptPath("")
+    setAttemptProgress(null)
   }
 
   return (
@@ -364,6 +482,12 @@ export function QuizTab({
                     >
                       {a.topic ?? a.target_page ?? a.slug} · {a.quiz_id}
                     </button>
+                    <span
+                      data-testid="quiz-attempt-badge"
+                      className="shrink-0 tabular-nums text-fg-secondary"
+                    >
+                      {badges[a.path] ?? ""}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -458,6 +582,24 @@ export function QuizTab({
         </div>
       )}
 
+      {phase === "review" && (
+        <QuizReview
+          quizMd={quizMd}
+          progress={attemptProgress ?? { schema_version: 1, answers: [], status: "completed", started_at: null, completed_at: null }}
+          passThreshold={passThreshold}
+          vaultPath={vaultPath}
+          eventsLog={attemptMeta?.events_log ?? null}
+          pages={wikiPages}
+          onOpenWikiPage={onOpenWikiPage}
+          onRedo={() => void redoThisAttempt()}
+          onBack={() => {
+            setQuizMd("")
+            setAttemptProgress(null)
+            setPhase("history")
+          }}
+        />
+      )}
+
       {phase === "planning" && (
         <div data-testid="quiz-planning" className="flex flex-col gap-2">
           <p className="text-[14px] text-fg-secondary">
@@ -469,8 +611,11 @@ export function QuizTab({
 
       {phase === "confirm" && (
         <div data-testid="quiz-confirm" className="flex flex-col gap-3">
-          <p className="text-[14px] text-fg-primary">
-            Planned scope — confirm to generate the quiz:
+          <p
+            data-testid="quiz-confirm-desc"
+            className="text-[14px] text-fg-primary"
+          >
+            {t("workspace.quiz.confirmDescription")}
           </p>
           <ul className="text-[13px] text-fg-secondary">
             {pages.map((p) => (
@@ -481,10 +626,10 @@ export function QuizTab({
           </ul>
           <div className="flex gap-2">
             <Button data-testid="quiz-revise" onClick={reset}>
-              改
+              {t("workspace.quiz.revise")}
             </Button>
             <Button data-testid="quiz-generate" onClick={onConfirm}>
-              確認
+              {t("workspace.quiz.confirm")}
             </Button>
           </div>
         </div>
@@ -504,6 +649,10 @@ export function QuizTab({
           <QuizAnswering
             quizMd={quizMd}
             passThreshold={passThreshold}
+            pages={wikiPages}
+            onOpenWikiPage={onOpenWikiPage}
+            initialProgress={attemptProgress}
+            onPersist={persistProgress}
           />
         </div>
       )}

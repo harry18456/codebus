@@ -1,0 +1,174 @@
+/**
+ * Read-only review of a completed quiz attempt (quiz-attempt-progress
+ * design D4/D5).
+ *
+ * Spec: app-workspace § Quiz History List — a completed attempt opens
+ * this Review (each question with the user's chosen answer, the correct
+ * answer, and the explanation); it SHALL NOT render the attempt as raw
+ * markdown. It carries `[重做此份]` (reset this attempt's sidecar and
+ * re-enter answering at Q1 with the SAME questions — never a re-spawn,
+ * distinct from `+ New quiz`) and, only when the attempt has a non-null
+ * `events_log`, the existing centered-modal view-generation-log
+ * affordance (reusing `QuizGenerationLog`).
+ */
+import { useMemo, useState } from "react"
+
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { isPassing, parseQuiz, type ChoiceKey } from "@/lib/quiz-parse"
+import type { QuizProgress, WikiPageMeta } from "@/lib/ipc"
+import { QuizGenerationLog } from "./QuizGenerationLog"
+import { ExplanationText } from "./ExplanationText"
+
+const CHOICE_KEYS: ChoiceKey[] = ["A", "B", "C", "D"]
+
+interface QuizReviewProps {
+  quizMd: string
+  progress: QuizProgress
+  passThreshold: number
+  vaultPath: string
+  /** Non-null enables the centered-modal view-generation-log affordance. */
+  eventsLog: string | null
+  /** Reset this attempt's sidecar and re-enter answering at Q1. */
+  onRedo: () => void
+  onBack: () => void
+  /** Wiki page index + navigate handler for explanation citations (D6). */
+  pages?: Record<string, WikiPageMeta>
+  onOpenWikiPage?: (slug: string) => void
+}
+
+export function QuizReview({
+  quizMd,
+  progress,
+  passThreshold,
+  vaultPath,
+  eventsLog,
+  onRedo,
+  onBack,
+  pages,
+  onOpenWikiPage,
+}: QuizReviewProps) {
+  const questions = useMemo(() => parseQuiz(quizMd), [quizMd])
+  const [logOpen, setLogOpen] = useState(false)
+
+  const total = questions.length
+  const correctCount = progress.answers.filter((a) => a.correct).length
+  const pass = isPassing(correctCount, total, passThreshold)
+
+  return (
+    <div
+      data-testid="quiz-review"
+      className="flex flex-1 flex-col gap-3 overflow-auto"
+    >
+      <div className="flex items-center gap-2">
+        <Button data-testid="quiz-attempt-back" onClick={onBack}>
+          ← Back to history
+        </Button>
+        <Button
+          variant="primary"
+          data-testid="quiz-redo-this"
+          onClick={onRedo}
+        >
+          重做此份
+        </Button>
+        {eventsLog && (
+          <Button
+            variant="secondary"
+            data-testid="quiz-view-log"
+            onClick={() => setLogOpen(true)}
+          >
+            看過程
+          </Button>
+        )}
+      </div>
+
+      {total > 0 && (
+        <p
+          data-testid="quiz-review-summary"
+          className={pass ? "text-green-500" : "text-red-500"}
+        >
+          {correctCount} / {total} (
+          {Math.round((correctCount / total) * 100)}%) —{" "}
+          {pass ? "Passed" : "Failed"} (threshold {passThreshold}%)
+        </p>
+      )}
+
+      <ol className="flex flex-col gap-4">
+        {questions.map((q, i) => {
+          const qNum = i + 1
+          const answer = progress.answers.find((a) => a.q === qNum)
+          const userChoice = answer?.selected ?? null
+          const isCorrect = answer?.correct ?? false
+          return (
+            <li
+              key={qNum}
+              data-testid="quiz-review-question"
+              className="flex flex-col gap-2 rounded border border-border p-3"
+            >
+              <p className="text-[13px] text-fg-secondary">
+                Question {qNum} of {total}
+              </p>
+              <h3 className="text-[15px] text-fg-primary">{q.stem}</h3>
+              <ul className="flex flex-col gap-1">
+                {CHOICE_KEYS.map((k) => {
+                  const isAnswer = k === q.answer
+                  const isPicked = k === userChoice
+                  return (
+                    <li
+                      key={k}
+                      className={[
+                        "rounded px-2 py-1 text-[14px]",
+                        isAnswer ? "bg-green-500/15" : "",
+                        isPicked && !isAnswer ? "bg-red-500/15" : "",
+                      ].join(" ")}
+                    >
+                      {k}) {q.choices[k]}
+                    </li>
+                  )
+                })}
+              </ul>
+              <p
+                className={
+                  isCorrect ? "text-green-500 text-[13px]" : "text-red-500 text-[13px]"
+                }
+              >
+                Your answer: {userChoice ?? "—"} · Correct answer: {q.answer}
+              </p>
+              <p className="text-[14px] text-fg-secondary">
+                <ExplanationText
+                  text={q.explanation}
+                  pages={pages ?? {}}
+                  onOpenWikiPage={onOpenWikiPage}
+                />
+              </p>
+            </li>
+          )
+        })}
+      </ol>
+
+      {eventsLog && (
+        <Dialog open={logOpen} onOpenChange={(o) => setLogOpen(o)}>
+          <DialogContent data-testid="quiz-view-log-modal">
+            <DialogHeader>
+              <DialogTitle>Generation log</DialogTitle>
+            </DialogHeader>
+            <div className="max-h-[60vh] overflow-auto">
+              <QuizGenerationLog vaultPath={vaultPath} eventsLog={eventsLog} />
+            </div>
+            <DialogClose asChild>
+              <Button variant="secondary" data-testid="quiz-view-log-close">
+                關閉
+              </Button>
+            </DialogClose>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  )
+}

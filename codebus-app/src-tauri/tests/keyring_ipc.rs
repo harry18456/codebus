@@ -76,12 +76,12 @@ where
 }
 
 /// Spec: `IPC Command Registry` (fix-app-quiz modified) —
-/// 23 commands total (9 foundation + 6 workspace + 2 chat + 6 quiz) AND
+/// 25 commands total (9 foundation + 6 workspace + 2 chat + 8 quiz) AND
 /// the three keyring command names are part of the registered set.
 #[test]
 fn registered_commands_includes_three_keyring_names() {
     let names: std::collections::HashSet<&str> = REGISTERED_COMMANDS.iter().copied().collect();
-    assert_eq!(names.len(), 23);
+    assert_eq!(names.len(), 25);
     for required in [
         "set_endpoint_key",
         "get_endpoint_key",

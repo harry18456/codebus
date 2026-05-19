@@ -29,6 +29,26 @@ export interface QuizQuestion {
   choices: Record<ChoiceKey, string>
   answer: ChoiceKey
   explanation: string
+  /**
+   * The `[[slug]]` wiki citations found in this question's explanation,
+   * in first-seen order and de-duplicated (design D6). The answering and
+   * review views render these as navigable wikilinks.
+   */
+  sources: string[]
+}
+
+/** Ordered, de-duplicated `[[slug]]` citations in an explanation. */
+function extractSources(explanation: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const m of explanation.matchAll(/\[\[([^\]]+)\]\]/g)) {
+    const slug = m[1].trim()
+    if (slug && !seen.has(slug)) {
+      seen.add(slug)
+      out.push(slug)
+    }
+  }
+  return out
 }
 
 const CHOICE_KEYS: ChoiceKey[] = ["A", "B", "C", "D"]
@@ -87,6 +107,7 @@ export function parseQuiz(md: string): QuizQuestion[] {
       choices: choices as Record<ChoiceKey, string>,
       answer,
       explanation,
+      sources: extractSources(explanation),
     })
   }
   return questions
@@ -104,4 +125,30 @@ export function isPassing(
 ): boolean {
   if (total === 0) return false
   return (correct / total) * 100 >= thresholdPercent
+}
+
+/**
+ * Derived per-attempt history badge (quiz-attempt-progress design D4).
+ * `total` is the question count parsed from the attempt markdown; the
+ * answered/correct/score values are recomputed from the sidecar answers
+ * (never stored — single source of truth, design D1):
+ *
+ *   not-started        → `0/N`
+ *   in-progress        → `X/N`
+ *   completed          → `X/N · S% · pass|fail`
+ */
+export function quizBadge(
+  status: "not_started" | "in_progress" | "completed",
+  answered: number,
+  correct: number,
+  total: number,
+  passThresholdPercent: number,
+): string {
+  if (status === "not_started") return `0/${total}`
+  if (status === "in_progress") return `${answered}/${total}`
+  const score = total === 0 ? 0 : Math.round((correct / total) * 100)
+  const verdict = isPassing(correct, total, passThresholdPercent)
+    ? "pass"
+    : "fail"
+  return `${answered}/${total} · ${score}% · ${verdict}`
 }

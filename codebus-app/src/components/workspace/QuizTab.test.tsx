@@ -97,6 +97,15 @@ describe("QuizTab", () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "list_quiz_attempts") return Promise.resolve([])
       if (cmd === "read_quiz_attempt") return Promise.resolve("# attempt md")
+      if (cmd === "read_quiz_progress")
+        return Promise.resolve({
+          schema_version: 1,
+          answers: [],
+          status: "not_started",
+          started_at: null,
+          completed_at: null,
+        })
+      if (cmd === "write_quiz_progress") return Promise.resolve(null)
       return Promise.resolve("quiz-run-1")
     })
     listeners.clear()
@@ -268,6 +277,60 @@ describe("QuizTab", () => {
     )
   })
 
+  // quiz-attempt-progress task 8.1 (design D7) — spec: app-workspace
+  // § Quiz Tab Plan-Confirm-Generate Flow: confirm view states it will
+  // generate from the listed pages; the revise control is `重新規劃`
+  // (i18n) and returns to topic input; labels come from i18n.
+  it("confirm view: i18n description + 重新規劃 relabel returns to topic input without spawning", async () => {
+    const orig = navigator.language
+    Object.defineProperty(navigator, "language", {
+      value: "zh-TW",
+      configurable: true,
+    })
+    try {
+      render(<QuizTab vaultPath="/v" />)
+      await openNewQuiz()
+      fireEvent.change(screen.getByTestId("quiz-topic-input"), {
+        target: { value: "auth" },
+      })
+      fireEvent.click(screen.getByTestId("quiz-start"))
+      await waitFor(() =>
+        expect(listeners.has("quiz-plan-terminal")).toBe(true),
+      )
+      listeners.get("quiz-plan-terminal")!({
+        payload: {
+          run_id: "quiz-plan-1",
+          result: { kind: "scope", pages: ["wiki/modules/auth.md"] },
+        },
+      })
+      await waitFor(() =>
+        expect(screen.getByTestId("quiz-confirm")).toBeInTheDocument(),
+      )
+      // (a) description states it will generate from the listed pages.
+      expect(screen.getByTestId("quiz-confirm-desc")).toHaveTextContent(
+        "將依下列 wiki 頁面出題",
+      )
+      // (b) relabeled revise control + (d) confirm label, from i18n.
+      expect(screen.getByTestId("quiz-revise")).toHaveTextContent("重新規劃")
+      expect(screen.getByTestId("quiz-generate")).toHaveTextContent("確認")
+      // (c) revise returns to the topic-input view; the click itself
+      // spawns nothing (reaching confirm legitimately required a plan
+      // spawn, so assert no NEW spawn after clearing the call record).
+      invokeMock.mockClear()
+      fireEvent.click(screen.getByTestId("quiz-revise"))
+      await waitFor(() =>
+        expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument(),
+      )
+      expect(invokedCommands()).not.toContain("spawn_quiz_plan")
+      expect(invokedCommands()).not.toContain("spawn_quiz_generate")
+    } finally {
+      Object.defineProperty(navigator, "language", {
+        value: orig,
+        configurable: true,
+      })
+    }
+  })
+
   it("scope plan shows confirm controls and does NOT auto-generate", async () => {
     render(<QuizTab vaultPath="/v" />)
     await openNewQuiz()
@@ -418,7 +481,22 @@ describe("QuizTab", () => {
       if (cmd === "list_quiz_attempts")
         return Promise.resolve(HISTORY_ATTEMPTS)
       if (cmd === "read_quiz_attempt")
-        return Promise.resolve("---\nquiz_id: x\n---\n\n## Q1. opened")
+        return Promise.resolve(FIVE_Q_MD)
+      if (cmd === "read_quiz_progress")
+        return Promise.resolve({
+          schema_version: 1,
+          answers: [
+            { q: 1, selected: "A", correct: true },
+            { q: 2, selected: "A", correct: true },
+            { q: 3, selected: "A", correct: true },
+            { q: 4, selected: "A", correct: true },
+            { q: 5, selected: "A", correct: true },
+          ],
+          status: "completed",
+          started_at: "2026-05-16T10:00:00Z",
+          completed_at: "2026-05-16T10:05:00Z",
+        })
+      if (cmd === "write_quiz_progress") return Promise.resolve(null)
       if (cmd === "read_quiz_events")
         return Promise.resolve([
           {
@@ -437,55 +515,215 @@ describe("QuizTab", () => {
   // history row and INTO the opened attempt detail view, shown as a
   // centered modal. Spec: app-workspace § Quiz History List (re-authored).
 
-  it("history rows have no view-log button and no inline panel", async () => {
-    mockHistory()
+  // --- quiz-attempt-progress task 4.1 (design D4/D5) ---
+  // Spec: app-workspace § Quiz History List — completed attempts open a
+  // read-only Review (per-question user choice vs correct + explanation),
+  // NOT the raw markdown; rows carry a derived status badge.
+
+  it("history rows show derived badges and no inline view-log panel", async () => {
+    const ROWS = [
+      {
+        slug: "auth-x",
+        quiz_id: "c",
+        trigger: "ai_planned",
+        topic: "auth",
+        target_page: null,
+        events_log: null,
+        path: "/v/.codebus/quiz/auth-x/c.md",
+      },
+      {
+        slug: "auth-x",
+        quiz_id: "b",
+        trigger: "ai_planned",
+        topic: "auth",
+        target_page: null,
+        events_log: null,
+        path: "/v/.codebus/quiz/auth-x/b.md",
+      },
+      {
+        slug: "auth-x",
+        quiz_id: "a",
+        trigger: "ai_planned",
+        topic: "auth",
+        target_page: null,
+        events_log: null,
+        path: "/v/.codebus/quiz/auth-x/a.md",
+      },
+    ]
+    const PROGRESS_BY_PATH: Record<string, unknown> = {
+      // c → no sidecar / not-started → 0/5
+      "/v/.codebus/quiz/auth-x/c.progress.json": {
+        schema_version: 1,
+        answers: [],
+        status: "not_started",
+        started_at: null,
+        completed_at: null,
+      },
+      // b → 2 of 5 answered, in_progress → 2/5
+      "/v/.codebus/quiz/auth-x/b.progress.json": {
+        schema_version: 1,
+        answers: [
+          { q: 1, selected: "A", correct: true },
+          { q: 2, selected: "B", correct: false },
+        ],
+        status: "in_progress",
+        started_at: "t",
+        completed_at: null,
+      },
+      // a → 5 of 5, 4 correct, completed → 5/5 · 80% · pass (threshold 80)
+      "/v/.codebus/quiz/auth-x/a.progress.json": {
+        schema_version: 1,
+        answers: [
+          { q: 1, selected: "A", correct: true },
+          { q: 2, selected: "A", correct: true },
+          { q: 3, selected: "A", correct: true },
+          { q: 4, selected: "A", correct: true },
+          { q: 5, selected: "B", correct: false },
+        ],
+        status: "completed",
+        started_at: "t",
+        completed_at: "t2",
+      },
+    }
+    useSettingsStore.setState({
+      config: { app: { quiz: { pass_threshold: 80 } } },
+    })
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "list_quiz_attempts") return Promise.resolve(ROWS)
+      if (cmd === "read_quiz_attempt") return Promise.resolve(FIVE_Q_MD)
+      if (cmd === "read_quiz_progress") {
+        const p = (args as { path: string }).path
+        return Promise.resolve(PROGRESS_BY_PATH[p])
+      }
+      return Promise.resolve("quiz-run-1")
+    })
     render(<QuizTab vaultPath="/v" />)
     await waitFor(() =>
-      expect(screen.getByTestId("quiz-history-group")).toBeInTheDocument(),
+      expect(screen.getAllByTestId("quiz-attempt-row")).toHaveLength(3),
     )
-    expect(screen.getAllByTestId("quiz-attempt-row")).toHaveLength(2)
-    expect(screen.queryByTestId("quiz-view-log")).not.toBeInTheDocument()
-    expect(
-      screen.queryByTestId("quiz-view-log-panel"),
-    ).not.toBeInTheDocument()
-    // opening a row still shows the attempt markdown
-    fireEvent.click(screen.getAllByTestId("quiz-attempt-open")[0])
-    await waitFor(() =>
-      expect(screen.getByTestId("quiz-attempt-view")).toBeInTheDocument(),
-    )
-    expect(screen.getByTestId("quiz-attempt-view")).toHaveTextContent(
-      "## Q1. opened",
-    )
+    const badges = screen
+      .getAllByTestId("quiz-attempt-badge")
+      .map((b) => b.textContent)
+    expect(badges).toEqual(["0/5", "2/5", "5/5 · 80% · pass"])
+    expect(screen.queryByTestId("quiz-view-log-panel")).not.toBeInTheDocument()
   })
 
-  it("opened attempt with events_log shows a modal view-log timeline", async () => {
+  it("completed attempt opens QuizReview (not raw md); modal view-log works", async () => {
     mockHistory()
     render(<QuizTab vaultPath="/v" />)
     await waitFor(() =>
       expect(screen.getAllByTestId("quiz-attempt-row")).toHaveLength(2),
     )
-    // row[0] = newest = the one WITH events_log
+    // row[0] = newest = the one WITH events_log; status completed.
     fireEvent.click(screen.getAllByTestId("quiz-attempt-open")[0])
     await waitFor(() =>
-      expect(screen.getByTestId("quiz-view-log")).toBeInTheDocument(),
+      expect(screen.getByTestId("quiz-review")).toBeInTheDocument(),
     )
+    // Review, NOT the raw-markdown attempt view.
+    expect(screen.queryByTestId("quiz-attempt-view")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("quiz-attempt-md")).not.toBeInTheDocument()
+    expect(screen.getAllByTestId("quiz-review-question")).toHaveLength(5)
+
     fireEvent.click(screen.getByTestId("quiz-view-log"))
     await waitFor(() =>
       expect(screen.getByTestId("quiz-view-log-modal")).toBeInTheDocument(),
     )
     expect(screen.getByTestId("thought-item")).toBeInTheDocument()
-    expect(screen.queryByTestId("quiz-view-log-path")).not.toBeInTheDocument()
-    // dismiss → back to the attempt detail view
     fireEvent.click(screen.getByTestId("quiz-view-log-close"))
     await waitFor(() =>
       expect(
         screen.queryByTestId("quiz-view-log-modal"),
       ).not.toBeInTheDocument(),
     )
-    expect(screen.getByTestId("quiz-attempt-view")).toBeInTheDocument()
+    expect(screen.getByTestId("quiz-review")).toBeInTheDocument()
   })
 
-  it("opened attempt without events_log shows no view-log affordance", async () => {
+  it("[重做此份] resets the sidecar and restarts answering at Q1 without spawning", async () => {
+    mockHistory()
+    render(<QuizTab vaultPath="/v" />)
+    await waitFor(() =>
+      expect(screen.getAllByTestId("quiz-attempt-row")).toHaveLength(2),
+    )
+    fireEvent.click(screen.getAllByTestId("quiz-attempt-open")[0])
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-redo-this")).toBeInTheDocument(),
+    )
+    invokeMock.mockClear()
+    fireEvent.click(screen.getByTestId("quiz-redo-this"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-answering")).toBeInTheDocument(),
+    )
+    expect(screen.getByTestId("quiz-answering")).toHaveTextContent(
+      "Question 1 of 5",
+    )
+    // sidecar reset persisted; no agent re-spawn.
+    expect(invokedCommands()).toContain("write_quiz_progress")
+    expect(invokedCommands()).not.toContain("spawn_quiz_plan")
+    expect(invokedCommands()).not.toContain("spawn_quiz_generate")
+  })
+
+  // --- quiz-attempt-progress task 7.1 (design D3 revised) ---
+  // Spec: app-workspace § Quiz Answering and Summary — "Opening an
+  // in-progress attempt restores the last answered question"; Next
+  // continues at the first unanswered; submitting there persists.
+  it("opening an in-progress attempt restores the last answered question; Next then submit persists via write_quiz_progress without spawning", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_quiz_attempts")
+        return Promise.resolve([
+          {
+            slug: "auth-x",
+            quiz_id: "2026-05-18T10-00-00Z",
+            trigger: "ai_planned",
+            topic: "auth",
+            target_page: null,
+            events_log: null,
+            path: "/v/.codebus/quiz/auth-x/2026-05-18T10-00-00Z.md",
+          },
+        ])
+      if (cmd === "read_quiz_attempt")
+        return Promise.resolve(FIVE_Q_MD)
+      if (cmd === "read_quiz_progress")
+        return Promise.resolve({
+          schema_version: 1,
+          answers: [
+            { q: 1, selected: "A", correct: true },
+            { q: 2, selected: "A", correct: true },
+          ],
+          status: "in_progress",
+          started_at: "2026-05-18T10:00:00Z",
+          completed_at: null,
+        })
+      if (cmd === "write_quiz_progress") return Promise.resolve(null)
+      return Promise.resolve("quiz-run-1")
+    })
+    render(<QuizTab vaultPath="/v" />)
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-attempt-open")).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByTestId("quiz-attempt-open"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-answering")).toBeInTheDocument(),
+    )
+    // Restored at the last answered question (Q2), revealed.
+    expect(screen.getByTestId("quiz-answering")).toHaveTextContent(
+      "Question 2 of 5",
+    )
+    expect(screen.getByTestId("quiz-verdict")).toBeInTheDocument()
+    // Next advances to the first unanswered (Q3); answer there persists.
+    fireEvent.click(screen.getByTestId("quiz-next"))
+    expect(screen.getByTestId("quiz-answering")).toHaveTextContent(
+      "Question 3 of 5",
+    )
+    fireEvent.click(screen.getByTestId("quiz-choice-A"))
+    fireEvent.click(screen.getByTestId("quiz-submit"))
+    await waitFor(() =>
+      expect(invokedCommands()).toContain("write_quiz_progress"),
+    )
+    expect(invokedCommands()).not.toContain("spawn_quiz_plan")
+    expect(invokedCommands()).not.toContain("spawn_quiz_generate")
+  })
+
+  it("completed attempt without events_log shows Review with no view-log affordance", async () => {
     mockHistory()
     render(<QuizTab vaultPath="/v" />)
     await waitFor(() =>
@@ -494,8 +732,9 @@ describe("QuizTab", () => {
     // row[1] = older = events_log null
     fireEvent.click(screen.getAllByTestId("quiz-attempt-open")[1])
     await waitFor(() =>
-      expect(screen.getByTestId("quiz-attempt-view")).toBeInTheDocument(),
+      expect(screen.getByTestId("quiz-review")).toBeInTheDocument(),
     )
+    expect(screen.queryByTestId("quiz-attempt-view")).not.toBeInTheDocument()
     expect(screen.queryByTestId("quiz-view-log")).not.toBeInTheDocument()
   })
 })

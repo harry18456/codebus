@@ -114,6 +114,12 @@ const en = {
   "workspace.tab.wiki": "Wiki",
   "workspace.tab.quiz": "Quiz",
 
+  // ---- Workspace · Quiz ----
+  "workspace.quiz.confirmDescription":
+    "The quiz will be generated from the wiki pages below — confirm to start:",
+  "workspace.quiz.revise": "Re-plan",
+  "workspace.quiz.confirm": "Confirm",
+
   // ---- Workspace · Goals ----
   "workspace.goals.newGoalButton": "+ New goal",
   "workspace.goals.emptyHint":
@@ -309,6 +315,12 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.tab.goals": "Goals",
   "workspace.tab.wiki": "Wiki",
   "workspace.tab.quiz": "Quiz",
+
+  // ---- Workspace · Quiz ----
+  "workspace.quiz.confirmDescription":
+    "將依下列 wiki 頁面出題，確認後開始生成測驗：",
+  "workspace.quiz.revise": "重新規劃",
+  "workspace.quiz.confirm": "確認",
 
   // ---- Workspace · Goals ----
   "workspace.goals.newGoalButton": "+ 新增 Goal",
