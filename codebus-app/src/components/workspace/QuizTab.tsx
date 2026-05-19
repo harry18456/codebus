@@ -92,11 +92,17 @@ interface QuizTabProps {
    */
   wikiPages?: Record<string, WikiPageMeta>
   onOpenWikiPage?: (slug: string) => void
+  /**
+   * fix-quiz-ux-wiring (design D2): monotonic counter bumped by
+   * Workspace when the user re-selects the already-active Quiz tab.
+   * On any change to a value > 0, the Quiz tab returns to its
+   * quiz-history view. The initial 0 is inert (does not yank a
+   * freshly-mounted tab away from a flow). Non-destructive — answering
+   * progress is persisted, so reopening an attempt resumes.
+   */
+  quizHomeSignal?: number
 }
 
-// task 5.2 uses the default question count; wiring it to the shared
-// `quiz.default_length` config is part of the settings/answering scope.
-const DEFAULT_QUESTION_COUNT = 5
 
 /**
  * Live plan/generate agent activity, rendered through the SAME stream
@@ -141,6 +147,7 @@ export function QuizTab({
   onPendingConsumed,
   wikiPages,
   onOpenWikiPage,
+  quizHomeSignal,
 }: QuizTabProps) {
   // Summary pass/fail threshold comes from app.quiz.pass_threshold via
   // the settings store (design D1) — never a hardcoded constant.
@@ -235,6 +242,17 @@ export function QuizTab({
       setPhase("error")
     }
   }
+
+  // design D2 — Workspace bumps `quizHomeSignal` when the user
+  // re-selects the already-active Quiz tab. Any change to a value > 0
+  // returns the tab to its quiz-history view. The initial 0 is inert
+  // so a freshly-mounted tab is not yanked out of a flow. Returning is
+  // non-destructive: answering progress is persisted.
+  useEffect(() => {
+    if (quizHomeSignal && quizHomeSignal > 0) {
+      setPhase("history")
+    }
+  }, [quizHomeSignal])
 
   // task 5.5 — refresh the history list whenever the history view is
   // shown (mount default, back from an attempt / input / answering).
@@ -393,10 +411,14 @@ export function QuizTab({
     unlistenRef.current = handle
     await subscribeQuizStream()
     try {
+      // Question count comes from the shared `quiz.default_length`
+      // config (legacy `app.quiz.default_length` fallback, clamped
+      // 3..10) — never a hardcoded constant (design D4). Read at spawn
+      // time so it reflects the config loaded at workspace startup.
       await spawnQuizGenerate(
         vaultPath,
         genPages,
-        DEFAULT_QUESTION_COUNT,
+        useSettingsStore.getState().getDefaultLength(),
         trigger,
       )
     } catch (e) {
@@ -646,6 +668,24 @@ export function QuizTab({
 
       {phase === "ready" && (
         <div data-testid="quiz-ready" className="flex flex-1 flex-col">
+          {/*
+           * Back-to-history control (design D1). Wraps the answering
+           * view so it is reachable during answering AND on the
+           * post-quiz summary. Same testid + `setPhase("history")`
+           * behavior as the idle-phase control; the two phases are
+           * mutually exclusive so they never render simultaneously.
+           * Non-destructive: answering progress is persisted by the
+           * cursor sidecar, so reopening the attempt resumes exactly.
+           * It does NOT spawn an agent.
+           */}
+          <div className="mb-2">
+            <Button
+              data-testid="quiz-back-to-history"
+              onClick={() => setPhase("history")}
+            >
+              ← History
+            </Button>
+          </div>
           <QuizAnswering
             quizMd={quizMd}
             passThreshold={passThreshold}

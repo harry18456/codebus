@@ -25,6 +25,7 @@ import type { VaultEntry } from "@/lib/ipc"
 import { Workspace } from "./Workspace"
 import { useChatStore } from "@/store/chat"
 import { useGoalsStore } from "@/store/goals"
+import { useSettingsStore } from "@/store/settings"
 import { useWikiStore } from "@/store/wiki"
 
 const invokeMock = vi.mocked(invoke)
@@ -37,6 +38,18 @@ const VAULT: VaultEntry = {
 }
 
 const CHAT_INITIAL_STATE = useChatStore.getState()
+const SETTINGS_INITIAL_STATE = useSettingsStore.getState()
+
+function resetSettingsStore(): void {
+  useSettingsStore.setState({
+    config: SETTINGS_INITIAL_STATE.config,
+    initialConfig: SETTINGS_INITIAL_STATE.initialConfig,
+    dirty: false,
+    loading: false,
+    saving: false,
+    error: null,
+  })
+}
 
 function resetChatStore(): void {
   useChatStore.setState({
@@ -66,6 +79,7 @@ describe("Workspace", () => {
       _bodyCache: {},
     })
     resetChatStore()
+    resetSettingsStore()
   })
 
   afterEach(() => {
@@ -77,6 +91,51 @@ describe("Workspace", () => {
       _bodyCache: {},
     })
     resetChatStore()
+    resetSettingsStore()
+  })
+
+  it("loads global config into the settings store on mount", async () => {
+    // Route invoke by command name: load_global_config returns a config
+    // with a non-default pass_threshold; everything else returns [].
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_global_config") {
+        return Promise.resolve({ app: { quiz: { pass_threshold: 75 } } })
+      }
+      return Promise.resolve([])
+    })
+
+    render(<Workspace vault={VAULT} />)
+
+    await waitFor(() => {
+      expect(
+        useSettingsStore.getState().config.app?.quiz?.pass_threshold,
+      ).toBe(75)
+    })
+    const loadCalls = invokeMock.mock.calls.filter(
+      (c) => c[0] === "load_global_config",
+    )
+    expect(loadCalls).toHaveLength(1)
+  })
+
+  it("re-selecting the already-active Quiz tab returns to quiz history", async () => {
+    render(<Workspace vault={VAULT} />)
+    fireEvent.click(screen.getByTestId("workspace-tab-quiz"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
+    )
+    // Enter a quiz flow: + New quiz opens the topic-input view, so the
+    // history list is no longer shown.
+    fireEvent.click(screen.getByTestId("new-quiz"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument(),
+    )
+    expect(screen.queryByTestId("quiz-history")).not.toBeInTheDocument()
+    // Selecting the Quiz tab again while it is already active returns
+    // the Quiz tab to its quiz-history view (design D2).
+    fireEvent.click(screen.getByTestId("workspace-tab-quiz"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
+    )
   })
 
   it("Workspace_mounts_with_goals_tab_default", () => {

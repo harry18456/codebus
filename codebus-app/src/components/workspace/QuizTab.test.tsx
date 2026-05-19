@@ -451,6 +451,138 @@ describe("QuizTab", () => {
     expect(onConsumed).toHaveBeenCalledTimes(1)
   })
 
+  // --- fix-quiz-ux-wiring task 3.1: generate spawn question count comes
+  // from the shared quiz length config (getDefaultLength), NOT a
+  // hardcoded component constant. Spec: quiz § Shared Quiz Config
+  // Namespace — "App generate uses the configured length". Design D4.
+  it("generate spawn uses getDefaultLength() instead of a hardcoded 5", async () => {
+    useSettingsStore.setState({ config: { quiz: { default_length: 8 } } })
+    render(
+      <QuizTab
+        vaultPath="/v"
+        pendingPage="wiki/modules/auth.md"
+        onPendingConsumed={vi.fn()}
+      />,
+    )
+    await waitFor(() =>
+      expect(invokedCommands()).toContain("spawn_quiz_generate"),
+    )
+    const genCall = invokeMock.mock.calls.find(
+      (c) => c[0] === "spawn_quiz_generate",
+    )
+    expect(genCall).toBeDefined()
+    expect((genCall![1] as { questionCount: number }).questionCount).toBe(8)
+  })
+
+  // --- fix-quiz-ux-wiring task 4.1: back-to-history control inside the
+  // answering/summary view (design D1). Spec: app-workspace § Quiz Tab
+  // Plan-Confirm-Generate Flow — "Back-to-history from the answering
+  // view" + "Back-to-history from the summary". Non-destructive: no
+  // spawn_quiz_plan / spawn_quiz_generate.
+
+  const IN_PROGRESS_ATTEMPT = {
+    slug: "auth-abcd1234",
+    quiz_id: "2026-05-16T12-00-00Z",
+    trigger: "ai_planned",
+    topic: "auth",
+    target_page: null,
+    events_log: null,
+    path: "/v/.codebus/quiz/auth-abcd1234/2026-05-16T12-00-00Z.md",
+  }
+
+  it("answering view shows back-to-history; clicking it returns to history without spawning", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_quiz_attempts")
+        return Promise.resolve([IN_PROGRESS_ATTEMPT])
+      if (cmd === "read_quiz_attempt") return Promise.resolve(FIVE_Q_MD)
+      if (cmd === "read_quiz_progress")
+        return Promise.resolve({
+          schema_version: 1,
+          answers: [],
+          status: "in_progress",
+          started_at: "2026-05-16T12:00:00Z",
+          completed_at: null,
+        })
+      if (cmd === "write_quiz_progress") return Promise.resolve(null)
+      return Promise.resolve("quiz-run-1")
+    })
+    render(<QuizTab vaultPath="/v" />)
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-attempt-open")).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByTestId("quiz-attempt-open"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-stem")).toBeInTheDocument(),
+    )
+    expect(screen.getByTestId("quiz-back-to-history")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("quiz-back-to-history"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
+    )
+    expect(invokedCommands()).not.toContain("spawn_quiz_plan")
+    expect(invokedCommands()).not.toContain("spawn_quiz_generate")
+  })
+
+  it("summary shows back-to-history; clicking it returns to history without spawning", async () => {
+    useSettingsStore.setState({
+      config: { app: { quiz: { pass_threshold: 80 } } },
+    })
+    render(<QuizTab vaultPath="/v" />)
+    await runFiveQuizFourCorrect()
+    expect(screen.getByTestId("quiz-summary")).toBeInTheDocument()
+    expect(screen.getByTestId("quiz-back-to-history")).toBeInTheDocument()
+    // Snapshot spawn calls before the back click — the back action
+    // itself must be non-destructive (no further spawn).
+    invokeMock.mockClear()
+    fireEvent.click(screen.getByTestId("quiz-back-to-history"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
+    )
+    expect(invokedCommands()).not.toContain("spawn_quiz_plan")
+    expect(invokedCommands()).not.toContain("spawn_quiz_generate")
+  })
+
+  // --- fix-quiz-ux-wiring task 5.1: quizHomeSignal prop (design D2).
+  // Spec: app-workspace § Quiz Tab Plan-Confirm-Generate Flow —
+  // "Re-selecting the Quiz tab returns to quiz history". An incrementing
+  // counter from Workspace forces the history phase; the initial 0
+  // value must NOT trigger it.
+
+  it("incrementing quizHomeSignal forces the history phase", async () => {
+    const { rerender } = render(
+      <QuizTab vaultPath="/v" quizHomeSignal={0} />,
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
+    )
+    // Leave history: enter the topic-input view.
+    fireEvent.click(screen.getByTestId("new-quiz"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument(),
+    )
+    expect(screen.queryByTestId("quiz-history")).not.toBeInTheDocument()
+    // Workspace bumps the signal (re-select active Quiz tab) → history.
+    rerender(<QuizTab vaultPath="/v" quizHomeSignal={1} />)
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
+    )
+  })
+
+  it("initial quizHomeSignal of 0 does not force the history phase", async () => {
+    render(<QuizTab vaultPath="/v" quizHomeSignal={0} />)
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByTestId("new-quiz"))
+    await waitFor(() =>
+      expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument(),
+    )
+    // The mount-time signal value of 0 must not yank the user back to
+    // history — they stay in the topic-input view they navigated to.
+    expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument()
+    expect(screen.queryByTestId("quiz-history")).not.toBeInTheDocument()
+  })
+
   // --- task 5.5: history list ---
   // Spec: app-workspace § Quiz History List — attempts grouped by slug,
   // retry shows two rows under one slug, view-log affordance present,

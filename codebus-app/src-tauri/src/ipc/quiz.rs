@@ -832,6 +832,7 @@ mod tests {
             status: QuizStatus::InProgress,
             started_at: Some("2026-05-18T10:00:00Z".into()),
             completed_at: None,
+            cursor: None,
         };
         write_quiz_progress(
             tmp.path().to_string_lossy().into_owned(),

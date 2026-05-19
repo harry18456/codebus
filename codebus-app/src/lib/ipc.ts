@@ -23,6 +23,15 @@ export interface GlobalConfig {
   claude_code?: unknown
   pii?: unknown
   log?: unknown
+  /**
+   * Shared top-level quiz namespace (authoritative). `default_length`
+   * is the generated question count, range 3–10, default 5. The legacy
+   * `app.quiz.default_length` is tolerated as a fallback for
+   * un-migrated configs.
+   */
+  quiz?: {
+    default_length?: number
+  }
   app?: {
     quiz?: {
       pass_threshold?: number

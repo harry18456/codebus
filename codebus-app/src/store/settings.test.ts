@@ -69,6 +69,39 @@ describe("settings store", () => {
     expect(useSettingsStore.getState().getPassThreshold()).toBe(55)
   })
 
+  it("getDefaultLength prefers shared quiz.default_length over legacy app.quiz.default_length", () => {
+    useSettingsStore.setState({
+      config: {
+        quiz: { default_length: 7 },
+        app: { quiz: { default_length: 4 } },
+      },
+    })
+    expect(useSettingsStore.getState().getDefaultLength()).toBe(7)
+  })
+
+  it("getDefaultLength falls back to legacy app.quiz.default_length when shared is absent", () => {
+    useSettingsStore.setState({
+      config: { app: { quiz: { default_length: 8 } } },
+    })
+    expect(useSettingsStore.getState().getDefaultLength()).toBe(8)
+  })
+
+  it("getDefaultLength defaults to 5 when no length configured", () => {
+    useSettingsStore.setState({ config: {} })
+    expect(useSettingsStore.getState().getDefaultLength()).toBe(5)
+  })
+
+  it("getDefaultLength clamps to the inclusive 3..10 range", () => {
+    useSettingsStore.setState({ config: { quiz: { default_length: 2 } } })
+    expect(useSettingsStore.getState().getDefaultLength()).toBe(3)
+    useSettingsStore.setState({ config: { quiz: { default_length: 99 } } })
+    expect(useSettingsStore.getState().getDefaultLength()).toBe(10)
+    useSettingsStore.setState({ config: { quiz: { default_length: 10 } } })
+    expect(useSettingsStore.getState().getDefaultLength()).toBe(10)
+    useSettingsStore.setState({ config: { quiz: { default_length: 3 } } })
+    expect(useSettingsStore.getState().getDefaultLength()).toBe(3)
+  })
+
   it("keeps dirty=false on a failed save and surfaces error", async () => {
     mockedInvoke.mockRejectedValueOnce({ kind: "io", message: "fs" })
     useSettingsStore.setState({ config: { app: { quiz: { pass_threshold: 70, default_length: 5 } } }, dirty: true })

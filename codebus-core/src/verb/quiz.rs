@@ -116,21 +116,25 @@ pub struct QuizReport {
 }
 
 /// Parse the plan-spawn marker. Per spec the marker MUST be the first
-/// line; we tolerate leading whitespace only. `[CODEBUS_QUIZ_SCOPE]`
-/// yields a comma-separated `wiki/` path list (≥1 non-empty entry);
-/// `[CODEBUS_QUIZ_NO_MATCH]` yields the trimmed reason. Anything else —
-/// including a marker that is not at the start — returns `None`.
+/// line; the parser is tolerant on read. `[CODEBUS_QUIZ_SCOPE]` yields a
+/// comma-separated `wiki/` path list (≥1 non-empty entry);
+/// `[CODEBUS_QUIZ_NO_MATCH]` yields the trimmed reason. When no line
+/// contains either marker, returns `None`.
 pub(crate) fn parse_plan_outcome(text: &str) -> Option<QuizPlanOutcome> {
-    // Tolerant recovery (design D6, mirroring the D4 generate-body fence
-    // tolerance): strip a leading/trailing code fence the agent may have
-    // wrapped its response in, then accept the FIRST line that begins
-    // with either marker even when the agent emitted preamble lines
-    // before it. The SKILL still mandates the marker on line 1; this is
-    // caller-side robustness, not a relaxation of the agent contract.
+    // Tolerant recovery (design D6, mirroring the D4 generate-body
+    // `strip_preamble_before_first_question` fix): strip a leading/
+    // trailing code fence the agent may have wrapped its response in,
+    // then accept the FIRST line that *contains* either marker — even
+    // when the agent glued a preamble sentence onto the same line before
+    // the marker with no newline (manual-e2e defect). The marker text
+    // anywhere on the line is taken; everything after it is the payload.
+    // The SKILL still mandates the marker on line 1; this is caller-side
+    // robustness, not a relaxation of the agent contract.
     let stripped = strip_code_fence(text);
     for raw in stripped.lines() {
         let line = raw.trim();
-        if let Some(rest) = line.strip_prefix(QUIZ_SCOPE_MARKER) {
+        if let Some(idx) = line.find(QUIZ_SCOPE_MARKER) {
+            let rest = &line[idx + QUIZ_SCOPE_MARKER.len()..];
             let pages: Vec<String> = rest
                 .split(',')
                 .map(|s| s.trim().to_string())
@@ -141,12 +145,12 @@ pub(crate) fn parse_plan_outcome(text: &str) -> Option<QuizPlanOutcome> {
             }
             return Some(QuizPlanOutcome::Scope(pages));
         }
-        if let Some(rest) = line.strip_prefix(QUIZ_NO_MATCH_MARKER) {
-            let reason = rest.trim().to_string();
-            if reason.is_empty() {
+        if let Some(idx) = line.find(QUIZ_NO_MATCH_MARKER) {
+            let rest = line[idx + QUIZ_NO_MATCH_MARKER.len()..].trim();
+            if rest.is_empty() {
                 return None;
             }
-            return Some(QuizPlanOutcome::NoMatch(reason));
+            return Some(QuizPlanOutcome::NoMatch(rest.to_string()));
         }
     }
     None
@@ -685,6 +689,36 @@ mod tests {
             Some(QuizPlanOutcome::NoMatch(
                 "vault only covers web auth".into()
             ))
+        );
+    }
+
+    // Defect (manual e2e, quiz-e2e vault): the plan agent sometimes glues
+    // a preamble sentence onto the SAME line as the marker (no newline
+    // before it), e.g. `先掃描…頁面。[CODEBUS_QUIZ_SCOPE] wiki/a.md`. The
+    // marker IS present, just not at line start. Same defect class as the
+    // generate-body `strip_preamble_before_first_question` fix — the plan
+    // parser must also accept a marker mid-line, not only as a line prefix.
+
+    #[test]
+    fn parse_scope_marker_glued_after_inline_preamble_is_recovered() {
+        let text = "先掃描 `wiki/` 找 JWT authentication 相關頁面。\
+                    [CODEBUS_QUIZ_SCOPE] wiki/synthesis/jwt-auth-system.md, \
+                    wiki/concepts/jwt-pitfalls.md";
+        assert_eq!(
+            parse_plan_outcome(text),
+            Some(QuizPlanOutcome::Scope(vec![
+                "wiki/synthesis/jwt-auth-system.md".into(),
+                "wiki/concepts/jwt-pitfalls.md".into(),
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_no_match_marker_glued_after_inline_preamble_is_recovered() {
+        let text = "分析後沒有相關頁面。[CODEBUS_QUIZ_NO_MATCH] vault 只涵蓋 web auth";
+        assert_eq!(
+            parse_plan_outcome(text),
+            Some(QuizPlanOutcome::NoMatch("vault 只涵蓋 web auth".into()))
         );
     }
 

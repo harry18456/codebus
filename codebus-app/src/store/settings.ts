@@ -43,6 +43,17 @@ interface SettingsState {
    * The Quiz tab uses this instead of a hardcoded component constant.
    */
   getPassThreshold: () => number
+  /**
+   * Generated quiz question count, resolved from the shared top-level
+   * `quiz.default_length` (authoritative), falling back to the legacy
+   * `app.quiz.default_length` for un-migrated configs, then 5 when
+   * neither is set. Clamped to the inclusive 3..10 range — the same
+   * range the core `quiz` config loader enforces, so an out-of-range
+   * configured value silently converges instead of being rejected.
+   * The Quiz tab passes this to the generate spawn instead of a
+   * hardcoded constant.
+   */
+  getDefaultLength: () => number
   reset: () => void
   save: () => Promise<void>
   clearError: () => void
@@ -89,6 +100,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   getPassThreshold() {
     return get().config.app?.quiz?.pass_threshold ?? 80
+  },
+
+  getDefaultLength() {
+    const cfg = get().config
+    const raw = cfg.quiz?.default_length ?? cfg.app?.quiz?.default_length ?? 5
+    return Math.min(10, Math.max(3, raw))
   },
 
   reset() {

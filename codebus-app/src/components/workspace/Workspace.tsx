@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn"
 import { useChatStore } from "@/store/chat"
 import { useGoalsStore } from "@/store/goals"
 import { useRouteStore } from "@/store/route"
+import { useSettingsStore } from "@/store/settings"
 import { useVaultsStore } from "@/store/vaults"
 import { useWikiStore } from "@/store/wiki"
 import { useChatShortcut } from "@/hooks/useChatShortcut"
@@ -51,6 +52,11 @@ export function Workspace({ vault }: WorkspaceProps) {
   const wikiReset = useWikiStore((s) => s.reset)
 
   const [activeTab, setActiveTab] = useState<TabId>("goals")
+  // Monotonic counter bumped when the user selects the Quiz tab while it
+  // is already the active tab. QuizTab watches it and returns to its
+  // quiz-history view (design D2). Initial 0 is inert. Selecting Quiz
+  // from a different tab is a normal tab switch and does NOT bump it.
+  const [quizHomeSignal, setQuizHomeSignal] = useState(0)
   // task 5.3 — when set (via wiki preview [Quiz me on this]), the Quiz
   // tab consumes it to start the Page flow (skip planning).
   const [pendingQuizPage, setPendingQuizPage] = useState<string | null>(null)
@@ -61,6 +67,19 @@ export function Workspace({ vault }: WorkspaceProps) {
   // window listener to Workspace mount/unmount so the shortcut is inert in
   // the Lobby — see `useChatShortcut` for the spec scenario this enforces.
   useChatShortcut()
+
+  // Load persisted global config once at workspace startup so the Quiz
+  // tab's pass threshold and generated question count reflect saved
+  // settings without requiring the Settings modal to have been opened
+  // (design D3). Guard: only when the store is still at its empty
+  // initial config — never refight an in-flight load or clobber unsaved
+  // edits. `getState()` is non-reactive, so the effect runs once.
+  useEffect(() => {
+    const s = useSettingsStore.getState()
+    if (!s.loading && !s.dirty && Object.keys(s.config).length === 0) {
+      void s.load().catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     void refreshRuns(vault.path).catch(() => {})
@@ -211,7 +230,15 @@ export function Workspace({ vault }: WorkspaceProps) {
             id="quiz"
             label="Quiz"
             activeTab={activeTab}
-            onSelect={(t) => setActiveTab(t)}
+            onSelect={(t) => {
+              if (activeTab === "quiz") {
+                // Already on Quiz — re-selecting acts as "home": bump
+                // the signal so QuizTab returns to quiz history (D2).
+                setQuizHomeSignal((n) => n + 1)
+              } else {
+                setActiveTab(t)
+              }
+            }}
           />
         </nav>
       </aside>
@@ -247,6 +274,7 @@ export function Workspace({ vault }: WorkspaceProps) {
             onPendingConsumed={() => setPendingQuizPage(null)}
             wikiPages={wikiPages}
             onOpenWikiPage={onSelectPage}
+            quizHomeSignal={quizHomeSignal}
           />
         )}
       </section>
