@@ -362,6 +362,8 @@ tests:
 
 The `codebus-quiz` SKILL.md SHALL declare a read scope of `wiki/` only and SHALL forbid reading `raw/`, `log/`, and any path escaping the vault root. It SHALL define two prompt modes selected by the prompt prefix: `plan:` (emit `[CODEBUS_QUIZ_SCOPE]` or `[CODEBUS_QUIZ_NO_MATCH]` as the first line, then stop) and `generate:` (emit the quiz markdown body). It SHALL require the `[CODEBUS_QUIZ_VIOLATION] <path>` marker when forced toward `raw/`. It SHALL forbid the agent from authoring `quiz_id`, `topic`, or `generation_token_usage`, and forbid wrapping the whole output in a code fence. Markers and structural tokens SHALL always be English; question stems, choices, and explanations SHALL follow the language of the quizzed wiki pages (Language Override).
 
+The `generate:` mode SHALL additionally instruct the agent to self-validate and self-repair before emitting its final body: after drafting the quiz, the agent SHALL invoke `codebus quiz validate` on its draft via its Bash tool, SHALL correct the questions reported by the findings, and SHALL re-run the validator, repeating up to a fixed internal iteration cap stated explicitly in the SKILL body; when the cap is reached the agent SHALL emit its best current body rather than looping further. The SKILL SHALL reference the validator as the authority for structural and citation correctness and SHALL NOT restate the validator's rule definitions (no parallel schema copy); it SHALL describe acting on the validator's findings, not the rules themselves.
+
 #### Scenario: Quiz bundle declares wiki-only read scope
 
 - **WHEN** the `codebus-quiz/SKILL.md` is materialized
@@ -372,78 +374,12 @@ The `codebus-quiz` SKILL.md SHALL declare a read scope of `wiki/` only and SHALL
 - **WHEN** the `codebus-quiz/SKILL.md` is materialized
 - **THEN** it SHALL define the `plan:` mode emitting `[CODEBUS_QUIZ_SCOPE]`/`[CODEBUS_QUIZ_NO_MATCH]` and the `generate:` mode emitting the question body without agent-authored frontmatter
 
-<!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
-code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
-  - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
-  - codebus-core/src/verb/quiz.rs
-  - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
-tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
--->
+#### Scenario: Generate mode defines a bounded self-validate/self-repair loop
+
+- **WHEN** the `codebus-quiz/SKILL.md` is materialized
+- **THEN** its `generate:` mode SHALL instruct the agent to invoke `codebus quiz validate` on its draft, correct reported findings, and re-validate up to a fixed internal iteration cap stated in the body AND SHALL instruct the agent to emit its best current body when the cap is reached
+
+#### Scenario: Quiz bundle does not duplicate validator rules
+
+- **WHEN** the `codebus-quiz/SKILL.md` is materialized
+- **THEN** its body SHALL reference `codebus quiz validate` as the structural/citation authority AND SHALL NOT contain a restated copy of the validator's rule definitions

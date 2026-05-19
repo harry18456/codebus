@@ -618,8 +618,8 @@ The system SHALL apply write-if-missing semantics for this file: if `<vault_root
 The `codebus hook check-bash` subcommand SHALL implement the following stdin/stdout contract:
 
 - **Input** (stdin): a single JSON object matching Claude Code's PreToolUse hook input schema. The relevant fields are `tool_name` (expected `"Bash"`) and `tool_input.command` (the shell command string the agent intends to run).
-- **Allow**: when the command's first argv token resolves to a `codebus` binary (file basename `codebus` or `codebus.exe`, case-insensitive match) AND the second argv token is exactly `lint`, the subcommand SHALL exit with status zero AND SHALL NOT print a decision JSON to stdout.
-- **Block**: in all other cases (different binary, missing `lint` subcommand, malformed input, parse error), the subcommand SHALL exit with status zero AND SHALL print to stdout a single JSON object of the form `{"decision":"block","reason":"<message>"}` where `<message>` describes why the command was blocked.
+- **Allow**: when the command's first argv token resolves to a `codebus` binary (file basename `codebus` or `codebus.exe`, case-insensitive match) AND EITHER (a) the second argv token is exactly `lint`, OR (b) the second argv token is exactly `quiz` AND the third argv token is exactly `validate`, the subcommand SHALL exit with status zero AND SHALL NOT print a decision JSON to stdout. The two allowed forms correspond to the codebus-fix agent self-checking via `codebus lint` and the codebus-quiz generate agent self-validating via `codebus quiz validate` respectively; no other `codebus` subcommand and no other binary is permitted.
+- **Block**: in all other cases (different binary, neither the `lint` nor the `quiz validate` form, malformed input, parse error), the subcommand SHALL exit with status zero AND SHALL print to stdout a single JSON object of the form `{"decision":"block","reason":"<message>"}` where `<message>` describes why the command was blocked.
 - **Cross-platform**: the binary basename match SHALL be case-insensitive on Windows (`codebus.EXE` and `codebus.exe` both allowed) and case-sensitive on Unix.
 
 The `<vault_root>/.gitignore` (vault internal) SHALL include the line `.claude/settings.local.json` so user-added local override settings are not committed to the vault git repository.
@@ -649,14 +649,19 @@ The `<vault_root>/.gitignore` (vault internal) SHALL include the line `.claude/s
 - **WHEN** `codebus hook check-bash` receives stdin JSON whose `tool_input.command` value is `/usr/local/bin/codebus lint --repo /path` OR (on Windows) `D:/dev/codebus.exe lint --format json`
 - **THEN** the subcommand SHALL exit with status zero AND stdout SHALL NOT contain any `decision` JSON
 
+#### Scenario: hook check-bash allows codebus quiz validate invocation
+
+- **WHEN** `codebus hook check-bash` receives stdin JSON whose `tool_input.command` is `codebus quiz validate -` OR `/usr/local/bin/codebus quiz validate draft.md --json`
+- **THEN** the subcommand SHALL exit with status zero AND stdout SHALL NOT contain any `decision` JSON
+
 #### Scenario: hook check-bash blocks non-codebus binaries
 
 - **WHEN** `codebus hook check-bash` receives stdin JSON whose `tool_input.command` is `echo MARKER`
 - **THEN** the subcommand SHALL exit with status zero AND stdout SHALL contain a JSON object whose `decision` field equals `"block"` AND whose `reason` field is a non-empty string
 
-#### Scenario: hook check-bash blocks codebus subcommands other than lint
+#### Scenario: hook check-bash blocks codebus subcommands other than the two allowed forms
 
-- **WHEN** `codebus hook check-bash` receives stdin JSON whose `tool_input.command` is `codebus fix --no-fix`
+- **WHEN** `codebus hook check-bash` receives stdin JSON whose `tool_input.command` is `codebus fix --no-fix` OR `codebus quiz "some topic"` (the generate form, not `quiz validate`)
 - **THEN** the subcommand SHALL exit with status zero AND stdout SHALL contain a JSON object whose `decision` field equals `"block"`
 
 #### Scenario: hook check-bash fails closed on malformed input
@@ -668,34 +673,6 @@ The `<vault_root>/.gitignore` (vault internal) SHALL include the line `.claude/s
 
 - **WHEN** `codebus init` runs against `<repo>` and reaches the vault internal `.gitignore` mutation step
 - **THEN** the file `<vault_root>/.gitignore` SHALL contain a line equal to `.claude/settings.local.json`
-
-<!-- @trace
-source: v3-fix-trust-agent
-updated: 2026-05-10
-code:
-  - codebus-cli/src/commands/query.rs
-  - codebus-cli/src/commands/goal.rs
-  - codebus-cli/src/commands/mod.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/agent/claude_cli.rs
-  - codebus-cli/src/commands/fix.rs
-  - codebus-core/src/wiki/fix/mod.rs
-  - codebus-cli/Cargo.toml
-  - codebus-cli/src/commands/hook.rs
-  - codebus-core/src/vault/mod.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/config/lint_fix.rs
-  - codebus-core/src/wiki/fix/prompt.rs
-  - codebus-core/src/agent/mod.rs
-  - codebus-core/src/wiki/fix/session.rs
-  - codebus-core/src/vault/settings.rs
-tests:
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/fix_flow.rs
-  - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/cli_routing.rs
--->
 
 ---
 ### Requirement: Fix Loop Library Invocation Entry Point

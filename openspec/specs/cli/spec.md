@@ -8,7 +8,7 @@ The command-line entry surface — the `codebus` binary's subcommand registry, g
 
 ### Requirement: Subcommand Registration
 
-The `codebus` binary SHALL register exactly eight subcommands at the top level: `init`, `goal`, `query`, `lint`, `fix`, `config`, `chat`, `quiz`. No other subcommand SHALL be registered. The `--help` and `--version` flags SHALL be available at both the binary level and per subcommand. The `config` subcommand SHALL itself expose three sub-actions (`set-key`, `get-key`, `delete-key`); the sub-action contract is defined normatively in the `claude-code-config` capability. The `chat` subcommand contract is defined normatively in the `Chat Subcommand Behavior` requirement of this capability and the `Chat CLI Subcommand Behavior` requirement of the `chat-verb` capability. The `quiz` subcommand contract is defined normatively in the `Quiz Subcommand Behavior` requirement of this capability and the `quiz` capability.
+The `codebus` binary SHALL register exactly eight subcommands at the top level: `init`, `goal`, `query`, `lint`, `fix`, `config`, `chat`, `quiz`. No other subcommand SHALL be registered. The `--help` and `--version` flags SHALL be available at both the binary level and per subcommand. The `config` subcommand SHALL itself expose three sub-actions (`set-key`, `get-key`, `delete-key`); the sub-action contract is defined normatively in the `claude-code-config` capability. The `quiz` subcommand SHALL itself expose a `validate` sub-action (`codebus quiz validate <quiz-md-file | -> [--json]`); the sub-action contract is defined normatively in the `Quiz Validate Sub-Action Behavior` requirement of this capability and the `Quiz Output Validation and Repair` requirement of the `quiz` capability. The `chat` subcommand contract is defined normatively in the `Chat Subcommand Behavior` requirement of this capability and the `Chat CLI Subcommand Behavior` requirement of the `chat-verb` capability. The `quiz` subcommand contract is defined normatively in the `Quiz Subcommand Behavior` requirement of this capability and the `quiz` capability.
 
 #### Scenario: Help output lists exactly the eight subcommands
 
@@ -18,104 +18,12 @@ The `codebus` binary SHALL register exactly eight subcommands at the top level: 
 #### Scenario: Version flag prints cargo package version
 
 - **WHEN** `codebus --version` is invoked
-- **THEN** the binary SHALL print a single line containing the cargo package version of the `codebus-cli` crate AND SHALL exit with status zero
+- **THEN** the output SHALL be the `codebus` cargo package version AND SHALL exit with status zero
 
-#### Scenario: Unknown subcommand is rejected by clap
-
-- **WHEN** `codebus mcp` or `codebus randomverb` is invoked
-- **THEN** the binary SHALL print a clap error message to stderr identifying the unknown subcommand AND SHALL exit with non-zero status
-
-#### Scenario: Config subcommand help lists its three actions
-
-- **WHEN** `codebus config --help` is invoked
-- **THEN** the help output SHALL list `set-key`, `get-key`, `delete-key` as the only sub-actions AND SHALL exit with status zero
-
-#### Scenario: Chat subcommand help describes REPL behavior
-
-- **WHEN** `codebus chat --help` is invoked
-- **THEN** the help output SHALL describe the subcommand as launching an interactive multi-turn read-only chat REPL AND SHALL exit with status zero
-
-#### Scenario: Quiz subcommand help describes quiz generation
+#### Scenario: Quiz validate sub-action is registered under quiz
 
 - **WHEN** `codebus quiz --help` is invoked
-- **THEN** the help output SHALL describe the subcommand as generating a read-only multiple-choice quiz from wiki pages AND SHALL document the `--count` flag AND SHALL exit with status zero
-
-
-<!-- @trace
-source: v3-app-quiz
-updated: 2026-05-16
-code:
-  - codebus-app/src/components/workspace/WikiTab.tsx
-  - codebus-app/src/lib/ipc.ts
-  - docs/spike-artifacts/quiz-fixture-vault/manifest.yaml
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/jwt-token-lifecycle.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/index.md
-  - docs/spike-artifacts/spike-quiz-7-F5.jsonl
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - codebus-cli/src/main.rs
-  - codebus-core/src/config/quiz.rs
-  - docs/spike-artifacts/spike-quiz-7-F1.jsonl
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - docs/2026-05-15-v3-app-quiz-spike-plan.md
-  - docs/spike-artifacts/spike-quiz-7-F6.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E3.jsonl
-  - docs/spike-artifacts/spike-quiz-9-S1.jsonl
-  - codebus-core/src/verb/quiz.rs
-  - docs/v3-app-roadmap.md
-  - codebus-cli/src/commands/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run2.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC1.jsonl
-  - docs/spike-artifacts/spike-quiz-10-NC2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/user-store.md
-  - docs/spike-artifacts/spike-quiz-10-R1-run1.jsonl
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src/lib/quiz-parse.ts
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/log.md
-  - docs/spike-artifacts/spike-quiz-7-F2.jsonl
-  - docs/spike-artifacts/spike-quiz-8-E4.jsonl
-  - codebus-app/src/components/workspace/QuizAnswering.tsx
-  - docs/2026-05-15-v3-app-quiz-discussion.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/concepts/session-vs-token.md
-  - docs/spike-artifacts/spike-quiz-8-E5.jsonl
-  - codebus-cli/src/commands/quiz.rs
-  - docs/spike-artifacts/spike-quiz-9-S3.jsonl
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/log/events/sink.rs
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - docs/spike-artifacts/spike-quiz-runbook.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/verb/mod.rs
-  - docs/spike-artifacts/quiz-fixture-vault/CLAUDE.md
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - docs/spike-artifacts/spike-quiz-8-E2.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/raw/code/auth.py
-  - docs/spike-artifacts/spike-quiz-8-E1.jsonl
-  - docs/spike-artifacts/spike-quiz-7-F3.jsonl
-  - docs/spike-artifacts/quiz-fixture-vault/.claude/skills/codebus-quiz/SKILL.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/modules/auth-middleware.md
-  - docs/spike-artifacts/quiz-fixture-vault/wiki/processes/login-flow.md
-  - docs/spike-artifacts/spike-quiz-9-S2.jsonl
-  - codebus-core/src/vault/source_gitignore.rs
-  - docs/spike-artifacts/spike-quiz-10-R1-run3.jsonl
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/spike-artifacts/spike-quiz-7-F4.jsonl
-tests:
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-core/tests/vault_init.rs
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-core/tests/verb_library_surface.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/workspace/QuizAnswering.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/cli_routing.rs
--->
+- **THEN** the help output SHALL document a `validate` sub-action AND the top-level `codebus --help` SHALL still list exactly the eight subcommands with no ninth top-level subcommand
 
 ---
 ### Requirement: No-Arg Defaults to Init Dispatch
@@ -872,3 +780,37 @@ tests:
   - codebus-app/src-tauri/tests/keyring_ipc.rs
   - codebus-cli/tests/cli_routing.rs
 -->
+
+---
+### Requirement: Quiz Validate Sub-Action Behavior
+
+The `codebus quiz validate <quiz-md-file | ->` sub-action SHALL run the deterministic quiz validator (defined normatively in the `quiz` capability's `Quiz Output Validation and Repair` requirement) over a quiz markdown body and SHALL share the same underlying validator function the library final-verify uses. The body source SHALL be either a file path argument OR standard input when the argument is `-` or omitted. Human output SHALL report zero issues and exit with status zero when the body has no schema or wikilink-existence findings, SHALL list each finding (question identifier, rule, message) and exit with status one when findings exist, and SHALL exit with status two on a setup error (no locatable vault, or an unreadable file argument). With `--json`, the sub-action SHALL emit a machine-readable findings array (each entry carrying at least `rule`, `severity`, the question identifier, and a message) and SHALL apply the same exit-code contract.
+
+The stdin source exists so the codebus-quiz generate agent can self-validate the draft held in its context without first writing it to disk. This avoids a scratch-file lifecycle plus a write-then-emit double-write for a verb whose deliverable is a stdout body persisted by the caller; it is a process-simplicity choice and is NOT motivated by sandbox least-privilege (the `goal` and `fix` agents already run with un-gated vault Write).
+
+The codebus-quiz agent's generate spawn sandbox SHALL grant the agent a Bash tool hard-gated to invoking only `codebus quiz validate` (whitelist specifier of the form `Bash(codebus quiz validate *)`), installed via the same PreToolUse hook mechanism the `lint-feedback-loop` capability defines for the codebus-fix agent. The generate toolset SHALL NOT add Write or Edit (the agent has no scratch file to write — it pipes its in-context draft via stdin). The always-blocked tool set (WebFetch, WebSearch, Task, MCP, and the other globally forbidden tools) SHALL remain blocked.
+
+#### Scenario: Clean file exits zero
+
+- **WHEN** `codebus quiz validate <file>` runs over a structurally valid quiz whose citations all resolve
+- **THEN** human output SHALL report zero issues AND the process SHALL exit with status zero
+
+#### Scenario: Findings exit one with details
+
+- **WHEN** `codebus quiz validate <file>` runs over a quiz with a malformed question or a broken `[[slug]]` citation
+- **THEN** the output SHALL list each finding with its question identifier and rule AND the process SHALL exit with status one
+
+#### Scenario: JSON output is machine-readable
+
+- **WHEN** `codebus quiz validate <file> --json` runs over a quiz with findings
+- **THEN** the output SHALL be a JSON findings array where each entry carries at least `rule`, `severity`, the question identifier, and a message AND the process SHALL exit with status one
+
+#### Scenario: Body is read from stdin when the argument is `-`
+
+- **WHEN** a quiz markdown body is piped to `codebus quiz validate -`
+- **THEN** the validator SHALL run over the piped body AND SHALL apply the same finding output and exit-code contract as the file-path form
+
+#### Scenario: Agent Bash is hard-gated to quiz validate only
+
+- **WHEN** the codebus-quiz generate spawn agent attempts a Bash command other than `codebus quiz validate ...`
+- **THEN** the PreToolUse hook SHALL block it AND only `codebus quiz validate ...` invocations SHALL be permitted
