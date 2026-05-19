@@ -109,6 +109,93 @@ pub struct QuizPlanReport {
 pub struct QuizGenerateOptions {
     pub pages: Vec<String>,
     pub question_count: u8,
+    /// quiz-content-verify (design D5): run the optional independent
+    /// content verify + caller-orchestrated repair loop after the
+    /// deterministic final-verify. Caller-injected from `quiz.content_verify`
+    /// config (the library never reads config itself).
+    pub content_verify: bool,
+    /// quiz-content-verify (design D6): the user's originating topic for
+    /// the off-topic content check. `Some` for the Goal flow, `None` for
+    /// the Page flow (off-topic check skipped, other four still run).
+    pub topic: Option<String>,
+}
+
+/// Independent content-verify outcome (design D2/D4) persisted as the
+/// `content_review` caller frontmatter field. `None` on `QuizReport`
+/// means content verification was not run (config off) — readers MUST
+/// NOT treat absence as `Ok`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuizContentReview {
+    Ok,
+    /// Question numbers still flagged after the repair cap (or `[]` when
+    /// the verify spawn failed / was unparseable — conservatively flagged).
+    Flagged(Vec<u32>),
+}
+
+impl QuizContentReview {
+    /// Caller-frontmatter scalar: `ok` or `flagged [1, 3]`.
+    pub fn frontmatter_value(&self) -> String {
+        match self {
+            QuizContentReview::Ok => "ok".to_string(),
+            QuizContentReview::Flagged(qs) => {
+                let list = qs
+                    .iter()
+                    .map(|q| q.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("flagged [{list}]")
+            }
+        }
+    }
+}
+
+/// One per-question content defect parsed from a verify spawn line
+/// `Q<n> | <defect-type> | <suggestion>`.
+struct ContentDefect {
+    qnum: u32,
+    kind: String,
+    suggestion: String,
+}
+
+/// Parse a verify spawn's accumulated text. Returns `Some(vec![])` when
+/// the spawn reported `CONTENT_OK`, `Some(defects)` when it emitted
+/// `Q<n> | type | suggestion` lines, and `None` when neither is present
+/// (unparseable → caller treats as a conservative non-fatal flag).
+fn parse_content_defects(text: &str) -> Option<Vec<ContentDefect>> {
+    let mut defects = Vec::new();
+    let mut saw_ok = false;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line == "CONTENT_OK" {
+            saw_ok = true;
+            continue;
+        }
+        let Some(rest) = line.strip_prefix('Q') else {
+            continue;
+        };
+        let parts: Vec<&str> = rest.splitn(3, '|').map(|s| s.trim()).collect();
+        if parts.len() != 3 {
+            continue;
+        }
+        let Ok(qnum) = parts[0].parse::<u32>() else {
+            continue;
+        };
+        if parts[1].is_empty() {
+            continue;
+        }
+        defects.push(ContentDefect {
+            qnum,
+            kind: parts[1].to_string(),
+            suggestion: parts[2].to_string(),
+        });
+    }
+    if !defects.is_empty() {
+        Some(defects)
+    } else if saw_ok {
+        Some(Vec::new())
+    } else {
+        None
+    }
 }
 
 /// Successful generate-spawn summary. `quiz_md` is the fence-stripped
@@ -133,6 +220,10 @@ pub struct QuizReport {
     /// this as the `validation:` frontmatter field; an absent field is
     /// "not validated" and MUST NOT be read as `Ok`.
     pub validation: QuizValidation,
+    /// Independent content-verify outcome (design D2/D4). `None` when
+    /// `content_verify` was off (not run) — readers MUST NOT treat
+    /// `None` as `Ok`. `Some` is persisted as `content_review:`.
+    pub content_review: Option<QuizContentReview>,
 }
 
 /// Final-verify status carried on [`QuizReport`] and persisted as the
@@ -483,10 +574,10 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         QUIZ_GENERATE_TOOLSET,
         Some(QUIZ_BASH_WHITELIST),
         &resolved,
-        env,
+        env.clone(),
         cancel.clone(),
     )?;
-    let quiz_md =
+    let mut quiz_md =
         strip_preamble_before_first_question(&strip_code_fence(&gen_text));
 
     // Deterministic final verify (design D1/D3/D4). Run the same
@@ -515,6 +606,108 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
             eprintln!("  [{}] {}: {}", f.rule_id, f.path, f.message);
         }
         QuizValidation::Failed
+    };
+
+    // quiz-content-verify (design D1/D3/D4/D6): when enabled, run an
+    // independent read-only verify spawn judging content against the
+    // five-item defect contract, then a caller-orchestrated bounded
+    // repair loop (verify → repair generate spawn fed the defects →
+    // re-verify), hard-capped at 3 iterations with emit-best-on-cap.
+    // Residual / spawn-failure is best-effort: `content_review: flagged`,
+    // a non-fatal warning, no question dropped, exit unchanged.
+    let content_review: Option<QuizContentReview> = if options.content_verify {
+        const VERIFY_CAP: u8 = 3;
+        let topic_arg = options.topic.clone().unwrap_or_default();
+        let mut review = QuizContentReview::Ok;
+        for _ in 0..VERIFY_CAP {
+            if is_cancelled(&cancel) {
+                break;
+            }
+            let verify_prompt = format!(
+                "/codebus-quiz verify: topic={topic_arg}\n\nQUIZ:\n{quiz_md}"
+            );
+            let vtext = match run_spawn(
+                &mut fan_out,
+                verify_prompt,
+                paths.root.clone(),
+                QUIZ_TOOLSET,
+                None,
+                &resolved,
+                env.clone(),
+                cancel.clone(),
+            ) {
+                Ok((t, _)) => t,
+                Err(e) => {
+                    eprintln!(
+                        "warning: quiz content-verify spawn failed (non-fatal; content_review: flagged): {e}"
+                    );
+                    review = QuizContentReview::Flagged(Vec::new());
+                    break;
+                }
+            };
+            match parse_content_defects(&vtext) {
+                None => {
+                    eprintln!(
+                        "warning: quiz content-verify output unparseable (non-fatal; content_review: flagged)"
+                    );
+                    review = QuizContentReview::Flagged(Vec::new());
+                    break;
+                }
+                Some(d) if d.is_empty() => {
+                    review = QuizContentReview::Ok;
+                    break;
+                }
+                Some(d) => {
+                    review = QuizContentReview::Flagged(
+                        d.iter().map(|x| x.qnum).collect(),
+                    );
+                    let defect_lines = d
+                        .iter()
+                        .map(|x| format!("Q{} | {} | {}", x.qnum, x.kind, x.suggestion))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let repair_prompt = format!(
+                        "/codebus-quiz generate: pages=[{}] count={}\n\nThe previous quiz had content defects. Revise ONLY the flagged questions, keep all other questions verbatim, and keep exactly {} questions.\n\nPREVIOUS QUIZ:\n{}\n\nCONTENT DEFECTS:\n{}",
+                        options.pages.join(","),
+                        options.question_count,
+                        options.question_count,
+                        quiz_md,
+                        defect_lines
+                    );
+                    match run_spawn(
+                        &mut fan_out,
+                        repair_prompt,
+                        paths.root.clone(),
+                        QUIZ_GENERATE_TOOLSET,
+                        Some(QUIZ_BASH_WHITELIST),
+                        &resolved,
+                        env.clone(),
+                        cancel.clone(),
+                    ) {
+                        Ok((rtext, _)) => {
+                            quiz_md = strip_preamble_before_first_question(
+                                &strip_code_fence(&rtext),
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "warning: quiz content-repair spawn failed (non-fatal; keeping best body, content_review: flagged): {e}"
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if let QuizContentReview::Flagged(ref qs) = review {
+            eprintln!(
+                "warning: quiz content-verify flagged {} question(s) after repair cap (non-fatal; persisted content_review: flagged)",
+                qs.len()
+            );
+        }
+        Some(review)
+    } else {
+        None
     };
 
     let outcome = if is_cancelled(&cancel) {
@@ -554,6 +747,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         agent_exit_code: gen_report.exit.code(),
         events_log,
         validation,
+        content_review,
     })
 }
 
@@ -667,6 +861,12 @@ pub fn persist_quiz(
     // Deterministic final-verify outcome (design D4). Absent field =
     // "not validated"; readers MUST NOT treat absent as `ok`.
     fm.push_str(&format!("validation: {}\n", report.validation.as_str()));
+    // Independent content-verify outcome (design D2/D4). Written only
+    // when content verification ran; absent = not verified, readers
+    // MUST NOT treat absent as `ok`.
+    if let Some(cr) = &report.content_review {
+        fm.push_str(&format!("content_review: {}\n", cr.frontmatter_value()));
+    }
     fm.push_str("---\n\n");
     fm.push_str(report.quiz_md.trim());
     fm.push('\n');
@@ -688,6 +888,8 @@ mod tests {
         let _g = QuizGenerateOptions {
             pages: vec!["wiki/modules/auth-middleware.md".into()],
             question_count: 5,
+            content_verify: false,
+            topic: None,
         };
         assert!(matches!(
             QuizPlanOutcome::Scope(vec!["wiki/a.md".into()]),
@@ -941,6 +1143,8 @@ mod tests {
             QuizGenerateOptions {
                 pages: vec!["wiki/modules/auth-middleware.md".into()],
                 question_count: 5,
+                content_verify: false,
+                topic: None,
             },
             |e| events.borrow_mut().push(e),
             None,
@@ -977,6 +1181,7 @@ mod tests {
             agent_exit_code: Some(0),
             events_log: Some("/v/.codebus/log/events-x.jsonl".into()),
             validation: QuizValidation::Ok,
+            content_review: None,
         }
     }
 

@@ -41,12 +41,18 @@ pub const QUIZ_LENGTH_MAX: u8 = 10;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuizConfig {
     pub default_length: u8,
+    /// quiz-content-verify (design D5): gate for the optional model-based
+    /// content verification + repair stage. Default `false` so existing
+    /// users do not silently pay extra verify/repair spawns. Shared
+    /// `quiz.*` namespace (CLI reads it; never `app.*`).
+    pub content_verify: bool,
 }
 
 impl Default for QuizConfig {
     fn default() -> Self {
         Self {
             default_length: DEFAULT_QUIZ_LENGTH,
+            content_verify: false,
         }
     }
 }
@@ -64,6 +70,10 @@ struct QuizSection {
     /// warn-and-defaults (same contract as an unknown `pii.on_hit` value).
     #[serde(default, deserialize_with = "deserialize_default_length")]
     default_length: Option<u8>,
+    /// quiz-content-verify gate. Absent → false (forward-compat, same
+    /// tolerance posture as `default_length`'s absence → default).
+    #[serde(default)]
+    content_verify: bool,
 }
 
 fn deserialize_default_length<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
@@ -102,6 +112,7 @@ pub fn load_quiz_config(path: &Path) -> Result<QuizConfig, super::ConfigLoadErro
         if let Some(len) = quiz.default_length {
             cfg.default_length = len;
         }
+        cfg.content_verify = quiz.content_verify;
     }
     Ok(cfg)
 }
@@ -199,6 +210,42 @@ mod tests {
         );
         let cfg = load_quiz_config(&p).unwrap();
         assert_eq!(cfg.default_length, 7);
+    }
+
+    // --- quiz-content-verify task 1.1 (design D5): `quiz.content_verify`
+    // bool, default false, forward-compat tolerant. ---
+
+    #[test]
+    fn content_verify_defaults_false_when_absent() {
+        let tmp = TempDir::new().unwrap();
+        // file missing
+        let c1 = load_quiz_config(&tmp.path().join("none.yaml")).unwrap();
+        assert!(!c1.content_verify);
+        // quiz section present, key absent
+        let p = write_yaml(tmp.path(), "quiz:\n  default_length: 7\n");
+        let c2 = load_quiz_config(&p).unwrap();
+        assert!(!c2.content_verify);
+    }
+
+    #[test]
+    fn content_verify_parses_true_and_false() {
+        let tmp = TempDir::new().unwrap();
+        let pt = write_yaml(tmp.path(), "quiz:\n  content_verify: true\n");
+        assert!(load_quiz_config(&pt).unwrap().content_verify);
+        let pf = write_yaml(tmp.path(), "quiz:\n  content_verify: false\n");
+        assert!(!load_quiz_config(&pf).unwrap().content_verify);
+    }
+
+    #[test]
+    fn content_verify_coexists_with_default_length() {
+        let tmp = TempDir::new().unwrap();
+        let p = write_yaml(
+            tmp.path(),
+            "quiz:\n  default_length: 9\n  content_verify: true\n",
+        );
+        let cfg = load_quiz_config(&p).unwrap();
+        assert_eq!(cfg.default_length, 9);
+        assert!(cfg.content_verify);
     }
 
     /// Invalid YAML returns Err so caller can warn-and-default.

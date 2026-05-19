@@ -48,6 +48,8 @@ fn quiz_option_and_report_types_resolve() {
     let gen_opts = QuizGenerateOptions {
         pages: vec!["wiki/modules/auth-middleware.md".into()],
         question_count: 5,
+        content_verify: false,
+        topic: None,
     };
     assert_eq!(gen_opts.question_count, 5);
     assert!(matches!(

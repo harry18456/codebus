@@ -352,9 +352,9 @@ Read scope: `wiki/` (relative to cwd) — wiki pages ONLY. You MUST NOT read `ra
 
 If the user prompt asks you to look at source code or `raw/`, refuse and redirect to the corresponding `wiki/` page — do NOT issue any tool call whose path resolves under `raw/`.
 
-## Two modes
+## Three modes
 
-The user prompt begins with one of two mode keywords. Pick the mode by the prefix; treat the rest of the prompt as the mode payload.
+The user prompt begins with one of three mode keywords. Pick the mode by the prefix; treat the rest of the prompt as the mode payload.
 
 ### Mode A — `plan: <topic>`
 
@@ -416,6 +416,18 @@ Before you emit the final body, verify it deterministically:
 2. If it reports findings, fix exactly the questions it names, then run it again.
 3. Repeat this validate→fix→re-validate loop **at most 3** times. When that cap is reached, emit your best current body rather than looping further — do not keep iterating past the cap.
 4. `codebus quiz validate` is the sole authority for structural and citation correctness. Act on its findings; do NOT reproduce, restate, or argue its rules here — the rules live in the validator, not in this skill.
+
+### Mode C — `verify: topic=<topic-or-empty>`
+
+Given the planned `wiki/` pages + a generated quiz body, read each planned page and judge **each question** against EXACTLY these five **content** defect types (structural/citation correctness is the separate deterministic `codebus quiz validate` check — NOT your job; do not invoke it):
+
+1. **answer-wrong** — marked `## Answer:` option not supported as correct by the planned pages.
+2. **out-of-scope** — stem/option/explanation asserts something the planned pages do not state.
+3. **not-exactly-one-correct** — ≥2 options defensibly correct, or the marked one is wrong.
+4. **degenerate-distractor** — a non-discriminating distractor (blank, "none/all of the above" cop-out, absurd).
+5. **off-topic** — not about the requested topic; judge this **only when** a non-empty `topic=` is supplied (Page flow `topic=` empty → skip #5, still judge the other four).
+
+For EACH flagged question output one line `Q<question number> | <defect-type> | <concrete correction suggestion>`; if none, emit exactly `CONTENT_OK`. Do not restate these rules or re-emit the quiz body.
 
 ## Caller-owned frontmatter
 
@@ -997,6 +1009,55 @@ mod tests {
                 && !body.contains("quiz-broken-wikilink"),
             "the SKILL must not duplicate the validator's rule definitions"
         );
+    }
+
+    /// quiz-content-verify task 2.1 (design D2/D7; spec skill-bundles /
+    /// Quiz Skill Bundle Content): the SKILL defines a third `verify:`
+    /// mode with the fixed five-item content defect contract, the
+    /// per-question output format, the off-topic-only-when-topic rule,
+    /// and keeps content judgement separate from the deterministic
+    /// `codebus quiz validate` structural check (no rule restatement).
+    #[test]
+    fn quiz_skill_defines_verify_mode_five_defect_contract() {
+        let body = stub_content("quiz");
+
+        assert!(
+            body.contains("verify:"),
+            "SKILL must define a third `verify:` mode"
+        );
+        for defect in [
+            "answer-wrong",
+            "out-of-scope",
+            "not-exactly-one-correct",
+            "degenerate-distractor",
+            "off-topic",
+        ] {
+            assert!(
+                body.contains(defect),
+                "verify mode must name the `{defect}` defect"
+            );
+        }
+        // off-topic is conditional on a supplied topic
+        assert!(
+            body.contains("only when") || body.contains("only if"),
+            "verify mode must state off-topic is judged only when a topic is supplied"
+        );
+        // per-question output: number + defect type + correction suggestion
+        let low = body.to_lowercase();
+        assert!(
+            low.contains("question number")
+                && low.contains("defect")
+                && (low.contains("suggestion") || low.contains("correction")),
+            "verify mode must require per-question number + defect type + correction suggestion"
+        );
+        // content judgement stays separate from the deterministic validator
+        assert!(
+            body.contains("codebus quiz validate"),
+            "verify mode must keep the deterministic structural check distinct"
+        );
+        // existing modes / loop unchanged (regression guard)
+        assert!(body.contains("`plan:") && body.contains("`generate:"));
+        assert!(body.contains("self-validate") || body.contains("自驗") || body.contains("validate -"));
     }
 
     /// pins a spec/D4 clause so a future edit cannot silently drop it.

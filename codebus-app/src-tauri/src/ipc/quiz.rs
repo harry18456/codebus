@@ -221,6 +221,21 @@ where
 
 // ---- spawn_quiz_generate --------------------------------------------------
 
+/// Resolve the shared `quiz.content_verify` flag the GUI threads into
+/// generation (design D8). Split into a path-parameterised inner fn so
+/// the resolution logic (default-false, error-conservative-false) is
+/// unit-testable without environment juggling — the manual GUI run is
+/// not the only thing exercising this path.
+fn resolve_content_verify() -> bool {
+    resolve_content_verify_at(codebus_core::config::default_config_path())
+}
+
+fn resolve_content_verify_at(path: Option<std::path::PathBuf>) -> bool {
+    path.and_then(|p| codebus_core::config::load_quiz_config(&p).ok())
+        .map(|c| c.content_verify)
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub fn spawn_quiz_generate(
     app: AppHandle,
@@ -233,12 +248,17 @@ pub fn spawn_quiz_generate(
     let active_runs = runtime.active_runs.clone();
     let app_stream = app.clone();
     let app_terminal = app.clone();
+    // quiz-content-verify D8: resolve the shared `quiz.content_verify`
+    // using the same core loader the CLI uses; a load error falls back
+    // to false (do not silently enable extra spawns).
+    let content_verify = resolve_content_verify();
     spawn_quiz_generate_with_runner(
         active_runs,
         PathBuf::from(vault_path),
         pages,
         question_count,
         trigger,
+        content_verify,
         move |payload| {
             let _ = app_stream.emit("quiz-stream", payload);
         },
@@ -258,6 +278,7 @@ pub(crate) fn spawn_quiz_generate_with_runner<E, T, F>(
     pages: Vec<String>,
     question_count: u8,
     trigger: QuizTriggerArg,
+    content_verify: bool,
     emit: E,
     emit_terminal: T,
     runner: F,
@@ -294,9 +315,19 @@ where
                 });
             });
 
+            // quiz-content-verify D8: thread the resolved config flag
+            // and the trigger-derived originating topic. AiPlanned =
+            // Goal flow (topic → off-topic check runs); WikiPreview =
+            // Page flow (no topic → off-topic skipped, other 4 run).
+            let cv_topic = match &trigger {
+                QuizTriggerArg::AiPlanned { topic } => Some(topic.clone()),
+                QuizTriggerArg::WikiPreview { .. } => None,
+            };
             let options = QuizGenerateOptions {
                 pages,
                 question_count,
+                content_verify,
+                topic: cv_topic,
             };
             let result: std::thread::Result<Result<QuizReport, VerbError>> =
                 std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -627,6 +658,7 @@ mod tests {
             QuizTriggerArg::AiPlanned {
                 topic: "auth".into(),
             },
+            false,
             emit,
             emit_t,
             |_repo, _opts, _on_event, _cancel| {
@@ -639,6 +671,7 @@ mod tests {
                     agent_exit_code: Some(0),
                     events_log: Some("/v/.codebus/log/events-x.jsonl".into()),
                     validation: codebus_core::verb::quiz::QuizValidation::Ok,
+                    content_review: None,
                 })
             },
         )
@@ -666,6 +699,122 @@ mod tests {
             }
             other => panic!("expected Succeeded, got {other:?}"),
         }
+    }
+
+    // --- quiz-content-verify task 5.1 (design D8; spec app-workspace /
+    // Quiz Content Verify GUI Wiring): the GUI must thread the resolved
+    // `content_verify` flag and the trigger-derived topic into the
+    // `QuizGenerateOptions` it passes to `run_quiz_generate`.
+
+    fn capture_opts(
+        content_verify: bool,
+        trigger: QuizTriggerArg,
+    ) -> codebus_core::verb::quiz::QuizGenerateOptions {
+        use std::sync::Mutex;
+        let active = Arc::new(ActiveRuns::default());
+        let (_e, emit) = collect::<QuizStreamPayload>();
+        let (terms, emit_t) = collect::<QuizGenerateTerminalPayload>();
+        let captured: Arc<Mutex<Option<codebus_core::verb::quiz::QuizGenerateOptions>>> =
+            Arc::new(Mutex::new(None));
+        let cap = captured.clone();
+        spawn_quiz_generate_with_runner(
+            active,
+            PathBuf::from("/tmp/v"),
+            vec!["wiki/a.md".into()],
+            5,
+            trigger,
+            content_verify,
+            emit,
+            emit_t,
+            move |_repo, opts, _on_event, _cancel| {
+                *cap.lock().unwrap() = Some(opts.clone());
+                Ok(QuizReport {
+                    quiz_md: "## Q1. x\n## Answer: A".into(),
+                    planned_pages: vec!["wiki/a.md".into()],
+                    accumulated_tokens: Default::default(),
+                    started_at: "t0".into(),
+                    finished_at: "t1".into(),
+                    agent_exit_code: Some(0),
+                    events_log: None,
+                    validation: codebus_core::verb::quiz::QuizValidation::Ok,
+                    content_review: None,
+                })
+            },
+        )
+        .expect("spawn");
+        for _ in 0..200 {
+            if !terms.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        captured.lock().unwrap().clone().expect("runner ran")
+    }
+
+    #[test]
+    fn gui_threads_content_verify_and_goal_topic() {
+        let o = capture_opts(
+            true,
+            QuizTriggerArg::AiPlanned {
+                topic: "jwt auth".into(),
+            },
+        );
+        assert!(o.content_verify, "content_verify=true must be threaded");
+        assert_eq!(
+            o.topic.as_deref(),
+            Some("jwt auth"),
+            "AiPlanned trigger must supply the topic (Goal flow)"
+        );
+    }
+
+    #[test]
+    fn gui_page_flow_supplies_no_topic() {
+        let o = capture_opts(
+            true,
+            QuizTriggerArg::WikiPreview {
+                target_page: "wiki/a.md".into(),
+            },
+        );
+        assert!(o.content_verify);
+        assert_eq!(
+            o.topic, None,
+            "WikiPreview (Page flow) must supply no topic"
+        );
+    }
+
+    // quiz-content-verify task 5.2 (design D8): the real config
+    // resolution path (`#[tauri::command] spawn_quiz_generate` →
+    // `resolve_content_verify`) — covered here so manual GUI is not the
+    // only thing exercising it.
+    #[test]
+    fn resolve_content_verify_reads_shared_config() {
+        let d = tempfile::TempDir::new().unwrap();
+        // missing file → false
+        assert!(!resolve_content_verify_at(Some(d.path().join("none.yaml"))));
+        // None path → false
+        assert!(!resolve_content_verify_at(None));
+        // explicit true / false
+        let pt = d.path().join("t.yaml");
+        std::fs::write(&pt, "quiz:\n  content_verify: true\n").unwrap();
+        assert!(resolve_content_verify_at(Some(pt)));
+        let pf = d.path().join("f.yaml");
+        std::fs::write(&pf, "quiz:\n  content_verify: false\n").unwrap();
+        assert!(!resolve_content_verify_at(Some(pf)));
+        // invalid YAML → conservative false (do not enable on error)
+        let pe = d.path().join("e.yaml");
+        std::fs::write(&pe, "quiz:\n  : :: bad\n").unwrap();
+        assert!(!resolve_content_verify_at(Some(pe)));
+    }
+
+    #[test]
+    fn gui_content_verify_off_threads_false() {
+        let o = capture_opts(
+            false,
+            QuizTriggerArg::AiPlanned {
+                topic: "x".into(),
+            },
+        );
+        assert!(!o.content_verify);
     }
 
     #[test]

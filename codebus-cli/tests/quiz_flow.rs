@@ -117,6 +117,102 @@ fn quiz_goal_match_writes_file_with_caller_frontmatter() {
     assert!(body.contains("## Answer: B"));
 }
 
+// --- quiz-content-verify task 3.1: caller-orchestrated verify→repair
+// loop (design D1/D3/D4/D6; spec quiz / Quiz Content Verification and
+// Repair). content_verify is gated by the shared config key.
+
+/// Like `run_quiz` but seeds `<home>/.codebus/config.yaml` so the CLI
+/// resolves `quiz.content_verify` from config.
+fn run_quiz_cfg(
+    repo: &Path,
+    topic: &str,
+    behavior: &str,
+    cfg_body: &str,
+) -> Output {
+    let log = repo.join("mock-claude.log");
+    let _ = fs::remove_file(&log);
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
+    let cb = home.path().join(".codebus");
+    fs::create_dir_all(&cb).unwrap();
+    fs::write(cb.join("config.yaml"), cfg_body).unwrap();
+    Command::new(BIN)
+        .args(["quiz", topic])
+        .current_dir(repo)
+        .env("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE)
+        .env("CODEBUS_HOME", home.path())
+        .env("CODEBUS_MOCK_BEHAVIOR", behavior)
+        .env("CODEBUS_MOCK_LOG", &log)
+        .output()
+        .expect("run codebus quiz (cfg)")
+}
+
+#[test]
+fn content_verify_off_omits_content_review() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    // default config (no quiz.content_verify) → stage skipped entirely.
+    let (out, _l) = run_quiz(tmp.path(), "auth", "quiz-clean-body", None);
+    assert!(out.status.success());
+    let body = fs::read_to_string(find_quiz_file(tmp.path()).unwrap()).unwrap();
+    assert!(
+        frontmatter_value(&body, "content_review").is_none(),
+        "content_verify off MUST NOT write content_review:\n{body}"
+    );
+}
+
+#[test]
+fn content_verify_clean_marks_ok() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    let out = run_quiz_cfg(
+        tmp.path(),
+        "auth",
+        "quiz-verify-clean",
+        "quiz:\n  content_verify: true\n",
+    );
+    assert!(
+        out.status.success(),
+        "exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let body = fs::read_to_string(find_quiz_file(tmp.path()).unwrap()).unwrap();
+    assert_eq!(
+        frontmatter_value(&body, "content_review").as_deref(),
+        Some("ok"),
+        "clean verify must persist content_review: ok:\n{body}"
+    );
+}
+
+#[test]
+fn content_verify_residual_flagged_best_effort() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    let out = run_quiz_cfg(
+        tmp.path(),
+        "auth",
+        "quiz-verify-flag",
+        "quiz:\n  content_verify: true\n",
+    );
+    // best-effort: residual content defects do NOT change exit code.
+    assert!(out.status.success(), "best-effort exit 0");
+    let body = fs::read_to_string(find_quiz_file(tmp.path()).unwrap()).unwrap();
+    let cr = frontmatter_value(&body, "content_review").unwrap_or_default();
+    assert!(
+        cr.starts_with("flagged"),
+        "residual must be content_review: flagged (+Q1):\n{body}"
+    );
+    assert!(cr.contains('1'), "flagged question number 1 must be listed: {cr}");
+    assert!(body.contains("## Q1."), "questions must not be dropped");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("content"),
+        "a non-fatal content warning must be surfaced; stderr:\n{stderr}"
+    );
+}
+
 // --- quiz-validate-repair task 4.1: run_quiz_generate final-verify ---
 // (design D1/D3/D4; spec quiz / Quiz Output Validation and Repair).
 

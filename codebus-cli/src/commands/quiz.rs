@@ -91,6 +91,23 @@ fn resolve_count(flag: Option<u8>) -> u8 {
     }
 }
 
+/// Resolve `quiz.content_verify` from the shared `quiz.*` config
+/// (default `false`; the CLI never reads the app-only `app.*`
+/// namespace). A config load error warns and falls back to `false`
+/// (conservative: do not silently enable extra spawns).
+fn resolve_content_verify() -> bool {
+    match default_config_path() {
+        Some(p) => match load_quiz_config(&p) {
+            Ok(cfg) => cfg.content_verify,
+            Err(e) => {
+                eprintln!("warning: quiz config invalid ({e}); content_verify=false");
+                false
+            }
+        },
+        None => false,
+    }
+}
+
 // slug + frontmatter persistence moved to codebus_core::verb::quiz
 // (`quiz_slug` / `persist_quiz` / `QuizTrigger`) so the CLI and GUI
 // share one source of truth (v3-app-quiz task 5.5 / design D4/D7).
@@ -168,6 +185,10 @@ pub async fn run(
         QuizGenerateOptions {
             pages,
             question_count,
+            content_verify: resolve_content_verify(),
+            // CLI is always the Goal flow → supply the originating topic
+            // so the off-topic content check (design D6) can run.
+            topic: Some(topic.clone()),
         },
         render_stream,
         None,

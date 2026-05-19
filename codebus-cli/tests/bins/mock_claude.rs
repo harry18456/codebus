@@ -195,7 +195,7 @@ fn main() -> ExitCode {
                     );
                     emit_quiz_result();
                 }
-                QuizMode::Generate | QuizMode::Unknown => {
+                QuizMode::Generate | QuizMode::Verify | QuizMode::Unknown => {
                     emit_quiz_init(&sid);
                     emit_assistant_text(MOCK_QUIZ_BODY);
                     emit_quiz_result();
@@ -228,7 +228,7 @@ fn main() -> ExitCode {
                     );
                     emit_quiz_result();
                 }
-                QuizMode::Generate | QuizMode::Unknown => {
+                QuizMode::Generate | QuizMode::Verify | QuizMode::Unknown => {
                     emit_quiz_init(&sid);
                     // Use literal `\n` (JSON escape), not a raw newline —
                     // a raw newline inside the JSON string is invalid and
@@ -254,7 +254,7 @@ fn main() -> ExitCode {
                     );
                     emit_quiz_result();
                 }
-                QuizMode::Generate | QuizMode::Unknown => {
+                QuizMode::Generate | QuizMode::Verify | QuizMode::Unknown => {
                     emit_quiz_init(&sid);
                     emit_assistant_text(MOCK_QUIZ_CLEAN);
                     emit_quiz_result();
@@ -278,9 +278,68 @@ fn main() -> ExitCode {
                     );
                     emit_quiz_result();
                 }
-                QuizMode::Generate | QuizMode::Unknown => {
+                QuizMode::Generate | QuizMode::Verify | QuizMode::Unknown => {
                     emit_quiz_init(&sid);
                     emit_assistant_text(MOCK_QUIZ_BAD);
+                    emit_quiz_result();
+                }
+            }
+            ExitCode::SUCCESS
+        }
+
+        // quiz-content-verify: plan→scope, generate→clean body, and the
+        // independent verify spawn always reports CONTENT_OK → the
+        // caller verify→repair loop exits immediately with
+        // `content_review: ok`.
+        "quiz-verify-clean" => {
+            let sid = session_id();
+            match quiz_mode(&args) {
+                QuizMode::Plan => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(
+                        "[CODEBUS_QUIZ_SCOPE] wiki/concepts/jwt-token-lifecycle.md",
+                    );
+                    emit_quiz_result();
+                }
+                QuizMode::Verify => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text("CONTENT_OK");
+                    emit_quiz_result();
+                }
+                QuizMode::Generate | QuizMode::Unknown => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(MOCK_QUIZ_CLEAN);
+                    emit_quiz_result();
+                }
+            }
+            ExitCode::SUCCESS
+        }
+
+        // quiz-content-verify: the verify spawn ALWAYS flags Q1, so the
+        // caller loop repairs (generate again) then re-verifies and is
+        // flagged again, exhausting the cap → best-effort persist with
+        // `content_review: flagged` listing Q1 + a non-fatal warning,
+        // questions not dropped, exit 0.
+        "quiz-verify-flag" => {
+            let sid = session_id();
+            match quiz_mode(&args) {
+                QuizMode::Plan => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(
+                        "[CODEBUS_QUIZ_SCOPE] wiki/concepts/jwt-token-lifecycle.md",
+                    );
+                    emit_quiz_result();
+                }
+                QuizMode::Verify => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(
+                        "Q1 | answer-wrong | the marked option is not supported by the planned pages; pick the supported one",
+                    );
+                    emit_quiz_result();
+                }
+                QuizMode::Generate | QuizMode::Unknown => {
+                    emit_quiz_init(&sid);
+                    emit_assistant_text(MOCK_QUIZ_CLEAN);
                     emit_quiz_result();
                 }
             }
@@ -312,6 +371,7 @@ const MOCK_QUIZ_BODY: &str = "## Q1. What does the quiz integration mock validat
 enum QuizMode {
     Plan,
     Generate,
+    Verify,
     Unknown,
 }
 
@@ -321,6 +381,8 @@ fn quiz_mode(args: &[String]) -> QuizMode {
     let joined = args.join(" ");
     if joined.contains("/codebus-quiz plan:") {
         QuizMode::Plan
+    } else if joined.contains("/codebus-quiz verify:") {
+        QuizMode::Verify
     } else if joined.contains("/codebus-quiz generate:") {
         QuizMode::Generate
     } else {
