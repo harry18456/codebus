@@ -23,7 +23,45 @@ use ignore::WalkBuilder;
 use crate::pii::PiiScanner;
 use crate::pii::provider::{OnHit, PiiSeverity};
 
-const ALWAYS_SKIP_AT_ROOT: &[&str] = &[".codebus", ".git", ".env"];
+/// Top-level entries that SHALL be skipped only when they appear at the
+/// repository root (relative path's first segment). `.codebus/` and
+/// `.env` are tied to the repo's own conventions; the same names at a
+/// deeper depth are user content (e.g. `docs/.codebus/notes.md`) and
+/// SHALL be mirrored.
+const ALWAYS_SKIP_AT_ROOT: &[&str] = &[".codebus", ".env"];
+
+/// Directory names that SHALL be skipped wherever they appear in the
+/// path — at the repo root, in a submodule, or inside an embedded
+/// repository. Without this rule, a nested `.git/` introduced by a
+/// submodule would be mirrored along with its config (potentially
+/// containing token-bearing remote URLs) and its packed objects (which
+/// the regex PII scanner cannot redact since they are binary). The
+/// `vault` spec's `Raw Mirror with PII Scanner` requirement formalises
+/// this contract.
+const SKIP_DIR_NAME_ANYWHERE: &[&str] = &[".git"];
+
+/// True iff `rel` (a path relative to the source repo root) falls
+/// under one of the always-skipped locations. Shared by both
+/// [`sync_with_scanner_into`] (mirror writer) and
+/// [`walk_source_for_signal`] (drift detector) so the two filters
+/// cannot drift apart — a recurrence of the `v3-bug-fixes` init→goal
+/// re-sync regression.
+fn is_excluded_path(rel: &std::path::Path) -> bool {
+    let first_seg = rel.iter().next().and_then(|s| s.to_str()).unwrap_or("");
+    if ALWAYS_SKIP_AT_ROOT.contains(&first_seg) {
+        return true;
+    }
+    for seg in rel.iter() {
+        let s = match seg.to_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        if SKIP_DIR_NAME_ANYWHERE.contains(&s) {
+            return true;
+        }
+    }
+    false
+}
 
 /// Multi-segment paths (relative to repo root) the source-signal walk
 /// MUST skip regardless of `.gitignore` state. These are codebus-managed
@@ -93,8 +131,7 @@ pub fn walk_source_for_signal(repo_root: &Path) -> io::Result<(usize, u64)> {
             Ok(r) => r,
             Err(_) => continue,
         };
-        let first_seg = rel.iter().next().and_then(|s| s.to_str()).unwrap_or("");
-        if ALWAYS_SKIP_AT_ROOT.contains(&first_seg) {
+        if is_excluded_path(rel) {
             continue;
         }
         if skip_codebus_managed(rel) {
@@ -181,8 +218,7 @@ pub fn sync_with_scanner_into<W: io::Write>(
             Err(_) => continue,
         };
 
-        let first_seg = rel.iter().next().and_then(|s| s.to_str()).unwrap_or("");
-        if ALWAYS_SKIP_AT_ROOT.contains(&first_seg) {
+        if is_excluded_path(&rel) {
             continue;
         }
         if skip_codebus_managed(&rel) {
@@ -731,5 +767,83 @@ mod tests {
             "Warn under Warn SHALL leave file byte-identical"
         );
         assert!(warns.contains("pii warn: email"));
+    }
+
+    // === raw-sync-nested-git-leak ===
+
+    /// Helper: minimal coverage of the `is_excluded_path` decision table.
+    #[test]
+    fn is_excluded_path_root_only_codebus_and_env() {
+        // Root-level `.codebus` and `.env` SHALL be excluded.
+        assert!(is_excluded_path(Path::new(".codebus/manifest.yaml")));
+        assert!(is_excluded_path(Path::new(".env")));
+        // The same names at deeper depths are user content and SHALL
+        // NOT be excluded (covers the spec scenario "Nested .codebus
+        // directories at deeper depths are user content").
+        assert!(!is_excluded_path(Path::new("docs/.codebus/notes.md")));
+        assert!(!is_excluded_path(Path::new("a/.env")));
+    }
+
+    #[test]
+    fn is_excluded_path_dot_git_anywhere() {
+        // Root `.git` (regression of the prior root-only behavior).
+        assert!(is_excluded_path(Path::new(".git/HEAD")));
+        // Submodule / nested-repo `.git` (the bug this change fixes —
+        // spec scenario "Mirror skips nested .git directories at any
+        // depth").
+        assert!(is_excluded_path(Path::new("vendor/foo/.git/config")));
+        assert!(is_excluded_path(Path::new("a/b/c/.git/objects/x")));
+        // A file literally named `git` (no leading dot) MUST NOT be
+        // excluded; only the exact `.git` segment matches.
+        assert!(!is_excluded_path(Path::new("vendor/foo/git/config")));
+    }
+
+    /// Spec scenario `Mirror skips nested .git directories at any depth`.
+    #[test]
+    fn mirror_skips_nested_dot_git() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        write(&src.path().join("vendor/foo/.git/config"), b"[core]\n");
+        write(&src.path().join("vendor/foo/.git/objects/abc"), &[0u8, 1, 2]);
+        write(&src.path().join("vendor/foo/src/main.rs"), b"fn main() {}");
+        write(&src.path().join("README.md"), b"# x");
+        sync_with_scanner(src.path(), raw.path(), &null(), OnHit::Warn).unwrap();
+        // Nested `.git/` SHALL produce zero mirror entries.
+        assert!(!raw.path().join("vendor/foo/.git").exists());
+        // Sibling source under the submodule SHALL be mirrored.
+        assert!(raw.path().join("vendor/foo/src/main.rs").exists());
+        // Unrelated root file SHALL be mirrored.
+        assert!(raw.path().join("README.md").exists());
+    }
+
+    /// Spec scenario `Source signal walk excludes nested .git
+    /// identically to mirror` — the drift-detection walk MUST share
+    /// the exclusion filter so init→goal does not falsely re-sync.
+    #[test]
+    fn walk_source_for_signal_skips_nested_dot_git() {
+        let src = TempDir::new().unwrap();
+        write(&src.path().join("vendor/foo/.git/config"), b"[core]\n");
+        write(&src.path().join("vendor/foo/.git/objects/abc"), &[0u8; 16]);
+        write(&src.path().join("vendor/foo/src/main.rs"), b"fn main(){}");
+        let (files, bytes) = walk_source_for_signal(src.path()).unwrap();
+        // Only `vendor/foo/src/main.rs` should count.
+        assert_eq!(files, 1, "exactly one mirrorable file (the .rs)");
+        let main_bytes = fs::metadata(src.path().join("vendor/foo/src/main.rs"))
+            .unwrap()
+            .len();
+        assert_eq!(bytes, main_bytes);
+    }
+
+    /// Spec scenario `Nested .codebus directories at deeper depths are
+    /// user content and are mirrored`.
+    #[test]
+    fn mirror_includes_nested_dot_codebus_user_content() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        write(&src.path().join("docs/.codebus/notes.md"), b"user content");
+        sync_with_scanner(src.path(), raw.path(), &null(), OnHit::Warn).unwrap();
+        // The deeper `.codebus/` is user content and SHALL be mirrored;
+        // only the root-level `.codebus/` is the vault and excluded.
+        assert!(raw.path().join("docs/.codebus/notes.md").exists());
     }
 }

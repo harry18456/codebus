@@ -4,7 +4,7 @@
 **Surfaced during:** backlog 討論（roadmap review，user 詢問「複製 codebase 有複製 .git 嗎」）
 **Severity:** PII / 體積 leak（edge case，非主流情境）
 **Owner:** harry
-**Status:** parked
+**Status:** archived 2026-05-20 — implemented as change `raw-sync-nested-git-leak`(any-depth `.git` 排除 + 兩處 call site 共用 `is_excluded_path` helper + 5 個新 regression tests)
 
 ---
 
