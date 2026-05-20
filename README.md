@@ -83,7 +83,7 @@ cargo install --path codebus-cli
 └─ log.md         旅行日誌（每次上車的時間軸）
 ```
 
-設計遵循 [Karpathy 的 "LLM Wiki" pattern](https://gist.github.com/karpathy/3ef7345f9192fe96d11a25fb1c40b35c) — typed folders + wikilinks + goal-driven 慢慢長大，不是一次性 RAG。
+設計遵循 [Karpathy 的 "LLM Wiki" pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — typed folders + wikilinks + goal-driven 慢慢長大，不是一次性 RAG。
 
 ---
 
