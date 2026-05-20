@@ -8,18 +8,22 @@ The endpoint profile configuration and scoped environment injection that codebus
 
 ### Requirement: Endpoint Profile Schema
 
-The `~/.codebus/config.yaml` file SHALL accept a `claude_code` block with three top-level keys: `active`, `system`, and `azure`. The `active` key SHALL be a string with exactly one of two values: `system` or `azure`. The `system` block SHALL contain three verb sub-blocks named `goal`, `query`, and `fix`; each verb sub-block SHALL contain a `model` field (a `SystemModel` enum value) and an optional `effort` field (an arbitrary string). The `azure` block SHALL contain `base_url` (URL string), `keyring_service` (arbitrary string, default `codebus-azure`), and the same three verb sub-blocks (`goal`, `query`, `fix`); in the `azure` block each verb's `model` field SHALL be an arbitrary non-empty string and `effort` SHALL be an optional arbitrary string.
+The `~/.codebus/config.yaml` file SHALL accept a `claude_code` block with three top-level keys: `active`, `system`, and `azure`. The `active` key SHALL be a string with exactly one of two values: `system` or `azure`. The `system` block SHALL contain four verb sub-blocks named `goal`, `query`, `fix`, and `verify`; each verb sub-block SHALL contain a `model` field (a `SystemModel` enum value) and an optional `effort` field (an arbitrary string). The `azure` block SHALL contain `base_url` (URL string), `keyring_service` (arbitrary string, default `codebus-azure`), and the same four verb sub-blocks (`goal`, `query`, `fix`, `verify`); in the `azure` block each verb's `model` field SHALL be an arbitrary non-empty string and `effort` SHALL be an optional arbitrary string.
 
-The profile referenced by `active` MUST be fully populated for the load to succeed. The non-active profile MAY be absent or partially populated; codebus SHALL NOT validate fields of the non-active profile. If the `claude_code` block is absent entirely, the system SHALL fall back to a built-in default profile equivalent to `active: system` with verb defaults `goal: opus-4-6` / `query: haiku-4-5` / `fix: sonnet-4-6` and per-verb default `effort` values `high` / `low` / `medium` respectively.
+The profile referenced by `active` MUST be fully populated for the load to succeed — all four verb sub-blocks (`goal`, `query`, `fix`, `verify`) are required when the profile is active. The non-active profile MAY be absent or partially populated; codebus SHALL NOT validate fields of the non-active profile. If the `claude_code` block is absent entirely, the system SHALL fall back to a built-in default profile equivalent to `active: system` with verb defaults `goal: opus-4-6` / `query: haiku-4-5` / `fix: sonnet-4-6` / `verify: opus-4-6` and per-verb default `effort` values `high` / `low` / `medium` / `high` respectively.
 
-#### Scenario: System profile loads with all three verbs populated
+The `verify` sub-block SHALL govern the model and effort used by the independent content-verification spawn run by `quiz` and `goal` verbs after their main generation phase (see `Quiz Content Verification and Repair` in the `quiz` capability and `Goal Content Verification and Repair` in the `verb-library` capability). The `verify` sub-block SHALL NOT be referenced by any other spawn (quiz plan / quiz generate / quiz repair / goal main / goal repair / fix); those spawns continue to use their own verb's sub-block.
 
-- **WHEN** `~/.codebus/config.yaml` contains `claude_code.active: system` and a `claude_code.system` block with all three verbs populated
+The `Verb` resolution enum SHALL include a `Verify` variant alongside the existing `Goal` / `Query` / `Fix` / `Chat` / `Quiz` variants. The resolution function SHALL map `Verb::Verify` directly to the `verify` sub-block of the active profile. Unlike `Chat` and `Quiz` which reuse the `Query` sub-block by design, `Verb::Verify` SHALL NOT fall back to any other verb's sub-block.
+
+#### Scenario: System profile loads with all four verbs populated
+
+- **WHEN** `~/.codebus/config.yaml` contains `claude_code.active: system` and a `claude_code.system` block with all four verbs (`goal`, `query`, `fix`, `verify`) populated
 - **THEN** `load_claude_code_config` SHALL return a config with the system profile selected and the parsed verb settings
 
 #### Scenario: Azure profile loads with required fields
 
-- **WHEN** `~/.codebus/config.yaml` contains `claude_code.active: azure` and a `claude_code.azure` block with `base_url`, `keyring_service`, and all three verbs populated
+- **WHEN** `~/.codebus/config.yaml` contains `claude_code.active: azure` and a `claude_code.azure` block with `base_url`, `keyring_service`, and all four verbs (`goal`, `query`, `fix`, `verify`) populated
 - **THEN** `load_claude_code_config` SHALL return a config with the azure profile selected and the parsed verb settings, `base_url`, and `keyring_service`
 
 #### Scenario: Active azure but azure block missing base_url fails
@@ -27,15 +31,40 @@ The profile referenced by `active` MUST be fully populated for the load to succe
 - **WHEN** `~/.codebus/config.yaml` contains `claude_code.active: azure` and a `claude_code.azure` block lacking `base_url`
 - **THEN** `load_claude_code_config` SHALL return `ConfigLoadError::YamlParse` and SHALL NOT silently fall back to defaults
 
+#### Scenario: Active system but system block missing verify fails
+
+- **WHEN** `~/.codebus/config.yaml` contains `claude_code.active: system` and a `claude_code.system` block with `goal`, `query`, `fix` populated but `verify` absent
+- **THEN** `load_claude_code_config` SHALL return `ConfigLoadError::YamlParse` identifying `claude_code.system.verify` as the missing required field AND SHALL NOT silently fall back to defaults
+
+#### Scenario: Active azure but azure block missing verify fails
+
+- **WHEN** `~/.codebus/config.yaml` contains `claude_code.active: azure` and a `claude_code.azure` block with `goal`, `query`, `fix` populated but `verify` absent
+- **THEN** `load_claude_code_config` SHALL return `ConfigLoadError::YamlParse` identifying `claude_code.azure.verify` as the missing required field
+
 #### Scenario: Non-active profile may be partial
 
 - **WHEN** `~/.codebus/config.yaml` contains `claude_code.active: system` with a complete `system` block AND an `azure` block missing `keyring_service`
 - **THEN** `load_claude_code_config` SHALL return a config with the system profile selected and SHALL NOT fail due to the incomplete azure profile
 
+#### Scenario: Non-active profile may omit verify
+
+- **WHEN** `~/.codebus/config.yaml` contains `claude_code.active: system` with a complete `system` block (all four verbs populated) AND a partial `azure` block missing the `verify` sub-block
+- **THEN** `load_claude_code_config` SHALL return a config with the system profile selected and SHALL NOT fail due to the incomplete azure profile (verify required only on the active profile)
+
 #### Scenario: Invalid SystemModel value rejected
 
 - **WHEN** `~/.codebus/config.yaml` contains `claude_code.system.goal.model: gpt-4`
 - **THEN** `load_claude_code_config` SHALL return `ConfigLoadError::YamlParse` identifying the invalid enum value
+
+#### Scenario: Verb::Verify resolves to system.verify sub-block
+
+- **WHEN** the system profile is active with `system.verify: { model: opus-4-6, effort: high }` and `system.query: { model: haiku-4-5, effort: low }`
+- **THEN** `resolve(Verb::Verify)` SHALL return `model: opus-4-6` and `effort: high` AND SHALL NOT fall back to the `query` sub-block
+
+#### Scenario: Verb::Verify resolves to azure.verify sub-block
+
+- **WHEN** the azure profile is active with `azure.verify: { model: claude-opus-deploy, effort: high }`
+- **THEN** `resolve(Verb::Verify)` SHALL return `model: claude-opus-deploy` and `effort: high` (azure deployment names pass through verbatim)
 
 ##### Example: schema shape
 
@@ -43,19 +72,20 @@ The profile referenced by `active` MUST be fully populated for the load to succe
 claude_code:
   active: azure
   system:
-    goal:  { model: opus-4-6, effort: high }
-    query: { model: haiku-4-5,  effort: low }
-    fix:   { model: sonnet-4-6, effort: medium }
+    goal:   { model: opus-4-6,   effort: high   }
+    query:  { model: haiku-4-5,  effort: low    }
+    fix:    { model: sonnet-4-6, effort: medium }
+    verify: { model: opus-4-6,   effort: high   }
   azure:
     base_url: https://example.cognitiveservices.azure.com/anthropic
     keyring_service: codebus-azure
-    goal:  { model: claude-opus-4-6-2026V2,  effort: high }
-    query: { model: claude-haiku-4-5-2026V2, effort: low }
-    fix:   { model: claude-sonnet-4-6-2026V2, effort: medium }
+    goal:   { model: claude-opus-4-6-2026V2,   effort: high   }
+    query:  { model: claude-haiku-4-5-2026V2,  effort: low    }
+    fix:    { model: claude-sonnet-4-6-2026V2, effort: medium }
+    verify: { model: claude-opus-4-6-2026V2,   effort: high   }
 ```
 
 ---
-
 ### Requirement: System Profile Model Aliases
 
 The `SystemModel` type SHALL be a closed enum with exactly four variants serialised in kebab-case, each carrying an explicit version suffix: `opus-4-7`, `opus-4-6`, `haiku-4-5`, `sonnet-4-6`. Unversioned aliases (`opus`, `haiku`, `sonnet`) SHALL be rejected at deserialisation. Codebus SHALL maintain a deterministic mapping `to_cli_flag` from each variant to the string passed to the Claude CLI's `--model` flag. The mapping SHALL be: `opus-4-7` → `claude-opus-4-7`, `opus-4-6` → `claude-opus-4-6`, `haiku-4-5` → `claude-haiku-4-5`, `sonnet-4-6` → `claude-sonnet-4-6`. The mapping SHALL be applied immediately before spawning the child process.
@@ -85,7 +115,6 @@ The `SystemModel` type SHALL be a closed enum with exactly four variants seriali
 | `sonnet-4-6`        | `claude-sonnet-4-6`                       |
 
 ---
-
 ### Requirement: Azure Profile Model String Passthrough
 
 When the azure profile is active, codebus SHALL pass each verb's `model` field verbatim to the Claude CLI's `--model` flag. Codebus SHALL NOT validate, translate, or rewrite the string under any circumstance. The string SHALL be treated as an Azure deployment name even when its value matches a `SystemModel` enum literal.
@@ -101,7 +130,6 @@ When the azure profile is active, codebus SHALL pass each verb's `model` field v
 - **THEN** the spawned `claude` child process SHALL receive the argument pair `--model opus-4-6` AND codebus SHALL NOT translate the value to `claude-opus-4-6`
 
 ---
-
 ### Requirement: OS Keyring Integration With Env Fallback
 
 Codebus SHALL store the Azure API key in the operating-system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service or KWallet). The keyring entry SHALL be addressed by `(service, account)` where `service` is the value of `azure.keyring_service` (default `codebus-azure`) and `account` is the fixed literal `default`. The `account` value SHALL NOT be user-configurable in this change.
@@ -128,7 +156,6 @@ Before spawning any child process while the azure profile is active, codebus SHA
 - **THEN** `codebus query` SHALL exit with non-zero status, stderr SHALL contain an `EndpointKeyMissing` error message naming the keyring service AND the `CODEBUS_AZURE_KEY` env var, AND the `claude` child process SHALL NOT be spawned
 
 ---
-
 ### Requirement: Scoped Environment Injection At Spawn
 
 The `agent::claude_cli::invoke` function SHALL spawn the `claude` child process with environment variables injected exclusively via the `Command::env` / `Command::envs` Rust API. Codebus SHALL NOT modify the parent process's environment (no `std::env::set_var` calls) at any point in the spawn pipeline. When the system profile is active, codebus SHALL inject zero additional environment variables. When the azure profile is active, codebus SHALL inject exactly three environment variables on the child process: `ANTHROPIC_BASE_URL` (from `azure.base_url`), `ANTHROPIC_API_KEY` (from the keyring fallback chain), and `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` set to the literal string `1`.
@@ -149,7 +176,6 @@ The `agent::claude_cli::invoke` function SHALL spawn the `claude` child process 
 - **THEN** the parent process's `ANTHROPIC_API_KEY` environment variable SHALL be observable from the parent shell as either unset OR retain its pre-invocation value
 
 ---
-
 ### Requirement: Legacy Config Schema Warning Without Rewrite
 
 When `load_claude_code_config` parses a `~/.codebus/config.yaml` whose `claude_code` block contains `goal`, `query`, or `fix` keys directly (without being nested inside `system` or `azure`), codebus SHALL treat this as a legacy schema. The system SHALL print a migration warning to stderr that includes a concrete new-schema example AND SHALL NOT modify the user's on-disk yaml file. The invocation SHALL proceed as if the configuration were `active: system` with the legacy `model` / `effort` values mapped to the system profile's verb defaults.
@@ -160,7 +186,6 @@ When `load_claude_code_config` parses a `~/.codebus/config.yaml` whose `claude_c
 - **THEN** stderr SHALL contain a migration warning AND the user's yaml file SHALL be byte-for-byte unchanged AND codebus SHALL spawn the child process using the system profile
 
 ---
-
 ### Requirement: Config Subcommand For Keyring Management
 
 The `codebus` binary SHALL provide a `config` subcommand that exposes three actions: `set-key <profile>`, `get-key <profile>`, and `delete-key <profile>`. The `<profile>` argument SHALL accept the literal value `azure` and SHALL reject all other values with a non-zero exit code. The `get-key` action SHALL accept an optional `--show` flag.

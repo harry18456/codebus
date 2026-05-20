@@ -409,9 +409,13 @@ The system SHALL provide an optional independent model-based content verificatio
 2. **off-goal** — the page's content is unrelated to this run's goal.
 3. **taxonomy-misplaced** — the content is in the wrong page type / folder.
 
-On defects, `run_goal` SHALL run a Write-capable repair spawn fed the defect list, instructed to fix only the flagged pages in place, then re-verify; this loop SHALL be bounded by the shared cap of three iterations. Verify and repair events SHALL flow through the same event fan-out the goal spawn uses.
+The verify spawn SHALL resolve its model and effort via `cc_cfg.resolve(Verb::Verify)`, NOT `Verb::Goal` (`claude-code-config` Endpoint Profile Schema requirement defines the `Verb::Verify` resolution path). This ensures the verify spawn uses the dedicated `claude_code.system.verify` / `claude_code.azure.verify` sub-block, which is independent of the main goal spawn and the repair spawn that both continue to use `Verb::Goal`. The motivating use case is "expensive verification + cheaper main writing" (e.g., sonnet for goal main spawn, opus for verify).
+
+On defects, `run_goal` SHALL run a Write-capable repair spawn fed the defect list, instructed to fix only the flagged pages in place, then re-verify; this loop SHALL be bounded by the shared cap of three iterations. The repair spawn SHALL resolve its model via `cc_cfg.resolve(Verb::Goal)` (NOT `Verb::Verify`) — the repair stage continues to use the same model as the original goal main spawn, so the cost profile is "verify with the dedicated verify model, repair with the same goal model used for main writing". Verify and repair events SHALL flow through the same event fan-out the goal spawn uses.
 
 Residual defects after the cap SHALL be best-effort: a non-fatal warning SHALL be surfaced, no page SHALL be reverted, the `GoalReport` SHALL carry a content-review status (`ok` / `flagged` with pages / not-run), `run_goal` SHALL NOT return an error solely because content defects remain, the exit code SHALL be unchanged, and `auto_commit` SHALL still run (content verification SHALL NOT block the commit). A verify spawn failure or unparseable output SHALL be treated as non-fatal: a warning SHALL be surfaced and the status SHALL be `flagged` (never silently `ok`). An absent content-review status SHALL be read as "not verified" and SHALL NOT be treated as `ok`.
+
+`run_goal` SHALL NOT emit verify-spawn model / effort metadata into the per-run `RunLog` entry. The `RunLog` `model` and `effort` fields SHALL continue to record the main goal spawn's model (`Verb::Goal` resolution); the verify spawn's model is observable via the `events.jsonl` per-run timeline (which already records every spawn's `SpawnStart` event including the model in use), but SHALL NOT appear in the consolidated `RunLog` row.
 
 #### Scenario: Disabled by default
 
@@ -443,9 +447,24 @@ Residual defects after the cap SHALL be best-effort: a non-fatal warning SHALL b
 - **WHEN** `run_quiz_generate` is exercised after the verify→repair orchestration is factored into the shared core
 - **THEN** its persisted `content_review` value format, events, cap, and best-effort semantics SHALL be identical to before the refactor
 
+#### Scenario: Goal verify spawn uses Verb::Verify model not Verb::Goal
+
+- **WHEN** `goal.content_verify` is `true`, `claude_code.system.goal` resolves to `model: sonnet-4-6`, AND `claude_code.system.verify` resolves to `model: opus-4-6`
+- **THEN** the verify spawn SHALL be invoked with `--model claude-opus-4-6` AND the goal main spawn and the repair spawn SHALL be invoked with `--model claude-sonnet-4-6`
+
+#### Scenario: Goal repair spawn uses Verb::Goal model not Verb::Verify
+
+- **WHEN** `goal.content_verify` is `true`, the verify spawn flags a page, AND `claude_code.system.verify` resolves to `model: opus-4-6` while `claude_code.system.goal` resolves to `model: sonnet-4-6`
+- **THEN** the repair spawn SHALL be invoked with `--model claude-sonnet-4-6` (the goal model, NOT the verify model) — repair keeps the same model profile as the goal main spawn
+
+#### Scenario: Goal RunLog model field records main spawn not verify
+
+- **WHEN** `goal.content_verify` is `true`, the main goal spawn resolves to `sonnet-4-6`, AND the verify spawn resolves to `opus-4-6`
+- **THEN** the per-run `RunLog` entry SHALL record `model: claude-sonnet-4-6` (the main spawn's model) AND SHALL NOT record the verify spawn's model in any RunLog field
+
 <!-- @trace
-source: goal-content-verify
-updated: 2026-05-19
+source: goal-content-verify, verify-stage-independent-model
+updated: 2026-05-20
 code:
   - codebus-core/src/config/mod.rs
   - codebus-core/src/verb/goal.rs
