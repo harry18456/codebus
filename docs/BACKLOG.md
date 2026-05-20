@@ -17,7 +17,6 @@
 | 2026-05-14 | Settings 缺少 chat verb 的 model / effort 設定 | UX gap（設定不透明） | 輕-中（方案 A 半天 / 方案 B 1-2 半天） | [settings-chat-model](2026-05-14-settings-chat-model-backlog.md) |
 | 2026-05-19 | Settings 設定面板完整化（config↔UI 覆蓋盤點） | UX gap（設定不透明） | Change 1 ✅ ship; Change 2 todo | [settings-config-coverage](2026-05-19-settings-config-coverage-backlog.md) |
 | 2026-05-20 | Wiki 頁面加按鈕直接開 Obsidian | UX 補強（取代 in-app graph view） | 輕（半天） | [wiki-open-in-obsidian](2026-05-20-wiki-open-in-obsidian-backlog.md) |
-| 2026-05-20 | PreToolUse Read hook 擋圖片 / binary 檔案 | PII safety gap（隱性洩漏路徑） | 輕（半天） | [pretooluse-image-block](2026-05-20-pretooluse-image-block-backlog.md) |
 
 ## 已 archived 項目
 
@@ -27,6 +26,7 @@
 | 2026-05-20 | PII 設定 UI（Settings 內加 extra regex rules） | `settings-config-frontend` | [pii-settings-ui](2026-05-14-pii-settings-ui-backlog.md) |
 | 2026-05-20 | .codebus 目錄即時監聽（fs watcher） | `codebus-fs-watcher` | [codebus-fs-watcher](2026-05-15-codebus-fs-watcher-backlog.md) |
 | 2026-05-20 | raw mirror 巢狀 .git 未排除（submodule leak） | `raw-sync-nested-git-leak` | [raw-sync-nested-git-leak](2026-05-19-raw-sync-nested-git-leak-backlog.md) |
+| 2026-05-20 | PreToolUse Read hook 擋圖片 / binary 檔案 | `pretooluse-image-block` | [pretooluse-image-block](2026-05-20-pretooluse-image-block-backlog.md) |
 
 ## 已決定不做
 
