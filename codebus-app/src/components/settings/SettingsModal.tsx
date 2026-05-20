@@ -117,8 +117,10 @@ export function SettingsModal({
 
   const safeConfig = (config ?? {}) as {
     app?: { quiz?: { pass_threshold?: number; default_length?: number } }
-    quiz?: { default_length?: number }
-    pii?: { scanner?: string }
+    quiz?: { default_length?: number; content_verify?: boolean }
+    goal?: { content_verify?: boolean }
+    pii?: { scanner?: string; on_hit?: string; patterns_extra?: string[] }
+    lint?: { fix?: { enabled?: boolean } }
     log?: { sink?: string; dir?: string }
   }
   const passThreshold = safeConfig.app?.quiz?.pass_threshold ?? 80
@@ -133,6 +135,34 @@ export function SettingsModal({
 
   const piiScanner = safeConfig.pii?.scanner ?? "regex_basic"
   const logDir = safeConfig.log?.dir ?? ""
+
+  // --- settings-config-frontend: newly surfaced config knobs ---
+  const piiOnHit = safeConfig.pii?.on_hit ?? "warn"
+  const lintFixEnabled = safeConfig.lint?.fix?.enabled ?? true
+  const quizContentVerify = safeConfig.quiz?.content_verify ?? false
+  const goalContentVerify = safeConfig.goal?.content_verify ?? false
+  const loggingDisabled = safeConfig.log?.sink === "none"
+  const patternsExtra: string[] = safeConfig.pii?.patterns_extra ?? []
+  // A pattern is invalid when it cannot compile as a RegExp. Empty entries
+  // (freshly added rows) are treated as not-yet-invalid so the user can
+  // type into them without Save being blocked prematurely.
+  const patternInvalid = (p: string): boolean => {
+    if (p.length === 0) return false
+    try {
+      // eslint-disable-next-line no-new
+      new RegExp(p)
+      return false
+    } catch {
+      return true
+    }
+  }
+  const piiPatternsInvalid = patternsExtra.some(patternInvalid)
+
+  function setPatternsExtra(next: string[]) {
+    update({
+      pii: { patterns_extra: next } as unknown as Record<string, unknown>,
+    } as never)
+  }
 
   async function handleSave() {
     try {
@@ -251,6 +281,168 @@ export function SettingsModal({
             </span>
           </Field>
 
+          {/* 4b. PII on-hit policy */}
+          <Field label={t("settings.fields.piiOnHit.label")}>
+            <div className="flex items-center gap-2">
+              <select
+                data-testid="pii-on-hit-select"
+                value={piiOnHit}
+                onChange={(e) =>
+                  update({
+                    pii: { on_hit: e.target.value } as Record<string, unknown>,
+                  } as never)
+                }
+                className="rounded-md border border-border bg-bg-raised px-2 py-1 text-xs"
+              >
+                <option value="warn">
+                  {t("settings.fields.piiOnHit.warn")}
+                </option>
+                <option value="skip">
+                  {t("settings.fields.piiOnHit.skip")}
+                </option>
+                <option value="mask">
+                  {t("settings.fields.piiOnHit.mask")}
+                </option>
+              </select>
+            </div>
+            <div
+              data-testid="pii-on-hit-critical-note"
+              className="text-[11px] text-fg-tertiary"
+            >
+              {t("settings.fields.piiOnHit.criticalNote")}
+            </div>
+          </Field>
+
+          {/* 4c. PII extra patterns */}
+          <Field label={t("settings.fields.piiPatterns.label")}>
+            <div className="flex flex-col gap-1">
+              {patternsExtra.map((p, i) => {
+                const invalid = patternInvalid(p)
+                return (
+                  <div key={i} className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-2">
+                      <input
+                        data-testid={`pii-patterns-input-${i}`}
+                        value={p}
+                        placeholder={t(
+                          "settings.fields.piiPatterns.placeholder",
+                        )}
+                        onChange={(e) => {
+                          const next = [...patternsExtra]
+                          next[i] = e.target.value
+                          setPatternsExtra(next)
+                        }}
+                        className={`w-[260px] rounded-md border bg-bg-raised px-2 py-1 font-mono text-[11px] ${
+                          invalid
+                            ? "border-error focus-visible:ring-error"
+                            : "border-border"
+                        }`}
+                        aria-invalid={invalid || undefined}
+                      />
+                      <button
+                        type="button"
+                        data-testid={`pii-patterns-remove-${i}`}
+                        onClick={() =>
+                          setPatternsExtra(
+                            patternsExtra.filter((_, j) => j !== i),
+                          )
+                        }
+                        className="text-xs text-fg-secondary underline decoration-dashed hover:text-fg"
+                      >
+                        {t("settings.fields.piiPatterns.remove")}
+                      </button>
+                    </div>
+                    {invalid && (
+                      <span
+                        data-testid={`pii-patterns-error-${i}`}
+                        className="text-[11px] text-error"
+                      >
+                        {t("settings.fields.piiPatterns.invalid")}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+              <button
+                type="button"
+                data-testid="pii-patterns-add"
+                onClick={() => setPatternsExtra([...patternsExtra, ""])}
+                className="self-start text-xs text-fg-secondary underline decoration-dashed hover:text-fg"
+              >
+                {t("settings.fields.piiPatterns.add")}
+              </button>
+            </div>
+          </Field>
+
+          {/* 4d. Lint fix enabled */}
+          <Field
+            label={t("settings.fields.lintFix.label")}
+            subLabel={t("settings.fields.lintFix.sublabel")}
+          >
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                data-testid="lint-fix-toggle"
+                checked={lintFixEnabled}
+                onChange={() =>
+                  update({
+                    lint: {
+                      fix: { enabled: !lintFixEnabled },
+                    } as Record<string, unknown>,
+                  } as never)
+                }
+              />
+            </label>
+          </Field>
+
+          {/* 4e. Quiz content verify */}
+          <Field label={t("settings.fields.quizContentVerify.label")}>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                data-testid="quiz-content-verify-toggle"
+                checked={quizContentVerify}
+                onChange={() =>
+                  update({
+                    quiz: {
+                      content_verify: !quizContentVerify,
+                    } as Record<string, unknown>,
+                  } as never)
+                }
+              />
+            </label>
+            <div
+              data-testid="quiz-content-verify-cost"
+              className="text-[11px] text-fg-tertiary"
+            >
+              {t("settings.fields.quizContentVerify.cost")}
+            </div>
+          </Field>
+
+          {/* 4f. Goal content verify */}
+          <Field label={t("settings.fields.goalContentVerify.label")}>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                data-testid="goal-content-verify-toggle"
+                checked={goalContentVerify}
+                onChange={() =>
+                  update({
+                    goal: {
+                      content_verify: !goalContentVerify,
+                    } as Record<string, unknown>,
+                  } as never)
+                }
+              />
+            </label>
+            <div
+              data-testid="goal-content-verify-cost"
+              className="text-[11px] text-fg-tertiary"
+            >
+              {t("settings.fields.goalContentVerify.cost")}
+            </div>
+          </Field>
+
           {/* 5. Log sink */}
           <Field label={t("settings.fields.logSink.label")}>
             <div className="flex items-center gap-2">
@@ -300,6 +492,21 @@ export function SettingsModal({
                 testId="log-sink-reset"
                 t={t}
               />
+              <label className="flex items-center gap-1 text-xs text-fg-secondary">
+                <input
+                  type="checkbox"
+                  data-testid="log-disable-toggle"
+                  checked={loggingDisabled}
+                  onChange={() =>
+                    update({
+                      log: {
+                        sink: loggingDisabled ? "jsonl" : "none",
+                      } as Record<string, unknown>,
+                    } as never)
+                  }
+                />
+                <span>{t("settings.fields.logSink.disable")}</span>
+              </label>
             </div>
           </Field>
 
@@ -405,7 +612,7 @@ export function SettingsModal({
           <Button
             variant="primary"
             onClick={handleSave}
-            disabled={!dirty || saving || !claudeCodeValid}
+            disabled={!dirty || saving || !claudeCodeValid || piiPatternsInvalid}
             data-testid="settings-save"
             title={
               !claudeCodeValid

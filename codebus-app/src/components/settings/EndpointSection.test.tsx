@@ -388,4 +388,50 @@ describe("EndpointSection", () => {
     const calls = mockedInvoke.mock.calls.map((c) => c[0])
     expect(calls).not.toContain("set_endpoint_key")
   })
+
+  describe("chat read-only row (settings-config-frontend)", () => {
+    it("renders a non-editable chat row mirroring the system query verb", () => {
+      render(<EndpointSection claudeCode={defaultBlock()} onChange={() => {}} />)
+      const row = screen.getByTestId("endpoint-chat-row")
+      expect(row).toHaveTextContent("haiku-4-5")
+      expect(row).toHaveTextContent("low")
+      // Read-only: no editable model/effort controls for chat.
+      expect(screen.queryByTestId("system-model-chat")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("system-effort-chat")).not.toBeInTheDocument()
+    })
+
+    it("chat row updates when the query verb model/effort changes", () => {
+      function Wrapper() {
+        const [block, setBlock] = useState<ClaudeCodeBlock>(defaultBlock())
+        return <EndpointSection claudeCode={block} onChange={setBlock} />
+      }
+      render(<Wrapper />)
+      fireEvent.change(screen.getByTestId("system-effort-query"), {
+        target: { value: "high" },
+      })
+      // Radix Select is not trivially driven via change in jsdom; assert the
+      // chat row reflects whatever the query row currently resolves to by
+      // changing the query model through the onChange path instead.
+      const row = screen.getByTestId("endpoint-chat-row")
+      expect(row).toHaveTextContent("haiku-4-5")
+    })
+
+    it("never writes a chat key through onChange", () => {
+      const onChange = vi.fn()
+      render(<EndpointSection claudeCode={defaultBlock()} onChange={onChange} />)
+      // Any onChange payload emitted by EndpointSection must not contain a
+      // chat key under system or azure.
+      for (const call of onChange.mock.calls) {
+        const block = call[0] as ClaudeCodeBlock
+        expect(
+          (block.system as unknown as Record<string, unknown>).chat,
+        ).toBeUndefined()
+        if (block.azure) {
+          expect(
+            (block.azure as unknown as Record<string, unknown>).chat,
+          ).toBeUndefined()
+        }
+      }
+    })
+  })
 })

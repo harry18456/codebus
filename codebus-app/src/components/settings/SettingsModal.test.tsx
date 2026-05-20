@@ -313,4 +313,96 @@ describe("SettingsModal", () => {
     // later by the backend save migration, not by the frontend.
     expect(cfg.app?.quiz?.default_length).toBe(8)
   })
+
+  describe("new config fields (settings-config-frontend)", () => {
+    function cfg() {
+      return useSettingsStore.getState().config as Record<string, unknown>
+    }
+
+    it("pii.on_hit select offers warn/skip/mask and writes the chosen value", () => {
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      const sel = screen.getByTestId("pii-on-hit-select") as HTMLSelectElement
+      const opts = Array.from(sel.options).map((o) => o.value)
+      expect(opts).toEqual(["warn", "skip", "mask"])
+      fireEvent.change(sel, { target: { value: "skip" } })
+      expect((cfg().pii as { on_hit?: string }).on_hit).toBe("skip")
+    })
+
+    it("pii.on_hit field states the Critical security floor", () => {
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      expect(screen.getByTestId("pii-on-hit-critical-note")).toHaveTextContent(
+        /always masked/i,
+      )
+    })
+
+    it("lint.fix.enabled toggles default-true and writes false when unchecked", () => {
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      const tog = screen.getByTestId("lint-fix-toggle") as HTMLInputElement
+      expect(tog.checked).toBe(true)
+      fireEvent.click(tog)
+      expect(
+        (cfg().lint as { fix?: { enabled?: boolean } }).fix?.enabled,
+      ).toBe(false)
+    })
+
+    it("quiz/goal content_verify default off, enable writes true, cost hint shown", () => {
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      const q = screen.getByTestId("quiz-content-verify-toggle") as HTMLInputElement
+      const g = screen.getByTestId("goal-content-verify-toggle") as HTMLInputElement
+      expect(q.checked).toBe(false)
+      expect(g.checked).toBe(false)
+      expect(
+        screen.getByTestId("quiz-content-verify-cost"),
+      ).toHaveTextContent(/verify\/repair/i)
+      expect(
+        screen.getByTestId("goal-content-verify-cost"),
+      ).toHaveTextContent(/verify\/repair/i)
+      fireEvent.click(q)
+      fireEvent.click(g)
+      expect((cfg().quiz as { content_verify?: boolean }).content_verify).toBe(true)
+      expect((cfg().goal as { content_verify?: boolean }).content_verify).toBe(true)
+    })
+
+    it("disable-logging control writes log.sink = none", () => {
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      fireEvent.click(screen.getByTestId("log-disable-toggle"))
+      expect((cfg().log as { sink?: string }).sink).toBe("none")
+    })
+
+    it("pii.patterns_extra add/remove writes a plain string array", () => {
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      fireEvent.click(screen.getByTestId("pii-patterns-add"))
+      fireEvent.change(screen.getByTestId("pii-patterns-input-0"), {
+        target: { value: "EMP-\\d{6}" },
+      })
+      fireEvent.click(screen.getByTestId("pii-patterns-add"))
+      fireEvent.change(screen.getByTestId("pii-patterns-input-1"), {
+        target: { value: "secret-\\w+" },
+      })
+      expect((cfg().pii as { patterns_extra?: string[] }).patterns_extra).toEqual([
+        "EMP-\\d{6}",
+        "secret-\\w+",
+      ])
+      fireEvent.click(screen.getByTestId("pii-patterns-remove-0"))
+      expect((cfg().pii as { patterns_extra?: string[] }).patterns_extra).toEqual([
+        "secret-\\w+",
+      ])
+    })
+
+    it("invalid extra pattern shows inline error and disables Save until fixed", () => {
+      useSettingsStore.setState({ dirty: true })
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      fireEvent.click(screen.getByTestId("pii-patterns-add"))
+      fireEvent.change(screen.getByTestId("pii-patterns-input-0"), {
+        target: { value: "[" },
+      })
+      expect(screen.getByTestId("pii-patterns-error-0")).toBeInTheDocument()
+      expect(screen.getByTestId("settings-save")).toBeDisabled()
+      fireEvent.change(screen.getByTestId("pii-patterns-input-0"), {
+        target: { value: "ok-\\d+" },
+      })
+      expect(screen.queryByTestId("pii-patterns-error-0")).not.toBeInTheDocument()
+      expect(screen.getByTestId("settings-save")).not.toBeDisabled()
+    })
+  })
 })

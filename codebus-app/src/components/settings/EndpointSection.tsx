@@ -21,6 +21,8 @@ import {
   getEndpointKey,
 } from "@/lib/ipc"
 
+import { useT } from "@/i18n/useT"
+
 import { SetKeyDialog } from "./SetKeyDialog"
 
 /**
@@ -51,6 +53,7 @@ export function EndpointSection({
   onChange,
   errors = [],
 }: EndpointSectionProps) {
+  const t = useT()
   const hasError = (field: string) => errors.some((e) => e.field === field)
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null)
   const [keyError, setKeyError] = useState<string | null>(null)
@@ -236,6 +239,20 @@ export function EndpointSection({
             </VerbRow>
           )
         })}
+        <div
+          data-testid="endpoint-chat-row"
+          className="flex items-center gap-2 text-fg-tertiary"
+        >
+          <span className="w-[56px] font-mono text-[11px]">
+            {t("settings.fields.endpointChat.label")}
+          </span>
+          <span className="font-mono text-[11px]">
+            {t("settings.fields.endpointChat.inherits", {
+              model: claudeCode.system.query.model,
+              effort: claudeCode.system.query.effort,
+            })}
+          </span>
+        </div>
       </ProfileBlock>
 
       <ProfileBlock

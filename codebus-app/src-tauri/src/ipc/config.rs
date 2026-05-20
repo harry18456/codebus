@@ -95,10 +95,21 @@ pub(crate) fn save_global_config_at(path: &Path, payload: &GlobalConfig) -> IpcR
         // dropped here. Write the resolved length to the shared top-level
         // `quiz.*` key — this is the one-time migration landing point.
         obj.insert("app".to_string(), enriched_app);
-        obj.insert(
-            "quiz".to_string(),
-            serde_json::json!({ "default_length": quiz_default_length }),
+        // Merge the resolved `quiz.default_length` into the existing `quiz`
+        // object rather than replacing the whole namespace — replacing
+        // would silently drop other `quiz.*` keys (notably
+        // `quiz.content_verify`) that the user just set in the Settings
+        // UI. Discovered via manual e2e of settings-config-frontend.
+        let mut quiz_obj = obj
+            .get("quiz")
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        quiz_obj.insert(
+            "default_length".to_string(),
+            serde_json::Value::from(quiz_default_length),
         );
+        obj.insert("quiz".to_string(), serde_json::Value::Object(quiz_obj));
     }
 
     if let Some(parent) = path.parent() {
@@ -318,6 +329,30 @@ mod tests {
         assert_eq!(reloaded["app"]["quiz"]["pass_threshold"], json!(70));
         // default_length now lives in the shared quiz.* namespace.
         assert_eq!(reloaded["quiz"]["default_length"], json!(5));
+    }
+
+    /// Regression: settings-config-frontend manual e2e revealed that the
+    /// previous unconditional `obj.insert("quiz", { default_length })`
+    /// destroyed sibling `quiz.*` keys (notably `quiz.content_verify`),
+    /// so the Settings UI could toggle Quiz content verify, click Save,
+    /// reopen — and the key was silently absent on disk. The enrichment
+    /// must MERGE `default_length` into the existing quiz object.
+    #[test]
+    fn save_preserves_quiz_sibling_keys() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        let payload = json!({
+            "app": { "quiz": { "pass_threshold": 80 } },
+            "quiz": { "default_length": 7, "content_verify": true },
+        });
+        save_global_config_at(&path, &payload).unwrap();
+        let reloaded = load_global_config_at(&path).unwrap();
+        assert_eq!(reloaded["quiz"]["default_length"], json!(7));
+        assert_eq!(
+            reloaded["quiz"]["content_verify"],
+            json!(true),
+            "quiz.content_verify must survive save→load round-trip"
+        );
     }
 
     /// Migration: a stale pre-v3-app-quiz config with

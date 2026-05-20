@@ -107,6 +107,28 @@ const en = {
   "settings.toast.saved": "Saved",
   "settings.reset.label": "Reset to default",
   "settings.reset.alreadyDefault": "Already at default",
+  "settings.fields.piiOnHit.label": "PII on-hit policy",
+  "settings.fields.piiOnHit.warn": "warn",
+  "settings.fields.piiOnHit.skip": "skip",
+  "settings.fields.piiOnHit.mask": "mask",
+  "settings.fields.piiOnHit.criticalNote":
+    "Critical-severity matches (API keys) are always masked regardless of this setting.",
+  "settings.fields.piiPatterns.label": "PII extra patterns",
+  "settings.fields.piiPatterns.placeholder": "regex (e.g. EMP-\\d{6})",
+  "settings.fields.piiPatterns.add": "Add pattern",
+  "settings.fields.piiPatterns.remove": "Remove",
+  "settings.fields.piiPatterns.invalid": "Invalid regular expression",
+  "settings.fields.lintFix.label": "Lint fix enabled",
+  "settings.fields.lintFix.sublabel": "Run the lint-and-fix loop after a goal",
+  "settings.fields.quizContentVerify.label": "Quiz content verify",
+  "settings.fields.quizContentVerify.cost":
+    "Enabling this adds extra verify/repair agent spawns (slower, higher token cost).",
+  "settings.fields.goalContentVerify.label": "Goal content verify",
+  "settings.fields.goalContentVerify.cost":
+    "Enabling this adds extra verify/repair agent spawns (slower, higher token cost).",
+  "settings.fields.logSink.disable": "Disable logging",
+  "settings.fields.endpointChat.label": "chat",
+  "settings.fields.endpointChat.inherits": "inherits query ({model} / {effort})",
 
   // ---- Workspace shell ----
   "workspace.backToLobby": "← Back to Lobby",
@@ -309,6 +331,28 @@ const zh: Record<keyof typeof en, string> = {
   "settings.toast.saved": "已儲存",
   "settings.reset.label": "還原預設",
   "settings.reset.alreadyDefault": "目前已是預設",
+  "settings.fields.piiOnHit.label": "PII 命中處理",
+  "settings.fields.piiOnHit.warn": "warn",
+  "settings.fields.piiOnHit.skip": "skip",
+  "settings.fields.piiOnHit.mask": "mask",
+  "settings.fields.piiOnHit.criticalNote":
+    "Critical 等級（API key 等）一律強制 mask，不受此設定影響。",
+  "settings.fields.piiPatterns.label": "PII 額外規則",
+  "settings.fields.piiPatterns.placeholder": "regex（例：EMP-\\d{6}）",
+  "settings.fields.piiPatterns.add": "新增規則",
+  "settings.fields.piiPatterns.remove": "刪除",
+  "settings.fields.piiPatterns.invalid": "無效的正規表達式",
+  "settings.fields.lintFix.label": "啟用 lint fix",
+  "settings.fields.lintFix.sublabel": "goal 完成後跑 lint-and-fix loop",
+  "settings.fields.quizContentVerify.label": "Quiz 內容驗證",
+  "settings.fields.quizContentVerify.cost":
+    "開啟會多花 verify/repair agent spawn（較慢、token 成本較高）。",
+  "settings.fields.goalContentVerify.label": "Goal 內容驗證",
+  "settings.fields.goalContentVerify.cost":
+    "開啟會多花 verify/repair agent spawn（較慢、token 成本較高）。",
+  "settings.fields.logSink.disable": "停用 logging",
+  "settings.fields.endpointChat.label": "chat",
+  "settings.fields.endpointChat.inherits": "沿用 query（{model} / {effort}）",
 
   // ---- Workspace shell ----
   "workspace.backToLobby": "← 回到 Lobby",

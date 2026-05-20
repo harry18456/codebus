@@ -372,17 +372,24 @@ tests:
 ---
 ### Requirement: Global Settings Modal Field Set
 
-The Settings modal SHALL be invoked by the bottom-left gear in either Lobby or Workspace state. The modal SHALL display exactly seven editable fields in this order:
+The Settings modal SHALL be invoked by the bottom-left gear in either Lobby or Workspace state. The modal SHALL display, in addition to the CLI Status row (see "Settings UI CLI Status Field") and the Endpoint Section (see "Settings UI Endpoint Section"), the following editable configuration fields:
 
 1. AI Provider (read-only label: "Claude CLI (only option for now)")
-2. Authentication (OAuth status label + Re-authenticate link button)
-3. Default model per verb (three dropdowns: goal, query, fix)
-4. PII scanner (dropdown showing scanner name and dynamic pattern count, e.g. `regex_basic · 14 patterns`)
-5. Log sink (path display + Change folder link)
-6. Quiz pass threshold (slider 50–100%, displayed value with `%` unit suffix)
-7. Default quiz length (slider 3–10, displayed value with `questions` unit suffix)
+2. PII scanner (dropdown showing scanner name and dynamic pattern count, e.g. `regex_basic · 14 patterns`)
+3. PII on-hit policy (dropdown: `warn` / `skip` / `mask`) mapping to `pii.on_hit`
+4. PII extra patterns (`pii.patterns_extra`): an editable list of raw regex strings with add and remove controls, no display label per entry
+5. Lint fix enabled (toggle) mapping to `lint.fix.enabled`
+6. Quiz content verify (toggle) mapping to `quiz.content_verify`
+7. Goal content verify (toggle) mapping to `goal.content_verify`
+8. Log sink (path display + Change folder link) with an additional control that disables logging entirely by writing `log.sink: none`
+9. Quiz pass threshold (slider 50–100%, displayed value with `%` unit suffix)
+10. Default quiz length (slider 3–10, displayed value with `questions` unit suffix)
 
-No additional fields SHALL be present in v1 (no theme toggle, no language switcher, no per-vault override section). Sub-labels under fields SHALL NOT promise features absent from v1 (e.g., the Default model sub-label MUST NOT say "overridden per goal" or similar that implies a non-existent override UI).
+The Endpoint Section SHALL render a read-only `chat` row that displays the model and effort the `chat` verb inherits from the `query` verb, in the form "沿用 query（<model> / <effort>）", kept in sync with the editable `query` row. The `chat` row SHALL NOT be editable and SHALL NOT introduce any `chat`-specific configuration key.
+
+No theme toggle, language switcher, or per-vault override section SHALL be present. Sub-labels under fields SHALL NOT promise features absent from v1. The PII on-hit field SHALL display copy stating that Critical-severity matches are always masked regardless of this setting (the security floor cannot be disabled from the UI). The Quiz content verify and Goal content verify toggles SHALL each display copy stating that enabling them incurs additional verify/repair agent spawns.
+
+The `save_global_config` IPC SHALL preserve every known and unknown subkey under any namespace it does not exclusively own. In particular, when enriching the `quiz` namespace with the resolved `default_length`, the IPC SHALL merge into the existing `quiz` object rather than replace it, so sibling keys (e.g. `quiz.content_verify`) set by the Settings UI survive a save→load round-trip. Unknown top-level YAML sections SHALL likewise continue to round-trip unchanged.
 
 #### Scenario: Modal opens from Lobby gear
 
@@ -394,6 +401,33 @@ No additional fields SHALL be present in v1 (no theme toggle, no language switch
 - **WHEN** the Settings modal renders the PII scanner field
 - **THEN** the displayed pattern count is read at runtime from the active scanner registry (not hard-coded in the UI source)
 
+#### Scenario: PII on-hit field states the Critical security floor
+
+- **WHEN** the Settings modal renders the PII on-hit policy field
+- **THEN** the field displays selectable values `warn`, `skip`, `mask` AND visible copy stating that Critical-severity matches are always masked regardless of the selected value
+
+#### Scenario: Content verify toggles state their cost
+
+- **WHEN** the Settings modal renders the Quiz content verify and Goal content verify toggles
+- **THEN** each toggle displays copy stating that enabling it incurs additional verify/repair agent spawns
+
+#### Scenario: Invalid extra PII pattern blocks save
+
+- **WHEN** the user enters a string that is not a valid regular expression into the PII extra patterns list
+- **THEN** the field shows an inline error AND the Save button is disabled until the invalid pattern is corrected or removed
+
+#### Scenario: Disabling logging writes sink none
+
+- **GIVEN** `~/.codebus/config.yaml` has no `log` section
+- **WHEN** the user activates the disable-logging control in the Log sink field and clicks Save
+- **THEN** `~/.codebus/config.yaml` contains `log:` with `sink: none` after save
+
+#### Scenario: Chat row is read-only and mirrors query
+
+- **GIVEN** the `query` verb resolves to model `haiku-4-5` and effort `low`
+- **WHEN** the user opens the Settings modal Endpoint Section
+- **THEN** a non-editable `chat` row displays "沿用 query（haiku-4-5 / low）" AND no `chat` key is written to `~/.codebus/config.yaml` on save
+
 #### Scenario: Save persists atomically
 
 - **WHEN** the user changes any field and clicks Save
@@ -404,6 +438,43 @@ No additional fields SHALL be present in v1 (no theme toggle, no language switch
 - **GIVEN** `~/.codebus/config.yaml` has `app.quiz.pass_threshold: 80`
 - **WHEN** the user opens Settings, changes the threshold slider to 70, and clicks Save
 - **THEN** `~/.codebus/config.yaml` contains `app.quiz.pass_threshold: 70` after save, and reopening Settings shows the slider at 70
+
+#### Scenario: quiz sibling subkeys survive save
+
+- **GIVEN** the in-memory config payload has `quiz.default_length: 7` AND `quiz.content_verify: true`
+- **WHEN** `save_global_config` writes the payload to disk and a subsequent `load_global_config` reads it back
+- **THEN** the reloaded payload still contains `quiz.default_length: 7` AND `quiz.content_verify: true`
+
+
+<!-- @trace
+source: settings-config-frontend
+updated: 2026-05-20
+code:
+  - codebus-core/src/verb/goal.rs
+  - codebus-app/src/components/settings/EndpointSection.tsx
+  - codebus-core/src/git/mod.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-core/src/verb/content_verify.rs
+  - docs/2026-05-14-pii-settings-ui-backlog.md
+  - codebus-core/src/git/nested_repo.rs
+  - codebus-core/src/skill_bundle/mod.rs
+  - docs/2026-05-19-settings-config-coverage-backlog.md
+  - docs/BACKLOG.md
+  - codebus-core/src/config/goal.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
+  - codebus-core/src/verb/mod.rs
+  - codebus-app/src/components/settings/SettingsModal.tsx
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-19-raw-sync-nested-git-leak-backlog.md
+  - codebus-app/src/i18n/messages.ts
+  - codebus-core/src/config/mod.rs
+tests:
+  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/components/settings/EndpointSection.test.tsx
+  - codebus-cli/tests/bins/mock_claude.rs
+  - codebus-cli/tests/goal_flow.rs
+  - codebus-cli/tests/goal_content_verify_cli.rs
+-->
 
 ---
 ### Requirement: AppConfig Namespace Isolation
@@ -630,7 +701,7 @@ The v1 codebus-app SHALL NOT include any of the following:
 #### Scenario: Settings modal has no theme or language controls
 
 - **WHEN** the user opens the Settings modal in any state
-- **THEN** the rendered modal contains exactly the seven fields defined in "Global Settings Modal Field Set" and no theme or language controls
+- **THEN** the rendered modal contains exactly the fields defined in "Global Settings Modal Field Set" plus the CLI Status row and Endpoint Section defined by their own requirements, and no theme or language controls
 
 #### Scenario: No telemetry network calls
 
@@ -639,78 +710,33 @@ The v1 codebus-app SHALL NOT include any of the following:
 
 
 <!-- @trace
-source: v3-app-workspace-goal
-updated: 2026-05-14
+source: settings-config-frontend
+updated: 2026-05-20
 code:
-  - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-core/src/render/banner.rs
-  - codebus-app/src-tauri/gen/schemas/acl-manifests.json
-  - codebus-app/src/components/LoadingOverlay.tsx
-  - codebus-app/src/components/workspace/WikiTree.tsx
-  - codebus-app/src/lib/ipc.ts
-  - docs/2026-05-14-skill-bundles-vault-only-backlog.md
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/capabilities/default.json
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - codebus-app/src/store/route.ts
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - codebus-app/src/components/workspace/RunDetailRunning.tsx
-  - codebus-app/src/components/workspace/ActivityStreamItem.tsx
-  - codebus-app/src/lib/milkdown-wikilink.tsx
-  - codebus-app/src-tauri/src/state/app_state.rs
-  - codebus-app/src/App.tsx
-  - codebus-app/src/components/workspace/RunListItem.tsx
-  - codebus-app/src/components/workspace/RunDetailCancelled.tsx
-  - codebus-cli/src/commands/init.rs
   - codebus-core/src/verb/goal.rs
-  - codebus-app/src/store/goals.ts
-  - codebus-app/src-tauri/gen/schemas/desktop-schema.json
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - codebus-app/src/components/workspace/RunDetailDone.tsx
-  - codebus-app/package.json
-  - codebus-app/src/store/wiki.ts
-  - docs/2026-05-14-git-context-tool-backlog.md
-  - codebus-core/src/verb/fix.rs
-  - codebus-app/src/i18n/messages.ts
-  - codebus-app/src-tauri/gen/schemas/capabilities.json
-  - codebus-app/src-tauri/src/state/active_runs.rs
-  - codebus-app/src/components/workspace/GoalsTab.tsx
-  - codebus-app/src/components/workspace/WorkspaceStub.tsx
-  - codebus-app/src-tauri/gen/schemas/windows-schema.json
-  - codebus-app/src-tauri/src/state/mod.rs
-  - codebus-app/src-tauri/src/ipc/wiki.rs
-  - codebus-app/src/components/workspace/NewGoalModal.tsx
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src-tauri/Cargo.toml
-  - codebus-app/src-tauri/src/lib.rs
+  - codebus-app/src/components/settings/EndpointSection.tsx
+  - codebus-core/src/git/mod.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-core/src/verb/content_verify.rs
+  - docs/2026-05-14-pii-settings-ui-backlog.md
+  - codebus-core/src/git/nested_repo.rs
+  - codebus-core/src/skill_bundle/mod.rs
+  - docs/2026-05-19-settings-config-coverage-backlog.md
   - docs/BACKLOG.md
-  - codebus-app/src/components/workspace/WikiTab.tsx
-  - Cargo.toml
+  - codebus-core/src/config/goal.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
+  - codebus-core/src/verb/mod.rs
+  - codebus-app/src/components/settings/SettingsModal.tsx
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-19-raw-sync-nested-git-leak-backlog.md
+  - codebus-app/src/i18n/messages.ts
+  - codebus-core/src/config/mod.rs
 tests:
-  - codebus-app/src/hooks/useNewVaultShortcut.test.tsx
-  - codebus-app/src/components/workspace/WorkspaceStub.test.tsx
-  - codebus-app/src/lib/milkdown-wikilink.test.tsx
-  - codebus-app/src/components/workspace/RunDetailRunning.test.tsx
-  - codebus-app/src/components/workspace/RunDetailDone.test.tsx
-  - codebus-app/src/hooks/useLobbyDragDrop.test.tsx
-  - codebus-app/src/lib/ipc.test.ts
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-app/src/components/workspace/GoalsTab.test.tsx
-  - codebus-app/src/components/workspace/Workspace.test.tsx
-  - codebus-app/src/store/goals.test.ts
-  - codebus-app/src/components/workspace/RunListItem.test.tsx
-  - codebus-app/src/components/workspace/WikiTab.test.tsx
-  - codebus-app/src/store/wiki.test.ts
-  - codebus-app/src/components/workspace/NewGoalModal.test.tsx
-  - codebus-app/src/test/forbidden-behaviors.test.tsx
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-app/src/store/route.test.ts
-  - codebus-app/src/i18n/workspace.test.ts
-  - codebus-app/src/components/workspace/WikiTree.test.tsx
-  - codebus-app/src/components/lobby/Lobby.test.tsx
-  - codebus-app/src/components/workspace/RunDetailCancelled.test.tsx
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
+  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/components/settings/EndpointSection.test.tsx
+  - codebus-cli/tests/bins/mock_claude.rs
+  - codebus-cli/tests/goal_flow.rs
+  - codebus-cli/tests/goal_content_verify_cli.rs
 -->
 
 ---
