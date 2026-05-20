@@ -126,7 +126,7 @@ CLI 主線 ship 後 app 層 v1 切成主序列 8 條（foundation + A + B + chat
 | ✅ | `quiz-attempt-progress` | Quiz 進度持久化 redesign：不可變 attempt md + sibling `<id>.progress.json` sidecar；history 徽章 / 路由；completed → QuizReview 取代 raw md；重做此份 |
 | ✅ | `fix-quiz-ux-wiring` | 5 項既有缺口（答題/summary 返回鈕 / 已 active Quiz tab 點回 history / 啟動載入 config / 出題數接 `quiz.default_length` clamp / plan-marker 行內前言容忍） |
 | ✅ | `settings-config-frontend` | Settings 把 pii / lint / quiz / goal / log 各 config knob 接到 UI |
-| ⏳ | `v3-app-polish-ship` | Release build / installer / auto-update / icon / E2E test infra / 跨平台 macOS+Linux 驗收 sweep |
+| ⏳ | `v3-app-polish-ship` | Release build / installer / auto-update / icon / E2E test infra / 跨平台 macOS+Linux 驗收 sweep。**2026-05-20 user 明確 deprioritize**：solo dev、無外部 user 階段 release-gate 衛生工作回報低，本條優先序排在 `v3-multi-agentic-provider` 跟其他 feature backlog 之後；待具體 release-blocking 訊號出現（要對外發、要給別人試、deadline）再動 |
 
 ### Stage 4 — 語意層深化（2026-05-19 → 進行中，3 條 ✅）
 
@@ -178,7 +178,7 @@ Goal / quiz 的 trust-agent 模式 ship 後實機看到「agent 自己 validate 
 | Status | Idea | 觸發點 |
 |---|---|---|
 | 💭 | `v3-fix-path-inject` | init 自動注 PATH 進 `.claude/settings.json`，免 user 手動 `cargo install`。等真有 user 抱怨 fix 跑不起來再開 |
-| 💭 | `v3-multi-agentic-provider` | 第二個 provider impl（codex / gemini / 其他）真進來時，先 spike 對方 CLI 的 slash command + toolset gate 機制；驗完才設計 trait surface |
+| 🟢 | `v3-multi-agentic-provider` | **2026-05-20 unblocked** — codex CLI 0.132.0 spike 確認 contract 完整，second-impl 對標條件滿足。**Codex 對映**：`codex exec` ≈ `claude -p`、`--json` ≈ `stream-json`、`--sandbox read-only/workspace-write/danger-full-access` 比 Claude `acceptEdits` 更乾淨、`~/.codex/skills/<name>/SKILL.md` **完全相同 yaml frontmatter + md 格式** 跟 Claude 共用、`resume`/`fork` ≈ `--resume`、有 `.rules` execpolicy + hook system、`--output-schema` 額外加分、token usage 含 `reasoning_output_tokens` 直接對應 codebus 既有 `TokenUsage.reasoning_tokens`。**同日 `agy` 1.0.0 spike 結論不適合**（缺 `--tools` / 無 stream-json / `-p` mode 看不到 agentic tool loop / 帶自己預設 system prompt 打架）。**工程量重估**：約 1-2 週 — 加 `CodexBackend` + `parse_codex_stream_line` + skill bundle 雙寫（`.codebus/.claude/skills/` + `.codebus/.codex/skills/`）+ config schema 加 codex profile + `agent::invoke` routing。校準：之前說「codebus 在 v3-run-log-events 已 normalized、卡的是對方缺 contract」是對的，agy spike 印證；codex spike 找到合格 second-impl，整合 viable。詳見 [`docs/2026-05-14-multi-provider-agent-backend-backlog.md`](2026-05-14-multi-provider-agent-backend-backlog.md) 2026-05-20 更新段 |
 | 💭 | `v3-multi-pii-provider` | 補強現有 regex_basic：Microsoft Presidio HTTP / AWS Comprehend Detect-PII / 自訂 ML scanner |
 | 💭 | `v3-embedded-search` | 對 wiki pages 跑 embedding / vector index 提供 semantic search（補強 `query` 或開新 `codebus search` verb） |
 | 💭 | `v3-first-run-wizard` | 第一次跑偵測 `~/.codebus/config.yaml` 不存在 → 互動引導選 AI / PII / log 設定。依賴上面四條都有實際選項可選才有意義 |

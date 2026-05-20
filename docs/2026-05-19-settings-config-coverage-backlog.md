@@ -4,7 +4,7 @@
 **Surfaced during:** roadmap review，user 要求窮舉所有 config 並對齊 app Settings 露出狀況
 **Severity:** UX gap（設定不透明 / 部分 knob 無 GUI 入口）
 **Owner:** harry
-**Status:** discussed 2026-05-19 → 切 2 條 change（見下方「討論結論」）
+**Status:** Change 1 ✅ ship（`settings-config-frontend`, 2026-05-20）；Change 2 todo（user 2026-05-20 確認要做：「便宜出 + 貴審」motivation 成立）
 
 ---
 
