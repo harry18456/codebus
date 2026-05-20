@@ -41,6 +41,13 @@ pub enum Verb {
     /// section would be scope creep with no v1 user-visible benefit
     /// (mirrors the `Chat` rationale above).
     Quiz,
+    /// verify-stage-independent-model: content-verify spawn for both
+    /// quiz and goal verbs. Unlike `Chat` and `Quiz` which reuse the
+    /// `Query` sub-block, `Verb::Verify` resolves directly to the
+    /// dedicated `system.verify` / `azure.verify` config sub-block —
+    /// no fallback to query or any other verb. This enables the
+    /// "cheap generation + expensive verification" cost pattern.
+    Verify,
 }
 
 /// A verb's resolved settings: `model` is the value to pass to `claude
@@ -68,6 +75,9 @@ impl ClaudeCodeConfig {
                     Verb::Chat => &self.system.query,
                     // v3-app-quiz: quiz reuses query settings (read-only).
                     Verb::Quiz => &self.system.query,
+                    // verify-stage-independent-model: verify resolves to
+                    // its own dedicated sub-block, NOT a fallback.
+                    Verb::Verify => &self.system.verify,
                 };
                 ResolvedVerb {
                     model: Some(v.model.to_cli_flag().to_string()),
@@ -85,6 +95,7 @@ impl ClaudeCodeConfig {
                     Verb::Fix => &az.fix,
                     Verb::Chat => &az.query,
                     Verb::Quiz => &az.query,
+                    Verb::Verify => &az.verify,
                 };
                 ResolvedVerb {
                     model: Some(v.model.clone()),
@@ -214,7 +225,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = write_yaml(
             tmp.path(),
-            "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5,    effort: low }\n    fix:   { model: sonnet-4-6,   effort: medium }\n",
+            "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n",
         );
         let cfg = load_claude_code_config(&p).unwrap();
         let resolved = cfg.resolve(Verb::Goal);
@@ -232,11 +243,85 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = write_yaml(
             tmp.path(),
-            "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: claude-opus-4-6-2026V2, effort: high }\n    query: { model: dep-haiku, effort: low }\n    fix:   { model: dep-sonnet, effort: medium }\n",
+            "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: claude-opus-4-6-2026V2, effort: high   }\n    query:  { model: dep-haiku,              effort: low    }\n    fix:    { model: dep-sonnet,             effort: medium }\n    verify: { model: claude-opus-4-6-2026V2, effort: high   }\n",
         );
         let cfg = load_claude_code_config(&p).unwrap();
         let resolved = cfg.resolve(Verb::Goal);
         assert_eq!(resolved.model.as_deref(), Some("claude-opus-4-6-2026V2"));
+    }
+
+    // === verify-stage-independent-model task 1.2 (RED) ===
+    //
+    // `Verb::Verify` SHALL resolve directly to `system.verify` (or
+    // `azure.verify`), independent of the active profile's other verbs.
+    // It MUST NOT fall back to query or any other verb's sub-block —
+    // unlike `Verb::Chat` and `Verb::Quiz` which by design reuse the
+    // query sub-block.
+
+    /// Spec: Endpoint Profile Schema — `Verb::Verify` resolves to system.verify
+    /// in the active=system profile, distinct from query/goal/fix/quiz.
+    #[test]
+    fn system_profile_resolve_verify_uses_verify_block() {
+        let tmp = TempDir::new().unwrap();
+        let p = write_yaml(
+            tmp.path(),
+            "claude_code:\n  active: system\n  system:\n    goal:   { model: sonnet-4-6, effort: medium }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n",
+        );
+        let cfg = load_claude_code_config(&p).unwrap();
+        let verify = cfg.resolve(Verb::Verify);
+        assert_eq!(
+            verify.model.as_deref(),
+            Some("claude-opus-4-6"),
+            "Verb::Verify must resolve to system.verify, not query/goal/fix"
+        );
+        assert_eq!(verify.effort.as_deref(), Some("high"));
+
+        // Sanity: query/goal/fix unaffected (no leaking from verify).
+        assert_eq!(
+            cfg.resolve(Verb::Query).model.as_deref(),
+            Some("claude-haiku-4-5")
+        );
+        assert_eq!(
+            cfg.resolve(Verb::Goal).model.as_deref(),
+            Some("claude-sonnet-4-6")
+        );
+    }
+
+    /// Spec: Endpoint Profile Schema — `Verb::Verify` resolves to azure.verify
+    /// verbatim (deployment name passthrough) when active=azure.
+    #[test]
+    fn azure_profile_resolve_verify_uses_verify_block_verbatim() {
+        let tmp = TempDir::new().unwrap();
+        let p = write_yaml(
+            tmp.path(),
+            "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: dep-sonnet, effort: medium }\n    query:  { model: dep-haiku,  effort: low    }\n    fix:    { model: dep-sonnet, effort: medium }\n    verify: { model: dep-opus-deep, effort: high }\n",
+        );
+        let cfg = load_claude_code_config(&p).unwrap();
+        let verify = cfg.resolve(Verb::Verify);
+        assert_eq!(
+            verify.model.as_deref(),
+            Some("dep-opus-deep"),
+            "azure mode passes the deployment name verbatim"
+        );
+        assert_eq!(verify.effort.as_deref(), Some("high"));
+    }
+
+    /// Regression: `Verb::Verify` SHALL NOT fall back to query (unlike Chat/Quiz)
+    /// when verify and query have different values.
+    #[test]
+    fn resolve_verify_does_not_fall_back_to_query() {
+        let tmp = TempDir::new().unwrap();
+        let p = write_yaml(
+            tmp.path(),
+            "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-7,   effort: high   }\n",
+        );
+        let cfg = load_claude_code_config(&p).unwrap();
+        let verify = cfg.resolve(Verb::Verify);
+        let query = cfg.resolve(Verb::Query);
+        assert_ne!(
+            verify.model, query.model,
+            "Verb::Verify must NOT inherit from Verb::Query"
+        );
     }
 
     /// Legacy schema → returns defaults, file unchanged.
@@ -316,6 +401,10 @@ mod tests {
                     model: "dep-sonnet".into(),
                     effort: "medium".into(),
                 },
+                verify: crate::config::endpoint::AzureVerbConfig {
+                    model: "dep-opus".into(),
+                    effort: "high".into(),
+                },
             }),
         };
         let env = build_env_overrides(&cfg).expect("env fallback satisfies key");
@@ -364,6 +453,10 @@ mod tests {
                     model: "dep-sonnet".into(),
                     effort: "medium".into(),
                 },
+                verify: crate::config::endpoint::AzureVerbConfig {
+                    model: "dep-opus".into(),
+                    effort: "high".into(),
+                },
             }),
         };
         let err = build_env_overrides(&cfg).expect_err("must fail with EndpointKeyMissing");
@@ -386,7 +479,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = write_yaml(
             tmp.path(),
-            "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-7, effort: high }\n    query: { model: haiku-4-5,    effort: low }\n    fix:   { model: sonnet-4-6,   effort: medium }\n",
+            "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-7,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n",
         );
         let cfg = load_claude_code_config(&p).unwrap();
         assert_eq!(cfg.system.goal.model, SystemModel::Opus4_7);

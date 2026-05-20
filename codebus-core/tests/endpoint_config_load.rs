@@ -67,7 +67,7 @@ fn legacy_schema_warns_without_rewrite() {
 fn new_schema_load_emits_no_warning() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("config.yaml");
-    let body = "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5,  effort: low }\n    fix:   { model: sonnet-4-6, effort: medium }\n";
+    let body = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n";
     fs::write(&path, body).unwrap();
 
     let mut sink: Vec<u8> = Vec::new();

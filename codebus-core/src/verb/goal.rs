@@ -298,6 +298,11 @@ pub fn run_goal(
 
     // Step 7: resolve goal verb config + build env overrides.
     let goal_resolved = cc_cfg.resolve(Verb::Goal);
+    // verify-stage-independent-model: dedicated resolution for the
+    // content-verify spawn (see spec `verb-library` `Goal Content
+    // Verification and Repair`). Repair / main / RunLog all stay on
+    // `goal_resolved` — only the verify closure uses this.
+    let verify_resolved = cc_cfg.resolve(Verb::Verify);
     let goal_env =
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
@@ -460,13 +465,16 @@ pub fn run_goal(
                         goal_text,
                         pages.join("\n")
                     );
+                    // verify-stage-independent-model: verify spawn uses
+                    // `Verb::Verify` resolved settings, NOT `Verb::Goal`.
+                    // Repair spawn below keeps `goal_resolved`.
                     let vtext = match run_goal_spawn(
                         &mut **fan_cell.borrow_mut(),
                         prompt,
                         paths.root.clone(),
                         GOAL_VERIFY_TOOLSET,
-                        goal_resolved.model.clone(),
-                        goal_resolved.effort.clone(),
+                        verify_resolved.model.clone(),
+                        verify_resolved.effort.clone(),
                         cv_env.clone(),
                         cancel.clone(),
                     ) {

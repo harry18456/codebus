@@ -46,7 +46,7 @@ fn setup_home_with_service(service: &str) -> TempDir {
     let cfg_dir = home.path().join(".codebus");
     std::fs::create_dir_all(&cfg_dir).unwrap();
     let body = format!(
-        "claude_code:\n  active: system\n  system:\n    goal:  {{ model: opus-4-6,   effort: high }}\n    query: {{ model: haiku-4-5,  effort: low }}\n    fix:   {{ model: sonnet-4-6, effort: medium }}\n  azure:\n    base_url: https://placeholder.example.com/anthropic\n    keyring_service: {service}\n    goal:  {{ model: dep-opus, effort: high }}\n    query: {{ model: dep-haiku, effort: low }}\n    fix:   {{ model: dep-sonnet, effort: medium }}\n",
+        "claude_code:\n  active: system\n  system:\n    goal:   {{ model: opus-4-6,   effort: high   }}\n    query:  {{ model: haiku-4-5,  effort: low    }}\n    fix:    {{ model: sonnet-4-6, effort: medium }}\n    verify: {{ model: opus-4-6,   effort: high   }}\n  azure:\n    base_url: https://placeholder.example.com/anthropic\n    keyring_service: {service}\n    goal:   {{ model: dep-opus,   effort: high   }}\n    query:  {{ model: dep-haiku,  effort: low    }}\n    fix:    {{ model: dep-sonnet, effort: medium }}\n    verify: {{ model: dep-opus,   effort: high   }}\n",
     );
     std::fs::write(cfg_dir.join("config.yaml"), body).unwrap();
     home
@@ -175,7 +175,7 @@ fn config_parse_failure_aborts_delete_without_touching_keyring() {
     let cfg_dir = home.path().join(".codebus");
     std::fs::create_dir_all(&cfg_dir).unwrap();
     let broken = format!(
-        "claude_code:\n  active: system\n  system:\n    goal:  {{ model: opus-4-6,   effort: high }}\n    query: {{ model: haiku-4-5,  effort: low }}\n    fix:   {{ model: sonnet-4-6, effort: medium }}\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: {service}\n    goal:  {{ model: dep-opus, effort: high }}\n    query: {{ model: dep-haiku, effort: low }}\n    fix:   {{ model: dep-sonnet, effort: medium }}\npii\n  scanner: regex_basic\n",
+        "claude_code:\n  active: system\n  system:\n    goal:   {{ model: opus-4-6,   effort: high   }}\n    query:  {{ model: haiku-4-5,  effort: low    }}\n    fix:    {{ model: sonnet-4-6, effort: medium }}\n    verify: {{ model: opus-4-6,   effort: high   }}\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: {service}\n    goal:   {{ model: dep-opus,   effort: high   }}\n    query:  {{ model: dep-haiku,  effort: low    }}\n    fix:    {{ model: dep-sonnet, effort: medium }}\n    verify: {{ model: dep-opus,   effort: high   }}\npii\n  scanner: regex_basic\n",
     );
     std::fs::write(cfg_dir.join("config.yaml"), broken).unwrap();
 

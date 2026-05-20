@@ -89,12 +89,18 @@ pub struct SystemVerbConfig {
     pub effort: String,
 }
 
-/// Three verb settings (goal / query / fix) under the system profile.
+/// Four verb settings (goal / query / fix / verify) under the system profile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemProfile {
     pub goal: SystemVerbConfig,
     pub query: SystemVerbConfig,
     pub fix: SystemVerbConfig,
+    /// verify-stage-independent-model: dedicated sub-block for the
+    /// content-verify spawn of quiz / goal verbs. Required in active
+    /// profile (see `Endpoint Profile Schema` spec). Default value is
+    /// `opus-4-6 / high` — strongest reasoning model + highest effort —
+    /// reflecting the "expensive verification" design intent.
+    pub verify: SystemVerbConfig,
 }
 
 impl Default for SystemProfile {
@@ -111,6 +117,10 @@ impl Default for SystemProfile {
             fix: SystemVerbConfig {
                 model: SystemModel::Sonnet4_6,
                 effort: "medium".into(),
+            },
+            verify: SystemVerbConfig {
+                model: SystemModel::Opus4_6,
+                effort: "high".into(),
             },
         }
     }
@@ -135,6 +145,9 @@ pub struct AzureProfile {
     pub goal: AzureVerbConfig,
     pub query: AzureVerbConfig,
     pub fix: AzureVerbConfig,
+    /// verify-stage-independent-model: dedicated sub-block for the
+    /// content-verify spawn (mirrors `SystemProfile::verify`).
+    pub verify: AzureVerbConfig,
 }
 
 /// The full `claude_code` config block, parsed and validated. The active
@@ -197,6 +210,8 @@ pub(super) struct RawSystemProfile {
     pub query: Option<SystemVerbConfig>,
     #[serde(default)]
     pub fix: Option<SystemVerbConfig>,
+    #[serde(default)]
+    pub verify: Option<SystemVerbConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,6 +226,8 @@ pub(super) struct RawAzureProfile {
     pub query: Option<AzureVerbConfig>,
     #[serde(default)]
     pub fix: Option<AzureVerbConfig>,
+    #[serde(default)]
+    pub verify: Option<AzureVerbConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -287,13 +304,24 @@ fn validate_system_profile(
                     "claude_code.system.fix: required when active=system",
                 ))
             })?;
-            Ok(SystemProfile { goal, query, fix })
+            let verify = raw.verify.ok_or_else(|| {
+                ConfigLoadError::YamlParse(serde_yaml::Error::custom(
+                    "claude_code.system.verify: required when active=system",
+                ))
+            })?;
+            Ok(SystemProfile {
+                goal,
+                query,
+                fix,
+                verify,
+            })
         }
         (ActiveProfile::Azure, None) => Ok(SystemProfile::default()),
         (ActiveProfile::Azure, Some(raw)) => Ok(SystemProfile {
             goal: raw.goal.unwrap_or(SystemProfile::default().goal),
             query: raw.query.unwrap_or(SystemProfile::default().query),
             fix: raw.fix.unwrap_or(SystemProfile::default().fix),
+            verify: raw.verify.unwrap_or(SystemProfile::default().verify),
         }),
     }
 }
@@ -313,19 +341,24 @@ fn validate_azure_profile(
             let goal = require_azure_verb(raw.goal, "claude_code.azure.goal")?;
             let query = require_azure_verb(raw.query, "claude_code.azure.query")?;
             let fix = require_azure_verb(raw.fix, "claude_code.azure.fix")?;
+            let verify = require_azure_verb(raw.verify, "claude_code.azure.verify")?;
             Ok(Some(AzureProfile {
                 base_url,
                 keyring_service,
                 goal,
                 query,
                 fix,
+                verify,
             }))
         }
         (ActiveProfile::System, None) => Ok(None),
         // Non-active azure block: keep as cold storage. base_url /
         // keyring_service may be missing — we deliberately do NOT
         // construct an `AzureProfile` (which would require them) and
-        // instead return None so the caller can ignore it.
+        // instead return None so the caller can ignore it. All four
+        // verb sub-blocks (incl. verify) must be present to qualify
+        // for cold-storage preservation; partial verb blocks are
+        // dropped silently.
         (ActiveProfile::System, Some(raw)) => {
             match (
                 raw.base_url,
@@ -333,16 +366,23 @@ fn validate_azure_profile(
                 raw.goal,
                 raw.query,
                 raw.fix,
+                raw.verify,
             ) {
-                (Some(base_url), Some(keyring_service), Some(goal), Some(query), Some(fix))
-                    if !base_url.is_empty() && !keyring_service.is_empty() =>
-                {
+                (
+                    Some(base_url),
+                    Some(keyring_service),
+                    Some(goal),
+                    Some(query),
+                    Some(fix),
+                    Some(verify),
+                ) if !base_url.is_empty() && !keyring_service.is_empty() => {
                     Ok(Some(AzureProfile {
                         base_url,
                         keyring_service,
                         goal,
                         query,
                         fix,
+                        verify,
                     }))
                 }
                 _ => Ok(None),
@@ -434,7 +474,7 @@ mod tests {
     /// Spec: Endpoint Profile Schema — full system profile loads.
     #[test]
     fn system_profile_loads_with_all_three_verbs() {
-        let yaml = "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5,    effort: low }\n    fix:   { model: sonnet-4-6,   effort: medium }\n";
+        let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n";
         let outcome = parse_claude_code_yaml(yaml).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
@@ -470,7 +510,7 @@ mod tests {
     /// Spec: Endpoint Profile Schema — full azure profile loads.
     #[test]
     fn azure_profile_loads_with_required_fields() {
-        let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://example.cognitiveservices.azure.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: dep-opus, effort: high }\n    query: { model: dep-haiku, effort: low }\n    fix:   { model: dep-sonnet, effort: medium }\n";
+        let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://example.cognitiveservices.azure.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: dep-opus,   effort: high   }\n    query:  { model: dep-haiku,  effort: low    }\n    fix:    { model: dep-sonnet, effort: medium }\n    verify: { model: dep-opus,   effort: high   }\n";
         let outcome = parse_claude_code_yaml(yaml).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
@@ -510,7 +550,7 @@ mod tests {
     /// Spec: Endpoint Profile Schema — non-active profile may be absent.
     #[test]
     fn non_active_profile_may_be_absent() {
-        let yaml = "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5,    effort: low }\n    fix:   { model: sonnet-4-6,   effort: medium }\n";
+        let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n";
         // No azure block at all → still valid.
         let outcome = parse_claude_code_yaml(yaml).unwrap();
         assert!(matches!(outcome, ParseOutcome::New(_)));
@@ -522,7 +562,7 @@ mod tests {
         // active=system; azure block present but missing keyring_service.
         // codebus does not validate; it just drops the partial profile to
         // None so the caller never sees half-populated state.
-        let yaml = "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5,    effort: low }\n    fix:   { model: sonnet-4-6,   effort: medium }\n  azure:\n    base_url: https://e.example.com/anthropic\n    goal: { model: dep-opus, effort: high }\n";
+        let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n  azure:\n    base_url: https://e.example.com/anthropic\n    goal: { model: dep-opus, effort: high }\n";
         let outcome = parse_claude_code_yaml(yaml).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
@@ -532,12 +572,87 @@ mod tests {
         assert!(cfg.azure.is_none());
     }
 
+    // === verify-stage-independent-model task 1.1 (RED) ===
+    //
+    // `Endpoint Profile Schema` requirement now lists `verify` as a fourth
+    // required verb sub-block (alongside goal / query / fix). Active-profile
+    // yaml without it MUST be rejected; non-active profile yaml MAY omit it
+    // (cold storage tolerance preserved).
+
+    /// Spec: Endpoint Profile Schema — active=system but system.verify missing rejected.
+    #[test]
+    fn active_system_with_missing_verify_rejected() {
+        let yaml = "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5, effort: low }\n    fix:   { model: sonnet-4-6, effort: medium }\n";
+        let err =
+            parse_claude_code_yaml(yaml).expect_err("missing system.verify must be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("verify"),
+            "error must mention the verify field path; got: {msg}"
+        );
+    }
+
+    /// Spec: Endpoint Profile Schema — active=azure but azure.verify missing rejected.
+    #[test]
+    fn active_azure_with_missing_verify_rejected() {
+        let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://e.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: dep-opus,   effort: high   }\n    query: { model: dep-haiku,  effort: low    }\n    fix:   { model: dep-sonnet, effort: medium }\n";
+        let err = parse_claude_code_yaml(yaml).expect_err("missing azure.verify must be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("verify"),
+            "error must mention the verify field path; got: {msg}"
+        );
+    }
+
+    /// Spec: Endpoint Profile Schema — non-active profile may omit verify
+    /// (cold storage tolerance preserved). This is a regression guardrail:
+    /// the strict verify requirement applies ONLY to the active profile.
+    #[test]
+    fn non_active_profile_may_omit_verify() {
+        // active=system with full system block (incl. verify); azure
+        // block partial (no verify) — must parse OK.
+        let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6, effort: high }\n    query:  { model: haiku-4-5, effort: low }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6, effort: high }\n  azure:\n    base_url: https://e.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: dep-opus,   effort: high   }\n    query: { model: dep-haiku,  effort: low    }\n    fix:   { model: dep-sonnet, effort: medium }\n";
+        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        assert!(
+            matches!(outcome, ParseOutcome::New(_)),
+            "non-active azure missing verify must NOT block load"
+        );
+    }
+
+    /// Spec: Endpoint Profile Schema — active=system with all four verbs populated (incl. verify).
+    #[test]
+    fn system_profile_loads_with_all_four_verbs_including_verify() {
+        let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6, effort: high }\n    query:  { model: haiku-4-5, effort: low }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6, effort: high }\n";
+        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let cfg = match outcome {
+            ParseOutcome::New(cfg) => cfg,
+            other => panic!("expected New, got {other:?}"),
+        };
+        assert_eq!(cfg.active, ActiveProfile::System);
+        assert_eq!(cfg.system.verify.model, SystemModel::Opus4_6);
+        assert_eq!(cfg.system.verify.effort, "high");
+    }
+
+    /// Spec: Endpoint Profile Schema — active=azure with all four verbs populated (incl. verify).
+    #[test]
+    fn azure_profile_loads_with_all_four_verbs_including_verify() {
+        let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://e.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: dep-opus,   effort: high   }\n    query:  { model: dep-haiku,  effort: low    }\n    fix:    { model: dep-sonnet, effort: medium }\n    verify: { model: dep-opus,   effort: high   }\n";
+        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let cfg = match outcome {
+            ParseOutcome::New(cfg) => cfg,
+            other => panic!("expected New, got {other:?}"),
+        };
+        let az = cfg.azure.expect("azure populated when active=azure");
+        assert_eq!(az.verify.model, "dep-opus");
+        assert_eq!(az.verify.effort, "high");
+    }
+
     // === Active selector default ===
 
     /// Spec: Endpoint Profile Schema — `active` defaults to system when absent.
     #[test]
     fn active_defaults_to_system_when_unspecified() {
-        let yaml = "claude_code:\n  system:\n    goal:  { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5,    effort: low }\n    fix:   { model: sonnet-4-6,   effort: medium }\n";
+        let yaml = "claude_code:\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n";
         let outcome = parse_claude_code_yaml(yaml).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
@@ -575,7 +690,7 @@ mod tests {
         /// the user gets a 404 at runtime, which is the correct signal.
         #[test]
         fn system_alias_literal_is_not_translated_in_azure() {
-            let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: opus-4-6, effort: high }\n    query: { model: opus-4-6, effort: low }\n    fix:   { model: opus-4-6, effort: medium }\n";
+            let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: opus-4-6, effort: high   }\n    query:  { model: opus-4-6, effort: low    }\n    fix:    { model: opus-4-6, effort: medium }\n    verify: { model: opus-4-6, effort: high   }\n";
             let outcome = parse_claude_code_yaml(yaml).unwrap();
             let cfg = match outcome {
                 ParseOutcome::New(c) => c,
@@ -591,7 +706,7 @@ mod tests {
         /// preserved verbatim across the round-trip.
         #[test]
         fn long_azure_deployment_name_preserved_verbatim() {
-            let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: claude-opus-4-6-2026V2, effort: high }\n    query: { model: claude-haiku-4-5-2026V2, effort: low }\n    fix:   { model: claude-sonnet-4-6-2026V2, effort: medium }\n";
+            let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: claude-opus-4-6-2026V2,   effort: high   }\n    query:  { model: claude-haiku-4-5-2026V2,  effort: low    }\n    fix:    { model: claude-sonnet-4-6-2026V2, effort: medium }\n    verify: { model: claude-opus-4-6-2026V2,   effort: high   }\n";
             let cfg = match parse_claude_code_yaml(yaml).unwrap() {
                 ParseOutcome::New(c) => c,
                 other => panic!("expected New, got {other:?}"),
@@ -615,7 +730,7 @@ mod tests {
         /// Spec: Azure mode preserves casing exactly (no normalisation).
         #[test]
         fn azure_model_case_preserved() {
-            let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: MyDeployment-Opus-V2, effort: high }\n    query: { model: dep-haiku, effort: low }\n    fix:   { model: dep-sonnet, effort: medium }\n";
+            let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: MyDeployment-Opus-V2, effort: high   }\n    query:  { model: dep-haiku,            effort: low    }\n    fix:    { model: dep-sonnet,           effort: medium }\n    verify: { model: MyDeployment-Opus-V2, effort: high   }\n";
             let cfg = match parse_claude_code_yaml(yaml).unwrap() {
                 ParseOutcome::New(c) => c,
                 other => panic!("expected New, got {other:?}"),

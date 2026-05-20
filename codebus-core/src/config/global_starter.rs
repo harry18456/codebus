@@ -98,6 +98,15 @@ claude_code:
       # Lint-and-edit loop — balanced choice.
       model: sonnet-4-6
       effort: medium
+    verify:
+      # Content-verify spawn for quiz / goal verbs — judges whether the
+      # generated content is grounded in the source mirror / planned pages.
+      # Defaults to opus-4-6 + high effort: the "expensive verification"
+      # half of the "cheap generation + expensive verification" pattern.
+      # Override to haiku-4-5 + low if you want verify to share the cheap
+      # profile of your main spawn (defeats the cost design but valid).
+      model: opus-4-6
+      effort: high
 
   # Uncomment + fill in to use Azure endpoints. Run
   #   codebus config set-key azure
@@ -105,9 +114,10 @@ claude_code:
   # azure:
   #   base_url: https://<your-resource>.cognitiveservices.azure.com/anthropic
   #   keyring_service: codebus-azure
-  #   goal:  { model: <your-opus-deployment-name>,   effort: high   }
-  #   query: { model: <your-haiku-deployment-name>,  effort: low    }
-  #   fix:   { model: <your-sonnet-deployment-name>, effort: medium }
+  #   goal:   { model: <your-opus-deployment-name>,   effort: high   }
+  #   query:  { model: <your-haiku-deployment-name>,  effort: low    }
+  #   fix:    { model: <your-sonnet-deployment-name>, effort: medium }
+  #   verify: { model: <your-opus-deployment-name>,   effort: high   }
 
 # Lint subsystem.
 lint:

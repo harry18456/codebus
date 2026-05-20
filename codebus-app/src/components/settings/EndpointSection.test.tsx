@@ -19,6 +19,7 @@ function defaultBlock(): ClaudeCodeBlock {
       goal: { model: "opus-4-6", effort: "high" },
       query: { model: "haiku-4-5", effort: "low" },
       fix: { model: "sonnet-4-6", effort: "medium" },
+      verify: { model: "opus-4-6", effort: "high" },
     },
     azure: null,
   }
@@ -213,6 +214,7 @@ describe("EndpointSection", () => {
       goal: { model: "dep-x", effort: "high" },
       query: { model: "dep-y", effort: "low" },
       fix: { model: "dep-z", effort: "medium" },
+      verify: { model: "dep-x", effort: "high" },
     }
     render(<EndpointSection claudeCode={block} onChange={() => {}} />)
     fireEvent.click(screen.getByTestId("azure-effort-goal"))
@@ -240,6 +242,7 @@ describe("EndpointSection", () => {
       goal: { model: "dep-x", effort: "high" },
       query: { model: "dep-y", effort: "low" },
       fix: { model: "dep-z", effort: "extreme" },
+      verify: { model: "dep-x", effort: "high" },
     }
     render(
       <EndpointSection
@@ -387,6 +390,77 @@ describe("EndpointSection", () => {
     // Only the initial get_endpoint_key call SHALL have happened; no set.
     const calls = mockedInvoke.mock.calls.map((c) => c[0])
     expect(calls).not.toContain("set_endpoint_key")
+  })
+
+  // --- verify-stage-independent-model task 6.1 (RED) ---
+  // The `verify` verb row SHALL render as a fourth editable row (alongside
+  // goal / query / fix) per spec `app-shell` `Settings UI Endpoint
+  // Section` (modified to "four verb rows"). Behavior must mirror the
+  // existing three rows: 4 model options, 6 effort options, aria-invalid
+  // wiring, Save gate.
+
+  describe("verify editable row (verify-stage-independent-model)", () => {
+    it("renders an editable verify row in the system profile sub-section", () => {
+      render(<EndpointSection claudeCode={defaultBlock()} onChange={() => {}} />)
+      expect(screen.getByTestId("system-model-verify")).toBeInTheDocument()
+      expect(screen.getByTestId("system-effort-verify")).toBeInTheDocument()
+    })
+
+    it("renders an azure deployment-name input + effort select for verify", () => {
+      const block = defaultBlock()
+      block.active = "azure"
+      block.azure = {
+        base_url: "https://x.example.com/anthropic",
+        keyring_service: "codebus-azure",
+        goal: { model: "dep-x", effort: "high" },
+        query: { model: "dep-y", effort: "low" },
+        fix: { model: "dep-z", effort: "medium" },
+        verify: { model: "dep-x", effort: "high" },
+      }
+      render(<EndpointSection claudeCode={block} onChange={() => {}} />)
+      expect(screen.getByTestId("azure-deployment-verify")).toBeInTheDocument()
+      expect(screen.getByTestId("azure-effort-verify")).toBeInTheDocument()
+    })
+
+    it("verify model dropdown lists exactly four versioned options", async () => {
+      render(<EndpointSection claudeCode={defaultBlock()} onChange={() => {}} />)
+      fireEvent.click(screen.getByTestId("system-model-verify"))
+      await waitFor(() => {
+        expect(screen.getByRole("option", { name: "opus-4-6" })).toBeInTheDocument()
+      })
+      for (const opt of ["opus-4-7", "opus-4-6", "haiku-4-5", "sonnet-4-6"]) {
+        expect(screen.getByRole("option", { name: opt })).toBeInTheDocument()
+      }
+    })
+
+    it("flags aria-invalid when azure verify deployment is empty", () => {
+      const block = defaultBlock()
+      block.active = "azure"
+      block.azure = {
+        base_url: "https://x.example.com/anthropic",
+        keyring_service: "codebus-azure",
+        goal: { model: "dep-x", effort: "high" },
+        query: { model: "dep-y", effort: "low" },
+        fix: { model: "dep-z", effort: "medium" },
+        verify: { model: "", effort: "high" },
+      }
+      render(
+        <EndpointSection
+          claudeCode={block}
+          onChange={() => {}}
+          errors={[
+            {
+              field: "claude_code.azure.verify.model",
+              message: "verify deployment name is required when active=azure",
+            },
+          ]}
+        />,
+      )
+      expect(screen.getByTestId("azure-deployment-verify")).toHaveAttribute(
+        "aria-invalid",
+        "true",
+      )
+    })
   })
 
   describe("chat read-only row (settings-config-frontend)", () => {

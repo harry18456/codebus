@@ -174,6 +174,15 @@ export interface SystemProfile {
   goal: SystemVerb
   query: SystemVerb
   fix: SystemVerb
+  /**
+   * `verify-stage-independent-model`: dedicated sub-block for the
+   * content-verify spawn shared by quiz and goal verbs. Required in
+   * the active profile (see spec `claude-code-config` `Endpoint
+   * Profile Schema`). Default is `opus-4-6 / high` — strongest
+   * reasoning model + highest effort, encoding the "expensive
+   * verification" design intent.
+   */
+  verify: SystemVerb
 }
 
 export interface AzureProfile {
@@ -182,6 +191,13 @@ export interface AzureProfile {
   goal: AzureVerb
   query: AzureVerb
   fix: AzureVerb
+  /**
+   * `verify-stage-independent-model`: azure-side mirror of
+   * `SystemProfile.verify` — the deployment name + effort used by
+   * the content-verify spawn when `active === "azure"`. Required
+   * in active profile.
+   */
+  verify: AzureVerb
 }
 
 export interface ClaudeCodeBlock {
@@ -198,6 +214,7 @@ export const SYSTEM_PROFILE_DEFAULTS: SystemProfile = {
   goal: { model: "opus-4-6", effort: "high" },
   query: { model: "haiku-4-5", effort: "low" },
   fix: { model: "sonnet-4-6", effort: "medium" },
+  verify: { model: "opus-4-6", effort: "high" },
 }
 
 /**
@@ -245,7 +262,7 @@ export function validateClaudeCodeBlock(
         message: "keyring_service is required when active=azure",
       })
     }
-    for (const verb of ["goal", "query", "fix"] as const) {
+    for (const verb of ["goal", "query", "fix", "verify"] as const) {
       if (!az[verb].model.trim()) {
         errors.push({
           field: `claude_code.azure.${verb}.model`,
@@ -257,7 +274,7 @@ export function validateClaudeCodeBlock(
   // Effort enum check applies to BOTH profiles regardless of `active`
   // so cold-storage values cannot silently carry a legacy / non-enum
   // value through Save (spec `Settings UI Endpoint Section`).
-  for (const verb of ["goal", "query", "fix"] as const) {
+  for (const verb of ["goal", "query", "fix", "verify"] as const) {
     if (!isSystemEffort(block.system[verb].effort)) {
       errors.push({
         field: `claude_code.system.${verb}.effort`,
@@ -266,7 +283,7 @@ export function validateClaudeCodeBlock(
     }
   }
   if (block.azure) {
-    for (const verb of ["goal", "query", "fix"] as const) {
+    for (const verb of ["goal", "query", "fix", "verify"] as const) {
       if (!isSystemEffort(block.azure[verb].effort)) {
         errors.push({
           field: `claude_code.azure.${verb}.effort`,

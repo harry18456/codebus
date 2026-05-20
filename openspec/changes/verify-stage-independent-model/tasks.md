@@ -1,0 +1,37 @@
+## 1. Config schema 擴增（codebus-core）
+
+- [x] 1.1 在 `codebus-core/src/config/endpoint.rs` 加 parse tests 鎖定 `Endpoint Profile Schema` 新增的 verify 必填行為：active=system + system.verify 缺 → `ConfigLoadError::YamlParse` 含 field path、active=azure + azure.verify 缺 → 同錯誤、active=system + 只缺 azure.verify → 解析成功（cold storage 寬鬆）；測試**初始狀態 FAIL**（因 RawSystemProfile / RawAzureProfile / validate_system_profile / validate_azure_profile 都尚未感知 verify 欄）。Verify: `cargo test --package codebus-core endpoint::tests::verify` 紅燈。
+- [x] 1.2 在 `codebus-core/src/config/claude_code.rs` 加 `resolve(Verb::Verify)` 解析測試：system 與 azure profile 各設不同 verify 子塊，assert 回傳對應的 model 與 effort、且**不會 fallback 到 query 或其他 verb**（落實 design Decision「`Verb::Verify` 變體 + `system.verify` / `azure.verify` config block」）；測試**初始狀態 FAIL**。Verify: `cargo test --package codebus-core claude_code::tests::resolve_verify` 紅燈。
+- [x] 1.3 擴 schema 讓 1.1 + 1.2 全綠：`Verb` enum 加 `Verify` 變體、`SystemProfile` / `AzureProfile` struct 加 `verify` 欄、`RawSystemProfile` / `RawAzureProfile` 加 `Option<…VerbConfig>` 欄、`validate_system_profile` / `validate_azure_profile` 加 require 子句（落實 design Decision「Required in active profile（不採 optional fallback）」），`resolve()` match arm 加 `Verb::Verify => &self.system.verify` / `&az.verify`。Verify: `cargo test --package codebus-core config` 全綠。
+- [x] 1.4 更新 `SystemProfile::default()` 加 `verify: SystemVerbConfig { model: SystemModel::Opus4_6, effort: "high".into() }`（落實 design Decision「預設值 `opus-4-6 / high`」）；現有 default_config_uses_v2_verified_models 等預設值測試自動 cover verify 欄。Verify: `cargo test --package codebus-core config::endpoint::tests::default` 全綠。
+- [x] 1.5 更新 `codebus-core/src/config/global_starter.rs` 的 `STARTER_CONFIG` 常數加 `verify:` 註解區塊（內容與 `SystemProfile::default().verify` 完全 round-trip 對齊），既有 `starter_round_trips_to_defaults` 測試自動驗證；同步更新 starter 內的 azure 註解範例增加 verify 行（保持註解區塊文字與實際 schema 對齊）。Verify: `cargo test --package codebus-core global_starter` 全綠（含 round-trip 測試）。
+
+## 2. Migration doc
+
+- [x] 2.1 新增 `docs/2026-05-20-verify-stage-independent-model-migration.md`，沿用 `docs/2026-05-20-pretooluse-image-block-migration.md` 既有格式：列既有 user 該手動加進 `~/.codebus/config.yaml` 的 verify yaml snippet（system + azure 兩種 active profile 各一份）、明確說明預期 cost 行為（opus-4-6 + high 比 quiz/goal 主 spawn 貴）、提供 re-init（刪檔重跑）替代選項、解釋「為什麼不自動 migrate」（保 write-if-missing byte-identical 契約）。Verify: 文件存在、JSON / yaml snippet 與 STARTER_CONFIG 對齊（manual review）。
+
+## 3. Quiz verify spawn 切換到 `Verb::Verify`
+
+- [x] 3.1 在 `codebus-core/src/verb/quiz.rs` 對應測試檔加單元測試鎖定 `Quiz Content Verification and Repair` requirement 新增的 spawn 模型路由契約：mock cc_cfg 設 `system.quiz.model = haiku-4-5` + `system.verify.model = opus-4-6`，跑 `run_quiz_generate` 觸發 content verify 階段，assert verify spawn 拿到的 model = `claude-opus-4-6`、plan / generate / repair spawn 拿到的 model = `claude-haiku-4-5`；測試**初始狀態 FAIL**（既有 verify closure 仍用 `&resolved` 即 Verb::Quiz）。Verify: `cargo test --package codebus-cli quiz_flow verify_uses_verify_model` 紅燈。
+- [x] 3.2 在 `verb/quiz.rs` 既有 `let resolved = cc_cfg.resolve(Verb::Quiz);` 旁加 `let verify_resolved = cc_cfg.resolve(Verb::Verify);`，content verify closure 內既有 `run_spawn(...., &resolved, ....)` 改為 `run_spawn(...., &verify_resolved, ....)`；落實 design Decision「Verify spawn 切換點：2 處，其他 spawn 全部不動」前半。Verify: 3.1 全綠、既有 quiz_flow 其他測試（plan / generate / repair 行為）仍綠。
+
+## 4. Goal verify spawn 切換到 `Verb::Verify`
+
+- [x] 4.1 在 `codebus-core/src/verb/goal.rs` 對應測試檔加單元測試鎖定 `Goal Content Verification and Repair` requirement 新增的 spawn 模型路由契約：mock cc_cfg 設 `system.goal.model = sonnet-4-6` + `system.verify.model = opus-4-6`，跑 `run_goal` 觸發 content verify 階段，assert verify spawn 拿到的 model = `claude-opus-4-6`、main spawn 與 repair spawn 拿到的 model = `claude-sonnet-4-6`；測試**初始狀態 FAIL**。Verify: `cargo test --package codebus-cli goal_content_verify_cli verify_uses_verify_model` 紅燈。
+- [x] 4.2 在 `verb/goal.rs` 既有 `let goal_resolved = cc_cfg.resolve(Verb::Goal);` 旁加 `let verify_resolved = cc_cfg.resolve(Verb::Verify);`，content verify closure 內既有 `run_goal_spawn(...., goal_resolved.model.clone(), goal_resolved.effort.clone(), ....)` 改為 `run_goal_spawn(...., verify_resolved.model.clone(), verify_resolved.effort.clone(), ....)`；落實 design Decision「Verify spawn 切換點：2 處，其他 spawn 全部不動」後半，**同時落實 design Decision「RunLog 不紀錄 verify model」**——goal main / repair / RunLog metadata（即 `write_run_log` 對應的 `goal_resolved.model.clone()` 兩處）都維持 `goal_resolved` 不切到 verify_resolved，保留「一 verb 一 row」契約；對應的 quiz 端 RunLog 寫入（`write_run_log` 內 model/effort 欄）同樣維持 `resolved`（Verb::Quiz）不動。Verify: 4.1 全綠、既有 goal_flow / goal_content_verify_cli 其他測試仍綠、quiz_flow 對 RunLog model 欄的既有斷言仍記錄 main spawn 的 model（不是 verify）。
+
+## 5. Frontend interface / defaults / i18n
+
+- [x] 5.1 在 `codebus-app/src/lib/ipc.ts` 的 `SystemProfile` 與 `AzureProfile` interface 加 `verify: { model: string; effort: string }` 欄位，落實 design「`ipc.ts` `SystemProfile` / `AzureProfile` interface 加 `verify: { model: string; effort: string }`」；tsc 應立刻在 EndpointSection 等消費端報缺欄錯誤（編譯紅燈是預期）。Verify: `pnpm tsc --noEmit` 或對等指令在後續 task 完成前可能仍紅，但 type 定義到位。
+- [x] 5.2 在 `EndpointSection.tsx`（或對應的 defaults 出口檔）更新 `SYSTEM_PROFILE_DEFAULTS` 加 `verify: { model: "opus-4-6", effort: "high" }`（落實 design「`SYSTEM_PROFILE_DEFAULTS.verify = { model: "opus-4-6", effort: "high" }`」），AzureProfile 對應 defaults 同步加 verify 預設 deployment-name placeholder 與 effort `high`。Verify: 對應的單元測試（SettingsModal.test.tsx 既有 fallback / fresh init 測試）含 verify 欄期望值。
+- [x] 5.3 在 `codebus-app/src/i18n/messages.ts` 加 verify row label（zh-tw 「驗證階段」/ en `Verify stage`）、tooltip（「建議用 reasoning 強的 model 把關 quiz / goal 寫的內容；預設 opus-4-6 / high 對應『便宜出 + 貴審』策略」與 en 對應翻譯）、相關 aria-label。Verify: 對應 i18n smoke 測試（messages.ts 既有完整性測試）通過、EndpointSection.test.tsx 對 verify row label 的斷言通過。
+
+## 6. EndpointSection 加 verify row + 測試
+
+- [x] 6.1 在 `codebus-app/src/components/settings/EndpointSection.test.tsx` 加新單元測試鎖定 `Settings UI Endpoint Section` requirement 新增的 4-row 行為：assert 渲染後存在 4 個 system verb row（goal / query / fix / verify）、verify row 含 model select（4 options）+ effort select（6 options）、azure 4 個 deployment-name input（含 `azure-deployment-verify`）、空 verify model 觸發 aria-invalid 與 disabled Save、效率值合法時 row 行為與其他 row 一致；測試**初始狀態 FAIL**。Verify: `pnpm test --filter EndpointSection` 紅燈。
+- [x] 6.2 將 `EndpointSection.tsx` 既有 `const VERBS = ["goal","query","fix"] as const` 擴增為 `["goal","query","fix","verify"] as const`（落實 design Decision「Settings UI 自動 render（VERBS 陣列擴增）」），確認 loop 自動 render verify row、`data-testid` 命名遵循既有規則（`system-model-verify` / `system-effort-verify` / `azure-deployment-verify` / `azure-effort-verify`），不動 chat row 既有 read-only hint。Verify: 6.1 全綠、既有 3-row 測試也綠（chat row 仍 outside loop）。
+- [x] 6.3 更新 `codebus-app/src/components/settings/SettingsModal.test.tsx` 整合測試含 verify 欄的 round-trip：load → render → edit verify model → Save 後 payload 含 `claude_code.system.verify` 或 `claude_code.azure.verify` 對應更新；assert API key 不出現在 payload 內（既有測試斷言延伸到含 verify 的場景）。Verify: `pnpm test --filter SettingsModal` 全綠。
+
+## 7. End-to-end smoke
+
+- [x] 7.1 在 Windows 跑 smoke 驗證 `verify-stage-independent-model` 整條鏈：(a) 在 fresh temp repo 跑 `codebus init`，檢視寫出的 `~/.codebus/config.yaml` 含 verify 區塊；(b) 暫改 yaml 移除 verify 區塊，下次 `codebus query "ping"` 觸發 fail-loud parse error 含 verify field path 訊息；(c) 還原 yaml 後跑 `cargo tauri dev`，開啟 Settings 看 EndpointSection 渲染 4 個可編輯 verb row（含 verify），改 verify model 後 Save、reload 仍見新值；macOS / Linux GUI 驗收延後至 `v3-app-polish-ship` deferred acceptance registry（per memory `feedback_dont_default_polish_ship`）。Verify: 三項皆觀察到對應行為。

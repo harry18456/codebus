@@ -155,9 +155,10 @@ function readClaudeCodeBlock(config: GlobalConfig | null | undefined): ClaudeCod
 function mergeSystemProfile(raw: unknown): SystemProfile {
   const r = (raw ?? {}) as Partial<SystemProfile>
   return {
-    goal:  r.goal  ?? { ...SYSTEM_PROFILE_DEFAULTS.goal },
-    query: r.query ?? { ...SYSTEM_PROFILE_DEFAULTS.query },
-    fix:   r.fix   ?? { ...SYSTEM_PROFILE_DEFAULTS.fix },
+    goal:   r.goal   ?? { ...SYSTEM_PROFILE_DEFAULTS.goal },
+    query:  r.query  ?? { ...SYSTEM_PROFILE_DEFAULTS.query },
+    fix:    r.fix    ?? { ...SYSTEM_PROFILE_DEFAULTS.fix },
+    verify: r.verify ?? { ...SYSTEM_PROFILE_DEFAULTS.verify },
   }
 }
 
@@ -172,9 +173,10 @@ function readAzureProfile(raw: unknown): AzureProfile | null {
     keyring_service: r.keyring_service && r.keyring_service.length > 0
       ? r.keyring_service
       : DEFAULT_AZURE_KEYRING_SERVICE,
-    goal:  r.goal  ?? { model: "", effort: "high" },
-    query: r.query ?? { model: "", effort: "low" },
-    fix:   r.fix   ?? { model: "", effort: "medium" },
+    goal:   r.goal   ?? { model: "", effort: "high" },
+    query:  r.query  ?? { model: "", effort: "low" },
+    fix:    r.fix    ?? { model: "", effort: "medium" },
+    verify: r.verify ?? { model: "", effort: "high" },
   }
 }
 

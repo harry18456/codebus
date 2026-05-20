@@ -129,6 +129,9 @@ const en = {
   "settings.fields.logSink.disable": "Disable logging",
   "settings.fields.endpointChat.label": "chat",
   "settings.fields.endpointChat.inherits": "inherits query ({model} / {effort})",
+  "settings.fields.endpointVerify.label": "verify",
+  "settings.fields.endpointVerify.tooltip":
+    "Independent model for the content-verify spawn (quiz / goal). Pick a reasoning-strong model to catch hallucinations — default opus-4-6 / high encodes the \"cheap generation + expensive verification\" pattern.",
 
   // ---- Workspace shell ----
   "workspace.backToLobby": "← Back to Lobby",
@@ -353,6 +356,9 @@ const zh: Record<keyof typeof en, string> = {
   "settings.fields.logSink.disable": "停用 logging",
   "settings.fields.endpointChat.label": "chat",
   "settings.fields.endpointChat.inherits": "沿用 query（{model} / {effort}）",
+  "settings.fields.endpointVerify.label": "verify",
+  "settings.fields.endpointVerify.tooltip":
+    "Content verify spawn（quiz / goal 共用）的獨立 model；建議用 reasoning 強的 model 把關。預設 opus-4-6 / high 對應「便宜出 + 貴審」策略。",
 
   // ---- Workspace shell ----
   "workspace.backToLobby": "← 回到 Lobby",

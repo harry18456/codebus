@@ -218,9 +218,10 @@ mod tests {
             "claude_code": {
                 "active": "system",
                 "system": {
-                    "goal":  { "model": "opus-4-6",   "effort": "high" },
-                    "query": { "model": "haiku-4-5",  "effort": "low" },
-                    "fix":   { "model": "sonnet-4-6", "effort": "medium" }
+                    "goal":   { "model": "opus-4-6",   "effort": "high"   },
+                    "query":  { "model": "haiku-4-5",  "effort": "low"    },
+                    "fix":    { "model": "sonnet-4-6", "effort": "medium" },
+                    "verify": { "model": "opus-4-6",   "effort": "high"   }
                 }
             },
             "log": { "sink": "~/.codebus/logs/" },
@@ -285,16 +286,18 @@ mod tests {
             "claude_code": {
                 "active": "azure",
                 "system": {
-                    "goal":  { "model": "opus-4-6",   "effort": "high" },
-                    "query": { "model": "haiku-4-5",  "effort": "low" },
-                    "fix":   { "model": "sonnet-4-6", "effort": "medium" }
+                    "goal":   { "model": "opus-4-6",   "effort": "high"   },
+                    "query":  { "model": "haiku-4-5",  "effort": "low"    },
+                    "fix":    { "model": "sonnet-4-6", "effort": "medium" },
+                    "verify": { "model": "opus-4-6",   "effort": "high"   }
                 },
                 "azure": {
                     "base_url": "https://x.example.com/anthropic",
                     "keyring_service": "codebus-azure",
-                    "goal":  { "model": "dep-x", "effort": "high" },
-                    "query": { "model": "dep-y", "effort": "low" },
-                    "fix":   { "model": "dep-z", "effort": "medium" }
+                    "goal":   { "model": "dep-x", "effort": "high"   },
+                    "query":  { "model": "dep-y", "effort": "low"    },
+                    "fix":    { "model": "dep-z", "effort": "medium" },
+                    "verify": { "model": "dep-x", "effort": "high"   }
                 }
             },
             "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } }

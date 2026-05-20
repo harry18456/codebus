@@ -53,6 +53,7 @@ describe("validateClaudeCodeBlock — effort enum enforcement", () => {
         goal: { model: "opus-4-6", effort: "high" },
         query: { model: "haiku-4-5", effort: "low" },
         fix: { model: "sonnet-4-6", effort: "medium" },
+        verify: { model: "opus-4-6", effort: "high" },
       },
       azure: null,
     }
@@ -84,6 +85,7 @@ describe("validateClaudeCodeBlock — effort enum enforcement", () => {
       goal: { model: "dep-x", effort: "high" },
       query: { model: "dep-y", effort: "low" },
       fix: { model: "dep-z", effort: "extreme" },
+      verify: { model: "dep-x", effort: "high" },
     }
     const errors = validateClaudeCodeBlock(block)
     expect(errors).toContainEqual({
@@ -101,6 +103,7 @@ describe("validateClaudeCodeBlock — effort enum enforcement", () => {
         goal: { model: "opus-4-6", effort: "high" },
         query: { model: "haiku-4-5", effort: "low" },
         fix: { model: "sonnet-4-6", effort: "medium" },
+        verify: { model: "opus-4-6", effort: "high" },
       },
       azure: {
         base_url: "https://x.example.com/anthropic",
@@ -108,6 +111,7 @@ describe("validateClaudeCodeBlock — effort enum enforcement", () => {
         goal: { model: "dep-x", effort: "high" },
         query: { model: "dep-y", effort: "low" },
         fix: { model: "dep-z", effort: "medium" },
+        verify: { model: "dep-x", effort: "high" },
       },
     }
     expect(validateClaudeCodeBlock(block)).toEqual([])

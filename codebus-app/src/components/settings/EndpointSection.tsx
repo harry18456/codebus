@@ -45,7 +45,10 @@ export interface EndpointSectionProps {
   errors?: ClaudeCodeValidationError[]
 }
 
-const VERBS = ["goal", "query", "fix"] as const
+// verify-stage-independent-model: `verify` is the fourth editable verb
+// row (spec `app-shell` `Settings UI Endpoint Section`). It SHALL render
+// after `fix` to convey the "verification follows main action" sequence.
+const VERBS = ["goal", "query", "fix", "verify"] as const
 type Verb = (typeof VERBS)[number]
 
 export function EndpointSection({
@@ -512,6 +515,7 @@ function freshAzureBlock(): NonNullable<ClaudeCodeBlock["azure"]> {
     goal: { model: "", effort: "high" },
     query: { model: "", effort: "low" },
     fix: { model: "", effort: "medium" },
+    verify: { model: "", effort: "high" },
   }
 }
 

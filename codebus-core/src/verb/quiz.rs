@@ -304,8 +304,20 @@ fn is_cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
 /// Load claude_code config + resolve the quiz verb settings + build env
 /// overrides. Shared by both spawns (each verb call loads independently,
 /// matching the existing verb convention).
-fn load_quiz_agent_config()
--> Result<(crate::config::ResolvedVerb, crate::agent::EnvOverrides), VerbError> {
+///
+/// Returns `(resolved, verify_resolved, env)`:
+/// - `resolved` — `Verb::Quiz` settings used by plan / generate / repair spawns
+/// - `verify_resolved` — `Verb::Verify` settings used by the content-verify spawn
+///   (per `verify-stage-independent-model`; see spec `claude-code-config`
+///   `Endpoint Profile Schema` and spec `quiz` `Quiz Content Verification and Repair`)
+fn load_quiz_agent_config() -> Result<
+    (
+        crate::config::ResolvedVerb,
+        crate::config::ResolvedVerb,
+        crate::agent::EnvOverrides,
+    ),
+    VerbError,
+> {
     let cc_cfg = match default_config_path() {
         Some(p) if p.exists() => {
             load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
@@ -316,8 +328,9 @@ fn load_quiz_agent_config()
         _ => Default::default(),
     };
     let resolved = cc_cfg.resolve(Verb::Quiz);
+    let verify_resolved = cc_cfg.resolve(Verb::Verify);
     let env = build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
-    Ok((resolved, env))
+    Ok((resolved, verify_resolved, env))
 }
 
 /// Run one spawn, accumulating assistant `text` (Thought) into a single
@@ -393,7 +406,7 @@ pub fn run_quiz_plan<F: FnMut(VerbEvent)>(
         });
     }
 
-    let (resolved, env) = load_quiz_agent_config()?;
+    let (resolved, _verify_resolved, env) = load_quiz_agent_config()?;
 
     // The plan step is not persisted (RunLog/events.jsonl) — it is a
     // planning sub-step. Its stream is surfaced live via on_event for
@@ -461,7 +474,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         });
     }
 
-    let (resolved, env) = load_quiz_agent_config()?;
+    let (resolved, verify_resolved, env) = load_quiz_agent_config()?;
 
     let log_cfg = load_verb_log_config().map_err(|e| VerbError::ConfigParse {
         which: "log",
@@ -565,13 +578,16 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         let verify = |body: &String| -> Result<Option<Vec<ContentDefect>>, VerbError> {
             let verify_prompt =
                 format!("/codebus-quiz verify: topic={topic_arg}\n\nQUIZ:\n{body}");
+            // verify-stage-independent-model: verify spawn uses
+            // `Verb::Verify` resolved settings, NOT `Verb::Quiz`.
+            // Repair / plan / generate spawns below keep using `&resolved`.
             let vtext = match run_spawn(
                 &mut **fan_cell.borrow_mut(),
                 verify_prompt,
                 paths.root.clone(),
                 QUIZ_TOOLSET,
                 None,
-                &resolved,
+                &verify_resolved,
                 env.clone(),
                 cancel.clone(),
             ) {

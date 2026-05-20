@@ -83,6 +83,35 @@ fn goal_config_true_threads_goal_text_into_verify_spawn() {
     );
 }
 
+/// verify-stage-independent-model task 4.1 (RED): the goal verify
+/// spawn SHALL resolve its model via `Verb::Verify`, NOT `Verb::Goal`.
+/// Spawn sequence is main goal → verify → exit (clean path, no repair),
+/// so the mock-claude.log final write captures the verify spawn's argv.
+#[test]
+fn goal_verify_spawn_uses_verb_verify_model_not_verb_goal_model() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    // goal=sonnet-4-6, verify=opus-4-6 — opus must surface in the
+    // verify spawn argv, NOT sonnet.
+    let cfg_body = "claude_code:\n  active: system\n  system:\n    goal:   { model: sonnet-4-6, effort: medium }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\ngoal:\n  content_verify: true\n";
+    let out = run_goal_cfg(tmp.path(), "describe auth", "goal-verify-clean", Some(cfg_body));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let dump = fs::read_to_string(tmp.path().join("mock-claude.log")).unwrap_or_default();
+    assert!(
+        dump.contains("arg=claude-opus-4-6"),
+        "verify spawn must use Verb::Verify resolved model (claude-opus-4-6); got:\n{dump}"
+    );
+    assert!(
+        !dump.contains("arg=claude-sonnet-4-6"),
+        "verify spawn must NOT use Verb::Goal resolved model (claude-sonnet-4-6); got:\n{dump}"
+    );
+}
+
 /// Spec scenario: Default off leaves CLI flow unchanged — absent config
 /// means no verify spawn and the existing exit / auto_commit behavior.
 #[test]

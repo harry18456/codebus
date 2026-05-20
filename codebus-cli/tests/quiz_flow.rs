@@ -213,6 +213,47 @@ fn content_verify_residual_flagged_best_effort() {
     );
 }
 
+// --- verify-stage-independent-model task 3.1 (RED) ---
+// Quiz verify spawn SHALL use the model resolved via `Verb::Verify`,
+// NOT `Verb::Quiz`. The mock_claude binary overwrites the log per
+// invocation, so for `quiz-verify-clean` (sequence: plan → generate →
+// verify → exit) the final log captures the verify spawn's argv.
+
+#[test]
+fn quiz_verify_spawn_uses_verb_verify_model_not_quiz_model() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+
+    // Configure quiz (= reuses query) to haiku-4-5, verify to opus-4-6.
+    // After the change, the verify spawn must invoke claude with
+    // --model claude-opus-4-6 (NOT claude-haiku-4-5 which is what
+    // Verb::Quiz resolves to).
+    let cfg_body = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\nquiz:\n  content_verify: true\n";
+    let out = run_quiz_cfg(tmp.path(), "auth", "quiz-verify-clean", cfg_body);
+    assert!(
+        out.status.success(),
+        "quiz-verify-clean should exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // The mock log was overwritten by each spawn; the final write is
+    // the verify spawn (last invocation before exit).
+    let log_path = tmp.path().join("mock-claude.log");
+    let log = fs::read_to_string(&log_path)
+        .expect("mock-claude.log must exist after the verify spawn");
+    assert!(
+        log.contains("arg=claude-opus-4-6"),
+        "verify spawn must use Verb::Verify resolved model (claude-opus-4-6); \
+         got log:\n{log}"
+    );
+    assert!(
+        !log.contains("arg=claude-haiku-4-5"),
+        "verify spawn must NOT use Verb::Quiz resolved model (claude-haiku-4-5); \
+         got log:\n{log}"
+    );
+}
+
 // --- quiz-validate-repair task 4.1: run_quiz_generate final-verify ---
 // (design D1/D3/D4; spec quiz / Quiz Output Validation and Repair).
 

@@ -198,7 +198,7 @@ fn yaml_syntax_error_aborts_config_delete_key_without_touching_keyring() {
 #[test]
 fn legal_yaml_with_unknown_key_does_not_fail_loud() {
     let _g = serial_lock();
-    let legal_with_unknown = "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-6,   effort: high }\n    query: { model: haiku-4-5,  effort: low }\n    fix:   { model: sonnet-4-6, effort: medium }\nfuture_section:\n  knob: 42\n";
+    let legal_with_unknown = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\nfuture_section:\n  knob: 42\n";
     let (home, mock_log) = setup_with_config(legal_with_unknown);
     let repo = prepare_clean_vault(home.path());
 

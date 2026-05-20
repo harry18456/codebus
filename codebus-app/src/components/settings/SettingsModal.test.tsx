@@ -24,6 +24,7 @@ describe("SettingsModal", () => {
             goal: { model: "opus-4-6", effort: "high" },
             query: { model: "haiku-4-5", effort: "low" },
             fix: { model: "sonnet-4-6", effort: "medium" },
+            verify: { model: "opus-4-6", effort: "high" },
           },
         },
         pii: { scanner: "regex_basic" },
@@ -150,6 +151,7 @@ describe("SettingsModal", () => {
             goal: { model: "opus-4-6", effort: "high" },
             query: { model: "haiku-4-5", effort: "low" },
             fix: { model: "sonnet-4-6", effort: "medium" },
+            verify: { model: "opus-4-6", effort: "high" },
           },
           azure: {
             base_url: "", // missing → invalid
@@ -157,6 +159,7 @@ describe("SettingsModal", () => {
             goal: { model: "", effort: "high" },
             query: { model: "", effort: "low" },
             fix: { model: "", effort: "medium" },
+            verify: { model: "", effort: "high" },
           },
         },
       },
@@ -180,6 +183,7 @@ describe("SettingsModal", () => {
           goal: { model: "opus-4-6", effort: "high" },
           query: { model: "haiku-4-5", effort: "low" },
           fix: { model: "sonnet-4-6", effort: "medium" },
+          verify: { model: "opus-4-6", effort: "high" },
         },
         azure: {
           base_url: "https://x.example.com/anthropic",
@@ -187,6 +191,7 @@ describe("SettingsModal", () => {
           goal: { model: "dep-x", effort: "high" },
           query: { model: "dep-y", effort: "low" },
           fix: { model: "dep-z", effort: "medium" },
+          verify: { model: "dep-x", effort: "high" },
         },
       },
     }
@@ -230,6 +235,7 @@ describe("SettingsModal", () => {
             goal: { model: "opus-4-6", effort: "super-high" },
             query: { model: "haiku-4-5", effort: "low" },
             fix: { model: "sonnet-4-6", effort: "medium" },
+            verify: { model: "opus-4-6", effort: "high" },
           },
         },
       },
@@ -282,6 +288,7 @@ describe("SettingsModal", () => {
             goal: { model: "opus-4-6", effort: "high" },
             query: { model: "haiku-4-5", effort: "low" },
             fix: { model: "sonnet-4-6", effort: "medium" },
+            verify: { model: "opus-4-6", effort: "high" },
           },
         },
         pii: { scanner: "regex_basic" },
