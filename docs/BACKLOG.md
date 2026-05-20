@@ -19,6 +19,7 @@
 | 2026-05-15 | .codebus 目錄即時監聽（fs watcher） | UX gap（外部修改 GUI 不感知） | 小-中（polling 半天 / fs watcher 2-3 半天） | [codebus-fs-watcher](2026-05-15-codebus-fs-watcher-backlog.md) |
 | 2026-05-19 | raw mirror 巢狀 .git 未排除（submodule leak） | PII / 體積 leak（edge case） | 小（方案 B 半天） | [raw-sync-nested-git-leak](2026-05-19-raw-sync-nested-git-leak-backlog.md) |
 | 2026-05-19 | Settings 設定面板完整化（config↔UI 覆蓋盤點） | UX gap（設定不透明） | 輕-中（前端 1-2 半天 / 設計題另計） | [settings-config-coverage](2026-05-19-settings-config-coverage-backlog.md) |
+| 2026-05-20 | Wiki 網路圖（Obsidian-style graph view） | feature gap（v1 明確 out-of-scope） | 中（3-4 個半天） | [wiki-graph-view](2026-05-20-wiki-graph-view-backlog.md) |
 
 ## 已 archived 項目
 
