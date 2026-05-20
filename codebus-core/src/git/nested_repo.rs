@@ -49,6 +49,52 @@ pub fn auto_commit(vault_root: impl AsRef<Path>, message: &str) -> io::Result<St
     Ok(head.trim().to_string())
 }
 
+/// Current `HEAD` sha of the nested vault repo, or `None` when it
+/// cannot be resolved (no commits yet / not a repo). Used by the
+/// goal content-verify stage to pin a pre-run revision before the goal
+/// agent spawn (goal-content-verify design D3).
+pub fn rev_parse_head(vault_root: impl AsRef<Path>) -> Option<String> {
+    capture_git(vault_root.as_ref(), &["rev-parse", "HEAD"])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Repo-relative paths under `subdir` that this run created or modified
+/// since `base_rev` (goal-content-verify design D3). Combines tracked
+/// modifications (`git diff --name-only <base_rev> -- <subdir>`) with
+/// brand-new untracked files (`git ls-files --others --exclude-standard
+/// -- <subdir>`) so a freshly-written, not-yet-committed wiki page is
+/// detected as "changed" (the design's intent is *added or modified*
+/// pages; `git diff` alone misses untracked additions). When `base_rev`
+/// is `None` the diff is taken against `HEAD`. Returns a de-duplicated,
+/// sorted list; an empty list means nothing under `subdir` changed.
+/// Any git failure surfaces as `io::Error` (caller treats the whole
+/// content-verify stage as best-effort / non-fatal).
+pub fn changed_paths_under(
+    vault_root: impl AsRef<Path>,
+    base_rev: Option<&str>,
+    subdir: &str,
+) -> io::Result<Vec<String>> {
+    let vault_root = vault_root.as_ref();
+    let base = base_rev.unwrap_or("HEAD");
+    let diff = capture_git(vault_root, &["diff", "--name-only", base, "--", subdir])?;
+    let others = capture_git(
+        vault_root,
+        &["ls-files", "--others", "--exclude-standard", "--", subdir],
+    )?;
+    let mut paths: Vec<String> = diff
+        .lines()
+        .chain(others.lines())
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
 fn run_git(cwd: &Path, args: &[&str]) -> io::Result<()> {
     let out = Command::new("git").current_dir(cwd).args(args).output()?;
     if !out.status.success() {

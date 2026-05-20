@@ -446,6 +446,193 @@ fn goal_spawn_forwards_user_configured_model() {
 /// append one RunLog entry under <vault>/.codebus/log/runs-<today>.jsonl
 /// with mode "goal" and tokens.input_tokens == 100 (from the mock's
 /// usage event).
+// === goal-content-verify task 4.1: independent content verify + bounded
+// repair (design D2/D3/D4; spec verb-library / Goal Content Verification
+// and Repair). content_verify is gated by the shared `goal.*` config. ===
+
+/// Like `run_goal` but seeds `<home>/.codebus/config.yaml` with the
+/// given body so the CLI resolves `goal.content_verify` from config.
+/// Keeps the default `--no-fix` so these tests exercise the
+/// content-verify stage in isolation from the lint/fix phase.
+fn run_goal_cv(
+    repo: &Path,
+    goal_text: &str,
+    behavior: &str,
+    cfg_body: &str,
+) -> Output {
+    let log = repo.join("mock-claude.log");
+    let _ = fs::remove_file(&log);
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
+    let cb = home.path().join(".codebus");
+    fs::create_dir_all(&cb).unwrap();
+    fs::write(cb.join("config.yaml"), cfg_body).unwrap();
+    Command::new(BIN)
+        .args(["--no-obsidian-register", "--no-fix", "goal", goal_text])
+        .current_dir(repo)
+        .env("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE)
+        .env("CODEBUS_HOME", home.path())
+        .env("CODEBUS_MOCK_BEHAVIOR", behavior)
+        .env("CODEBUS_MOCK_LOG", &log)
+        .output()
+        .expect("run codebus goal (cv cfg)")
+}
+
+#[test]
+fn content_verify_off_runs_no_verify_spawn() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    // No goal.content_verify in config → stage skipped entirely even
+    // with a flag-prone behavior.
+    let (out, log) = run_goal(tmp.path(), "describe auth", &[], "goal-verify-flag");
+    assert!(
+        out.status.success(),
+        "content_verify off: exit unchanged; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let dump = fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        !dump.contains("/codebus-goal verify:"),
+        "no verify spawn may run when content_verify is off:\n{dump}"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("content-review"),
+        "no content-review warning when stage is off; stderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn content_verify_no_changed_pages_short_circuits() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    // content_verify on, but the agent writes nothing → no changed wiki
+    // page → stage resolves ok WITHOUT spawning a verify.
+    let out = run_goal_cv(
+        tmp.path(),
+        "noop goal",
+        "success-noop",
+        "goal:\n  content_verify: true\n",
+    );
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let dump = fs::read_to_string(tmp.path().join("mock-claude.log")).unwrap_or_default();
+    assert!(
+        !dump.contains("/codebus-goal verify:"),
+        "no changed wiki pages must short-circuit before any verify spawn:\n{dump}"
+    );
+}
+
+#[test]
+fn content_verify_clean_marks_ok_and_commits() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    let out = run_goal_cv(
+        tmp.path(),
+        "describe auth",
+        "goal-verify-clean",
+        "goal:\n  content_verify: true\n",
+    );
+    assert!(
+        out.status.success(),
+        "clean content verify: exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let dump = fs::read_to_string(tmp.path().join("mock-claude.log")).unwrap_or_default();
+    assert!(
+        dump.contains("/codebus-goal verify:"),
+        "a verify spawn must run when pages changed:\n{dump}"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("content-review"),
+        "clean verify must NOT surface a content-review warning; stderr:\n{stderr}"
+    );
+    // auto_commit still runs: the written page is committed.
+    let vault = tmp.path().join(".codebus");
+    assert!(vault.join("wiki/concepts/mock.md").is_file());
+    let head_msg = git(&vault, &["log", "--pretty=%s", "-1"]);
+    assert_eq!(
+        String::from_utf8_lossy(&head_msg.stdout).trim(),
+        "wiki: describe auth"
+    );
+}
+
+#[test]
+fn content_verify_flag_residual_best_effort_does_not_block_commit() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    let out = run_goal_cv(
+        tmp.path(),
+        "describe auth",
+        "goal-verify-flag",
+        "goal:\n  content_verify: true\n",
+    );
+    // Best-effort: residual content defects do NOT change the exit code.
+    assert!(
+        out.status.success(),
+        "residual flag must stay exit 0 (best-effort); stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("content-review"),
+        "a non-fatal content-review warning must be surfaced; stderr:\n{stderr}"
+    );
+    let vault = tmp.path().join(".codebus");
+    // Page NOT reverted — the repaired body is what landed on disk.
+    let page = fs::read_to_string(vault.join("wiki/concepts/mock.md"))
+        .expect("flagged page must still exist (not reverted)");
+    assert!(
+        page.contains("mock-repaired"),
+        "the repair spawn's write must persist (page not reverted):\n{page}"
+    );
+    // auto_commit still runs despite residual content defects.
+    let head_msg = git(&vault, &["log", "--pretty=%s", "-1"]);
+    assert_eq!(
+        String::from_utf8_lossy(&head_msg.stdout).trim(),
+        "wiki: describe auth",
+        "auto_commit must still run (content verify never blocks commit)"
+    );
+    let dump = fs::read_to_string(tmp.path().join("mock-claude.log")).unwrap_or_default();
+    assert!(
+        dump.contains("/codebus-goal verify:") || dump.contains("/codebus-goal repair:"),
+        "verify/repair spawns must have run:\n{dump}"
+    );
+}
+
+#[test]
+fn content_verify_unparseable_is_conservative_flag_non_fatal() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# h").unwrap();
+    assert!(run_init(tmp.path()).status.success());
+    let out = run_goal_cv(
+        tmp.path(),
+        "describe auth",
+        "goal-verify-unparseable",
+        "goal:\n  content_verify: true\n",
+    );
+    assert!(
+        out.status.success(),
+        "unparseable verify is non-fatal; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("content-review"),
+        "unparseable verify must conservatively surface a content-review warning; stderr:\n{stderr}"
+    );
+    // commit still runs.
+    let vault = tmp.path().join(".codebus");
+    let head_msg = git(&vault, &["log", "--pretty=%s", "-1"]);
+    assert_eq!(
+        String::from_utf8_lossy(&head_msg.stdout).trim(),
+        "wiki: describe auth"
+    );
+}
+
 #[test]
 fn goal_streams_events_and_writes_jsonl_log() {
     let tmp = TempDir::new().unwrap();

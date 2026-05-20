@@ -45,6 +45,9 @@ use crate::log::verb_log::{load_verb_log_config, resolve_sink_dir, write_run_log
 use crate::log::{RunLog, SinkConfig, TokenUsage};
 use crate::stream::StreamEvent;
 use crate::vault::layout::vault_paths;
+use crate::verb::content_verify::{
+    ContentDefect, ContentVerifyOutcome, parse_content_defects, run_content_verify_loop,
+};
 use crate::verb::error::VerbError;
 use crate::verb::event::{VerbBanner, VerbEvent, VerbLifecycleEvent};
 use crate::verb::quiz_validate::validate_quiz_body;
@@ -124,79 +127,12 @@ pub struct QuizGenerateOptions {
 /// `content_review` caller frontmatter field. `None` on `QuizReport`
 /// means content verification was not run (config off) — readers MUST
 /// NOT treat absence as `Ok`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum QuizContentReview {
-    Ok,
-    /// Question numbers still flagged after the repair cap (or `[]` when
-    /// the verify spawn failed / was unparseable — conservatively flagged).
-    Flagged(Vec<u32>),
-}
-
-impl QuizContentReview {
-    /// Caller-frontmatter scalar: `ok` or `flagged [1, 3]`.
-    pub fn frontmatter_value(&self) -> String {
-        match self {
-            QuizContentReview::Ok => "ok".to_string(),
-            QuizContentReview::Flagged(qs) => {
-                let list = qs
-                    .iter()
-                    .map(|q| q.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("flagged [{list}]")
-            }
-        }
-    }
-}
-
-/// One per-question content defect parsed from a verify spawn line
-/// `Q<n> | <defect-type> | <suggestion>`.
-struct ContentDefect {
-    qnum: u32,
-    kind: String,
-    suggestion: String,
-}
-
-/// Parse a verify spawn's accumulated text. Returns `Some(vec![])` when
-/// the spawn reported `CONTENT_OK`, `Some(defects)` when it emitted
-/// `Q<n> | type | suggestion` lines, and `None` when neither is present
-/// (unparseable → caller treats as a conservative non-fatal flag).
-fn parse_content_defects(text: &str) -> Option<Vec<ContentDefect>> {
-    let mut defects = Vec::new();
-    let mut saw_ok = false;
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line == "CONTENT_OK" {
-            saw_ok = true;
-            continue;
-        }
-        let Some(rest) = line.strip_prefix('Q') else {
-            continue;
-        };
-        let parts: Vec<&str> = rest.splitn(3, '|').map(|s| s.trim()).collect();
-        if parts.len() != 3 {
-            continue;
-        }
-        let Ok(qnum) = parts[0].parse::<u32>() else {
-            continue;
-        };
-        if parts[1].is_empty() {
-            continue;
-        }
-        defects.push(ContentDefect {
-            qnum,
-            kind: parts[1].to_string(),
-            suggestion: parts[2].to_string(),
-        });
-    }
-    if !defects.is_empty() {
-        Some(defects)
-    } else if saw_ok {
-        Some(Vec::new())
-    } else {
-        None
-    }
-}
+///
+/// goal-content-verify D1: this is now a re-export alias of the shared
+/// [`crate::verb::content_verify::ContentReview`] — the type, its
+/// variants, and `frontmatter_value` (`ok` / `flagged [1, 3]`) are
+/// unchanged from the pre-extraction quiz form.
+pub type QuizContentReview = crate::verb::content_verify::ContentReview;
 
 /// Successful generate-spawn summary. `quiz_md` is the fence-stripped
 /// question body WITHOUT caller frontmatter — the caller injects
@@ -616,18 +552,21 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
     // Residual / spawn-failure is best-effort: `content_review: flagged`,
     // a non-fatal warning, no question dropped, exit unchanged.
     let content_review: Option<QuizContentReview> = if options.content_verify {
-        const VERIFY_CAP: u8 = 3;
+        // goal-content-verify D1: the verify→repair orchestration now
+        // lives in the shared `verb::content_verify` core. quiz injects
+        // its two adapters (verify = a read-only verify spawn parsed via
+        // the shared parser; repair = a regenerate spawn whose stripped
+        // body becomes the new draft) and maps the shared outcome back
+        // to the unchanged `content_review` frontmatter form. Behavior
+        // (events, cap, best-effort, persisted value) is preserved.
         let topic_arg = options.topic.clone().unwrap_or_default();
-        let mut review = QuizContentReview::Ok;
-        for _ in 0..VERIFY_CAP {
-            if is_cancelled(&cancel) {
-                break;
-            }
-            let verify_prompt = format!(
-                "/codebus-quiz verify: topic={topic_arg}\n\nQUIZ:\n{quiz_md}"
-            );
+        let fan_cell = std::cell::RefCell::new(&mut fan_out);
+
+        let verify = |body: &String| -> Result<Option<Vec<ContentDefect>>, VerbError> {
+            let verify_prompt =
+                format!("/codebus-quiz verify: topic={topic_arg}\n\nQUIZ:\n{body}");
             let vtext = match run_spawn(
-                &mut fan_out,
+                &mut **fan_cell.borrow_mut(),
                 verify_prompt,
                 paths.root.clone(),
                 QUIZ_TOOLSET,
@@ -641,70 +580,74 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
                     eprintln!(
                         "warning: quiz content-verify spawn failed (non-fatal; content_review: flagged): {e}"
                     );
-                    review = QuizContentReview::Flagged(Vec::new());
-                    break;
+                    return Err(e);
                 }
             };
-            match parse_content_defects(&vtext) {
-                None => {
-                    eprintln!(
-                        "warning: quiz content-verify output unparseable (non-fatal; content_review: flagged)"
-                    );
-                    review = QuizContentReview::Flagged(Vec::new());
-                    break;
-                }
-                Some(d) if d.is_empty() => {
-                    review = QuizContentReview::Ok;
-                    break;
-                }
-                Some(d) => {
-                    review = QuizContentReview::Flagged(
-                        d.iter().map(|x| x.qnum).collect(),
-                    );
-                    let defect_lines = d
-                        .iter()
-                        .map(|x| format!("Q{} | {} | {}", x.qnum, x.kind, x.suggestion))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let repair_prompt = format!(
-                        "/codebus-quiz generate: pages=[{}] count={}\n\nThe previous quiz had content defects. Revise ONLY the flagged questions, keep all other questions verbatim, and keep exactly {} questions.\n\nPREVIOUS QUIZ:\n{}\n\nCONTENT DEFECTS:\n{}",
-                        options.pages.join(","),
-                        options.question_count,
-                        options.question_count,
-                        quiz_md,
-                        defect_lines
-                    );
-                    match run_spawn(
-                        &mut fan_out,
-                        repair_prompt,
-                        paths.root.clone(),
-                        QUIZ_GENERATE_TOOLSET,
-                        Some(QUIZ_BASH_WHITELIST),
-                        &resolved,
-                        env.clone(),
-                        cancel.clone(),
-                    ) {
-                        Ok((rtext, _)) => {
-                            quiz_md = strip_preamble_before_first_question(
-                                &strip_code_fence(&rtext),
-                            );
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "warning: quiz content-repair spawn failed (non-fatal; keeping best body, content_review: flagged): {e}"
-                            );
-                            break;
-                        }
+            let parsed = parse_content_defects(&vtext);
+            if parsed.is_none() {
+                eprintln!(
+                    "warning: quiz content-verify output unparseable (non-fatal; content_review: flagged)"
+                );
+            }
+            Ok(parsed)
+        };
+
+        let repair =
+            |body: &String, defects: &[ContentDefect]| -> Result<String, VerbError> {
+                let defect_lines = defects
+                    .iter()
+                    .map(|x| format!("{} | {} | {}", x.id, x.kind, x.suggestion))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let repair_prompt = format!(
+                    "/codebus-quiz generate: pages=[{}] count={}\n\nThe previous quiz had content defects. Revise ONLY the flagged questions, keep all other questions verbatim, and keep exactly {} questions.\n\nPREVIOUS QUIZ:\n{}\n\nCONTENT DEFECTS:\n{}",
+                    options.pages.join(","),
+                    options.question_count,
+                    options.question_count,
+                    body,
+                    defect_lines
+                );
+                match run_spawn(
+                    &mut **fan_cell.borrow_mut(),
+                    repair_prompt,
+                    paths.root.clone(),
+                    QUIZ_GENERATE_TOOLSET,
+                    Some(QUIZ_BASH_WHITELIST),
+                    &resolved,
+                    env.clone(),
+                    cancel.clone(),
+                ) {
+                    Ok((rtext, _)) => {
+                        Ok(strip_preamble_before_first_question(&strip_code_fence(&rtext)))
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "warning: quiz content-repair spawn failed (non-fatal; keeping best body, content_review: flagged): {e}"
+                        );
+                        Err(e)
                     }
                 }
+            };
+
+        let (new_md, outcome) =
+            run_content_verify_loop(quiz_md, || is_cancelled(&cancel), verify, repair);
+        quiz_md = new_md;
+        let review = match outcome {
+            ContentVerifyOutcome::Ok => QuizContentReview::Ok,
+            ContentVerifyOutcome::Flagged(defects) => {
+                let qnums: Vec<u32> = defects
+                    .iter()
+                    .filter_map(|d| {
+                        d.id.strip_prefix('Q').and_then(|s| s.parse::<u32>().ok())
+                    })
+                    .collect();
+                eprintln!(
+                    "warning: quiz content-verify flagged {} question(s) after repair cap (non-fatal; persisted content_review: flagged)",
+                    qnums.len()
+                );
+                QuizContentReview::Flagged(qnums)
             }
-        }
-        if let QuizContentReview::Flagged(ref qs) = review {
-            eprintln!(
-                "warning: quiz content-verify flagged {} question(s) after repair cap (non-fatal; persisted content_review: flagged)",
-                qs.len()
-            );
-        }
+        };
         Some(review)
     } else {
         None

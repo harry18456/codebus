@@ -176,7 +176,11 @@ fn workflow_section(verb: &str) -> String {
 /// orchestrates the ingest dance only. Step 2 enumerates the five taxonomy
 /// folder names so the agent knows where pages go, but type definitions
 /// are not duplicated here.
-const GOAL_WORKFLOW: &str = "## Workflow (per-goal ingest)
+const GOAL_WORKFLOW: &str = "## Mode selection
+
+The prompt MAY begin with a mode prefix. If it begins with `verify:` use the **Verify mode** section below; if it begins with `repair:` use the **Repair mode** section; otherwise (no recognized prefix) it is a normal goal and you follow the default per-goal ingest workflow.
+
+## Workflow (per-goal ingest)
 
 When this skill is activated, follow these 5 steps in order:
 
@@ -189,6 +193,22 @@ When this skill is activated, follow these 5 steps in order:
 4. **Build wikilinks**: link pages with `[[other-page]]`. When linking to an existing page use that page's filename only (no path); cross-folder resolution is handled by the schema convention.
 
 5. **Print closing summary**: emit ONE short stdout line stating how many pages were created vs how many were modified in this run. Phrase the line in the same natural language as the goal text per the §0 Language Policy in cwd `CLAUDE.md` (so a goal in Japanese gets a Japanese summary, a goal in English gets an English one, etc.). The agent MUST NOT copy phrasing from this SKILL.md verbatim into the stdout summary; this paragraph describes the output shape only and is not itself a template.
+
+## Verify mode (`verify:` prefix)
+
+Prompt shape: `verify: goal=<originating goal>` followed by a `CHANGED PAGES:` list of `wiki/`-relative page paths this run created or modified. This mode is **read-only** (no Write/Edit). Read each listed `wiki/` page and the originating goal. For the faithfulness check you MAY also Read the `raw/code/` source mirror (read only, for grounding ONLY) — but you MUST NOT emit any `raw/` file contents in your output; emit only the defect judgements.
+
+Judge each changed page against EXACTLY these three content defect types (structural correctness is the separate deterministic lint check — NOT your job; do not restate or reproduce lint rules):
+
+1. **unfaithful** — the page asserts something not grounded in (or contradicting) the `raw/code/` source mirror.
+2. **off-goal** — the page's content is unrelated to this run's `goal`.
+3. **taxonomy-misplaced** — the content is in the wrong page type / folder (e.g. process content written into a concepts page).
+
+For EACH flagged page output one line `<wiki-relative-path> | <defect-type> | <concrete correction suggestion>`; if no page has a defect, emit exactly `CONTENT_OK`. Do not re-emit page bodies or restate these rules.
+
+## Repair mode (`repair:` prefix)
+
+Prompt shape: `repair: goal=<originating goal>` followed by `CONTENT DEFECTS:` (the `path | defect-type | suggestion` lines) and the `FLAGGED PAGES:` list. Fix ONLY the flagged pages in place (Write/Edit), applying the suggested corrections so each page becomes faithful to `raw/code/`, on-goal, and correctly placed. Do NOT touch any page not in the flagged list. Keep the same scope rules as the ingest workflow.
 
 ## Language Override
 
@@ -690,6 +710,77 @@ mod tests {
         assert!(s.contains("skills"));
         assert!(s.contains("codebus-goal"));
         assert!(s.ends_with("SKILL.md"));
+    }
+
+    /// goal-content-verify task 3.1 (design D5; spec skill-bundles /
+    /// Codebus-Goal Verify Mode): the codebus-goal SKILL defines a
+    /// `verify:` prompt mode with the fixed three-item content defect
+    /// contract, the per-page `path | type | suggestion` / `CONTENT_OK`
+    /// output format, explicit `raw/code/` grounding permission (read
+    /// only, never emit raw contents), and keeps content judgement
+    /// separate from the deterministic lint rules (no rule restatement).
+    #[test]
+    fn goal_skill_defines_verify_mode_three_defect_contract() {
+        let body = stub_content("goal");
+
+        assert!(
+            body.contains("verify:"),
+            "goal SKILL must define a `verify:` prompt mode"
+        );
+        for defect in ["unfaithful", "off-goal", "taxonomy-misplaced"] {
+            assert!(
+                body.contains(defect),
+                "verify mode must name the `{defect}` defect"
+            );
+        }
+        let low = body.to_lowercase();
+        // per-page output: path + defect type + correction suggestion
+        assert!(
+            low.contains("path")
+                && low.contains("defect")
+                && (low.contains("suggestion") || low.contains("correction")),
+            "verify mode must require per-page path + defect type + suggestion"
+        );
+        assert!(
+            body.contains("CONTENT_OK"),
+            "verify mode must define the no-defect `CONTENT_OK` token"
+        );
+        // ingest workflow (the default mode) is NOT regressed
+        assert!(
+            body.contains("Workflow (per-goal ingest)"),
+            "the existing ingest workflow must be preserved"
+        );
+        // distinct mode selected by prompt prefix, not the ingest default
+        assert!(
+            low.contains("prefix") || low.contains("begins with"),
+            "verify mode must be selected by a prompt prefix, distinct from ingest"
+        );
+    }
+
+    /// Spec scenario: Verify mode permits raw/code grounding reads AND
+    /// forbids emitting raw/ contents (only defect judgements). Spec
+    /// scenario: Verify mode does not duplicate lint rules.
+    #[test]
+    fn goal_verify_mode_grounding_and_lint_separation() {
+        let body = stub_content("goal");
+
+        // explicitly permits reading raw/code/ for the faithfulness check
+        assert!(
+            body.contains("raw/code/"),
+            "verify mode must explicitly permit reading `raw/code/` for grounding"
+        );
+        // forbids leaking raw/ contents into output (only defect verdicts)
+        assert!(
+            body.contains("verify:") && body.contains("only the defect judgements"),
+            "verify mode must forbid emitting raw/ contents, emitting only the defect judgements"
+        );
+        // does NOT restate the deterministic lint rule ids / definitions
+        assert!(
+            !body.contains("nav-missing")
+                && !body.contains("broken-wikilink")
+                && !body.contains("frontmatter-parse"),
+            "verify mode must not duplicate the deterministic lint rule definitions"
+        );
     }
 
     #[test]

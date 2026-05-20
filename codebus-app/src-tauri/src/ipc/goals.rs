@@ -44,6 +44,7 @@ use std::thread;
 
 use codebus_core::log::events::sink::EventEnvelope;
 use codebus_core::log::sink::{RunLog, TokenUsage};
+use codebus_core::config::{default_config_path, load_goal_config};
 use codebus_core::verb::error::VerbError;
 use codebus_core::verb::event::VerbBanner;
 use codebus_core::verb::goal::{run_goal, GoalOptions, GoalReport};
@@ -116,6 +117,22 @@ pub struct GoalTerminalPayload {
     pub run_id: String,
 }
 
+// ---- content-verify config resolution -------------------------------------
+
+/// goal-content-verify D6: resolve `goal.content_verify` from the shared
+/// `goal.*` config using the same core loader the CLI uses. A missing
+/// path, missing file/section/field, or any load error conservatively
+/// resolves to `false` — a config error MUST NOT silently enable extra
+/// verify/repair spawns. Never reads the app-only `app.*` namespace.
+pub(crate) fn resolve_goal_content_verify(cfg_path: Option<&Path>) -> bool {
+    match cfg_path {
+        Some(p) => load_goal_config(p)
+            .map(|c| c.content_verify)
+            .unwrap_or(false),
+        None => false,
+    }
+}
+
 // ---- spawn_goal -----------------------------------------------------------
 
 /// Tauri command wrapper. The real cross-thread orchestration lives in
@@ -131,6 +148,9 @@ pub fn spawn_goal(
     let active_runs = runtime.active_runs.clone();
     let app_for_stream = app.clone();
     let app_for_terminal = app.clone();
+    // GUI parity with the CLI: resolve `goal.content_verify` from the
+    // same shared core loader (conservative false on any error).
+    let content_verify = resolve_goal_content_verify(default_config_path().as_deref());
     spawn_goal_with_runner(
         active_runs,
         PathBuf::from(vault_path),
@@ -145,6 +165,7 @@ pub fn spawn_goal(
         move |payload| {
             let _ = app_for_terminal.emit("goal-terminal", payload);
         },
+        content_verify,
         |repo, options, mut on_event, cancel| {
             run_goal(repo, options, |e| on_event(e), cancel)
         },
@@ -167,6 +188,7 @@ pub(crate) fn spawn_goal_with_runner<E, T, F>(
     goal_text: String,
     emit: E,
     emit_terminal: T,
+    content_verify: bool,
     runner: F,
 ) -> Result<String, AppError>
 where
@@ -225,6 +247,9 @@ where
                 // GUI does NOT touch Obsidian registry (the foundation
                 // already left this opt-in to the user via Settings).
                 no_obsidian_register: true,
+                // goal-content-verify D6: resolved from the shared
+                // `goal.*` config by the caller (CLI parity).
+                content_verify,
             };
 
             let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -505,6 +530,7 @@ mod tests {
             finished_at: "2026-05-13T00:00:01Z".into(),
             agent_exit_code: Some(0),
             fix_post_lint_issues_remain: false,
+            content_review: None,
         }
     }
 
@@ -523,6 +549,92 @@ mod tests {
             outcome: outcome.into(),
             session_id: None,
         }
+    }
+
+    use std::sync::mpsc::SyncSender;
+
+    /// Capturing runner: records the `GoalOptions` injected into
+    /// `run_goal` so tests can assert config-resolved threading, then
+    /// returns a fake successful report.
+    fn capturing_runner(
+        tx: SyncSender<GoalOptions>,
+    ) -> impl FnOnce(
+        &Path,
+        GoalOptions,
+        Box<dyn FnMut(VerbEvent) + Send>,
+        Option<Arc<AtomicBool>>,
+    ) -> Result<GoalReport, VerbError>
+           + Send
+           + 'static {
+        move |_repo, opts, _on_event, _cancel| {
+            let _ = tx.send(opts);
+            Ok(fake_report())
+        }
+    }
+
+    fn write_goal_cfg(home: &Path, body: &str) {
+        let cb = home.join(".codebus");
+        fs::create_dir_all(&cb).unwrap();
+        fs::write(cb.join("config.yaml"), body).unwrap();
+    }
+
+    /// goal-content-verify task 6.1 (design D6; spec app-workspace /
+    /// Goal Content Verify GUI Wiring). Scenario: GUI resolves config
+    /// and threads goal text — `goal.content_verify: true` → `run_goal`
+    /// receives `content_verify == true` and the originating goal text.
+    #[test]
+    fn spawn_goal_threads_content_verify_true_and_goal_text() {
+        let home = tempfile::TempDir::new().unwrap();
+        write_goal_cfg(home.path(), "goal:\n  content_verify: true\n");
+        let cv = resolve_goal_content_verify(Some(
+            &home.path().join(".codebus").join("config.yaml"),
+        ));
+        assert!(cv, "true config must resolve to content_verify=true");
+
+        let runtime = AppRuntimeState::new();
+        let (tx, rx) = mpsc::sync_channel::<GoalOptions>(1);
+        let temp = tempfile::TempDir::new().unwrap();
+        spawn_goal_with_runner(
+            runtime.active_runs.clone(),
+            temp.path().to_path_buf(),
+            "describe auth".into(),
+            |_p| {},
+            |_t| {},
+            cv,
+            capturing_runner(tx),
+        )
+        .expect("spawn ok");
+        let opts = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("runner must receive GoalOptions");
+        assert!(opts.content_verify, "content_verify must thread into run_goal");
+        assert_eq!(
+            opts.text, "describe auth",
+            "originating goal text must thread into run_goal (off-goal check)"
+        );
+    }
+
+    /// Scenario: GUI default-off — absent config → content_verify false.
+    #[test]
+    fn resolve_goal_content_verify_false_when_config_absent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(!resolve_goal_content_verify(Some(
+            &tmp.path().join("nonexistent.yaml")
+        )));
+        assert!(!resolve_goal_content_verify(None));
+    }
+
+    /// Scenario: GUI config load error is conservative — a malformed
+    /// config resolves to `false` (do NOT silently enable extra spawns).
+    #[test]
+    fn resolve_goal_content_verify_false_on_load_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let p = tmp.path().join("config.yaml");
+        fs::write(&p, "goal:\n  content_verify: not-a-bool\n").unwrap();
+        assert!(
+            !resolve_goal_content_verify(Some(&p)),
+            "a malformed goal config must conservatively resolve to false"
+        );
     }
 
     /// Task 3.1 acceptance: spawn_goal returns a run id AND the
@@ -554,6 +666,7 @@ mod tests {
             move |payload| {
                 let _ = terminal_tx.send(payload.run_id);
             },
+            false,
             runner,
         )
         .expect("spawn ok");
@@ -596,6 +709,7 @@ mod tests {
             "x".into(),
             |_p| {},
             |_terminal| {},
+            false,
             |_repo, _opts, _on_event, _cancel| Ok(fake_report()),
         )
         .expect_err("second spawn must be rejected");
@@ -631,6 +745,7 @@ mod tests {
             "concurrent goal".into(),
             |_p| {},
             |_terminal| {},
+            false,
             |_repo, _opts, _on_event, _cancel| Ok(fake_report()),
         )
         .expect("goal spawn MUST succeed when only a chat turn is active");

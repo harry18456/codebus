@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Args;
-use codebus_core::config::ConfigLoadError;
+use codebus_core::config::{ConfigLoadError, default_config_path, load_goal_config};
 use codebus_core::render::{RenderOptions, print_banner, print_event};
 use codebus_core::verb::goal::{GoalOptions, run_goal};
 use codebus_core::verb::{VerbError, VerbEvent};
@@ -46,11 +46,32 @@ pub async fn run(
         );
     }
 
+    // goal-content-verify D6: resolve `goal.content_verify` from the
+    // shared `goal.*` config (never the app-only `app.*` namespace). A
+    // load error conservatively defaults to `false` — do NOT silently
+    // enable extra verify/repair spawns on a malformed config. No new
+    // subcommand: this is an internal stage of `run_goal`. The
+    // originating goal text is already threaded via `text` (the off-goal
+    // check needs it).
+    let content_verify = match default_config_path() {
+        Some(p) => match load_goal_config(&p) {
+            Ok(cfg) => cfg.content_verify,
+            Err(e) => {
+                if debug {
+                    eprintln!("[debug] goal: goal config load failed, content_verify=false: {e}");
+                }
+                false
+            }
+        },
+        None => false,
+    };
+
     let options = GoalOptions {
         text: args.text.clone(),
         force_resync: args.force_resync,
         no_fix,
         no_obsidian_register,
+        content_verify,
     };
 
     let render_opts_for_closure = render_opts.clone();

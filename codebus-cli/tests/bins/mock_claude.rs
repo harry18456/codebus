@@ -346,10 +346,95 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
 
+        // goal-content-verify task 4.1: goal ingest writes a wiki page;
+        // the independent verify spawn always reports CONTENT_OK → the
+        // shared verify→repair loop exits immediately with content-review
+        // ok; auto_commit runs normally.
+        "goal-verify-clean" => match goal_mode(&args) {
+            GoalMode::Verify => {
+                emit_quiz_init(&session_id());
+                emit_assistant_text("CONTENT_OK");
+                emit_quiz_result();
+                ExitCode::SUCCESS
+            }
+            GoalMode::Repair => ExitCode::SUCCESS,
+            GoalMode::Ingest | GoalMode::Unknown => {
+                let _ = write_test_page("wiki/concepts/mock.md", "mock");
+                ExitCode::SUCCESS
+            }
+        },
+
+        // goal-content-verify task 4.1: verify ALWAYS flags the changed
+        // page; the loop repairs (Write spawn rewrites the page) then
+        // re-verifies and is flagged again, exhausting the cap → residual
+        // content_review: flagged + a non-fatal warning, the page is NOT
+        // reverted, exit unchanged, auto_commit still runs.
+        "goal-verify-flag" => match goal_mode(&args) {
+            GoalMode::Verify => {
+                emit_quiz_init(&session_id());
+                emit_assistant_text(
+                    "wiki/concepts/mock.md | unfaithful | claim not grounded in raw/code",
+                );
+                emit_quiz_result();
+                ExitCode::SUCCESS
+            }
+            GoalMode::Repair => {
+                // Repair spawn is Write-capable: rewrite the flagged page
+                // in place (still "flagged" on re-verify by design of
+                // this mock, to exercise the cap path).
+                let _ = write_test_page("wiki/concepts/mock.md", "mock-repaired");
+                ExitCode::SUCCESS
+            }
+            GoalMode::Ingest | GoalMode::Unknown => {
+                let _ = write_test_page("wiki/concepts/mock.md", "mock");
+                ExitCode::SUCCESS
+            }
+        },
+
+        // goal-content-verify task 4.1: verify emits prose with neither
+        // CONTENT_OK nor a parseable defect line → unparseable → the
+        // stage is conservatively flagged (never silently ok), non-fatal.
+        "goal-verify-unparseable" => match goal_mode(&args) {
+            GoalMode::Verify => {
+                emit_quiz_init(&session_id());
+                emit_assistant_text("I looked at the pages and they seem fine overall.");
+                emit_quiz_result();
+                ExitCode::SUCCESS
+            }
+            GoalMode::Repair => ExitCode::SUCCESS,
+            GoalMode::Ingest | GoalMode::Unknown => {
+                let _ = write_test_page("wiki/concepts/mock.md", "mock");
+                ExitCode::SUCCESS
+            }
+        },
+
         other => {
             eprintln!("mock-claude: unknown behavior `{other}`");
             ExitCode::from(2)
         }
+    }
+}
+
+#[derive(PartialEq)]
+enum GoalMode {
+    Ingest,
+    Verify,
+    Repair,
+    Unknown,
+}
+
+/// Classify a goal spawn by scanning argv for the `/codebus-goal` slash
+/// command's mode prefix (goal-content-verify design D3/D6).
+fn goal_mode(args: &[String]) -> GoalMode {
+    let joined = args.join(" ");
+    if joined.contains("/codebus-goal verify:") {
+        GoalMode::Verify
+    } else if joined.contains("/codebus-goal repair:") {
+        GoalMode::Repair
+    } else if joined.contains("/codebus-goal ") {
+        GoalMode::Ingest
+    } else {
+        GoalMode::Unknown
     }
 }
 

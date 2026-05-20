@@ -13,4 +13,4 @@
 
 pub mod nested_repo;
 
-pub use nested_repo::{auto_commit, init_nested_repo};
+pub use nested_repo::{auto_commit, changed_paths_under, init_nested_repo, rev_parse_head};

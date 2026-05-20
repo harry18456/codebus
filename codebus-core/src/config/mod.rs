@@ -15,6 +15,7 @@
 
 pub mod claude_code;
 pub mod endpoint;
+pub mod goal;
 pub mod global_starter;
 pub mod keyring;
 pub mod lint_fix;
@@ -34,6 +35,7 @@ pub use global_starter::{StarterOutcome, write_starter_config_if_missing};
 pub use keyring::KeyringError;
 pub use lint_fix::{LintFixConfig, load_lint_fix_config};
 pub use log::{LogConfig, load_log_config};
+pub use goal::{GoalConfig, load_goal_config};
 pub use pii::{PiiConfig, PiiScannerKind, load_pii_config};
 pub use quiz::{QuizConfig, load_quiz_config};
 

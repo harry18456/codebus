@@ -24,7 +24,11 @@ use crate::config::{
     PiiConfig, PiiScannerKind, Verb, build_env_overrides, default_config_path,
     load_claude_code_config, load_lint_fix_config, load_pii_config,
 };
-use crate::git::auto_commit;
+use crate::agent::claude_cli::InvokeReport;
+use crate::git::{auto_commit, changed_paths_under, rev_parse_head};
+use crate::verb::content_verify::{
+    ContentDefect, ContentVerifyOutcome, parse_content_defects, run_content_verify_loop,
+};
 use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
 use crate::log::verb_log::{
@@ -53,6 +57,14 @@ use std::time::Instant;
 /// that). v2 iter-9 carry, spike-verified 2026-05-09 to be a real hard gate.
 pub const GOAL_TOOLSET: &[&str] = &["Read", "Glob", "Grep", "Write", "Edit"];
 
+/// Read-only toolset for the goal **content-verify** spawn
+/// (goal-content-verify design D3). No Write/Edit — the verify spawn
+/// only judges. `Read` covers the cwd-relative `raw/code/` source mirror
+/// so the unfaithful check can be grounded against source (the
+/// `raw/code/` read scope is wider than the quiz verify spawn's
+/// wiki-only scope by design).
+pub const GOAL_VERIFY_TOOLSET: &[&str] = &["Read", "Glob", "Grep"];
+
 /// Caller-controllable inputs to `run_goal`.
 #[derive(Debug, Clone)]
 pub struct GoalOptions {
@@ -60,6 +72,38 @@ pub struct GoalOptions {
     pub force_resync: bool,
     pub no_fix: bool,
     pub no_obsidian_register: bool,
+    /// goal-content-verify (design D5/D6): run the optional independent
+    /// content verify + bounded repair stage after the fix loop and
+    /// before `auto_commit`. Caller-injected from `goal.content_verify`
+    /// config (the library never reads config itself); default `false`.
+    pub content_verify: bool,
+}
+
+/// Independent content-verify outcome carried on [`GoalReport`]
+/// (goal-content-verify design D4). `None` means the stage did not run
+/// (config off) — readers MUST NOT treat absence as `Ok` ("not
+/// verified" ≠ "ok").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GoalContentReview {
+    Ok,
+    /// Wiki page paths still flagged after the cap. An **empty** vec is
+    /// the conservative non-fatal flag (verify spawn failed / output
+    /// unparseable / changed-page detection failed — never silently
+    /// `Ok`).
+    Flagged(Vec<String>),
+}
+
+impl GoalContentReview {
+    /// Human-readable status for the non-fatal warning / run log:
+    /// `ok` or `flagged [wiki/a.md, wiki/b.md]`.
+    pub fn status_str(&self) -> String {
+        match self {
+            GoalContentReview::Ok => "ok".to_string(),
+            GoalContentReview::Flagged(pages) => {
+                format!("flagged [{}]", pages.join(", "))
+            }
+        }
+    }
 }
 
 /// Outcome of a successful `run_goal` invocation. `agent_exit_code` is
@@ -76,6 +120,11 @@ pub struct GoalReport {
     pub finished_at: String,
     pub agent_exit_code: Option<i32>,
     pub fix_post_lint_issues_remain: bool,
+    /// goal-content-verify (design D4): independent content-verify
+    /// outcome. `None` when the stage did not run (config off); readers
+    /// MUST NOT treat `None` as `Ok`. `auto_commit` and the exit code
+    /// are unaffected by this value.
+    pub content_review: Option<GoalContentReview>,
 }
 
 /// Run the goal verb against `repo`. See module docs for full behavior.
@@ -252,6 +301,17 @@ pub fn run_goal(
     let goal_env =
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
+    // goal-content-verify D3: pin the vault revision BEFORE the goal
+    // agent spawn so the content-verify stage can diff this run's
+    // created/modified wiki pages against it. Only needed when the stage
+    // will run; `None` (no commits / git failure) degrades gracefully
+    // (the helper falls back to `HEAD` and the stage stays best-effort).
+    let pre_rev: Option<String> = if options.content_verify {
+        rev_parse_head(&paths.root)
+    } else {
+        None
+    };
+
     // Step 8: spawn goal agent.
     fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Goal,
@@ -369,6 +429,131 @@ pub fn run_goal(
         }
     }
 
+    // goal-content-verify D2/D3/D4: optional independent content verify
+    // + bounded repair, AFTER the fix loop and BEFORE auto_commit. Gated
+    // by `options.content_verify` (caller-injected from config). The
+    // whole stage is best-effort — it never returns an error for content
+    // defects, never reverts a page, and never blocks the commit; the
+    // exit code is unaffected. `None` => stage did not run.
+    let content_review: Option<GoalContentReview> = if options.content_verify {
+        match changed_paths_under(&paths.root, pre_rev.as_deref(), "wiki/") {
+            Err(e) => {
+                eprintln!(
+                    "warning: goal content-verify changed-page detection failed (non-fatal; content-review: flagged): {e}"
+                );
+                Some(GoalContentReview::Flagged(Vec::new()))
+            }
+            Ok(pages) if pages.is_empty() => {
+                // No wiki page changed this run → resolve ok without
+                // spawning anything (design D3 short-circuit).
+                Some(GoalContentReview::Ok)
+            }
+            Ok(pages) => {
+                let goal_text = options.text.clone();
+                let cv_env = build_env_overrides(&cc_cfg)
+                    .map_err(|e| VerbError::KeyringMissing { source: e })?;
+                let fan_cell = std::cell::RefCell::new(&mut fan_out);
+
+                let verify = |_: &()| -> Result<Option<Vec<ContentDefect>>, VerbError> {
+                    let prompt = format!(
+                        "/codebus-goal verify: goal={}\n\nCHANGED PAGES:\n{}",
+                        goal_text,
+                        pages.join("\n")
+                    );
+                    let vtext = match run_goal_spawn(
+                        &mut **fan_cell.borrow_mut(),
+                        prompt,
+                        paths.root.clone(),
+                        GOAL_VERIFY_TOOLSET,
+                        goal_resolved.model.clone(),
+                        goal_resolved.effort.clone(),
+                        cv_env.clone(),
+                        cancel.clone(),
+                    ) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            eprintln!(
+                                "warning: goal content-verify spawn failed (non-fatal; content-review: flagged): {e}"
+                            );
+                            return Err(e);
+                        }
+                    };
+                    let parsed = parse_content_defects(&vtext);
+                    if parsed.is_none() {
+                        eprintln!(
+                            "warning: goal content-verify output unparseable (non-fatal; content-review: flagged)"
+                        );
+                    }
+                    Ok(parsed)
+                };
+
+                let repair =
+                    |_: &(), defects: &[ContentDefect]| -> Result<(), VerbError> {
+                        let defect_lines = defects
+                            .iter()
+                            .map(|d| format!("{} | {} | {}", d.id, d.kind, d.suggestion))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        let flagged_pages = defects
+                            .iter()
+                            .map(|d| d.id.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        let prompt = format!(
+                            "/codebus-goal repair: goal={}\n\nCONTENT DEFECTS:\n{}\n\nFLAGGED PAGES:\n{}",
+                            goal_text, defect_lines, flagged_pages
+                        );
+                        match run_goal_spawn(
+                            &mut **fan_cell.borrow_mut(),
+                            prompt,
+                            paths.root.clone(),
+                            GOAL_TOOLSET,
+                            goal_resolved.model.clone(),
+                            goal_resolved.effort.clone(),
+                            cv_env.clone(),
+                            cancel.clone(),
+                        ) {
+                            Ok(_) => Ok(()),
+                            Err(e) => {
+                                eprintln!(
+                                    "warning: goal content-repair spawn failed (non-fatal; keeping pages, content-review: flagged): {e}"
+                                );
+                                Err(e)
+                            }
+                        }
+                    };
+
+                let (_unit, outcome) = run_content_verify_loop(
+                    (),
+                    || {
+                        cancel
+                            .as_ref()
+                            .map(|f| f.load(Ordering::Relaxed))
+                            .unwrap_or(false)
+                    },
+                    verify,
+                    repair,
+                );
+                match outcome {
+                    ContentVerifyOutcome::Ok => Some(GoalContentReview::Ok),
+                    ContentVerifyOutcome::Flagged(defects) => {
+                        let mut flagged: Vec<String> =
+                            defects.iter().map(|d| d.id.clone()).collect();
+                        flagged.sort();
+                        flagged.dedup();
+                        eprintln!(
+                            "warning: goal content-review flagged {} page(s) after repair cap (non-fatal; not reverted, commit proceeds)",
+                            flagged.len()
+                        );
+                        Some(GoalContentReview::Flagged(flagged))
+                    }
+                }
+            }
+        }
+    } else {
+        None
+    };
+
     // Step 10: auto-commit "wiki: <goal>".
     let commit_msg = format!("wiki: {}", options.text);
     match auto_commit(&paths.root, &commit_msg) {
@@ -432,7 +617,60 @@ pub fn run_goal(
         finished_at: invoke_report.finished_at,
         agent_exit_code: invoke_report.exit.code(),
         fix_post_lint_issues_remain,
+        content_review,
     })
+}
+
+/// Run one goal-side spawn (content-verify or content-repair),
+/// accumulating assistant `Thought` text while forwarding every stream
+/// event through `fan_out`, bracketed by `SpawnStart` / `SpawnEnd`
+/// lifecycle events (goal-content-verify D3: verify/repair events flow
+/// through the same fan-out the goal spawn uses). Mirrors the quiz
+/// `run_spawn` shape.
+#[allow(clippy::too_many_arguments)]
+fn run_goal_spawn(
+    fan_out: &mut dyn FnMut(VerbEvent),
+    slash_command: String,
+    vault_root: std::path::PathBuf,
+    toolset: &'static [&'static str],
+    model: Option<String>,
+    effort: Option<String>,
+    env: crate::agent::EnvOverrides,
+    cancel: Option<Arc<AtomicBool>>,
+) -> Result<String, VerbError> {
+    fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
+        verb: Verb::Goal,
+    }));
+    let mut accumulated = String::new();
+    let report: InvokeReport = {
+        let acc = &mut accumulated;
+        let fan_out = &mut *fan_out;
+        crate::agent::invoke(
+            crate::agent::InvokeAgentOptions {
+                slash_command,
+                vault_root,
+                toolset,
+                bash_whitelist: None,
+                model,
+                effort,
+                env,
+                resume_session_id: None,
+            },
+            |event: StreamEvent| {
+                if let StreamEvent::Thought { text } = &event {
+                    acc.push_str(text);
+                }
+                fan_out(VerbEvent::Stream(event));
+            },
+            cancel,
+        )
+        .map_err(|e| VerbError::Spawn { source: e })?
+    };
+    fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnEnd {
+        verb: Verb::Goal,
+        exit_code: report.exit.code(),
+    }));
+    Ok(accumulated)
 }
 
 /// Construct the active PII scanner from `pii.scanner` discriminator.
@@ -468,6 +706,7 @@ mod tests {
             force_resync: false,
             no_fix: false,
             no_obsidian_register: false,
+            content_verify: false,
         };
         let _ = TempDir::new().unwrap();
     }
