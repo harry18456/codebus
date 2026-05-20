@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const setMock = vi.fn()
@@ -25,8 +25,12 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }))
 
+import { listen } from "@tauri-apps/api/event"
 import { WikiTab } from "./WikiTab"
 import { useWikiStore } from "@/store/wiki"
+import { useVaultWatcherStatusStore } from "@/store/vault-watcher-status"
+
+const mockedListen = vi.mocked(listen)
 
 describe("WikiTab", () => {
   beforeEach(() => {
@@ -90,5 +94,43 @@ describe("WikiTab", () => {
     expect(screen.getByTestId("wiki-empty")).toHaveTextContent(
       "No wiki pages yet — run a goal to start documenting",
     )
+  })
+
+  // ---- Watcher integration (codebus-fs-watcher) ----
+
+  it("error_event_disables_autorefresh_and_shows_indicator", () => {
+    useVaultWatcherStatusStore.setState({
+      disabledVaults: { "/v": "ENOSPC: inotify watch limit exhausted" },
+    })
+    useWikiStore.setState({
+      pages: { a: { slug: "a", path: "/v/.codebus/wiki/a.md", title: "A" } },
+    })
+    render(<WikiTab vaultPath="/v" />)
+    const banner = screen.getByTestId("watcher-status-banner")
+    expect(banner).toHaveTextContent(/auto-refresh disabled/i)
+    expect(banner).toHaveTextContent("ENOSPC")
+    // Reset to keep test isolation tight.
+    useVaultWatcherStatusStore.setState({ disabledVaults: {} })
+  })
+
+  it("external_add_refreshes_tree", async () => {
+    let capturedCallback: ((ev: { payload: unknown }) => void) | undefined
+    mockedListen.mockImplementation(async (name, cb) => {
+      if (name === "wiki-list-changed") {
+        capturedCallback = cb as (ev: { payload: unknown }) => void
+      }
+      return () => {}
+    })
+    const listPagesSpy = vi.fn(async () => {})
+    useWikiStore.setState({
+      pages: { a: { slug: "a", path: "/v/.codebus/wiki/a.md", title: "A" } },
+      listPages: listPagesSpy as never,
+    })
+
+    render(<WikiTab vaultPath="/v" />)
+    await waitFor(() => expect(capturedCallback).toBeTruthy())
+
+    capturedCallback?.({ payload: null })
+    await waitFor(() => expect(listPagesSpy).toHaveBeenCalledWith("/v"))
   })
 })

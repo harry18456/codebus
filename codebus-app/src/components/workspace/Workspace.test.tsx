@@ -273,4 +273,34 @@ describe("Workspace", () => {
 
     acceptSpy.mockRestore()
   })
+
+  // ---- Watcher lifecycle (codebus-fs-watcher tasks 2.6 / 2.3) ----
+
+  it("mount_starts_watcher", async () => {
+    invokeMock.mockResolvedValue([])
+    render(<Workspace vault={VAULT} />)
+    await waitFor(() => {
+      const calls = invokeMock.mock.calls.map((c) => c[0])
+      expect(calls).toContain("start_vault_watcher")
+    })
+    const startCall = invokeMock.mock.calls.find(
+      (c) => c[0] === "start_vault_watcher",
+    )
+    expect(startCall?.[1]).toEqual({ vaultPath: VAULT.path })
+  })
+
+  it("unmount_stops_watcher", async () => {
+    invokeMock.mockResolvedValue([])
+    const { unmount } = render(<Workspace vault={VAULT} />)
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.map((c) => c[0]),
+      ).toContain("start_vault_watcher")
+    })
+    unmount()
+    const stopCall = invokeMock.mock.calls.find(
+      (c) => c[0] === "stop_vault_watcher",
+    )
+    expect(stopCall?.[1]).toEqual({ vaultPath: VAULT.path })
+  })
 })

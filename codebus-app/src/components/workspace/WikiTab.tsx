@@ -1,9 +1,11 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Folder } from "lucide-react"
 
 import { cn } from "@/lib/cn"
 import { useWikiStore } from "@/store/wiki"
+import { useWatcherEvent } from "@/hooks/useWatcherEvent"
 
+import { WatcherStatusBanner } from "./WatcherStatusBanner"
 import { WikiPreview } from "./WikiPreview"
 import { WikiTree } from "./WikiTree"
 
@@ -28,7 +30,18 @@ export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
   const currentPath = useWikiStore((s) => s.currentPath)
   const body = useWikiStore((s) => s.body)
   const loadPage = useWikiStore((s) => s.loadPage)
+  const listPages = useWikiStore((s) => s.listPages)
   const [treeOpen, setTreeOpen] = useState(true)
+
+  // External edits (Obsidian / VS Code / terminal goal) that touch
+  // `<vault>/.codebus/wiki/` SHALL refresh the tree without requiring
+  // a manual remount. Spec: `Wiki Tab Subscribes To Watcher Events`.
+  useEffect(
+    () => useWatcherEvent("wiki-list-changed", () => {
+      void listPages(vaultPath)
+    }),
+    [listPages, vaultPath],
+  )
 
   const hasPages = Object.keys(pages).length > 0
   const currentTitle =
@@ -55,6 +68,7 @@ export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
       data-testid="wiki-tab"
       className="flex h-full w-full flex-col"
     >
+      <WatcherStatusBanner vaultPath={vaultPath} />
       <div
         data-tauri-drag-region
         className="flex items-center gap-2 border-b border-border px-3 py-2 pr-[160px]"

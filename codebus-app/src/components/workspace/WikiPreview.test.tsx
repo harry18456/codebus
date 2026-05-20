@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }))
@@ -7,10 +7,12 @@ vi.mock("@tauri-apps/api/event", () => ({
 }))
 
 import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import { WikiPreview } from "./WikiPreview"
 import { useWikiStore } from "@/store/wiki"
 
 const invokeMock = vi.mocked(invoke)
+const mockedListen = vi.mocked(listen)
 
 describe("WikiPreview", () => {
   beforeEach(() => {
@@ -155,5 +157,64 @@ describe("WikiPreview", () => {
     })
     render(<WikiPreview vaultPath="/v" body={"# Log"} />)
     expect(screen.queryByTestId("quiz-me-on-this")).not.toBeInTheDocument()
+  })
+
+  // ---- Watcher integration (codebus-fs-watcher) ----
+
+  it("external_edit_open_page_refetches", async () => {
+    let capturedCallback:
+      | ((ev: { payload: { path: string } }) => void)
+      | undefined
+    mockedListen.mockImplementation(async (name, cb) => {
+      if (name === "wiki-page-changed") {
+        capturedCallback = cb as (ev: { payload: { path: string } }) => void
+      }
+      return () => {}
+    })
+    const loadPageSpy = vi.fn(async () => {})
+    // `slug` is `path.file_stem()` (the basename without `.md`), NOT
+    // the relative path under wiki/. See
+    // `codebus-app/src-tauri/src/ipc/wiki.rs::list_wiki_pages_impl`.
+    useWikiStore.setState({
+      currentPath: "foo",
+      body: "old",
+      loadPage: loadPageSpy as never,
+    })
+
+    render(<WikiPreview vaultPath="/v" body={"old"} />)
+    await waitFor(() => expect(capturedCallback).toBeTruthy())
+
+    capturedCallback?.({
+      payload: { path: "/v/.codebus/wiki/concepts/foo.md" },
+    })
+    await waitFor(() => expect(loadPageSpy).toHaveBeenCalledWith("/v", "foo"))
+  })
+
+  it("external_edit_other_page_is_ignored", async () => {
+    let capturedCallback:
+      | ((ev: { payload: { path: string } }) => void)
+      | undefined
+    mockedListen.mockImplementation(async (name, cb) => {
+      if (name === "wiki-page-changed") {
+        capturedCallback = cb as (ev: { payload: { path: string } }) => void
+      }
+      return () => {}
+    })
+    const loadPageSpy = vi.fn(async () => {})
+    useWikiStore.setState({
+      currentPath: "foo",
+      body: "stable",
+      loadPage: loadPageSpy as never,
+    })
+
+    render(<WikiPreview vaultPath="/v" body={"stable"} />)
+    await waitFor(() => expect(capturedCallback).toBeTruthy())
+
+    capturedCallback?.({
+      payload: { path: "/v/.codebus/wiki/concepts/other.md" },
+    })
+    // Allow one microtask + a small delay; loadPage SHALL NOT fire.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(loadPageSpy).not.toHaveBeenCalled()
   })
 })

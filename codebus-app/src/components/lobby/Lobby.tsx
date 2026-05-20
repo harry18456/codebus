@@ -4,6 +4,7 @@ import type { VaultEntry } from "@/lib/ipc"
 import { useVaultsStore } from "@/store/vaults"
 import { useRouteStore } from "@/store/route"
 import { useT } from "@/i18n/useT"
+import { useWatcherEvent } from "@/hooks/useWatcherEvent"
 
 import { EmptyState } from "./EmptyState"
 import { VaultCard } from "./VaultCard"
@@ -23,6 +24,18 @@ export function Lobby({ onNewVault, onRevealInFiles }: LobbyProps) {
   useEffect(() => {
     loadVaults()
   }, [loadVaults])
+
+  // Subscribe to the Lobby watcher so external edits to
+  // `~/.codebus/app-state.json` (e.g. another instance, or a future
+  // CLI hook that registers vaults) refresh the Lobby card list
+  // without requiring the user to re-mount. Cleanup unsubscribes on
+  // unmount per spec `Lobby Subscribes To Vault List Watcher`.
+  useEffect(
+    () => useWatcherEvent("vault-list-changed", () => {
+      void loadVaults()
+    }),
+    [loadVaults],
+  )
 
   const empty = vaults.length === 0
 

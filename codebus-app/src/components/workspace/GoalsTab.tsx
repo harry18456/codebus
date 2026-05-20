@@ -1,11 +1,13 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import type { RunLogSummary } from "@/lib/ipc"
 import { useGoalsStore } from "@/store/goals"
+import { useWatcherEvent } from "@/hooks/useWatcherEvent"
 
 import { NewGoalModal } from "./NewGoalModal"
 import { RunListItem } from "./RunListItem"
+import { WatcherStatusBanner } from "./WatcherStatusBanner"
 
 /**
  * Pre-fill examples for the empty Goals overview hint. Spec
@@ -35,8 +37,19 @@ export function GoalsTab({
   onSpawnedRun,
 }: GoalsTabProps) {
   const runs = useGoalsStore((s) => s.runs)
+  const refreshRuns = useGoalsStore((s) => s.refreshRuns)
   const [modalOpen, setModalOpen] = useState(false)
   const [prefill, setPrefill] = useState("")
+
+  // Terminal-spawned goals appearing in `<vault>/.codebus/log/` SHALL
+  // surface in the Goals list without requiring the user to switch
+  // tabs. Spec: `Goals Tab Subscribes To Watcher Events`.
+  useEffect(
+    () => useWatcherEvent("goals-changed", () => {
+      void refreshRuns(vaultPath)
+    }),
+    [refreshRuns, vaultPath],
+  )
 
   // Design + spec: Goals tab filters to mode === "goal" client-side
   // even though IPC already filters. The extra guard ensures the UI
@@ -59,6 +72,7 @@ export function GoalsTab({
       data-testid="goals-tab"
       className="flex h-full w-full flex-col"
     >
+      <WatcherStatusBanner vaultPath={vaultPath} />
       {/* pr-[160px] leaves room for the fixed WindowControls (3 × 46px). */}
       <div
         data-tauri-drag-region

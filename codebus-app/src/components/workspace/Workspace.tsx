@@ -12,8 +12,13 @@ import { useGoalsStore } from "@/store/goals"
 import { useRouteStore } from "@/store/route"
 import { useSettingsStore } from "@/store/settings"
 import { useVaultsStore } from "@/store/vaults"
+import { useVaultWatcherStatusStore } from "@/store/vault-watcher-status"
 import { useWikiStore } from "@/store/wiki"
 import { useChatShortcut } from "@/hooks/useChatShortcut"
+import { useWatcherEvent } from "@/hooks/useWatcherEvent"
+import {
+  invoke as tauriInvoke,
+} from "@tauri-apps/api/core"
 
 import { ChatWidget } from "./ChatWidget"
 import { GoalsTab } from "./GoalsTab"
@@ -115,6 +120,58 @@ export function Workspace({ vault }: WorkspaceProps) {
       cancelled = true
     }
   }, [selectedRunId, selectedDetail, activeRun, vault.path])
+
+  // Watcher integration: external edits to the open run's
+  // `events-<run>.jsonl` (terminal-spawned runs, live appends) SHALL
+  // re-fetch the detail so the displayed timeline stays current. The
+  // payload's run_id is compared against the currently selected run;
+  // mismatches are ignored to avoid churning unrelated state. Spec:
+  // `Goals Tab Subscribes To Watcher Events`.
+  useEffect(
+    () =>
+      useWatcherEvent("goal-run-changed", (payload) => {
+        if (!selectedRunId) return
+        if (payload.run_id !== selectedRunId) return
+        let cancelled = false
+        void getRunDetail(vault.path, selectedRunId)
+          .then((detail) => {
+            if (!cancelled) setSelectedDetail(detail)
+          })
+          .catch(() => {})
+        // No cancellation handle needed: useWatcherEvent's cleanup
+        // tears down the subscription on unmount, so subsequent
+        // promise resolutions race only against state setters that
+        // React already gates on mount.
+        void cancelled
+      }),
+    [selectedRunId, vault.path],
+  )
+
+  // Subscribe to `vault-watcher-error` so a failed watcher startup
+  // populates the disabled-status store. The banner in each tab reads
+  // from that store and surfaces the failure. The subscription is
+  // session-scoped (cleanup on unmount) per spec.
+  useEffect(
+    () =>
+      useWatcherEvent("vault-watcher-error", (payload) => {
+        useVaultWatcherStatusStore
+          .getState()
+          .markDisabled(payload.vault_path, payload.reason)
+      }),
+    [],
+  )
+
+  // Per-vault watcher lifecycle bound to Workspace mount/unmount.
+  // Spec: `Workspace Manages Per-Vault Watcher Lifecycle`. Vault
+  // switch (new Workspace mount for a different vault) releases the
+  // prior watcher via the cleanup return, then starts the new one.
+  useEffect(() => {
+    const path = vault.path
+    void tauriInvoke("start_vault_watcher", { vaultPath: path })
+    return () => {
+      void tauriInvoke("stop_vault_watcher", { vaultPath: path })
+    }
+  }, [vault.path])
 
   const onSelectRun = useCallback(
     async (run: RunLogSummary) => {

@@ -25,7 +25,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { Button } from "@/components/ui/button"
 import { useSettingsStore } from "@/store/settings"
 import { useT } from "@/i18n/useT"
+import { useWatcherEvent } from "@/hooks/useWatcherEvent"
 import { QuizAnswering } from "./QuizAnswering"
+import { WatcherStatusBanner } from "./WatcherStatusBanner"
 import {
   Dialog,
   DialogClose,
@@ -180,6 +182,51 @@ export function QuizTab({
   const [liveEvents, setLiveEvents] = useState<VerbEvent[]>([])
   const unlistenRef = useRef<UnlistenFn | null>(null)
   const streamUnlistenRef = useRef<UnlistenFn | null>(null)
+  // Monotonic counter bumped by the quiz-changed watcher event. Included
+  // in the history-load effect's deps so an external attempt write (e.g.
+  // terminal `codebus quiz`) re-runs the load and the new row appears
+  // without the user switching tabs. Spec: `Quiz Tab Subscribes To
+  // Watcher Events`.
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
+
+  // Subscribe to the per-vault quiz history watcher. The list reload
+  // happens via the dep-bump trick rather than a direct call so we
+  // reuse the existing `phase === "history"` effect's loader.
+  useEffect(
+    () =>
+      useWatcherEvent("quiz-changed", () => {
+        setHistoryRefreshKey((k) => k + 1)
+      }),
+    [],
+  )
+
+  // Re-fetch the currently-open attempt's md + sidecar when the watcher
+  // reports a change to that exact attempt. Edits to a different
+  // attempt are ignored so the open attempt's UI never churns.
+  useEffect(
+    () =>
+      useWatcherEvent("quiz-attempt-changed", (payload) => {
+        if (!attemptPath) return
+        // The watcher emits `slug` + `id`; the attemptPath ends with
+        // `<slug>/<id>.md`. Normalize separators because Rust on Windows
+        // may emit backslashes.
+        const norm = attemptPath.replace(/\\/g, "/")
+        const expectedSuffix = `/${payload.slug}/${payload.id}.md`
+        if (!norm.endsWith(expectedSuffix)) return
+        void Promise.all([
+          readQuizAttempt(vaultPath, attemptPath),
+          readQuizProgress(vaultPath, sidecarPath(attemptPath)),
+        ])
+          .then(([md, prog]) => {
+            setAttemptMd(md)
+            setAttemptProgress(prog)
+          })
+          .catch(() => {
+            /* read race — non-fatal; next interaction reloads */
+          })
+      }),
+    [attemptPath, vaultPath],
+  )
 
   // Persist a submission to the open attempt's sidecar (design D3).
   // No-op when no attempt path is known (e.g. a generate whose persist
@@ -299,7 +346,7 @@ export function QuizTab({
     return () => {
       alive = false
     }
-  }, [phase, vaultPath, passThreshold])
+  }, [phase, vaultPath, passThreshold, historyRefreshKey])
 
   function clearListener() {
     if (unlistenRef.current) {
@@ -448,6 +495,7 @@ export function QuizTab({
       data-testid="quiz-tab"
       className="flex h-full w-full flex-col"
     >
+      <WatcherStatusBanner vaultPath={vaultPath} />
       {/* Header mirrors GoalsTab exactly (full-width, border-b, p-3,
           pr-[160px] for the fixed WindowControls) so + New quiz lands
           in the same screen position/style as + New goal across tabs. */}

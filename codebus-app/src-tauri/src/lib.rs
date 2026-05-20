@@ -8,6 +8,7 @@ pub mod config;
 pub mod error;
 pub mod ipc;
 pub mod state;
+pub mod watcher;
 
 pub fn run() {
     tauri::Builder::default()
@@ -23,6 +24,16 @@ pub fn run() {
             }
         }))
         .manage(state::app_state::AppRuntimeState::new())
+        .manage(watcher::WatcherRegistry::new())
+        .setup(|app| {
+            use tauri::Manager;
+            let handle = app.handle().clone();
+            let registry = handle.state::<watcher::WatcherRegistry>();
+            if let Err(e) = watcher::setup_lobby_watcher(&handle, &registry) {
+                eprintln!("lobby watcher setup failed (auto-refresh disabled): {e}");
+            }
+            Ok(())
+        })
         .invoke_handler(generate_ipc_handler!())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,6 @@
 //! IPC command registry.
 //!
-//! The frontend MAY invoke only the twenty-five commands listed in
+//! The frontend MAY invoke only the twenty-seven commands listed in
 //! [`REGISTERED_COMMANDS`]. The spec ("IPC Command Registry", modified
 //! by `v3-app-workspace-goal` for goal lifecycle, by `v3-app-chat-cmdk`
 //! for chat-turn lifecycle, by `v3-app-quiz` for quiz plan/generate
@@ -70,6 +70,8 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
     "read_quiz_events",
     "read_quiz_progress",
     "write_quiz_progress",
+    "start_vault_watcher",
+    "stop_vault_watcher",
 ];
 
 /// Sugar for `tauri::generate_handler!` so the registration is colocated
@@ -103,6 +105,8 @@ macro_rules! generate_ipc_handler {
             $crate::ipc::quiz::read_quiz_events,
             $crate::ipc::quiz::read_quiz_progress,
             $crate::ipc::quiz::write_quiz_progress,
+            $crate::watcher::start_vault_watcher,
+            $crate::watcher::stop_vault_watcher,
         ]
     };
 }
@@ -116,11 +120,11 @@ mod tests {
     use super::REGISTERED_COMMANDS;
 
     #[test]
-    fn exactly_twenty_five_commands_are_registered() {
+    fn exactly_twenty_seven_commands_are_registered() {
         assert_eq!(
             REGISTERED_COMMANDS.len(),
-            25,
-            "IPC Command Registry requires exactly 25 commands (9 foundation + 6 workspace + 2 chat + 8 quiz)"
+            27,
+            "IPC Command Registry requires exactly 27 commands (9 foundation + 6 workspace + 2 chat + 8 quiz + 2 watcher)"
         );
     }
 
@@ -152,6 +156,8 @@ mod tests {
             "read_quiz_events",
             "read_quiz_progress",
             "write_quiz_progress",
+            "start_vault_watcher",
+            "stop_vault_watcher",
         ]
         .into_iter()
         .collect();

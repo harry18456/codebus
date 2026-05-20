@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -6,9 +6,12 @@ vi.mock("@tauri-apps/api/event", () => ({
 }))
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }))
 
+import { listen } from "@tauri-apps/api/event"
 import type { RunLogSummary } from "@/lib/ipc"
 import { GoalsTab } from "./GoalsTab"
 import { useGoalsStore } from "@/store/goals"
+
+const mockedListen = vi.mocked(listen)
 
 function makeRun(id: string, startedAt: string): RunLogSummary {
   return {
@@ -85,5 +88,29 @@ describe("GoalsTab", () => {
     render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
     expect(screen.queryByTestId("run-row-c")).toBeNull()
     expect(screen.getByTestId("run-row-g")).toBeInTheDocument()
+  })
+
+  // ---- Watcher integration (codebus-fs-watcher) ----
+
+  it("terminal_spawn_appears_via_goals_changed", async () => {
+    let capturedCallback: ((ev: { payload: unknown }) => void) | undefined
+    mockedListen.mockImplementation(async (name, cb) => {
+      if (name === "goals-changed") {
+        capturedCallback = cb as (ev: { payload: unknown }) => void
+      }
+      return () => {}
+    })
+    const refreshRunsSpy = vi.fn(async () => {})
+    useGoalsStore.setState({
+      runs: [],
+      activeRun: null,
+      refreshRuns: refreshRunsSpy as never,
+    })
+
+    render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
+    await waitFor(() => expect(capturedCallback).toBeTruthy())
+
+    capturedCallback?.({ payload: null })
+    await waitFor(() => expect(refreshRunsSpy).toHaveBeenCalledWith("/v"))
   })
 })

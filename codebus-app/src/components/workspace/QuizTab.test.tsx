@@ -869,4 +869,55 @@ describe("QuizTab", () => {
     expect(screen.queryByTestId("quiz-attempt-view")).not.toBeInTheDocument()
     expect(screen.queryByTestId("quiz-view-log")).not.toBeInTheDocument()
   })
+
+  // ---- Watcher integration (codebus-fs-watcher) ----
+
+  it("quiz-changed event refreshes the history list", async () => {
+    // First load: empty. After quiz-changed fires, list_quiz_attempts
+    // SHALL be called again to pick up the new attempt.
+    const empty: unknown[] = []
+    const oneAttempt = [
+      {
+        slug: "jwt",
+        path: "/v/.codebus/quiz/jwt/A.md",
+        sidecar_path: "/v/.codebus/quiz/jwt/A.progress.json",
+        events_log: null,
+        created_at: "2026-05-20T00:00:00Z",
+      },
+    ]
+    let attemptsResponse: unknown[] = empty
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_quiz_attempts") return Promise.resolve(attemptsResponse)
+      if (cmd === "read_quiz_attempt") return Promise.resolve("Q1\n- ans")
+      if (cmd === "read_quiz_progress")
+        return Promise.resolve({
+          schema_version: 1,
+          answers: [],
+          status: "not_started",
+          started_at: null,
+          completed_at: null,
+        })
+      return Promise.resolve(null)
+    })
+
+    render(<QuizTab vaultPath="/v" />)
+    await waitFor(() => expect(listeners.has("quiz-changed")).toBe(true))
+
+    // Initial load: empty.
+    const initialCalls = invokedCommands().filter(
+      (c) => c === "list_quiz_attempts",
+    ).length
+    expect(initialCalls).toBe(1)
+
+    // External quiz attempt appears on disk.
+    attemptsResponse = oneAttempt
+    listeners.get("quiz-changed")!({ payload: null })
+
+    await waitFor(() => {
+      const calls = invokedCommands().filter(
+        (c) => c === "list_quiz_attempts",
+      ).length
+      expect(calls).toBeGreaterThanOrEqual(2)
+    })
+  })
 })

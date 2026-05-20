@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import type { ComponentPropsWithoutRef, ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -6,6 +6,30 @@ import remarkGfm from "remark-gfm"
 import { Button } from "@/components/ui/button"
 import { transformBodyWikilinks } from "@/lib/milkdown-wikilink"
 import { useWikiStore } from "@/store/wiki"
+import { useWatcherEvent } from "@/hooks/useWatcherEvent"
+
+/**
+ * Extract the wiki slug from an absolute path emitted by the Rust
+ * watcher. The wiki store keys pages by `path.file_stem()` (see
+ * `codebus-app/src-tauri/src/ipc/wiki.rs::list_wiki_pages_impl`), so a
+ * page like `.codebus/wiki/concepts/project-purpose.md` has slug
+ * `project-purpose`, NOT `concepts/project-purpose`. Returns `null`
+ * when the path does not live under `<vault>/.codebus/wiki/` or does
+ * not end in `.md`.
+ */
+function slugFromWatcherPath(
+  payloadPath: string,
+  vaultPath: string,
+): string | null {
+  const normPayload = payloadPath.replace(/\\/g, "/")
+  const wikiPrefix = `${vaultPath.replace(/\\/g, "/")}/.codebus/wiki/`
+  if (!normPayload.startsWith(wikiPrefix)) return null
+  const rel = normPayload.slice(wikiPrefix.length)
+  const lastSlash = rel.lastIndexOf("/")
+  const leaf = lastSlash >= 0 ? rel.slice(lastSlash + 1) : rel
+  if (!leaf.endsWith(".md")) return null
+  return leaf.slice(0, -".md".length)
+}
 
 interface WikiPreviewProps {
   vaultPath: string
@@ -53,6 +77,39 @@ export function WikiPreview({
   const loadPage = useWikiStore((s) => s.loadPage)
   const pages = useWikiStore((s) => s.pages)
   const currentPath = useWikiStore((s) => s.currentPath)
+
+  // Re-fetch the currently displayed page when the watcher reports a
+  // content change for its exact path. Edits to other `.md` files are
+  // ignored so off-page work doesn't churn the preview. Windows file-
+  // lock races are handled with a single 500 ms retry per design D4.
+  useEffect(
+    () =>
+      useWatcherEvent("wiki-page-changed", (payload) => {
+        const changedSlug = slugFromWatcherPath(payload.path, vaultPath)
+        if (!changedSlug) return
+        // Invalidate the cached body for the changed page regardless of
+        // whether it is the currently displayed one. Without this the
+        // store's loadPage cache-check would short-circuit and the user
+        // would see stale content the next time the page is viewed.
+        useWikiStore.setState((state) => {
+          if (state._bodyCache[changedSlug] === undefined) return {} as never
+          const next = { ...state._bodyCache }
+          delete next[changedSlug]
+          return { _bodyCache: next } as never
+        })
+        // If this IS the currently displayed page, immediately re-fetch
+        // so the preview updates without a manual refresh. Windows
+        // file-lock races are absorbed by a single 500 ms retry per
+        // design D4.
+        if (currentPath !== changedSlug) return
+        void loadPage(vaultPath, changedSlug).catch(() => {
+          setTimeout(() => {
+            void loadPage(vaultPath, changedSlug)
+          }, 500)
+        })
+      }),
+    [loadPage, vaultPath, currentPath],
+  )
 
   const { transformed } = useMemo(
     () => transformBodyWikilinks(body ?? ""),
