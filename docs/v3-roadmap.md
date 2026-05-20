@@ -1,10 +1,12 @@
-# codebus v3 — Path D Redesign Roadmap
+# codebus v3 Roadmap
 
-> 起草：2026-05-08。本檔是後續所有 v3 change 的指引。每個 `/spectra-propose` 動工前先 reread。
+> 起草：2026-05-08（path D pivot 起點）。最後更新：2026-05-20。
+>
+> 涵蓋 CLI + app 兩條主線。每個 `/spectra-propose` 動工前先 reread。
 
 ## 1. Context
 
-V3 第一次嘗試（commit `640de61 feat: v3 skeleton ...` + `762541e feat: init auto-mutates ...`）已 `git reset --hard e877adc` 回退。原因：方向偏差。
+v3 第一次嘗試（commit `640de61 feat: v3 skeleton ...` + `762541e feat: init auto-mutates ...`）已 `git reset --hard e877adc` 回退。原因：方向偏差。
 
 具體偏差：
 
@@ -14,155 +16,175 @@ V3 第一次嘗試（commit `640de61 feat: v3 skeleton ...` + `762541e feat: ini
 - Goal/query/fix subcommand 自己 spawn `claude -p`（v2 模式），跟 path D 「skill mode」願景背道而馳
 - Schema 在 SKILL.md 跟 inline prompt 雙投遞，source-of-truth 模糊
 
-戳穿記錄留在 4 條 memory feedback：
-
-- [feedback_dont_speculative_abstract.md](file:///C:/Users/harry/.claude/projects/D--side-project-codebus/memory/feedback_dont_speculative_abstract.md) — single-impl trait 不寫進 Requirements
-- [feedback_no_artificial_checkpoint.md](file:///C:/Users/harry/.claude/projects/D--side-project-codebus/memory/feedback_no_artificial_checkpoint.md) — `/spectra-apply` 一路跑完
-- [feedback_dev_tool_claude_only.md](file:///C:/Users/harry/.claude/projects/D--side-project-codebus/memory/feedback_dev_tool_claude_only.md) — codebus repo root 不放 `AGENTS.md`
-- [feedback_grounded_debugging.md](file:///C:/Users/harry/.claude/projects/D--side-project-codebus/memory/feedback_grounded_debugging.md) — bug 連續猜 3 次停下別模擬
+四條 anti-pattern 從中萃出，至今仍生效（見 §3）。
 
 ## 2. Vision
 
-V3 走 [`legacy/v2-rust/docs/strategy/2026-05-08-skill-vs-binary-pivot.md`](../legacy/v2-rust/docs/strategy/2026-05-08-skill-vs-binary-pivot.md) §11.6「長期 pivot」path D：codebus 是 vault helper + skill installer。三個動詞 verb（goal / query / fix）走 **spawn `claude -p` 帶 slash command 觸發對應 skill bundle**，由 SKILL.md 內容指揮 agent 流程；不再像 v2 把整份 schema inline 進 prompt。schema 是 SKILL.md 唯一交付，binary 不再 inline。
+v3 走 [`legacy/v2-rust/docs/strategy/2026-05-08-skill-vs-binary-pivot.md`](../legacy/v2-rust/docs/strategy/2026-05-08-skill-vs-binary-pivot.md) §11.6「長期 pivot」path D：codebus 是 vault helper + skill installer。verb 走 **spawn `claude -p` 帶 slash command 觸發對應 skill bundle**，由 SKILL.md 內容指揮 agent 流程；schema 是 SKILL.md 唯一交付，binary 不再 inline。
 
 ### Architecture
 
 ```
 codebus binary（cargo workspace）
-├─ codebus-core（lib）── vault primitives / wiki lint / config / schema 內容
-├─ codebus-cli（bin codebus）── 5 verb subcommands（init / goal / query / lint / fix）
-└─ codebus-app（bin codebus-app, placeholder）── Tauri 預留
+├─ codebus-core（lib）── vault primitives / wiki lint / config / schema / verb library
+├─ codebus-cli（bin codebus）── 7 verb subcommands（init / goal / query / lint / fix / chat / quiz）
+└─ codebus-app（bin codebus-app）── Tauri desktop tutorial app（v1 進行中）
 
 CLI 行為分兩類：
   Direct（binary 自跑、deterministic）：
     - codebus init / no-arg → init at pwd
     - codebus lint [--json]
+    - codebus quiz validate <file>
   Spawn（binary fork claude -p、slash command 觸發 skill bundle）：
     - codebus goal "..."  → spawn `claude -p "/codebus-goal \"...\""`
     - codebus query "..." → spawn `claude -p "/codebus-query \"...\""`
     - codebus fix         → spawn `claude -p "/codebus-fix"`
+    - codebus chat        → multi-turn REPL，每 turn spawn `claude -p` 帶 transcript
+    - codebus quiz "..."  → two-shot（plan → generate），每 shot spawn `claude -p`
 
-  cwd = <repo>/.codebus；spawn 同時下 --tools + --allowedTools 雙旗（v2
-  iter-9 lesson，見 legacy/v2-rust/docs/superpowers/specs/2026-05-04-codebus-v2-phase1-design.md
-  §3.2.4）。各 verb toolset：
-    - query：Read,Glob,Grep（read-only）
-    - goal ：Read,Glob,Grep,Write,Edit
-    - fix  ：Read,Glob,Grep,Write,Edit,Bash（fix skill 跑 codebus lint --json）
-    - 永遠擋：WebFetch / WebSearch / AskUserQuestion / Task / NotebookEdit / MCP / 未來新增
-  不下 --add-dir → agent 出不去 vault。
+  cwd = <repo>/.codebus；spawn 同時下 triple-flag（v2 iter-9 lesson）：
+    --tools <whitelist>          # hard gate
+    --allowedTools <same>        # auto-approval
+    --permission-mode acceptEdits # -p mode 無 terminal 必需
 
-3 個 skill bundle 寫進 ~/.claude/skills/：
-  codebus-goal/  ── workflow per goal（schema rules + ingest 流程）
-  codebus-query/ ── workflow per query（read-only）
-  codebus-fix/   ── lint loop（Bash tool 跑 codebus lint --json，agent 改 wiki，重 lint）
-
-Provider 模組：codebus-core/src/agent/claude_cli.rs，single impl，**不寫 trait**。
-InvokeOptions struct 直接吃 verb 需要的參數（slash_command / toolset / cwd /
-model / effort）。trait surface 等到 codex / gemini 等 second impl 真的進來
-再開 change 設計（依 §3 anti-pattern #1：no single-impl abstraction in spec）。
+Provider 模組：codebus-core/src/agent/claude_cli.rs，single impl，不寫 trait。
+trait surface 等到 codex / gemini 等 second impl 真進來再開 change。
 
 每個 vault：
-  <repo>/.codebus/CLAUDE.md  ── per-repo schema（user 可改、agent 在進 vault 時讀）
-  <repo>/.codebus/wiki/      ── 5-folder taxonomy
-  <repo>/.codebus/raw/code/  ── PII-filtered source mirror
-  <repo>/.gitignore          ── auto append .codebus/（init 階段做）
+  <repo>/.codebus/CLAUDE.md   ── per-repo schema（user 可改）
+  <repo>/.codebus/wiki/       ── 5-folder taxonomy
+  <repo>/.codebus/raw/code/   ── PII-filtered source mirror
+  <repo>/.codebus/quiz/       ── 生成的 quiz md + per-attempt sidecar progress
+  <repo>/.codebus/log/        ── runs-<date>.jsonl + events-<run>.jsonl
+  <repo>/.gitignore           ── auto append .codebus/
 ```
 
 ### Lint = CLI（不是 skill）
 
-Lint 邏輯純 deterministic（7 條 rule pattern match）。優點：
-
-- CI / pre-commit hook 可直接用，不依賴 Claude Code
-- `codebus-fix` skill 透過 Bash tool 跑 `codebus lint --json` 拿 findings，不需 skill-call-skill
-- Skill 只 3 個（goal/query/fix），維護面縮小
+Lint 邏輯純 deterministic（7 條 rule pattern match）。CI / pre-commit 可直接用、fix skill 透過 Bash tool 跑 `codebus lint --json` 拿 findings，不需 skill-call-skill。
 
 ## 3. Anti-Patterns（一次都別再犯）
 
-引用 memory：
-
 1. **Spec 不寫 single-impl 抽象**：trait / API surface / enum variant 沒有 2+ impl 或 consumer 驗證的，寫進 design.md open questions 就好；不寫 normative Requirements
-2. **Schema 不雙投遞**：每份 schema 內容**只有一個 source of truth**。SKILL.md 跟 inline prompt 不可同份內容。Path D 下 SKILL.md 是唯一交付，binary 不再 inline schema
+2. **Schema 不雙投遞**：每份 schema 內容**只有一個 source of truth**。SKILL.md 跟 inline prompt 不可同份內容。path D 下 SKILL.md 是唯一交付，binary 不再 inline schema
 3. **Carry over v2 之前先 grep v2**：每個 change 動工前讀 v2 對應 module / spec，不靠記憶猜行為
 4. **`/spectra-apply` 不亂 checkpoint**：一路跑完 tasks.md，除非設計 / 環境真卡
 
-## 4. Change Decomposition
+## 4. Stages
 
-10 個 change，序列做。每個 ≤ 14 tasks。**全 10 條已於 2026-05-10 ship v3.0.0 完成**（commit `6936902 chore(release): v3.0.0`）— 表格保留供歷史對照。
+v3 走到今天可分四個階段。Stage 1 是 ship 主線；Stage 2 / 3 是 CLI 側補基建；Stage 4 是 app 進場 + 語意層深化（兩條交織）。
 
-| # | Status | Change | CLI 完成什麼 | Skill 完成什麼 | 依賴 |
-|---|---|---|---|---|---|
-| 1 | ✅ | `v3-workspace` | `codebus --help` + 5 verb routing（subcommand mode、no-arg → init at pwd）；含 `codebus-app` placeholder crate | — | — |
-| 2 | ✅ | `v3-init` | `codebus init [--repo X] [--no-obsidian-register]` 全功能：vault layout / raw_sync (NullScanner) / **obsidian vault register** / `.gitignore` mutation / per-repo `.codebus/CLAUDE.md` / 寫 3 個 skill bundle 骨架；含 `sanity_check::check_repo_is_not_vault` | 3 個 SKILL.md 骨架寫到 `~/.claude/skills/codebus-{goal,query,fix}/`（內容暫定，後續 change 補） | #1 |
-| 3 | ✅ | `v3-pii` | 接 `pii::PiiScanner` trait + `RegexBasicScanner`（v2 builtin regex：AWS / Anthropic key / email / IPv4）+ `NullScanner`（test fixture）；raw_sync default 切 RegexBasic with `OnHit::Warn`（mirror file + stderr warn 每個 match）；init 輸出含 PII match count。**Hardcode default rules 不開 config 入口** — `patterns_extra` / `on_hit` 覆蓋是 #9 的事 | — | #2 |
-| 4 | ✅ | `v3-vault-history` | 接 `core::git::nested_repo` 模組（v2 carry：`legacy/v2-rust/codebus-core/src/git/nested_repo.rs`）；init.rs 在 raw_sync 之後 obsidian-register 之前 init nested repo + 收尾 `auto_commit "init: codebus vault"`；`.codebus/.gitignore` 內含 `.lock` / `raw/code/` / `**/.obsidian/` / `logs/`（v2 carry）；公開 `auto_commit` API 給 #5 #8 wire；vault spec 反轉「SHALL NOT create `.codebus/.git/`」requirement | — | #3 |
-| 5 | ✅ | `v3-goal` | `codebus goal "..." [--force-resync] [--no-obsidian-register]` spawn `claude -p` 帶 slash command；首次寫 `codebus-core/src/agent/claude_cli.rs` single impl + `--tools/--allowedTools/--permission-mode acceptEdits` 三旗 sandbox（[2026-05-09 spike verified](#)）；vault 不存在 → auto-init（v2 carry）；source-signal detection 偵測 source drift 才 re-sync（manifest.git_head/file_count/total_bytes 比對）；spawn 收尾 `auto_commit "wiki: {goal}"` | `codebus-goal/SKILL.md` 補完整內容（neutral.md §4 workflow per goal + frontmatter schema reference；schema 仍 by-reference 引用 cwd `CLAUDE.md` 不 inline 重複） | #4 |
-| 6 | ✅ | `v3-query` | `codebus query "..."` spawn 同 #5 模式，read-only toolset（Read/Glob/Grep）；不 auto_commit | `codebus-query/SKILL.md` 補完整內容（neutral.md §11 workflow per query + read-only invariant） | #2 |
-| 7 | ✅ | `v3-lint` | `codebus lint [--repo X] [--json]` direct 全功能（7 rules：broken_wikilink / frontmatter_integrity / page_size / duplicate_slug / orphaned_page / taxonomy_violation / pii_leak）；human + JSON 雙輸出；exit 0/1 | — | #2 |
-| 8 | ✅ | `v3-fix` | `codebus fix` spawn 同 #5 模式，toolset 含 Bash（給 fix skill 跑 `codebus lint --json`）；spawn 收尾 `auto_commit "wiki: lint fix loop"` | `codebus-fix/SKILL.md`：用 Bash tool 跑 `codebus lint --json` → 解析 findings → 編輯 wiki page 改正 → 重跑 lint，max 5 iterations（user 可改） | #4 #7 |
-| 9 | ✅ | `v3-config` | `~/.codebus/config.yaml` 6 條 tolerance（v2 carry：missing file / parse fail / unknown key / unknown discriminator / unknown subfield / type mismatch graceful warn）；`lint` section（disabled_rules + custom_rules_dir + auto_fix.max_iterations）；`pii` section（`patterns_extra` append 到 #3 builtin rules + `on_hit` 覆蓋 #3 default `Warn`） | 反向打通：lint 吃 config disabled_rules；init 用 config 覆蓋 #3 PII default（`patterns_extra` append、`on_hit` 覆蓋）；fix skill 從 config 讀 max_iterations 寫進 SKILL.md instruction | #3 #7 |
-| 10 | ✅ | `v3-render-polish` | OSC 8 hyperlink wrap `[[wikilink]]` for `codebus lint` output；terminal color 5-level emoji priority（`--emoji` flag > `--no-emoji` > `NO_EMOJI` env > config.yaml `emoji:` > TTY auto-detect）；`NO_COLOR` env 守 color | — | #7 #9 |
+### Stage 1 — CLI v3.0.0 ship（2026-05-08 → 2026-05-10，13 條 ✅）
 
-### 依賴圖
-
-```
-#1 ─┬─ #2 ─┬─ #3 ─ #4 (vault-history) ─┬─ #5 (goal)
-    │      │                            └─ #8 (fix) ← + #7
-    │      ├─ #6 (query)
-    │      └─ #7 (lint) ─┬─ #8 (fix)
-    │                    └─ #10 (render-polish) ← + #9
-    │
-    └─ #9 (config，吃 #3 #7)
-```
-
-實務：1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 一條過。
-
-### Follow-up changes（非主 10 條序列）
-
-下面這些 nice-to-have 不在 ship-blocking path 上，等主序列推進到對應 trigger 點再開。**狀態欄是事實 source-of-truth，動工前先看這欄不要再憑印象**：
-
-| Status | Change | 觸發點 | 內容 / 結果 |
-|---|---|---|---|
-| ⏳ Pending | `v3-multi-agentic-provider` | §9 trigger（real user 反映 / Anthropic 出事 / 贊助 / Tauri demo 想 multi-vendor） | 第二個 provider impl（codex / gemini / 其他）真的要進來時，先 spike：對方 CLI 有沒有 user-invocable slash command 機制？toolset gate 機制是什麼（Claude=`--tools`、Codex=docker/chroot 等）？驗完才設計 trait surface 或 enum dispatch。在那之前 provider 模組保持 single impl。|
-| ✅ Done 2026-05-10 | `v3-run-log` (commits `9187da5` + `adb88c2`) | user 想看每個 verb 跑了多少 token、費了多少時間（v2 carry：`<vault>/.codebus/log/runs-<date>.jsonl` 含 goal / mode / model+effort / 時戳 / token usage / wiki_changed / lint counts） | 走 (A) 完整 v2 stream renderer port：`Stdio::piped()` + parse `--output-format stream-json --verbose` → render Thought/ToolUse/ToolResult 即時到 stdout + accumulate Usage 入 RunLog；jsonl date-rotate 一檔 / `sink: none` opt-out / sink 失敗 stderr warning + verb exit code 不變。Banner 系統如預期正交未動。Manual e2e 對 `D:/side_project/uv` 4 條 scenario 全綠（見 `docs/v3-uv-verification-2026-05-10.md` 附錄）。|
-| ✅ Done 2026-05-10 | `v3-bug-fixes` (commit `87e9b0c`) | v3-render-polish 後 UV repo 驗收（`docs/v3-uv-verification-2026-05-10.md`）暴露的 2 個非 BREAKING bug | (a) `init` 緊接 `goal` 不該觸發 re-sync — `walk_source_for_signal()` 與 `sync_with_scanner()` filter rule 對齊；(b) `codebus lint --repo <vault-root>` silently 回 `0 pages, no issues` — 偵測到 vault root 時 emit error 提示。|
-| ✅ Done 2026-05-10 | `v3-pii-severity-dispatch` (commit `c4f3d30`) | UV repo 驗收暴露：default `on_hit: mask` 對 docs/test 的 `127.0.0.1` / example email 過於激進（uv 觸發 672 hits 多為 false-positive），降低 wiki agent 對源碼可讀性 | severity-dispatched on_hit + Critical floor — Critical (AWS / Anthropic key) 強制 mask、Warn (email / ipv4) 走 user-config，wiki agent 對源碼可讀性回升。|
-
-另外有一條**純 docs 工作不需要開 spectra change**，**直接 commit 到 README**：
-
-- ✅ Done 2026-05-10 — **`docs(quickstart): require codebus on PATH for fix loop`** (commit `e4e8bfa`) — UV repo 驗收暴露：fix flow spawned agent 內部跑 `Bash(codebus lint *)` 時找不到 binary（CLI 最終 check 仍 OK）。已在 README quickstart 補一條 `cargo install --path codebus-cli` 與「為何 fix 需要 PATH 上有 codebus」的說明。如果之後想自動化（init 寫 `.claude/settings.json` 注 PATH），再開 `v3-fix-path-inject` change。
-
-### v3.x 再來的可能 follow-up（v3.0.0 ship 後新冒出的）
+10 條主序列 + 3 條 follow-up，於 2026-05-10 `chore(release): v3.0.0`（commit `6936902`）收口。
 
 | Status | Change | 內容 |
 |---|---|---|
-| 💭 Idea | `v3-fix-path-inject` | init 自動注 PATH 進 `.claude/settings.json`，免 user 手動 `cargo install`。等真的有 user 抱怨 fix 跑不起來再開。|
-| 💭 Idea | bump v3.1.0 | v3-run-log 是 v3.0.0 ship 後新加的 backwards-compatible feature（stream rendering + RunLog 持久化），按 semver 是 minor bump。決定前先看是否還有 v3.x 想攢一起。|
+| ✅ | `v3-workspace` | 3-crate workspace + 5-verb skeleton |
+| ✅ | `v3-init` | vault layout / raw_sync / Obsidian register / 3 skill 骨架 |
+| ✅ | `v3-pii` | `PiiScanner` trait + `RegexBasicScanner`（AWS / Anthropic key / email / IPv4） |
+| ✅ | `v3-vault-history` | nested git auto-init + auto_commit API |
+| ✅ | `v3-goal` | `codebus goal` spawn `claude -p` + triple-flag sandbox + source-signal drift |
+| ✅ | `v3-query` | read-only spawn 同模式（無 auto_commit） |
+| ✅ | `v3-lint` | 7 rules + human / JSON 雙輸出 |
+| ✅ | `v3-fix-trust-agent` | spawn fix loop + Bash 接 `codebus lint --json` |
+| ✅ | `v3-config` | 6 條 tolerance + lint section + pii section |
+| ✅ | `v3-render-polish` | OSC 8 wikilinks + 5-level emoji priority + NO_COLOR |
+| ✅ | `v3-run-log` | `Stdio::piped()` + parse `stream-json --verbose` + jsonl 持久化 |
+| ✅ | `v3-bug-fixes` | init→goal 不該 re-sync / lint --repo vault-root error 提示 |
+| ✅ | `v3-pii-severity-dispatch` | Critical 強制 mask、Warn 走 user-config（uv 驗收 672 false-positive 後得） |
 
-## 5. 累積里程碑
+UV repo 完整 e2e 驗證寫在 [`docs/v3-uv-verification-2026-05-10.md`](v3-uv-verification-2026-05-10.md)。
 
-- **#1 結束**：CLI shell 通；3-crate workspace 編譯
-- **#2 結束**：可以對任何 git repo 跑 `codebus`（no-arg）→ vault 立刻成形 + Obsidian app 看得到 + `~/.claude/skills/codebus-*/` 出現 3 個 skill 骨架（內容空）
-- **#4 結束**：`.codebus/` 含 nested git；init 結束有第一個 commit「init: codebus vault」；`auto_commit` API 公開可被後續 verb 收尾 wire
-- **#6 結束**：goal / query 兩個 skill 內容完整，可以在 Claude Code 用 `/codebus-goal "..."` / `/codebus-query "..."` 對 vault 做事；goal 收尾 commit 進 nested git；`init` + 2 個有用 skill = 第一個能對外展示的版本
-- **#8 結束**：`fix` skill 也通；`lint` direct CLI 配 `fix` skill = 完整 wiki 維護 loop；fix 收尾 commit 進 nested git
-- **#10 結束**：UX polish 到位（color + clickable wikilink），可發 v3.0.0
+### Stage 2 — CLI 側基建補完（2026-05-11 → 2026-05-14，7 條 ✅）
 
-## 6. Open Questions（每個 change 各自 design.md 處理）
+進 app 之前先把 CLI core 改成「app 可重用」型態：verb 邏輯從 CLI thin wrapper 搬進 `codebus_core::verb::*`，stream rendering 跟 invoke 解綁、加 cancel signal、events 持久化。同期補上 endpoint config / SKILL.md 純化等周邊整頓。
 
-- **#2**：per-repo `.codebus/CLAUDE.md` 寫的時候要不要 `if missing`（v2 phase 1 task 11.1）保 user 客製化？答：應該。
-- ~~**#3**：v2 PII filter 有 3 種 `on_hit` mode（Warn / Skip / Mask）。v3 default 走哪個？~~ ✅ resolved 2026-05-09：#3 hardcode `OnHit::Warn` default（v2 carry：mirror file + stderr warn 每個 match）；Skip / Mask 切換要等 #8 開 `pii.on_hit` config 入口。
-- **#4 / #5 / #7**：3 個 skill 的 `description:` 字串怎寫（影響 Claude Code 自動 activation）？需驗證。
-- ~~**#4 propose 前剩餘 spike**~~ ✅ resolved 2026-05-09：5 組對照 spike（`/_pii-toolgate-spike` test skill 強迫 Write）證實 v2 iter-9 lesson 在 `-p + slash + skill activation` 場景下完整有效。**Triple flag** 都要下 — `--tools <list>` (toolset whitelist hard gate) + `--allowedTools <same list>` (auto-approval) + `--permission-mode acceptEdits` (-p mode 沒 terminal 必須 bypass prompt)。關鍵 case：`--tools` 不含 Write 但 `--allowedTools` 含 Write + acceptEdits → **Write 仍被 hard-gate 擋**（file 未建）。spike 細節保留於 git commit history。
-- **#7**：fix loop 的 max_iterations 是 hardcoded 5（v2 default）還是必須走 config？建議先 hardcoded，#8 再讓 config 覆蓋。
-- **#8**：v2 config 的 `llm` / `render` / `log` section 在 path D 沒用，spec 直接 retire 還是保留 forward-compat 接收（unknown discriminator 走 graceful warn）？建議**只實作 lint / pii section**，其他 section 照 tolerance rule 「unknown top-level key 靜默忽略」處理。
+| Status | Change | 內容 |
+|---|---|---|
+| ✅ | `claude-code-endpoint-profiles` | `~/.codebus/config.yaml` 加 endpoint profiles（base_url / model / effort 三組合） |
+| ✅ | `fail-loud-on-config-parse-error` | config parse 錯誤從 silent fallback 改 fail-loud |
+| ✅ | `v3-goal-library` | 3 spawn verb orchestration 搬進 `codebus_core::verb::*`；invoke 加 `on_event` callback + `AtomicBool` cancel；CLI 變 thin wrapper byte-equivalent |
+| ✅ | `v3-run-log-events` | RunLog 加 `outcome`；per-run events.jsonl 持久化；GUI runs 強制寫 |
+| ✅ | `v3-chat-verb` | 新 verb `codebus chat`（multi-turn read-only REPL）+ `chat::run_chat_turn` + `codebus-chat/SKILL.md` + `/goal` in-REPL promote |
+| ✅ | `endpoint-effort-dropdown` | settings UI 後端的 effort 列表來自 spec |
+| ✅ | `v3-skill-bundles-vault-only` | SKILL.md 僅寫進 vault 自己 `.claude/skills/`，不污染 `~/.claude/skills/` |
+
+### Stage 3 — codebus-app v1（2026-05-11 → 進行中，10 條，9 ✅ / 1 ⏳）
+
+CLI 主線 ship 後 app 層 v1 切成主序列 8 條（foundation + A + B + chat + C + D + E + F），每一條都假設前一條已 archive；不是平行可換序。一路上加 2 條額外補洞（fix-app-quiz / fix-quiz-ux-wiring）、1 條進度持久化 redesign（quiz-attempt-progress）、1 條 settings 前端（settings-config-frontend）。
+
+| Status | Change | 內容 |
+|---|---|---|
+| ✅ | `v3-app-foundation` | Tauri shell + IPC bridge（5 commands） + Lobby + Settings modal stub + Workspace stub + Tailwind v4 / shadcn token |
+| ✅ | `stage-b-app-endpoint-settings` | foundation follow-up — settings 把 endpoint 三組合接通 |
+| ✅ | `v3-init-nav-stubs` | Sidebar Goals / Wiki / Quiz tabs stub |
+| ✅ | `v3-app-workspace-goal` | Vault Workspace 真內容：sidebar tabs + Wiki preview (Milkdown) + Goal flow（modal / mini-stream / running / done / cancelled / interrupted + `[Retry with same goal]`） |
+| ✅ | `v3-app-chat-cmdk` | Cmd+K spotlight chat 抽屜（multi-turn streaming + 引用 + `[Promote to goal]`） |
+| ✅ | `v3-app-quiz` | Quiz flow（pending / reviewing 兩態 + md 持久化）+ wiki page 觸發 quiz / 答題評分 / frontmatter |
+| ✅ | `fix-app-quiz` | v3-app-quiz 7 個 GUI defect TDD 修正（header 碰撞 / +New 無反應 / plan-marker 脆 / preamble 漏檔 / live render / view-log modal / quiz 內 +New 隱藏） |
+| ✅ | `quiz-attempt-progress` | Quiz 進度持久化 redesign：不可變 attempt md + sibling `<id>.progress.json` sidecar；history 徽章 / 路由；completed → QuizReview 取代 raw md；重做此份 |
+| ✅ | `fix-quiz-ux-wiring` | 5 項既有缺口（答題/summary 返回鈕 / 已 active Quiz tab 點回 history / 啟動載入 config / 出題數接 `quiz.default_length` clamp / plan-marker 行內前言容忍） |
+| ✅ | `settings-config-frontend` | Settings 把 pii / lint / quiz / goal / log 各 config knob 接到 UI |
+| ⏳ | `v3-app-polish-ship` | Release build / installer / auto-update / icon / E2E test infra / 跨平台 macOS+Linux 驗收 sweep |
+
+### Stage 4 — 語意層深化（2026-05-19 → 進行中，3 條 ✅）
+
+Goal / quiz 的 trust-agent 模式 ship 後實機看到「agent 自己 validate 自己」的盲區：plan 不符規範、generate 偏離 plan、寫出的 wiki 本身 hallucination。三條獨立 model 驗證 + bounded repair 補上這層。
+
+| Status | Change | 內容 |
+|---|---|---|
+| ✅ | `quiz-validate-repair` | Deterministic quiz validation + trust-agent self-repair loop |
+| ✅ | `quiz-content-verify` | Independent model content verify + bounded repair（CLI + GUI） |
+| ✅ | `goal-content-verify` | Independent model content verify + bounded repair（goal + shared core） |
+
+## 5. Cross-platform policy
+
+開發階段一律以 **Windows MSVC** 為主，每條 change 的 acceptance checklist 只在 Windows 上必跑必過。macOS / Linux 的手動回歸驗證集中到 `v3-app-polish-ship` 一次掃完，作為 release gate 的一部分。
+
+理由：
+1. 主要開發機是 Windows，每條 change 都要求三平台驗證 dev velocity 損失過大
+2. 跨平台 build artifact / installer 本來就排在 polish-ship，順手把手動驗收一起做才不會驗兩次
+3. polish-ship 才會建 E2E test infra，到時候 cross-platform 也可能變部分自動
+
+各 change 的 tasks.md 不另列 macOS / Linux acceptance 條目；polish-ship 屆時負責統整。
+
+### Deferred acceptance registry
+
+各 change 在此登記延後到 `v3-app-polish-ship` 的 macOS / Linux 手動驗收範圍：
+
+- **`v3-app-quiz`** — polish-ship 需在 macOS + Linux 重跑五區塊：(1) CLI `codebus quiz "<topic>"` 端到端（plan→generate→落檔 `<vault>/.codebus/quiz/<slug>/<id>.md`；no-match exit 0 不落檔；retry 非破壞兩檔）；(2) GUI Quiz tab plan-confirm-generate flow；(3) wiki preview `[Quiz me on this]` Page flow；(4) Quiz history（掃 `.codebus/quiz/` 依 slug group、retry 兩 row、`[看過程]` events.jsonl）；(5) 共用 `quiz.default_length` config 與 `app.*` namespace isolation。Windows MSVC 上述皆已必跑必過。
+- **`fix-app-quiz`** — macOS / Linux 手動驗收仍 deferred，沿用上述 v3-app-quiz 五區塊範圍含本 change 的修正。Windows 已由 user 實機 sweep pass（含 quiz-attempt-progress + fix-quiz-ux-wiring 合併驗收 2026-05-19）。
+- **`quiz-attempt-progress`** — macOS / Linux deferred。sidecar atomic write 的 `fs::rename` 覆寫語意在 Windows 已測試覆蓋，macOS/Linux 需於 polish-ship 一併實機確認。Windows GUI sweep 2026-05-19 全 pass（答題中途離開非破壞 / history 接續未答題 / QuizReview 取代 raw md / 解釋 wikilink 跳 wiki / 看過程 modal / 重做此份不 spawn）。
+- **`fix-quiz-ux-wiring`** — macOS / Linux deferred。Windows GUI sweep 2026-05-19 Journey A–D 全 pass（D4 出題數 / D1 返回非破壞 / D2 已 active tab 點回 history / D3 啟動載入 config 即生效 / D5 plan-marker 行內前言容忍 + no-match 不落檔）。
+
+## 6. Out of scope（v3 範圍以外）
+
+下列 item 在 v3 主線**皆不做**，未來走獨立 change 評估：
+
+- 多 AI provider 選擇 UI（Claude CLI 是唯一選項，trait surface 等 second-impl 真進來再開）
+- Light theme / theme toggle（hard-coded dark）
+- Language switcher UI（auto-detect system locale）
+- Per-vault settings override
+- Quest banner / progress bar / "graduated" / "mastered" / "learned" 任何 page-level state
+- Tutorial slideshow / 投影片模式 / 教學 md 生成
+- Telemetry / analytics / crash reporting
+- Quiz 歷史圖表 / 間隔重複（spaced repetition）
+- 多 goal 並行（v1 always at most 1 running goal）
+- 分享 / 匯出 / public wiki publish
+
+## 7. Tauri 之後可能做的（v3.x → v4 idea）
+
+| Status | Idea | 觸發點 |
+|---|---|---|
+| 💭 | `v3-fix-path-inject` | init 自動注 PATH 進 `.claude/settings.json`，免 user 手動 `cargo install`。等真有 user 抱怨 fix 跑不起來再開 |
+| 💭 | `v3-multi-agentic-provider` | 第二個 provider impl（codex / gemini / 其他）真進來時，先 spike 對方 CLI 的 slash command + toolset gate 機制；驗完才設計 trait surface |
+| 💭 | `v3-multi-pii-provider` | 補強現有 regex_basic：Microsoft Presidio HTTP / AWS Comprehend Detect-PII / 自訂 ML scanner |
+| 💭 | `v3-embedded-search` | 對 wiki pages 跑 embedding / vector index 提供 semantic search（補強 `query` 或開新 `codebus search` verb） |
+| 💭 | `v3-first-run-wizard` | 第一次跑偵測 `~/.codebus/config.yaml` 不存在 → 互動引導選 AI / PII / log 設定。依賴上面四條都有實際選項可選才有意義 |
+
+## 8. Open Questions（每個 change 各自 design.md 處理）
+
+- **#2**：per-repo `.codebus/CLAUDE.md` 寫的時候要不要 `if missing`（v2 phase 1 task 11.1）保 user 客製化？答：應該（已實作）。
+- **#7**：fix loop 的 max_iterations 是 hardcoded 5 還是必須走 config？答：hardcoded 5 + config 覆蓋（#8 接通）。
 - **#9**：OSC 8 hyperlink 在 `codebus lint` JSON output 模式要不要做？答：JSON 模式不要（machine-readable）；human 模式才做。
-
-## 7. Tauri 來時要做什麼
-
-`codebus-app` 在 #1 就是空殼。Tauri tutorial app 真動工時新開 change `tauri-app-bootstrap`，動到：
-
-- `codebus-app/Cargo.toml` 加 `tauri` deps
-- `codebus-app/src/`：Tauri command 包 `codebus-core::vault::query` / `codebus-core::wiki::lint`（這些 query API 在 path D 沒做，等需要時再開 change `vault-query-api`）
-- `codebus-app/tauri.conf.json` 等 Tauri 標配
-
-不在這 9 個 change 範圍內。
