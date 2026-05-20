@@ -26,8 +26,12 @@ pub fn settings_json_path(vault_root: &Path) -> PathBuf {
     vault_root.join(".claude").join("settings.json")
 }
 
-/// Default content for a fresh settings.json — registers a single
-/// PreToolUse hook on Bash that delegates to `codebus hook check-bash`.
+/// Default content for a fresh settings.json — registers two PreToolUse
+/// hooks: Bash (delegates to `codebus hook check-bash` per
+/// `Fix Bash Hook Installation`) and Read (delegates to
+/// `codebus hook check-read` per `PII Image Read Hook Installation`,
+/// blocking image / binary extensions that would bypass `regex_basic`
+/// PII filtering).
 pub const DEFAULT_SETTINGS_JSON: &str = r#"{
   "hooks": {
     "PreToolUse": [
@@ -37,6 +41,15 @@ pub const DEFAULT_SETTINGS_JSON: &str = r#"{
           {
             "type": "command",
             "command": "codebus hook check-bash"
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codebus hook check-read"
           }
         ]
       }
@@ -92,6 +105,51 @@ mod tests {
         let nested = entries[0]["hooks"].as_array().unwrap();
         assert_eq!(nested[0]["type"], "command");
         assert_eq!(nested[0]["command"], "codebus hook check-bash");
+    }
+
+    // --- pretooluse-image-block task 2.1 — settings.json carries BOTH
+    // the Bash matcher entry (from Fix Bash Hook Installation) AND the
+    // Read matcher entry (from PII Image Read Hook Installation) on a
+    // fresh vault.
+
+    #[test]
+    fn settings_json_contains_both_bash_and_read_matcher_entries() {
+        let tmp = TempDir::new().unwrap();
+        write_settings_if_missing(tmp.path()).unwrap();
+        let body = fs::read_to_string(settings_json_path(tmp.path())).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let entries = parsed["hooks"]["PreToolUse"]
+            .as_array()
+            .expect("hooks.PreToolUse must be an array");
+        assert!(
+            entries.len() >= 2,
+            "PreToolUse must carry at least two matcher entries (Bash + Read), got {}",
+            entries.len()
+        );
+
+        let find_entry = |matcher: &str, command: &str| -> bool {
+            entries.iter().any(|entry| {
+                if entry["matcher"] != matcher {
+                    return false;
+                }
+                let nested = match entry["hooks"].as_array() {
+                    Some(arr) => arr,
+                    None => return false,
+                };
+                nested.iter().any(|hook| {
+                    hook["type"] == "command" && hook["command"] == command
+                })
+            })
+        };
+
+        assert!(
+            find_entry("Bash", "codebus hook check-bash"),
+            "PreToolUse must contain Bash matcher entry invoking `codebus hook check-bash`"
+        );
+        assert!(
+            find_entry("Read", "codebus hook check-read"),
+            "PreToolUse must contain Read matcher entry invoking `codebus hook check-read`"
+        );
     }
 
     #[test]

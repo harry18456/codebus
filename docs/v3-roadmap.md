@@ -157,6 +157,7 @@ Goal / quiz 的 trust-agent 模式 ship 後實機看到「agent 自己 validate 
 - **`fix-app-quiz`** — macOS / Linux 手動驗收仍 deferred，沿用上述 v3-app-quiz 五區塊範圍含本 change 的修正。Windows 已由 user 實機 sweep pass（含 quiz-attempt-progress + fix-quiz-ux-wiring 合併驗收 2026-05-19）。
 - **`quiz-attempt-progress`** — macOS / Linux deferred。sidecar atomic write 的 `fs::rename` 覆寫語意在 Windows 已測試覆蓋，macOS/Linux 需於 polish-ship 一併實機確認。Windows GUI sweep 2026-05-19 全 pass（答題中途離開非破壞 / history 接續未答題 / QuizReview 取代 raw md / 解釋 wikilink 跳 wiki / 看過程 modal / 重做此份不 spawn）。
 - **`fix-quiz-ux-wiring`** — macOS / Linux deferred。Windows GUI sweep 2026-05-19 Journey A–D 全 pass（D4 出題數 / D1 返回非破壞 / D2 已 active tab 點回 history / D3 啟動載入 config 即生效 / D5 plan-marker 行內前言容忍 + no-match 不落檔）。
+- **`pretooluse-image-block`** — macOS / Linux GUI deferred；Tauri app smoke（cargo tauri dev → workspace → 對含 screenshot.png 的 repo 跑 goal flow → 觀察 mini-stream UX 上 hook 行為）也 deferred 至 polish-ship。Windows CLI hook contract 已 5 層驗證 pass（hook.rs 26 unit + hook_check_read.rs 14 integration + settings.rs 5 unit + `codebus init` 寫兩條 hook entry smoke + 命令列 stdin 對 image/text 行為正確）；CLI spawn 路徑下 `codebus goal` / `codebus query` 嘗試 Read 圖片**會被 SKILL.md prompt layer 先擋下**（defense-in-depth working as designed，hook 在當前標準流程下扮演 backstop 而非主 gate），詳見 change design.md「Observed Behavior Note」。
 
 ## 6. Out of scope（v3 範圍以外）
 

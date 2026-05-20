@@ -24,11 +24,16 @@ pub enum HookArgs {
     /// `codebus quiz validate *`, block everything else. Reads JSON from
     /// stdin, prints decision JSON to stdout, always exits 0.
     CheckBash,
+    /// PreToolUse Read hook: block image / binary file extensions whose
+    /// contents would bypass the regex_basic PII filter. Reads JSON from
+    /// stdin, prints decision JSON to stdout, always exits 0.
+    CheckRead,
 }
 
 pub async fn run(args: HookArgs) -> ExitCode {
     match args {
         HookArgs::CheckBash => check_bash().await,
+        HookArgs::CheckRead => check_read().await,
     }
 }
 
@@ -80,6 +85,8 @@ struct PreToolUseInput {
 struct ToolInput {
     #[serde(default)]
     command: Option<String>,
+    #[serde(default)]
+    file_path: Option<serde_json::Value>,
 }
 
 /// Per `Fix Bash Hook Installation` allow rule:
@@ -136,6 +143,82 @@ fn is_codebus_binary(token: &str) -> bool {
     } else {
         // Case-sensitive on Unix.
         basename == "codebus"
+    }
+}
+
+/// PreToolUse Read hook image / binary blocklist — file extensions whose
+/// content would bypass `regex_basic` PII filtering (which only scans text).
+/// Stored lowercase so callers compare against `to_ascii_lowercase()` output.
+const IMAGE_BLOCKLIST: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif", "pdf", "ico", "heic", "heif",
+    "avif",
+];
+
+/// Returns true when `path` ends in an extension on [`IMAGE_BLOCKLIST`].
+///
+/// Comparison is ASCII case-insensitive on every platform — this **deliberately
+/// diverges** from [`is_codebus_binary`]'s OS-split behavior (Windows
+/// case-insensitive, Unix case-sensitive). File extensions are conventionally
+/// case-insensitive across all operating systems, and a POSIX case-sensitive
+/// match would let `screenshot.PNG` bypass the blocklist on Linux. Do not
+/// "fix" this to match `is_codebus_binary`'s pattern without first revisiting
+/// the `pretooluse-image-block` change rationale.
+///
+/// Path separator handling: the directory portion is stripped using either
+/// `/` or `\` as a separator so Unix paths, Windows native paths, and Windows
+/// mixed-separator paths all yield the same extension.
+fn is_image_path(path: &str) -> bool {
+    let basename = path
+        .rsplit(|c| c == '/' || c == '\\')
+        .next()
+        .unwrap_or(path);
+    let Some(dot_pos) = basename.rfind('.') else {
+        return false;
+    };
+    let ext = &basename[dot_pos + 1..];
+    if ext.is_empty() {
+        return false;
+    }
+    let ext_lower = ext.to_ascii_lowercase();
+    IMAGE_BLOCKLIST.contains(&ext_lower.as_str())
+}
+
+/// Pure decision function for the PreToolUse Read hook — extracts the
+/// block / allow decision from a stdin JSON body so the logic is unit
+/// testable without subprocess stdin.
+///
+/// Returns `Some(reason)` when the agent's Read tool invocation MUST be
+/// blocked (image extension hit OR fail-closed condition); `None` when
+/// the Read invocation may proceed silently.
+fn check_read_inner(stdin_body: &str) -> Option<String> {
+    if stdin_body.trim().is_empty() {
+        return Some("hook: empty stdin (no PreToolUse JSON received)".to_string());
+    }
+    let parsed: PreToolUseInput = match serde_json::from_str(stdin_body) {
+        Ok(p) => p,
+        Err(_) => return Some("hook: malformed PreToolUse JSON on stdin".to_string()),
+    };
+    let file_path_value = parsed.tool_input.as_ref().and_then(|t| t.file_path.as_ref());
+    let path = match file_path_value {
+        Some(serde_json::Value::String(s)) if !s.is_empty() => s.as_str(),
+        _ => return Some("hook: tool_input.file_path absent or empty".to_string()),
+    };
+    if is_image_path(path) {
+        return Some(format!(
+            "hook: reading image / binary files is blocked to prevent PII bypass; received `{path}`"
+        ));
+    }
+    None
+}
+
+async fn check_read() -> ExitCode {
+    let mut buf = String::new();
+    if io::stdin().read_to_string(&mut buf).is_err() {
+        return emit_block("hook: failed to read stdin");
+    }
+    match check_read_inner(&buf) {
+        Some(reason) => emit_block(&reason),
+        None => ExitCode::from(0),
     }
 }
 
@@ -315,5 +398,256 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(parsed["decision"], "block");
         assert!(parsed["reason"].as_str().unwrap().contains("hello"));
+    }
+
+    // --- pretooluse-image-block task 1.1 (RED) — is_image_path predicate.
+    // Implementation lands in task 1.2; these tests pin the behavior
+    // contract from the `PII Image Read Hook Installation` requirement.
+
+    #[test]
+    fn is_image_path_blocks_lowercase_extensions() {
+        for ext in IMAGE_BLOCKLIST {
+            let path = format!("foo.{ext}");
+            assert!(is_image_path(&path), "expected block for {path}");
+        }
+    }
+
+    #[test]
+    fn is_image_path_blocks_uppercase_extensions() {
+        // ASCII case-insensitive on every platform — Linux too.
+        let cases = ["foo.PNG", "foo.JPG", "foo.JPEG", "foo.PDF", "foo.HEIC"];
+        for path in cases {
+            assert!(is_image_path(path), "expected block for {path}");
+        }
+    }
+
+    #[test]
+    fn is_image_path_blocks_mixed_case_extensions() {
+        assert!(is_image_path("photo.Jpeg"));
+        assert!(is_image_path("icon.Avif"));
+        assert!(is_image_path("doc.PdF"));
+    }
+
+    #[test]
+    fn is_image_path_allows_text_extensions() {
+        let allowed = [
+            "foo.md",
+            "foo.rs",
+            "foo.svg",
+            "foo.txt",
+            "foo.json",
+            "foo.yaml",
+            "foo.toml",
+        ];
+        for path in allowed {
+            assert!(!is_image_path(path), "expected allow for {path}");
+        }
+    }
+
+    #[test]
+    fn is_image_path_allows_no_extension() {
+        assert!(!is_image_path("Makefile"));
+        assert!(!is_image_path("script"));
+        assert!(!is_image_path(""));
+    }
+
+    #[test]
+    fn is_image_path_allows_hidden_files_with_non_image_extension() {
+        // `.gitignore` etc. — the leading dot is part of the basename, the
+        // extension extractor sees `gitignore` and must not match.
+        assert!(!is_image_path(".gitignore"));
+        assert!(!is_image_path("/repo/.gitignore"));
+    }
+
+    #[test]
+    fn is_image_path_handles_unix_path_separator() {
+        assert!(is_image_path("/repo/assets/img.png"));
+        assert!(is_image_path("./relative/photo.JPG"));
+        assert!(!is_image_path("/repo/src/main.rs"));
+    }
+
+    #[test]
+    fn is_image_path_handles_windows_path_separator() {
+        assert!(is_image_path("C:\\repo\\assets\\img.png"));
+        assert!(is_image_path("D:\\photos\\IMG_001.HEIC"));
+        assert!(!is_image_path("C:\\repo\\src\\main.rs"));
+    }
+
+    #[test]
+    fn is_image_path_handles_mixed_path_separator() {
+        // Windows commonly mixes `/` and `\`.
+        assert!(is_image_path("C:/repo\\assets/img.png"));
+        assert!(is_image_path("D:\\photos/snapshot.PNG"));
+    }
+
+    #[test]
+    fn is_image_path_only_considers_basename_extension() {
+        // Directory components containing dots SHALL NOT bleed into the
+        // extension match; only the filename's final `.ext` counts.
+        assert!(!is_image_path("a/b.png/file.md"));
+        assert!(!is_image_path("C:\\repo.git\\notes\\daily.md"));
+    }
+
+    // --- pretooluse-image-block task 1.3 (RED) — check_read fail-closed
+    // contract. Implementation lands in task 1.4; these tests pin the
+    // fail-closed branches required by the `PII Image Read Hook
+    // Installation` requirement (the subcommand SHALL NEVER silently allow
+    // on parse failure or missing fields).
+
+    #[test]
+    fn check_read_fail_closed_on_empty_stdin() {
+        let reason = check_read_inner("");
+        assert!(reason.is_some(), "empty stdin must block");
+        assert!(
+            reason.as_ref().unwrap().contains("empty"),
+            "block reason must identify empty stdin, got: {}",
+            reason.unwrap()
+        );
+    }
+
+    #[test]
+    fn check_read_fail_closed_on_whitespace_only_stdin() {
+        // Mirror check_bash's `buf.trim().is_empty()` semantics.
+        assert!(check_read_inner("   \n\t  ").is_some());
+    }
+
+    #[test]
+    fn check_read_fail_closed_on_malformed_json() {
+        let reason = check_read_inner("{not valid json");
+        assert!(reason.is_some(), "malformed JSON must block");
+        assert!(
+            reason.as_ref().unwrap().contains("malformed"),
+            "block reason must identify malformed JSON, got: {}",
+            reason.unwrap()
+        );
+    }
+
+    #[test]
+    fn check_read_fail_closed_on_missing_file_path() {
+        let body = r#"{"tool_name":"Read","tool_input":{}}"#;
+        let reason = check_read_inner(body);
+        assert!(reason.is_some(), "missing file_path must block");
+        assert!(
+            reason.as_ref().unwrap().contains("file_path"),
+            "block reason must identify file_path absence, got: {}",
+            reason.unwrap()
+        );
+    }
+
+    #[test]
+    fn check_read_fail_closed_on_non_string_file_path() {
+        // Numeric file_path — type confusion / fuzzing case.
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":123}}"#;
+        let reason = check_read_inner(body);
+        assert!(reason.is_some(), "non-string file_path must block");
+    }
+
+    #[test]
+    fn check_read_fail_closed_on_null_file_path() {
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":null}}"#;
+        let reason = check_read_inner(body);
+        assert!(reason.is_some(), "null file_path must block");
+    }
+
+    #[test]
+    fn check_read_fail_closed_on_empty_string_file_path() {
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":""}}"#;
+        let reason = check_read_inner(body);
+        assert!(reason.is_some(), "empty-string file_path must block");
+        assert!(
+            reason.as_ref().unwrap().contains("file_path"),
+            "block reason must identify empty file_path, got: {}",
+            reason.unwrap()
+        );
+    }
+
+    #[test]
+    fn check_read_fail_closed_on_missing_tool_input() {
+        // Whole `tool_input` object missing.
+        let body = r#"{"tool_name":"Read"}"#;
+        let reason = check_read_inner(body);
+        assert!(reason.is_some(), "missing tool_input must block");
+    }
+
+    // --- pretooluse-image-block task 1.4 — check_read positive contract:
+    // image extensions hit the blocklist; non-image extensions pass through.
+
+    #[test]
+    fn check_read_blocks_image_extension() {
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
+        let reason = check_read_inner(body);
+        assert!(reason.is_some(), "image extension must block");
+        let reason_str = reason.unwrap();
+        assert!(
+            reason_str.contains("flow.png"),
+            "block reason must echo the file_path, got: {reason_str}"
+        );
+        assert!(
+            reason_str.contains("PII bypass") || reason_str.contains("image"),
+            "block reason must surface the policy intent, got: {reason_str}"
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_image_extension_uppercase() {
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"assets/logo.JPG"}}"#;
+        assert!(check_read_inner(body).is_some());
+    }
+
+    #[test]
+    fn check_read_blocks_windows_path_image() {
+        let body =
+            r#"{"tool_name":"Read","tool_input":{"file_path":"C:\\repo\\assets\\img.png"}}"#;
+        assert!(check_read_inner(body).is_some());
+    }
+
+    #[test]
+    fn check_read_allows_text_extension() {
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/modules/uv-lib.md"}}"#;
+        assert!(
+            check_read_inner(body).is_none(),
+            "text file must pass through"
+        );
+    }
+
+    #[test]
+    fn check_read_allows_source_code() {
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"codebus-core/src/agent/claude_cli.rs"}}"#;
+        assert!(check_read_inner(body).is_none());
+    }
+
+    #[test]
+    fn check_read_allows_svg() {
+        // SVG is XML, scannable by regex_basic — deliberately NOT blocked.
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagram.svg"}}"#;
+        assert!(check_read_inner(body).is_none());
+    }
+
+    #[test]
+    fn check_read_allows_no_extension() {
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"Makefile"}}"#;
+        assert!(check_read_inner(body).is_none());
+    }
+
+    #[test]
+    fn check_read_block_reason_is_valid_json_after_emit() {
+        // Make sure the block reason survives JSON escaping with a path that
+        // contains backslashes (Windows).
+        let body =
+            r#"{"tool_name":"Read","tool_input":{"file_path":"C:\\repo\\img.png"}}"#;
+        let reason = check_read_inner(body).expect("must block");
+        let payload = format!(
+            "{{\"decision\":\"block\",\"reason\":{}}}",
+            json_escape(&reason)
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).expect("decision payload must parse as JSON");
+        assert_eq!(parsed["decision"], "block");
+        assert!(
+            parsed["reason"]
+                .as_str()
+                .unwrap()
+                .contains("img.png")
+        );
     }
 }
