@@ -18,6 +18,7 @@
 | 2026-05-21 | App Activity Stream 顯示完整 AI 回覆細節（CLI 詳細模式的前端對齊） | UX 補強 | 輕-中（觸發 UX 定案後約 1 個半天） | [app-stream-verbose-detail](2026-05-21-app-stream-verbose-detail-backlog.md) |
 | 2026-05-21 | 在 goal 引入動態 subagent 委派（Task 工具，AI 自主探索） | capability enhancement | 中（先 ground-truth 測 + 最小實驗版） | [goal-subagent-delegation](2026-05-21-goal-subagent-delegation-backlog.md) |
 | 2026-05-21 | Chat assistant 文字顯示優化（GFM 表格 + `[[wikilink]]`，app + CLI 兩邊） | UX 補強 | app 輕（半天）/ CLI 中（約 1 個半天） | [chat-display-polish](2026-05-21-chat-display-polish-backlog.md) |
+| 2026-05-21 | CLI `[[slug]]` 可點連結 + 可設定連結目標（app / obsidian，預設 app） | regression 補回 + capability | 重（codebus:// 協定吃掉大半） | [cli-wikilink-link-target](2026-05-21-cli-wikilink-link-target-backlog.md) |
 
 ## 已 archived 項目
 
