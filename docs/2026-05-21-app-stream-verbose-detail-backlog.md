@@ -18,27 +18,33 @@ App 的 Activity Stream（`codebus-app/src/components/workspace/ActivityStreamIt
 - App 收到的 `StreamEvent` 資料**本來就完整**（`event.data.input` 全量 `Value`、`event.data.output` 全量字串；events.jsonl 也存完整）。截斷只發生在前端 TSX。
 - 因此本條是**純前端 follow-up，後端零改動**。
 
-## Proposed fix
+## Proposed fix（discuss 2026-05-21 收斂，觸發 UX 已定案）
 
-在 Activity Stream / Run Detail timeline 上提供「展開看完整」的能力：完整 tool input（含 Write/Edit 寫入內容、複雜物件參數）、完整 tool result（不截斷）。thinking 視情況確認是否也需要完整展開（CLI 端 thinking 已完整）。
+採 **per-line 展開按鈕**——把現有 `ThoughtItem` 的「`▼` 展開 / `▲ collapse`」模式延伸到 timeline 的每一行 tool。不採全域 verbose 開關（B）/ settings 開關（C）：使用者要的是「需要時點開那一行看細項」，granular 不洗版，且 thought 已有同款先例。
 
-**需先 brainstorm 的觸發 UX（本條動工前先決定）：**
+具體行為（改在共用的 `ActivityStreamItem` + `foldTimeline`）：
 
-- **A**：每個 tool item 可點擊展開/摺疊（預設摺疊摘要，點開看完整）——區域性、不影響整體版面
-- **B**：Run Detail 上一個全域「詳細模式」切換，一鍵全展開
-- **C**：Settings 全域開關（對齊 CLI `--debug` 的心智模型）
+- **tool_use 行**（`🛠️ Read · CLAUDE.md`）：摺疊=現有摘要；展開=完整 input + **配對的 tool_result**（該 tool 拿回什麼）。例：
+  ```
+  🛠️ Read · CLAUDE.md   ▲ collapse
+     input:  D:/side_project/uv/.codebus/CLAUDE.md
+     result: <CLAUDE.md 完整內容>
+  ```
+- **Write/Edit 行**（`✍️ <path>`）：展開=完整寫入內容（解開 `writeEditPath` 只給 basename 的摘要）。
+- **thought / prose 不動**：chat 的 thought_block 已用 `AssistantMarkdownBlock` 完整 markdown 渲染；goal Run Detail 的 thought 已有 `ThoughtItem` 折疊 + `▼`。兩者各自已處理，本條不碰。
 
-A 最貼近「需要時才看」、不洗版；B/C 較粗粒度。動工前先 brainstorm 定案，別直接抄 CLI 的「一個旗標全開」。
+**一處改動、全 surface 生效**：`ActivityStreamItem` + `foldTimeline` 被 5 處共用（RunDetailRunning / RunDetailDone 的 Run details 摺疊區 / ChatTranscript / QuizGenerationLog / QuizTab），所以 tool 行展開做一次，goal running/done + chat + quiz 一起拿到——使用者明確希望 chat 也有，這點自動涵蓋。
+
+**關鍵實作 edge**：現在 `tool_result` 是獨立 event 且被丟棄（`ActivityStreamItem` `return null`）。要讓 tool 行展開看「結果」，需在 `foldTimeline` 把每個 tool_use 後面緊跟的 tool_result **配對併進同一個 item**。live stream 下 result 可能還沒到 → 展開先只顯示 input、標 pending。
 
 ## Tasks（粗估）
 
-1. 決定觸發 UX（A/B/C，先 brainstorm）
-2. `ActivityStreamItem` 加完整渲染分支（解開 `summarizeToolInput` / `command.slice` / `writeEditPath` 的摘要，提供完整版）
-3. 對應的展開/摺疊或切換 state + i18n
-4. vitest：摘要 vs 完整兩種渲染、切換行為
-5. 手動驗收：Windows 上 run 一個 goal，timeline 能展開看到完整 tool input/result
+1. `foldTimeline`：把 tool_use 與其後的 tool_result 配對成單一 item（含「result 未到」的 pending 狀態）
+2. `ActivityStreamItem`：tool_use / Write / Edit 加摺疊（預設）↔ 展開（完整 input + 配對 result / 完整寫入內容），沿用 `ThoughtItem` 的展開/摺疊 state 模式 + i18n
+3. vitest：摘要 vs 展開兩種渲染、配對邏輯、pending result、跨 surface（至少 RunDetail + Chat）
+4. 手動驗收：Windows 跑一個 goal + 一次 chat，timeline / 對話裡的 tool 行能展開看到完整 input + result
 
-工程量：輕-中（觸發 UX 定案後約 1 個半天）。
+工程量：輕-中（約 1 個半天；觸發 UX 已不需再 brainstorm）。
 
 ## Out of scope
 
@@ -48,4 +54,4 @@ A 最貼近「需要時才看」、不洗版；B/C 較粗粒度。動工前先 b
 
 ## 何時動
 
-CLI `--debug` 詳細模式 change 落地後再動，讓 CLI 先驗證「完整渲染」的形狀與價值，app 再對齊（含自己的觸發 UX）。無硬依賴，可隨時插入。
+CLI `--debug` 詳細模式 change（`cli-debug-stream-detail`）已於 2026-05-21 落地並實機驗證「完整渲染」的形狀與價值，前置條件已滿足。觸發 UX 也已於 discuss 定案（per-line 展開）。無硬依賴、設計已備齊，可隨時 `/spectra-propose` 起 change。
