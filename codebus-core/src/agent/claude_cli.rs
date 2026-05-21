@@ -243,8 +243,9 @@ fn join_within(handle: thread::JoinHandle<()>, deadline: Duration) {
 ///   5. `--permission-mode acceptEdits`
 ///   6. `--output-format stream-json`
 ///   7. `--verbose`
-///   8. `--model <m>` — optional
-///   9. `--effort <e>` — optional
+///   8. `--strict-mcp-config` + `--mcp-config {"mcpServers":{}}` — MCP load-layer isolation
+///   9. `--model <m>` — optional
+///  10. `--effort <e>` — optional
 pub(crate) fn build_claude_cmd(opts: &InvokeAgentOptions, claude_bin: &str) -> Command {
     let tools_csv = build_tools_csv(opts.toolset, opts.bash_whitelist);
     let allowed_tools_csv = build_allowed_tools_csv(opts.toolset, opts.bash_whitelist);
@@ -271,7 +272,17 @@ pub(crate) fn build_claude_cmd(opts: &InvokeAgentOptions, claude_bin: &str) -> C
         // format stays default `text` (prompt comes via `-p`).
         .arg("--output-format")
         .arg("stream-json")
-        .arg("--verbose");
+        .arg("--verbose")
+        // spawn-mcp-isolation: hard-isolate the MCP load layer. `--tools` /
+        // `--allowedTools` only gate built-in tools — they do NOT exclude MCP
+        // tools (verified 2026-05-21: ambient connector / user-scope MCP tools
+        // leak into the spawned session otherwise). `--strict-mcp-config` makes
+        // claude use ONLY the servers from `--mcp-config`; the empty config
+        // declares zero servers, so no ambient MCP (user / project / connector)
+        // is loaded. Unconditional, no escape hatch.
+        .arg("--strict-mcp-config")
+        .arg("--mcp-config")
+        .arg(r#"{"mcpServers":{}}"#);
 
     if let Some(model) = opts.model.as_deref() {
         cmd.arg("--model").arg(model);
@@ -385,6 +396,81 @@ mod tests {
         assert!(
             resume_pos < tools_pos,
             "--resume must appear before --tools (got resume at {resume_pos}, tools at {tools_pos})"
+        );
+    }
+
+    /// Returns the position of the first occurrence of `flag` in `args`.
+    fn pos(args: &[String], flag: &str) -> usize {
+        args.iter()
+            .position(|a| a == flag)
+            .unwrap_or_else(|| panic!("{flag} must appear in argv: {args:?}"))
+    }
+
+    fn fixture_opts_with_model(model: &str, effort: &str) -> InvokeAgentOptions {
+        InvokeAgentOptions {
+            slash_command: "/codebus-goal \"x\"".into(),
+            vault_root: PathBuf::from("/tmp/v"),
+            toolset: &["Read", "Glob", "Grep"],
+            bash_whitelist: None,
+            model: Some(model.into()),
+            effort: Some(effort.into()),
+            env: EnvOverrides::for_system(),
+            resume_session_id: None,
+        }
+    }
+
+    /// spawn-mcp-isolation: argv must carry the MCP load-layer isolation
+    /// flags — `--strict-mcp-config` and `--mcp-config {"mcpServers":{}}`.
+    #[test]
+    fn build_claude_cmd_carries_mcp_isolation_flags() {
+        let cmd = build_claude_cmd(&fixture_opts(None), "claude");
+        let args = cmd_args_collected(&cmd);
+        assert!(
+            args.iter().any(|a| a == "--strict-mcp-config"),
+            "--strict-mcp-config must be present: {args:?}"
+        );
+        let mcp_pos = pos(&args, "--mcp-config");
+        assert_eq!(
+            args.get(mcp_pos + 1).map(String::as_str),
+            Some(r#"{"mcpServers":{}}"#),
+            "--mcp-config must be immediately followed by the empty config literal"
+        );
+    }
+
+    /// spawn-mcp-isolation: the MCP flags sit after `--verbose` and before
+    /// the optional `--model` / `--effort` flags.
+    #[test]
+    fn build_claude_cmd_positions_mcp_flags_after_verbose_before_model() {
+        let cmd = build_claude_cmd(&fixture_opts_with_model("claude-opus-4-6", "high"), "claude");
+        let args = cmd_args_collected(&cmd);
+        let verbose = pos(&args, "--verbose");
+        let strict = pos(&args, "--strict-mcp-config");
+        let mcp = pos(&args, "--mcp-config");
+        let model = pos(&args, "--model");
+        assert!(
+            verbose < strict && verbose < mcp,
+            "MCP flags must follow --verbose (verbose {verbose}, strict {strict}, mcp {mcp})"
+        );
+        assert!(
+            strict < model && mcp < model,
+            "MCP flags must precede --model (strict {strict}, mcp {mcp}, model {model})"
+        );
+    }
+
+    /// spawn-mcp-isolation: adding the MCP flags must not break the existing
+    /// `--resume` before `--tools` invariant; the MCP flags land after `--tools`.
+    #[test]
+    fn build_claude_cmd_mcp_flags_preserve_resume_before_tools() {
+        let cmd = build_claude_cmd(&fixture_opts(Some("abc-123")), "claude");
+        let args = cmd_args_collected(&cmd);
+        let resume = pos(&args, "--resume");
+        let tools = pos(&args, "--tools");
+        let strict = pos(&args, "--strict-mcp-config");
+        let mcp = pos(&args, "--mcp-config");
+        assert!(resume < tools, "--resume must precede --tools");
+        assert!(
+            tools < strict && tools < mcp,
+            "MCP flags must follow --tools (tools {tools}, strict {strict}, mcp {mcp})"
         );
     }
 
