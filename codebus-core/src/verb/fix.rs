@@ -23,7 +23,7 @@
 //! 12. Load `log` config and write `RunLog`
 //! 13. Return `FixReport` with status reflecting termination reason
 
-use crate::agent::EnvOverrides;
+use crate::agent::{ClaudeBackend, EnvOverrides};
 use crate::config::{
     Verb, build_env_overrides, default_config_path, load_claude_code_config, load_lint_fix_config,
 };
@@ -169,10 +169,12 @@ pub fn run_fix(
         }
     };
 
-    // Step 6: resolve fix verb config + build env overrides.
+    // Step 6: resolve fix verb config (for RunLog) + build env overrides, then
+    // build the Claude backend (resolves model/effort from Verb::Fix itself).
     let fix_resolved = cc_cfg.resolve(Verb::Fix);
     let fix_env: EnvOverrides =
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
+    let backend = ClaudeBackend::new(cc_cfg, fix_env);
 
     // Fan-out closure: emit each VerbEvent to events sink + caller.
     let mut fan_out = |event: VerbEvent| {
@@ -203,9 +205,7 @@ pub fn run_fix(
         let fan_out = &mut fan_out;
         run_fix_loop(
             paths.root.clone(),
-            fix_resolved.model.clone(),
-            fix_resolved.effort.clone(),
-            fix_env,
+            &backend,
             |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
         )

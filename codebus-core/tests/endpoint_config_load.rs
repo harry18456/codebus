@@ -1,82 +1,77 @@
-//! Integration tests for `config::load_claude_code_config` covering the
-//! legacy-schema migration warning. Lives in `tests/` so the assertions
-//! exercise the public API surface (and so the test names — which form
-//! the verification target named in tasks.md — are visible in
-//! `cargo test --test endpoint_config_load`).
+//! Integration tests for `config::load_claude_code_config` over the unified
+//! `agent.providers.*` schema. Lives in `tests/` so the assertions exercise
+//! the public API surface (and the test names — the verification target named
+//! in tasks.md — are visible in `cargo test --test endpoint_config_load`).
 
 use std::fs;
 
 use codebus_core::config::{
-    ActiveProfile, ClaudeCodeConfig, LEGACY_MIGRATION_WARNING, load_claude_code_config_into,
+    ActiveProfile, ClaudeCodeConfig, Verb, load_claude_code_config,
 };
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
-/// Spec: Legacy Config Schema Warning Without Rewrite.
+/// Spec: REMOVED `Legacy Config Schema Warning Without Rewrite`.
 ///
-/// When `~/.codebus/config.yaml` contains the pre-profile schema (top-level
-/// `goal` / `query` / `fix` keys under `claude_code`), `load_claude_code_config`
-/// SHALL:
-/// - emit a migration warning containing the literal "migration" keyword
-///   AND a concrete new-schema example,
-/// - leave the on-disk file byte-for-byte unchanged,
-/// - return a config whose active profile is `System`.
+/// A legacy top-level `claude_code` block is treated as an absent `agent`
+/// block: `load_claude_code_config` SHALL return the built-in default, SHALL
+/// NOT print any migration warning, and SHALL leave the on-disk file
+/// byte-for-byte unchanged.
 #[test]
-fn legacy_schema_warns_without_rewrite() {
+fn legacy_claude_code_falls_back_to_default_without_rewrite() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("config.yaml");
-    let body = "claude_code:\n  goal:\n    model: opus\n    effort: high\n  query:\n    model: haiku\n    effort: low\n  fix:\n    model: sonnet\n    effort: medium\n";
+    let body = "claude_code:\n  goal:\n    model: opus\n    effort: high\n  query:\n    model: haiku\n    effort: low\n";
     fs::write(&path, body).unwrap();
 
     let hash_before = sha256(&fs::read(&path).unwrap());
-    let mut sink: Vec<u8> = Vec::new();
-    let cfg = load_claude_code_config_into(&path, &mut sink).expect("legacy load succeeds");
+    let cfg = load_claude_code_config(&path).expect("legacy load falls back to default");
     let hash_after = sha256(&fs::read(&path).unwrap());
 
-    // 1) File byte-for-byte unchanged.
+    // File byte-for-byte unchanged (loader never rewrites).
     assert_eq!(
         hash_before, hash_after,
-        "legacy schema detection must not rewrite ~/.codebus/config.yaml"
+        "legacy schema must not rewrite ~/.codebus/config.yaml"
     );
-
-    // 2) Returned config has active=System and matches the built-in default.
-    assert_eq!(cfg.active, ActiveProfile::System);
+    // Legacy block is ignored → built-in default.
     assert_eq!(cfg, ClaudeCodeConfig::default());
-
-    // 3) Warning text contains the migration keyword AND the concrete new
-    //    schema example (the literal substring `active: system`).
-    let warn = String::from_utf8(sink).expect("warning text is UTF-8");
-    let lower = warn.to_lowercase();
-    assert!(
-        lower.contains("migrate") || lower.contains("migration") || lower.contains("legacy"),
-        "warning missing migration keyword: {warn}"
-    );
-    assert!(
-        warn.contains("active: system"),
-        "warning missing new-schema example: {warn}"
-    );
-    // The shared constant lives in lib code — cross-check the integration
-    // test sees the same text the public binary surfaces.
-    assert!(warn.contains(LEGACY_MIGRATION_WARNING.lines().next().unwrap()));
 }
 
-/// Sanity: new-schema files do NOT trigger a migration warning. Pairs with
-/// `legacy_schema_warns_without_rewrite` to prove the warning is gated on
-/// the actual legacy shape (no false positives on healthy files).
+/// Spec: `Endpoint Profile Schema` — a complete `agent.providers.claude`
+/// system profile loads and resolves to the translated `--model` value.
 #[test]
-fn new_schema_load_emits_no_warning() {
+fn agent_schema_system_profile_loads_and_resolves() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("config.yaml");
-    let body = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n";
+    let body = "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   { model: opus-4-6,   effort: high   }\n        query:  { model: haiku-4-5,  effort: low    }\n        fix:    { model: sonnet-4-6, effort: medium }\n        verify: { model: opus-4-6,   effort: high   }\n";
     fs::write(&path, body).unwrap();
 
-    let mut sink: Vec<u8> = Vec::new();
-    let cfg = load_claude_code_config_into(&path, &mut sink).unwrap();
+    let cfg = load_claude_code_config(&path).expect("new-schema load succeeds");
     assert_eq!(cfg.active, ActiveProfile::System);
+    assert_eq!(
+        cfg.resolve(Verb::Goal).model.as_deref(),
+        Some("claude-opus-4-6")
+    );
+    assert_eq!(
+        cfg.resolve(Verb::Query).model.as_deref(),
+        Some("claude-haiku-4-5")
+    );
+}
+
+/// Spec: `Endpoint Profile Schema` — active profile missing a required verb
+/// sub-block is rejected (does not silently fall back to defaults).
+#[test]
+fn agent_schema_active_system_missing_verb_rejected() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("config.yaml");
+    // system active but `verify` sub-block absent.
+    let body = "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:  { model: opus-4-6,   effort: high }\n        query: { model: haiku-4-5,  effort: low }\n        fix:   { model: sonnet-4-6, effort: medium }\n";
+    fs::write(&path, body).unwrap();
+
+    let err = load_claude_code_config(&path).expect_err("missing verify must reject");
     assert!(
-        sink.is_empty(),
-        "new-schema load must not emit warnings; got: {}",
-        String::from_utf8_lossy(&sink)
+        format!("{err}").contains("verify"),
+        "error must name the missing verify field"
     );
 }
 

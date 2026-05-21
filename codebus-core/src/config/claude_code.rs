@@ -128,51 +128,19 @@ pub fn build_env_overrides(cfg: &ClaudeCodeConfig) -> Result<EnvOverrides, Keyri
     }
 }
 
-/// Stderr migration warning text emitted when a legacy schema is detected.
-/// Public for test cross-checking — production callers SHALL go through
-/// [`load_claude_code_config`].
-pub const LEGACY_MIGRATION_WARNING: &str = "\
-warning: ~/.codebus/config.yaml uses the legacy `claude_code` schema (top-level \
-`goal` / `query` / `fix` keys). Migrate to the profile schema:
-
-claude_code:
-  active: system
-  system:
-    goal:  { model: opus-4-6,   effort: high }
-    query: { model: haiku-4-5,  effort: low }
-    fix:   { model: sonnet-4-6, effort: medium }
-
-codebus will continue with built-in defaults this run; your config file has \
-NOT been modified.";
-
-/// Load `claude_code.*` from `path`. Migration warnings (legacy schema)
-/// are sent to stderr. See [`load_claude_code_config_into`] for the
-/// testable variant that lets callers capture the warning text.
+/// Load the claude provider config from `path`.
 ///
 /// Contract:
 ///
 /// - File missing → returns [`ClaudeCodeConfig::default()`].
-/// - File exists, `claude_code` section absent → returns
-///   [`ClaudeCodeConfig::default()`].
-/// - File exists with the new profile schema → parsed + validated config.
-/// - File exists with the legacy schema → stderr migration warning, then
-///   returns [`ClaudeCodeConfig::default()`]; the on-disk file is NOT
-///   modified.
-/// - File exists but yaml is structurally invalid OR the new schema has
-///   an invalid required field → returns [`ConfigLoadError::YamlParse`].
+/// - File exists, `agent` block (or `agent.providers.claude`) absent →
+///   returns [`ClaudeCodeConfig::default()`]. (A legacy top-level
+///   `claude_code` block is treated as an absent `agent` block — no warning,
+///   no rewrite; the unified `agent.providers.*` schema is the only schema.)
+/// - File exists with the new schema → parsed + validated config.
+/// - File exists but yaml is structurally invalid OR the active endpoint
+///   profile has an invalid required field → [`ConfigLoadError::YamlParse`].
 pub fn load_claude_code_config(path: &Path) -> Result<ClaudeCodeConfig, ConfigLoadError> {
-    load_claude_code_config_into(path, &mut std::io::stderr())
-}
-
-/// Like [`load_claude_code_config`] but routes the legacy-schema migration
-/// warning to `warn_sink` instead of stderr. Production callers use the
-/// no-sink wrapper; tests use this variant with a `Vec<u8>` to assert
-/// warning content. Sink write failures are silent — losing the warning
-/// is preferable to surfacing a write error that masks the real signal.
-pub fn load_claude_code_config_into(
-    path: &Path,
-    warn_sink: &mut dyn std::io::Write,
-) -> Result<ClaudeCodeConfig, ConfigLoadError> {
     let body = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -183,10 +151,6 @@ pub fn load_claude_code_config_into(
     match parse_claude_code_yaml(&body)? {
         ParseOutcome::New(cfg) => Ok(cfg),
         ParseOutcome::Missing => Ok(ClaudeCodeConfig::default()),
-        ParseOutcome::Legacy => {
-            let _ = writeln!(warn_sink, "{LEGACY_MIGRATION_WARNING}");
-            Ok(ClaudeCodeConfig::default())
-        }
     }
 }
 
@@ -200,6 +164,29 @@ mod tests {
         let p = dir.join("config.yaml");
         fs::write(&p, body).unwrap();
         p
+    }
+
+    /// Wrap a legacy-style `claude_code:\n  <body>` string into the unified
+    /// `agent.providers.claude` envelope, then write it. Lets the inner-schema
+    /// test strings stay verbatim while exercising the new top-level shape.
+    fn write_agent_yaml(dir: &Path, claude_code_yaml: &str) -> PathBuf {
+        let body = claude_code_yaml
+            .strip_prefix("claude_code:\n")
+            .expect("test yaml must start with `claude_code:\\n`");
+        let reindented: String = body
+            .lines()
+            .map(|l| {
+                if l.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("    {l}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let wrapped =
+            format!("agent:\n  active_provider: claude\n  providers:\n    claude:\n{reindented}\n");
+        write_yaml(dir, &wrapped)
     }
 
     /// File missing → defaults.
@@ -223,7 +210,7 @@ mod tests {
     #[test]
     fn system_profile_resolves_translated_model() {
         let tmp = TempDir::new().unwrap();
-        let p = write_yaml(
+        let p = write_agent_yaml(
             tmp.path(),
             "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n",
         );
@@ -241,7 +228,7 @@ mod tests {
     #[test]
     fn azure_profile_resolves_verbatim_deployment_name() {
         let tmp = TempDir::new().unwrap();
-        let p = write_yaml(
+        let p = write_agent_yaml(
             tmp.path(),
             "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: claude-opus-4-6-2026V2, effort: high   }\n    query:  { model: dep-haiku,              effort: low    }\n    fix:    { model: dep-sonnet,             effort: medium }\n    verify: { model: claude-opus-4-6-2026V2, effort: high   }\n",
         );
@@ -263,7 +250,7 @@ mod tests {
     #[test]
     fn system_profile_resolve_verify_uses_verify_block() {
         let tmp = TempDir::new().unwrap();
-        let p = write_yaml(
+        let p = write_agent_yaml(
             tmp.path(),
             "claude_code:\n  active: system\n  system:\n    goal:   { model: sonnet-4-6, effort: medium }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n",
         );
@@ -292,7 +279,7 @@ mod tests {
     #[test]
     fn azure_profile_resolve_verify_uses_verify_block_verbatim() {
         let tmp = TempDir::new().unwrap();
-        let p = write_yaml(
+        let p = write_agent_yaml(
             tmp.path(),
             "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: dep-sonnet, effort: medium }\n    query:  { model: dep-haiku,  effort: low    }\n    fix:    { model: dep-sonnet, effort: medium }\n    verify: { model: dep-opus-deep, effort: high }\n",
         );
@@ -311,7 +298,7 @@ mod tests {
     #[test]
     fn resolve_verify_does_not_fall_back_to_query() {
         let tmp = TempDir::new().unwrap();
-        let p = write_yaml(
+        let p = write_agent_yaml(
             tmp.path(),
             "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-7,   effort: high   }\n",
         );
@@ -347,7 +334,7 @@ mod tests {
     #[test]
     fn invalid_yaml_returns_parse_error() {
         let tmp = TempDir::new().unwrap();
-        let p = write_yaml(
+        let p = write_agent_yaml(
             tmp.path(),
             "claude_code:\n  active: bogus\n  system:\n    goal: { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5, effort: low }\n    fix: { model: sonnet-4-6, effort: medium }\n",
         );
@@ -477,7 +464,7 @@ mod tests {
     #[test]
     fn arbitrary_system_model_alias_accepted() {
         let tmp = TempDir::new().unwrap();
-        let p = write_yaml(
+        let p = write_agent_yaml(
             tmp.path(),
             "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-7,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n",
         );

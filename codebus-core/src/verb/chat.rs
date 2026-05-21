@@ -37,7 +37,7 @@
 //! No auto_commit at any point (chat is read-only; `CHAT_TOOLSET` excludes
 //! `Write`/`Edit` at the binary layer + SKILL.md restates the invariant).
 
-use crate::agent::{InvokeAgentOptions, invoke};
+use crate::agent::{ClaudeBackend, Permission, SpawnSpec, invoke};
 use crate::config::{Verb, build_env_overrides, default_config_path, load_claude_code_config};
 use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
@@ -160,9 +160,11 @@ pub fn run_chat_turn(
     let chat_resolved = cc_cfg.resolve(Verb::Chat);
     let slash_command = format!("/codebus-chat \"{}\"", options.text);
 
-    // Step 4: build env overrides (azure profile keyring fetch).
+    // Step 4: build env overrides (azure profile keyring fetch), then build
+    // the Claude backend (holds config for model resolution + env).
     let chat_env =
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
+    let backend = ClaudeBackend::new(cc_cfg, chat_env);
 
     // Fan-out closure: each VerbEvent → events sink + caller's on_event.
     let mut fan_out = |event: VerbEvent| {
@@ -184,16 +186,15 @@ pub fn run_chat_turn(
         let fan_out = &mut fan_out;
         let stream_options = options.session_id.clone();
         invoke(
-            InvokeAgentOptions {
-                slash_command,
-                vault_root: paths.root.clone(),
-                toolset: CHAT_TOOLSET,
-                bash_whitelist: None,
-                model: chat_resolved.model.clone(),
-                effort: chat_resolved.effort.clone(),
-                env: chat_env,
+            &backend,
+            SpawnSpec {
+                verb: Verb::Chat,
+                prompt: slash_command,
+                permission: Permission::ReadOnly,
+                command_allowance: None,
                 resume_session_id: stream_options,
             },
+            &paths.root,
             |event: StreamEvent| {
                 // Detect promote-suggestion marker on Thought text before
                 // forwarding the event — emission order matches spec

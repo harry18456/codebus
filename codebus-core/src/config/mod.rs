@@ -25,8 +25,7 @@ pub mod pii;
 pub mod quiz;
 
 pub use claude_code::{
-    LEGACY_MIGRATION_WARNING, ResolvedVerb, Verb, build_env_overrides, load_claude_code_config,
-    load_claude_code_config_into,
+    ResolvedVerb, Verb, build_env_overrides, load_claude_code_config,
 };
 pub use endpoint::{
     ActiveProfile, AzureProfile, AzureVerbConfig, ClaudeCodeConfig, SystemModel, SystemProfile,

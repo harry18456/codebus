@@ -123,43 +123,25 @@ pub(crate) fn save_global_config_at(path: &Path, payload: &GlobalConfig) -> IpcR
 }
 
 /// Run the codebus-core endpoint parser against the about-to-be-saved
-/// payload's `claude_code` section, if any. Rejects an incomplete active
-/// profile with `AppError::Invalid` so the frontend can surface inline
-/// error messages instead of writing yaml the CLI will refuse to load.
+/// payload's `agent` section, if any. Rejects an incomplete active endpoint
+/// profile with `AppError::Invalid` so the frontend can surface inline error
+/// messages instead of writing yaml the CLI will refuse to load.
 ///
-/// Missing `claude_code` section → no validation (legitimate first-time
-/// setup before user touches endpoint settings).
+/// Missing `agent` section → no validation (legitimate first-time setup
+/// before the user touches endpoint settings).
 fn validate_claude_code(payload: &GlobalConfig) -> IpcResult<()> {
-    let cc_value = match payload.get("claude_code") {
+    let agent_value = match payload.get("agent") {
         Some(v) => v,
         None => return Ok(()),
     };
-    let cc_yaml = serde_yaml::to_string(cc_value).map_err(|e| AppError::Invalid {
-        field: "claude_code".into(),
+    let agent_body = serde_yaml::to_string(agent_value).map_err(|e| AppError::Invalid {
+        field: "agent".into(),
         message: format!("failed to serialise for validation: {e}"),
     })?;
-    // Wrap in the same top-level shape the loader expects.
-    let wrapped = format!("claude_code:\n{}", indent_yaml(&cc_yaml));
-    match parse_claude_code_yaml(&wrapped) {
-        Ok(ParseOutcome::New(_) | ParseOutcome::Missing) => Ok(()),
-        Ok(ParseOutcome::Legacy) => {
-            // Frontend shape is always the new schema; if we ever
-            // observe legacy here it's a serialisation bug, not user
-            // input — surface as Invalid so we notice in tests.
-            Err(AppError::Invalid {
-                field: "claude_code".into(),
-                message: "internal: legacy schema produced by frontend serialisation".into(),
-            })
-        }
-        Err(e) => Err(AppError::Invalid {
-            field: "claude_code".into(),
-            message: e.to_string(),
-        }),
-    }
-}
-
-fn indent_yaml(body: &str) -> String {
-    body.lines()
+    // `agent_value` is the body of the `agent` mapping; re-nest it under the
+    // top-level `agent:` key so the loader sees the full document shape.
+    let inner = agent_body
+        .lines()
         .map(|l| {
             if l.is_empty() {
                 String::new()
@@ -168,7 +150,15 @@ fn indent_yaml(body: &str) -> String {
             }
         })
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    let wrapped = format!("agent:\n{inner}\n");
+    match parse_claude_code_yaml(&wrapped) {
+        Ok(ParseOutcome::New(_) | ParseOutcome::Missing) => Ok(()),
+        Err(e) => Err(AppError::Invalid {
+            field: "agent".into(),
+            message: e.to_string(),
+        }),
+    }
 }
 
 fn global_config_path() -> IpcResult<PathBuf> {
@@ -284,19 +274,24 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = config_path(&tmp);
         let payload = json!({
-            "claude_code": {
-                "active": "azure",
-                "system": {
-                    "goal":  { "model": "opus-4-6",   "effort": "high" },
-                    "query": { "model": "haiku-4-5",  "effort": "low" },
-                    "fix":   { "model": "sonnet-4-6", "effort": "medium" }
-                },
-                "azure": {
-                    "base_url": "",  // ← empty: invalid for active=azure
-                    "keyring_service": "codebus-azure",
-                    "goal":  { "model": "dep-x", "effort": "high" },
-                    "query": { "model": "dep-y", "effort": "low" },
-                    "fix":   { "model": "dep-z", "effort": "medium" }
+            "agent": {
+                "active_provider": "claude",
+                "providers": {
+                    "claude": {
+                        "active": "azure",
+                        "system": {
+                            "goal":  { "model": "opus-4-6",   "effort": "high" },
+                            "query": { "model": "haiku-4-5",  "effort": "low" },
+                            "fix":   { "model": "sonnet-4-6", "effort": "medium" }
+                        },
+                        "azure": {
+                            "base_url": "",  // ← empty: invalid for active=azure
+                            "keyring_service": "codebus-azure",
+                            "goal":  { "model": "dep-x", "effort": "high" },
+                            "query": { "model": "dep-y", "effort": "low" },
+                            "fix":   { "model": "dep-z", "effort": "medium" }
+                        }
+                    }
                 }
             },
             "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } }
@@ -304,8 +299,8 @@ mod tests {
         let err =
             save_global_config_at(&path, &payload).expect_err("incomplete azure must be rejected");
         assert!(
-            matches!(err, AppError::Invalid { ref field, .. } if field == "claude_code"),
-            "expected Invalid(claude_code), got {err:?}"
+            matches!(err, AppError::Invalid { ref field, .. } if field == "agent"),
+            "expected Invalid(agent), got {err:?}"
         );
         // Disk file SHALL NOT be created.
         assert!(!path.exists(), "save failure must not write yaml");
@@ -318,21 +313,26 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = config_path(&tmp);
         let payload = json!({
-            "claude_code": {
-                "active": "azure",
-                "system": {
-                    "goal":   { "model": "opus-4-6",   "effort": "high"   },
-                    "query":  { "model": "haiku-4-5",  "effort": "low"    },
-                    "fix":    { "model": "sonnet-4-6", "effort": "medium" },
-                    "verify": { "model": "opus-4-6",   "effort": "high"   }
-                },
-                "azure": {
-                    "base_url": "https://x.example.com/anthropic",
-                    "keyring_service": "codebus-azure",
-                    "goal":   { "model": "dep-x", "effort": "high"   },
-                    "query":  { "model": "dep-y", "effort": "low"    },
-                    "fix":    { "model": "dep-z", "effort": "medium" },
-                    "verify": { "model": "dep-x", "effort": "high"   }
+            "agent": {
+                "active_provider": "claude",
+                "providers": {
+                    "claude": {
+                        "active": "azure",
+                        "system": {
+                            "goal":   { "model": "opus-4-6",   "effort": "high"   },
+                            "query":  { "model": "haiku-4-5",  "effort": "low"    },
+                            "fix":    { "model": "sonnet-4-6", "effort": "medium" },
+                            "verify": { "model": "opus-4-6",   "effort": "high"   }
+                        },
+                        "azure": {
+                            "base_url": "https://x.example.com/anthropic",
+                            "keyring_service": "codebus-azure",
+                            "goal":   { "model": "dep-x", "effort": "high"   },
+                            "query":  { "model": "dep-y", "effort": "low"    },
+                            "fix":    { "model": "dep-z", "effort": "medium" },
+                            "verify": { "model": "dep-x", "effort": "high"   }
+                        }
+                    }
                 }
             },
             "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } }
@@ -340,7 +340,7 @@ mod tests {
         save_global_config_at(&path, &payload).expect("complete profile accepted");
         let loaded = load_global_config_at(&path).expect("reloads cleanly");
         assert_eq!(
-            loaded["claude_code"]["azure"]["base_url"],
+            loaded["agent"]["providers"]["claude"]["azure"]["base_url"],
             json!("https://x.example.com/anthropic")
         );
     }

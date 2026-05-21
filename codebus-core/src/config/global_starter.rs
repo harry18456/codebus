@@ -67,7 +67,13 @@ pii:
   # masking everything (Warn matches included).
   on_hit: warn
 
-# Claude Code endpoint + per-verb agent config. Two profiles are supported:
+# Agent provider + endpoint + per-verb config.
+#
+# `active_provider` selects which agent CLI drives spawns. Each provider lives
+# under `providers.<name>` and carries its own endpoint profiles. (Currently
+# the only supported provider is `claude`; more land as pure additions.)
+#
+# For the `claude` provider, two endpoint profiles are supported:
 #   system — use the user's globally configured Claude CLI endpoint (no env
 #            injection). `model` is a closed enum: opus-4-7 / opus-4-6 /
 #            haiku-4-5 / sonnet-4-6 (codebus translates to the right --model
@@ -79,45 +85,50 @@ pii:
 #            CLAUDE_CODE_DISABLE_ADVISOR_TOOL into the child process only —
 #            never modifies the parent shell environment.
 #
-# The `active` selector picks which profile drives the spawn. The other
-# profile is cold storage: codebus does NOT validate its fields, so you
-# can park half-edited config there while iterating.
-claude_code:
-  active: system
+# The provider's `active` selector picks which endpoint profile drives the
+# spawn. The other profile is cold storage: codebus does NOT validate its
+# fields, so you can park half-edited config there while iterating.
+agent:
+  active_provider: claude
 
-  system:
-    goal:
-      # Reasoning-heavy ingest into the wiki — v2-verified default.
-      model: opus-4-6
-      effort: high
-    query:
-      # Read-only retrieval — fast turnaround.
-      model: haiku-4-5
-      effort: low
-    fix:
-      # Lint-and-edit loop — balanced choice.
-      model: sonnet-4-6
-      effort: medium
-    verify:
-      # Content-verify spawn for quiz / goal verbs — judges whether the
-      # generated content is grounded in the source mirror / planned pages.
-      # Defaults to opus-4-6 + high effort: the "expensive verification"
-      # half of the "cheap generation + expensive verification" pattern.
-      # Override to haiku-4-5 + low if you want verify to share the cheap
-      # profile of your main spawn (defeats the cost design but valid).
-      model: opus-4-6
-      effort: high
+  providers:
+    claude:
+      active: system
 
-  # Uncomment + fill in to use Azure endpoints. Run
-  #   codebus config set-key azure
-  # to store the API key in your OS keyring.
-  # azure:
-  #   base_url: https://<your-resource>.cognitiveservices.azure.com/anthropic
-  #   keyring_service: codebus-azure
-  #   goal:   { model: <your-opus-deployment-name>,   effort: high   }
-  #   query:  { model: <your-haiku-deployment-name>,  effort: low    }
-  #   fix:    { model: <your-sonnet-deployment-name>, effort: medium }
-  #   verify: { model: <your-opus-deployment-name>,   effort: high   }
+      system:
+        goal:
+          # Reasoning-heavy ingest into the wiki — v2-verified default.
+          model: opus-4-6
+          effort: high
+        query:
+          # Read-only retrieval — fast turnaround.
+          model: haiku-4-5
+          effort: low
+        fix:
+          # Lint-and-edit loop — balanced choice.
+          model: sonnet-4-6
+          effort: medium
+        verify:
+          # Content-verify spawn for quiz / goal verbs — judges whether the
+          # generated content is grounded in the source mirror / planned
+          # pages. Defaults to opus-4-6 + high effort: the "expensive
+          # verification" half of the "cheap generation + expensive
+          # verification" pattern. Override to haiku-4-5 + low to share the
+          # cheap profile of your main spawn (defeats the cost design but
+          # valid).
+          model: opus-4-6
+          effort: high
+
+      # Uncomment + fill in to use Azure endpoints. Run
+      #   codebus config set-key azure
+      # to store the API key in your OS keyring.
+      # azure:
+      #   base_url: https://<your-resource>.cognitiveservices.azure.com/anthropic
+      #   keyring_service: codebus-azure
+      #   goal:   { model: <your-opus-deployment-name>,   effort: high   }
+      #   query:  { model: <your-haiku-deployment-name>,  effort: low    }
+      #   fix:    { model: <your-sonnet-deployment-name>, effort: medium }
+      #   verify: { model: <your-opus-deployment-name>,   effort: high   }
 
 # PreToolUse hook gates. Default behaviors are safe (block image / binary
 # reads to keep the regex_basic PII filter effective); flip individual
@@ -212,6 +223,18 @@ mod tests {
         assert!(target.exists());
     }
 
+    /// The starter uses the unified `agent.providers.*` schema, not the
+    /// removed legacy top-level `claude_code` block.
+    #[test]
+    fn starter_config_uses_agent_schema() {
+        assert!(STARTER_CONFIG.contains("\nagent:\n"));
+        assert!(STARTER_CONFIG.contains("active_provider: claude"));
+        assert!(STARTER_CONFIG.contains("  providers:\n"));
+        assert!(STARTER_CONFIG.contains("    claude:\n"));
+        // No legacy top-level claude_code block.
+        assert!(!STARTER_CONFIG.contains("\nclaude_code:\n"));
+    }
+
     /// Spec: starter content round-trips through every loader to defaults.
     /// This is the contract that keeps STARTER_CONFIG honest — if defaults
     /// change in any sub-module, this test will catch the drift.
@@ -229,6 +252,13 @@ mod tests {
 
         let cc = load_claude_code_config(&target).unwrap();
         assert_eq!(cc, ClaudeCodeConfig::default());
+        // Strong check: the starter is actually PARSED as the new schema (not
+        // ignored → default). A bogus marker model would fail the round-trip,
+        // so confirm the resolved model came from the starter's system block.
+        assert_eq!(
+            cc.resolve(crate::config::Verb::Goal).model.as_deref(),
+            Some("claude-opus-4-6")
+        );
 
         let lf = load_lint_fix_config(&target).unwrap();
         assert!(lf.enabled);

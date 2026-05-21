@@ -13,7 +13,8 @@
 
 pub mod prompt;
 
-use crate::agent::{InvokeAgentOptions, InvokeReport, invoke};
+use crate::agent::{AgentBackend, CommandPrefix, InvokeReport, Permission, SpawnSpec, invoke};
+use crate::config::Verb;
 use crate::stream::StreamEvent;
 use crate::wiki::lint::lint_wiki;
 use crate::wiki::types::LintResult;
@@ -85,14 +86,13 @@ impl std::error::Error for FixError {}
 ///   4. Run lint (final verification).
 ///   5. Use final lint state to decide TerminationReason.
 ///
-/// `vault_root` is the `.codebus/` directory. `model` / `effort` are the
-/// pass-through values from `~/.codebus/config.yaml`'s `claude_code.fix`
-/// section, or `None` to omit the flags from the spawned command line.
+/// `vault_root` is the `.codebus/` directory. `backend` is the agent backend
+/// (model/effort resolved from its own config by `Verb::Fix`; env held
+/// inside it). The Fix spawn uses Workspace permission + a `codebus lint`
+/// command allowance.
 pub fn run_fix_loop(
     vault_root: PathBuf,
-    model: Option<String>,
-    effort: Option<String>,
-    env: crate::agent::EnvOverrides,
+    backend: &dyn AgentBackend,
     on_event: impl FnMut(StreamEvent),
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<FixReport, FixError> {
@@ -107,16 +107,9 @@ pub fn run_fix_loop(
         });
     }
 
-    let invoke_report = invoke_fix_agent(
-        &vault_root,
-        prompt::initial_prompt(),
-        model,
-        effort,
-        env,
-        on_event,
-        cancel,
-    )
-    .map_err(FixError::Spawn)?;
+    let invoke_report =
+        invoke_fix_agent(&vault_root, prompt::initial_prompt(), backend, on_event, cancel)
+            .map_err(FixError::Spawn)?;
 
     let post = lint_wiki(&vault_root);
     let clean = post.error_count == 0 && post.warn_count == 0;
@@ -136,25 +129,24 @@ pub fn run_fix_loop(
 fn invoke_fix_agent(
     vault_root: &std::path::Path,
     slash_command: String,
-    model: Option<String>,
-    effort: Option<String>,
-    env: crate::agent::EnvOverrides,
+    backend: &dyn AgentBackend,
     on_event: impl FnMut(StreamEvent),
     cancel: Option<Arc<AtomicBool>>,
 ) -> io::Result<InvokeReport> {
     let report = invoke(
-        InvokeAgentOptions {
-            slash_command,
-            vault_root: vault_root.to_path_buf(),
-            toolset: FIX_TOOLSET,
-            bash_whitelist: Some(FIX_BASH_WHITELIST),
-            model,
-            effort,
-            env,
+        backend,
+        SpawnSpec {
+            verb: Verb::Fix,
+            prompt: slash_command,
+            // Fix Loop Agent Sandbox: Read,Glob,Grep,Write,Edit + bash limited
+            // to `codebus lint` (PreToolUse hook is the actual hard gate).
+            permission: Permission::Workspace,
+            command_allowance: Some(CommandPrefix::new(["codebus", "lint"])),
             // fix verb is one-shot (no session resume); chat verb is the
             // only caller that sets Some(...) on this field.
             resume_session_id: None,
         },
+        vault_root,
         on_event,
         cancel,
     )?;
@@ -187,21 +179,12 @@ mod tests {
     /// Spec scenario: "Fix skips agent entirely when initial lint is clean"
     #[test]
     fn run_fix_loop_skips_spawn_on_clean_initial_lint() {
+        use crate::agent::{ClaudeBackend, EnvOverrides};
+        use crate::config::endpoint::ClaudeCodeConfig;
+
         let tmp = make_clean_vault();
-        unsafe {
-            std::env::set_var("CODEBUS_CLAUDE_BIN", "/no/such/claude/bin/test-clean-skip");
-        }
-        let result = run_fix_loop(
-            tmp.path().to_path_buf(),
-            None,
-            None,
-            crate::agent::EnvOverrides::for_system(),
-            |_event| {},
-            None,
-        );
-        unsafe {
-            std::env::remove_var("CODEBUS_CLAUDE_BIN");
-        }
+        let backend = ClaudeBackend::new(ClaudeCodeConfig::default(), EnvOverrides::for_system());
+        let result = run_fix_loop(tmp.path().to_path_buf(), &backend, |_event| {}, None);
         let report = result.expect("clean vault should not invoke agent");
         assert!(report.agent_skipped);
         assert_eq!(report.termination, TerminationReason::InitialClean);
@@ -216,38 +199,23 @@ mod tests {
         assert_eq!(FIX_BASH_WHITELIST, "Bash(codebus lint *)");
     }
 
-    /// Spec scenario: "Fix spawn arguments contain no session continuity flags".
-    /// After v3-chat-verb added `resume_session_id: Option<String>` to
-    /// `InvokeAgentOptions`, fix verb keeps that field at `None` so the
-    /// spawned argv contains no `--resume` flag — byte-equivalent to the
-    /// pre-chat-verb implementation. Destructure pattern is exhaustive so
-    /// compile fails if a future field is added without a deliberate review
-    /// here.
+    /// Fix spawn carries no session-resume: the `SpawnSpec` built by
+    /// `invoke_fix_agent` sets `resume_session_id: None` (fix is one-shot;
+    /// only chat resumes). Verified at the SpawnSpec construction level.
     #[test]
-    fn invoke_options_carries_no_resume_session_id_for_fix() {
-        let opts = InvokeAgentOptions {
-            slash_command: "/codebus-fix".into(),
-            vault_root: PathBuf::from("/tmp"),
-            toolset: FIX_TOOLSET,
-            bash_whitelist: Some(FIX_BASH_WHITELIST),
-            model: None,
-            effort: None,
-            env: crate::agent::EnvOverrides::for_system(),
+    fn fix_spawn_spec_has_no_resume_and_workspace_permission() {
+        let spec = SpawnSpec {
+            verb: Verb::Fix,
+            prompt: "/codebus-fix".into(),
+            permission: Permission::Workspace,
+            command_allowance: Some(CommandPrefix::new(["codebus", "lint"])),
             resume_session_id: None,
         };
-        let InvokeAgentOptions {
-            slash_command: _,
-            vault_root: _,
-            toolset: _,
-            bash_whitelist: _,
-            model: _,
-            effort: _,
-            env: _,
-            resume_session_id,
-        } = opts;
-        assert!(
-            resume_session_id.is_none(),
-            "fix verb must always pass resume_session_id: None"
+        assert!(spec.resume_session_id.is_none());
+        assert_eq!(spec.permission, Permission::Workspace);
+        assert_eq!(
+            spec.command_allowance.unwrap().joined(),
+            "codebus lint"
         );
     }
 }

@@ -12,7 +12,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use codebus_core::agent::{EnvOverrides, InvokeAgentOptions, invoke};
+use codebus_core::agent::{ClaudeBackend, EnvOverrides, Permission, SpawnSpec, invoke};
+use codebus_core::config::{ClaudeCodeConfig, Verb};
 use tempfile::TempDir;
 
 const MOCK_CLAUDE: &str = env!("CARGO_BIN_EXE_mock-claude");
@@ -35,20 +36,26 @@ fn invoke_passes_env_overrides_to_command() {
         std::env::set_var("CODEBUS_MOCK_LOG", &log_path);
     }
 
+    // The azure env is held by the backend; this test only asserts env
+    // injection + no parent-env leak, so the config (model resolution) is
+    // irrelevant — use the default.
+    let backend = ClaudeBackend::new(
+        ClaudeCodeConfig::default(),
+        EnvOverrides::for_azure(
+            "https://example.cognitiveservices.azure.com/anthropic",
+            "sk-injection-test",
+        ),
+    );
     let report = invoke(
-        InvokeAgentOptions {
-            slash_command: "/codebus-query \"ping\"".into(),
-            vault_root: tmp.path().to_path_buf(),
-            toolset: &["Read"],
-            bash_whitelist: None,
-            model: Some("dep-opus".into()),
-            effort: Some("high".into()),
-            env: EnvOverrides::for_azure(
-                "https://example.cognitiveservices.azure.com/anthropic",
-                "sk-injection-test",
-            ),
+        &backend,
+        SpawnSpec {
+            verb: Verb::Query,
+            prompt: "/codebus-query \"ping\"".into(),
+            permission: Permission::ReadOnly,
+            command_allowance: None,
             resume_session_id: None,
         },
+        tmp.path(),
         |_event| {},
         None,
     )
@@ -108,17 +115,17 @@ fn for_system_does_not_inject_env() {
         std::env::set_var("CODEBUS_MOCK_LOG", &log_path);
     }
 
+    let backend = ClaudeBackend::new(ClaudeCodeConfig::default(), EnvOverrides::for_system());
     let report = invoke(
-        InvokeAgentOptions {
-            slash_command: "/x".into(),
-            vault_root: tmp.path().to_path_buf(),
-            toolset: &["Read"],
-            bash_whitelist: None,
-            model: None,
-            effort: None,
-            env: EnvOverrides::for_system(),
+        &backend,
+        SpawnSpec {
+            verb: Verb::Query,
+            prompt: "/x".into(),
+            permission: Permission::ReadOnly,
+            command_allowance: None,
             resume_session_id: None,
         },
+        tmp.path(),
         |_event| {},
         None,
     )

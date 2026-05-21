@@ -24,6 +24,7 @@ use crate::config::{
     PiiConfig, PiiScannerKind, Verb, build_env_overrides, default_config_path,
     load_claude_code_config, load_lint_fix_config, load_pii_config,
 };
+use crate::agent::ClaudeBackend;
 use crate::agent::claude_cli::InvokeReport;
 use crate::git::{auto_commit, changed_paths_under, rev_parse_head};
 use crate::verb::content_verify::{
@@ -298,13 +299,15 @@ pub fn run_goal(
 
     // Step 7: resolve goal verb config + build env overrides.
     let goal_resolved = cc_cfg.resolve(Verb::Goal);
-    // verify-stage-independent-model: dedicated resolution for the
-    // content-verify spawn (see spec `verb-library` `Goal Content
-    // Verification and Repair`). Repair / main / RunLog all stay on
-    // `goal_resolved` — only the verify closure uses this.
-    let verify_resolved = cc_cfg.resolve(Verb::Verify);
     let goal_env =
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
+    // One backend drives every goal-side spawn (main / fix-loop / content
+    // verify + repair). It resolves model/effort per the SpawnSpec's verb —
+    // verify-stage-independent-model: the content-verify spawn passes
+    // `Verb::Verify` so the backend resolves the dedicated verify sub-block;
+    // main/repair pass `Verb::Goal`, the fix-loop passes `Verb::Fix`. cc_cfg
+    // is cloned so the later resolve(Verb::Fix) for RunLog still has it.
+    let backend = ClaudeBackend::new(cc_cfg.clone(), goal_env);
 
     // goal-content-verify D3: pin the vault revision BEFORE the goal
     // agent spawn so the content-verify stage can diff this run's
@@ -325,18 +328,17 @@ pub fn run_goal(
     let invoke_report = {
         let fan_out = &mut fan_out;
         crate::agent::invoke(
-            crate::agent::InvokeAgentOptions {
-                slash_command,
-                vault_root: paths.root.clone(),
-                toolset: GOAL_TOOLSET,
-                bash_whitelist: None,
-                model: goal_resolved.model.clone(),
-                effort: goal_resolved.effort.clone(),
-                env: goal_env,
+            &backend,
+            crate::agent::SpawnSpec {
+                verb: Verb::Goal,
+                prompt: slash_command,
+                permission: crate::agent::Permission::Workspace,
+                command_allowance: None,
                 // goal verb is one-shot (no session resume); chat verb is
                 // the only caller that sets Some(...) on this field.
                 resume_session_id: None,
             },
+            &paths.root,
             |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
         )
@@ -379,16 +381,11 @@ pub fn run_goal(
             verb: Verb::Fix,
         }));
         let lint_started = Instant::now();
-        let fix_resolved = cc_cfg.resolve(Verb::Fix);
-        let fix_env =
-            build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
         let report = {
             let fan_out = &mut fan_out;
             run_fix_loop(
                 paths.root.clone(),
-                fix_resolved.model.clone(),
-                fix_resolved.effort.clone(),
-                fix_env,
+                &backend,
                 |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
                 cancel.clone(),
             )
@@ -455,8 +452,6 @@ pub fn run_goal(
             }
             Ok(pages) => {
                 let goal_text = options.text.clone();
-                let cv_env = build_env_overrides(&cc_cfg)
-                    .map_err(|e| VerbError::KeyringMissing { source: e })?;
                 let fan_cell = std::cell::RefCell::new(&mut fan_out);
 
                 let verify = |_: &()| -> Result<Option<Vec<ContentDefect>>, VerbError> {
@@ -465,17 +460,16 @@ pub fn run_goal(
                         goal_text,
                         pages.join("\n")
                     );
-                    // verify-stage-independent-model: verify spawn uses
-                    // `Verb::Verify` resolved settings, NOT `Verb::Goal`.
-                    // Repair spawn below keeps `goal_resolved`.
+                    // verify-stage-independent-model: verify spawn passes
+                    // `Verb::Verify` so the backend resolves the dedicated
+                    // verify sub-block, NOT `Verb::Goal`. Read-only sandbox.
                     let vtext = match run_goal_spawn(
                         &mut **fan_cell.borrow_mut(),
+                        &backend,
                         prompt,
-                        paths.root.clone(),
-                        GOAL_VERIFY_TOOLSET,
-                        verify_resolved.model.clone(),
-                        verify_resolved.effort.clone(),
-                        cv_env.clone(),
+                        &paths.root,
+                        Verb::Verify,
+                        crate::agent::Permission::ReadOnly,
                         cancel.clone(),
                     ) {
                         Ok(t) => t,
@@ -513,12 +507,11 @@ pub fn run_goal(
                         );
                         match run_goal_spawn(
                             &mut **fan_cell.borrow_mut(),
+                            &backend,
                             prompt,
-                            paths.root.clone(),
-                            GOAL_TOOLSET,
-                            goal_resolved.model.clone(),
-                            goal_resolved.effort.clone(),
-                            cv_env.clone(),
+                            &paths.root,
+                            Verb::Goal,
+                            crate::agent::Permission::Workspace,
                             cancel.clone(),
                         ) {
                             Ok(_) => Ok(()),
@@ -635,17 +628,17 @@ pub fn run_goal(
 /// lifecycle events (goal-content-verify D3: verify/repair events flow
 /// through the same fan-out the goal spawn uses). Mirrors the quiz
 /// `run_spawn` shape.
-#[allow(clippy::too_many_arguments)]
 fn run_goal_spawn(
     fan_out: &mut dyn FnMut(VerbEvent),
+    backend: &dyn crate::agent::AgentBackend,
     slash_command: String,
-    vault_root: std::path::PathBuf,
-    toolset: &'static [&'static str],
-    model: Option<String>,
-    effort: Option<String>,
-    env: crate::agent::EnvOverrides,
+    vault_root: &std::path::Path,
+    spec_verb: Verb,
+    permission: crate::agent::Permission,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<String, VerbError> {
+    // Lifecycle phase stays `Verb::Goal` (UI grouping); `spec_verb` is the
+    // model-resolution key (Verify for content-verify, Goal for repair).
     fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Goal,
     }));
@@ -654,16 +647,15 @@ fn run_goal_spawn(
         let acc = &mut accumulated;
         let fan_out = &mut *fan_out;
         crate::agent::invoke(
-            crate::agent::InvokeAgentOptions {
-                slash_command,
-                vault_root,
-                toolset,
-                bash_whitelist: None,
-                model,
-                effort,
-                env,
+            backend,
+            crate::agent::SpawnSpec {
+                verb: spec_verb,
+                prompt: slash_command,
+                permission,
+                command_allowance: None,
                 resume_session_id: None,
             },
+            vault_root,
             |event: StreamEvent| {
                 if let StreamEvent::Thought { text } = &event {
                     acc.push_str(text);

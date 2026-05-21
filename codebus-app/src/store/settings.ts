@@ -96,7 +96,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   updateClaudeCode(block) {
-    const next = { ...get().config, claude_code: block } as GlobalConfig
+    // Unified schema: the claude provider's endpoint block lives at
+    // `agent.providers.claude`. Preserve any sibling agent keys and force
+    // `active_provider: claude` (the only supported provider today).
+    const cur = get().config
+    const curAgent = (cur.agent ?? {}) as {
+      active_provider?: string
+      providers?: Record<string, unknown>
+    }
+    const next = {
+      ...cur,
+      agent: {
+        ...curAgent,
+        active_provider: "claude",
+        providers: { ...(curAgent.providers ?? {}), claude: block },
+      },
+    } as GlobalConfig
     set({ config: next, dirty: true })
   },
 
@@ -133,21 +148,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
 
 /**
- * Read a profile-shaped `claude_code` block from a possibly-empty / possibly-
- * legacy config payload. Always returns a fully populated `ClaudeCodeBlock`
- * — missing keys are filled with built-in defaults, missing azure block
- * is reported as `null`.
+ * Read the claude provider's endpoint block from `agent.providers.claude`.
+ * Always returns a fully populated `ClaudeCodeBlock` — missing keys are
+ * filled with built-in defaults, missing azure block is reported as `null`.
  *
- * Legacy-schema config (top-level `goal` / `query` / `fix` under
- * `claude_code` without `system` / `azure` wrappers) is NOT migrated
- * here — the IPC load path emits a stderr warning and falls back to
- * defaults; this function just reads what the load path produced. UI
- * therefore always sees the new profile shape.
+ * The unified schema has no legacy fallback: a config still using the old
+ * top-level `claude_code` block (or no `agent` block at all) reads as absent
+ * here and yields defaults — exactly what the CLI loader does, so UI and CLI
+ * agree.
  */
 function readClaudeCodeBlock(config: GlobalConfig | null | undefined): ClaudeCodeBlock {
-  const raw = (config as { claude_code?: unknown } | null | undefined)?.claude_code as
-    | Partial<ClaudeCodeBlock>
-    | undefined
+  const raw = (
+    config as
+      | { agent?: { providers?: { claude?: unknown } } }
+      | null
+      | undefined
+  )?.agent?.providers?.claude as Partial<ClaudeCodeBlock> | undefined
   const active: ActiveProfile = raw?.active === "azure" ? "azure" : "system"
   const system: SystemProfile = mergeSystemProfile(raw?.system)
   const azure: AzureProfile | null = readAzureProfile(raw?.azure)

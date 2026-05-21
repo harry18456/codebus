@@ -29,7 +29,7 @@ const BROKEN_YAML_SYNTAX: &str = "pii\n  scanner: regex_basic\n";
 
 /// Schema validation failure — `claude_code.system.goal.model` is not a
 /// recognised `SystemModel` variant.
-const BROKEN_SCHEMA: &str = "claude_code:\n  active: system\n  system:\n    goal:  { model: gpt-4,    effort: high }\n    query: { model: haiku-4-5,  effort: low }\n    fix:   { model: sonnet-4-6, effort: medium }\n";
+const BROKEN_SCHEMA: &str = "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   { model: gpt-4,     effort: high }\n        query:  { model: haiku-4-5,  effort: low }\n        fix:    { model: sonnet-4-6, effort: medium }\n        verify: { model: opus-4-6,   effort: high }\n";
 
 // === Section A: yaml syntax error aborts every verb ===
 
@@ -168,7 +168,7 @@ fn yaml_syntax_error_aborts_config_delete_key_without_touching_keyring() {
     let cfg_dir = home.path().join(".codebus");
     std::fs::create_dir_all(&cfg_dir).unwrap();
     let broken = format!(
-        "claude_code:\n  active: system\n  system:\n    goal:  {{ model: opus-4-6,   effort: high }}\n    query: {{ model: haiku-4-5,  effort: low }}\n    fix:   {{ model: sonnet-4-6, effort: medium }}\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: {service}\n    goal:  {{ model: dep-opus, effort: high }}\n    query: {{ model: dep-haiku, effort: low }}\n    fix:   {{ model: dep-sonnet, effort: medium }}\npii\n  scanner: regex_basic\n",
+        "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:  {{ model: opus-4-6,   effort: high }}\n        query: {{ model: haiku-4-5,  effort: low }}\n        fix:   {{ model: sonnet-4-6, effort: medium }}\n      azure:\n        base_url: https://x.example.com/anthropic\n        keyring_service: {service}\n        goal:  {{ model: dep-opus, effort: high }}\n        query: {{ model: dep-haiku, effort: low }}\n        fix:   {{ model: dep-sonnet, effort: medium }}\npii\n  scanner: regex_basic\n",
     );
     std::fs::write(cfg_dir.join("config.yaml"), broken).unwrap();
 
@@ -198,7 +198,7 @@ fn yaml_syntax_error_aborts_config_delete_key_without_touching_keyring() {
 #[test]
 fn legal_yaml_with_unknown_key_does_not_fail_loud() {
     let _g = serial_lock();
-    let legal_with_unknown = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\nfuture_section:\n  knob: 42\n";
+    let legal_with_unknown = "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   { model: opus-4-6,   effort: high   }\n        query:  { model: haiku-4-5,  effort: low    }\n        fix:    { model: sonnet-4-6, effort: medium }\n        verify: { model: opus-4-6,   effort: high   }\nfuture_section:\n  knob: 42\n";
     let (home, mock_log) = setup_with_config(legal_with_unknown);
     let repo = prepare_clean_vault(home.path());
 

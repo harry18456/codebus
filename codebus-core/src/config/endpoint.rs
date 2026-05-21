@@ -178,28 +178,31 @@ impl Default for ClaudeCodeConfig {
 #[derive(Debug, Default, Deserialize)]
 pub(super) struct RawConfigFile {
     #[serde(default)]
-    pub claude_code: Option<RawClaudeCode>,
+    pub agent: Option<RawAgent>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-pub(super) struct RawClaudeCode {
+pub(super) struct RawAgent {
+    #[serde(default)]
+    pub active_provider: Option<String>,
+    #[serde(default)]
+    pub providers: Option<RawProviders>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct RawProviders {
+    #[serde(default)]
+    pub claude: Option<RawClaudeProvider>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct RawClaudeProvider {
     #[serde(default)]
     pub active: Option<ActiveProfile>,
     #[serde(default)]
     pub system: Option<RawSystemProfile>,
     #[serde(default)]
     pub azure: Option<RawAzureProfile>,
-
-    // Legacy schema detection — when these appear directly under
-    // `claude_code` (without being nested under `system` / `azure`), the
-    // load path emits a migration warning. See
-    // `super::claude_code::load_claude_code_config`.
-    #[serde(default)]
-    pub goal: Option<serde_yaml::Value>,
-    #[serde(default)]
-    pub query: Option<serde_yaml::Value>,
-    #[serde(default)]
-    pub fix: Option<serde_yaml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -242,35 +245,38 @@ pub(super) struct RawAzureProfile {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseOutcome {
     New(ClaudeCodeConfig),
-    Legacy,
     Missing,
 }
 
 /// Parse the yaml text of `~/.codebus/config.yaml`. Returns `Missing` when
-/// the `claude_code` section is absent, `Legacy` when the file uses the
-/// pre-profile schema, and `New(...)` otherwise. Validation enforces that
-/// the active profile is fully populated; non-active profile data is
+/// the `agent` block (or its `providers.claude` sub-block) is absent, and
+/// `New(...)` otherwise. Validation enforces that the active endpoint profile
+/// of the claude provider is fully populated; the non-active profile is
 /// preserved verbatim but not validated.
+///
+/// `agent.active_provider` is accepted only as `claude` (or absent → claude)
+/// within this capability's scope; any other value is rejected.
 pub fn parse_claude_code_yaml(yaml: &str) -> Result<ParseOutcome, ConfigLoadError> {
     let raw: RawConfigFile = serde_yaml::from_str(yaml).map_err(ConfigLoadError::YamlParse)?;
-    let Some(cc) = raw.claude_code else {
+    let Some(agent) = raw.agent else {
         return Ok(ParseOutcome::Missing);
     };
 
-    let has_legacy_verb = cc.goal.is_some() || cc.query.is_some() || cc.fix.is_some();
-    let has_profile_block = cc.system.is_some() || cc.azure.is_some() || cc.active.is_some();
-    if has_legacy_verb && !has_profile_block {
-        return Ok(ParseOutcome::Legacy);
-    }
-    if has_legacy_verb && has_profile_block {
-        return Err(ConfigLoadError::YamlParse(serde_yaml::Error::custom(
-            "claude_code: top-level `goal` / `query` / `fix` keys are not allowed alongside `system` / `azure` profile blocks; move the verb settings inside the matching profile",
-        )));
+    if let Some(provider) = agent.active_provider.as_deref()
+        && provider != "claude"
+    {
+        return Err(ConfigLoadError::YamlParse(serde_yaml::Error::custom(format!(
+            "agent.active_provider: only `claude` is supported (got `{provider}`)"
+        ))));
     }
 
-    let active = cc.active.unwrap_or(ActiveProfile::System);
-    let system = validate_system_profile(active, cc.system)?;
-    let azure = validate_azure_profile(active, cc.azure)?;
+    let Some(claude) = agent.providers.and_then(|p| p.claude) else {
+        return Ok(ParseOutcome::Missing);
+    };
+
+    let active = claude.active.unwrap_or(ActiveProfile::System);
+    let system = validate_system_profile(active, claude.system)?;
+    let azure = validate_azure_profile(active, claude.azure)?;
     Ok(ParseOutcome::New(ClaudeCodeConfig {
         active,
         system,
@@ -422,6 +428,28 @@ use serde::de::Error as _;
 mod tests {
     use super::*;
 
+    /// Wrap a legacy-style `claude_code:\n  <body>` test string into the
+    /// unified `agent.providers.claude` envelope, re-nesting `<body>` one
+    /// level deeper. Lets the existing inner-schema test strings stay
+    /// verbatim while exercising the new top-level shape.
+    fn agent_yaml(claude_code_yaml: &str) -> String {
+        let body = claude_code_yaml
+            .strip_prefix("claude_code:\n")
+            .expect("test yaml must start with `claude_code:\\n`");
+        let reindented: String = body
+            .lines()
+            .map(|l| {
+                if l.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("    {l}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("agent:\n  active_provider: claude\n  providers:\n    claude:\n{reindented}\n")
+    }
+
     // === SystemModel alias mapping ===
 
     /// Spec: System Profile Model Aliases — `to_cli_flag` table.
@@ -461,7 +489,7 @@ mod tests {
     #[test]
     fn invalid_system_model_rejected() {
         let yaml = "claude_code:\n  active: system\n  system:\n    goal: { model: gpt-4, effort: high }\n    query: { model: haiku-4-5, effort: low }\n    fix: { model: sonnet-4-6, effort: medium }\n";
-        let err = parse_claude_code_yaml(yaml).expect_err("gpt-4 must be rejected");
+        let err = parse_claude_code_yaml(&agent_yaml(yaml)).expect_err("gpt-4 must be rejected");
         let msg = format!("{err}");
         assert!(
             msg.contains("variant") || msg.contains("gpt-4"),
@@ -475,7 +503,7 @@ mod tests {
     #[test]
     fn system_profile_loads_with_all_three_verbs() {
         let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n";
-        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
             other => panic!("expected New, got {other:?}"),
@@ -492,17 +520,40 @@ mod tests {
     #[test]
     fn active_system_with_missing_verb_rejected() {
         let yaml = "claude_code:\n  active: system\n  system:\n    goal: { model: opus-4-6, effort: high }\n    fix:  { model: sonnet-4-6, effort: medium }\n";
-        let err = parse_claude_code_yaml(yaml).expect_err("missing query must be rejected");
+        let err = parse_claude_code_yaml(&agent_yaml(yaml)).expect_err("missing query must be rejected");
         let msg = format!("{err}");
         assert!(msg.contains("query"), "got: {msg}");
     }
 
-    /// Spec: Endpoint Profile Schema — `claude_code` block absent → Missing.
+    /// Spec: Endpoint Profile Schema — `agent` block absent → Missing.
     #[test]
-    fn missing_claude_code_section_returns_missing() {
-        let yaml = "pii:\n  scanner: regex_basic\n";
+    fn missing_agent_section_returns_missing() {
+        let outcome = parse_claude_code_yaml("pii:\n  scanner: regex_basic\n").unwrap();
+        assert_eq!(outcome, ParseOutcome::Missing);
+    }
+
+    /// Legacy top-level `claude_code` schema is treated as an absent `agent`
+    /// block → Missing (no warning, no special handling).
+    #[test]
+    fn legacy_claude_code_top_level_returns_missing() {
+        let yaml = "claude_code:\n  active: system\n  system:\n    goal: { model: opus-4-6, effort: high }\n";
         let outcome = parse_claude_code_yaml(yaml).unwrap();
         assert_eq!(outcome, ParseOutcome::Missing);
+    }
+
+    /// `agent.providers.claude` absent (agent present but empty) → Missing.
+    #[test]
+    fn agent_without_claude_provider_returns_missing() {
+        let outcome = parse_claude_code_yaml("agent:\n  active_provider: claude\n").unwrap();
+        assert_eq!(outcome, ParseOutcome::Missing);
+    }
+
+    /// `agent.active_provider` other than `claude` is rejected.
+    #[test]
+    fn unsupported_active_provider_rejected() {
+        let yaml = "agent:\n  active_provider: codex\n  providers:\n    claude:\n      active: system\n";
+        let err = parse_claude_code_yaml(yaml).expect_err("non-claude provider must reject");
+        assert!(format!("{err}").contains("active_provider"));
     }
 
     // === Active=Azure happy + reject paths ===
@@ -511,7 +562,7 @@ mod tests {
     #[test]
     fn azure_profile_loads_with_required_fields() {
         let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://example.cognitiveservices.azure.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: dep-opus,   effort: high   }\n    query:  { model: dep-haiku,  effort: low    }\n    fix:    { model: dep-sonnet, effort: medium }\n    verify: { model: dep-opus,   effort: high   }\n";
-        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
             other => panic!("expected New, got {other:?}"),
@@ -531,7 +582,7 @@ mod tests {
     #[test]
     fn active_azure_with_missing_base_url_rejected() {
         let yaml = "claude_code:\n  active: azure\n  azure:\n    keyring_service: codebus-azure\n    goal:  { model: dep-opus, effort: high }\n    query: { model: dep-haiku, effort: low }\n    fix:   { model: dep-sonnet, effort: medium }\n";
-        let err = parse_claude_code_yaml(yaml).expect_err("missing base_url must be rejected");
+        let err = parse_claude_code_yaml(&agent_yaml(yaml)).expect_err("missing base_url must be rejected");
         let msg = format!("{err}");
         assert!(msg.contains("base_url"), "got: {msg}");
     }
@@ -540,7 +591,7 @@ mod tests {
     #[test]
     fn active_azure_with_no_azure_block_rejected() {
         let yaml = "claude_code:\n  active: azure\n  system:\n    goal: { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5, effort: low }\n    fix:   { model: sonnet-4-6, effort: medium }\n";
-        let err = parse_claude_code_yaml(yaml).expect_err("missing azure block must be rejected");
+        let err = parse_claude_code_yaml(&agent_yaml(yaml)).expect_err("missing azure block must be rejected");
         let msg = format!("{err}");
         assert!(msg.contains("azure"), "got: {msg}");
     }
@@ -552,7 +603,7 @@ mod tests {
     fn non_active_profile_may_be_absent() {
         let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n";
         // No azure block at all → still valid.
-        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).unwrap();
         assert!(matches!(outcome, ParseOutcome::New(_)));
     }
 
@@ -563,7 +614,7 @@ mod tests {
         // codebus does not validate; it just drops the partial profile to
         // None so the caller never sees half-populated state.
         let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n  azure:\n    base_url: https://e.example.com/anthropic\n    goal: { model: dep-opus, effort: high }\n";
-        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
             other => panic!("expected New, got {other:?}"),
@@ -584,7 +635,7 @@ mod tests {
     fn active_system_with_missing_verify_rejected() {
         let yaml = "claude_code:\n  active: system\n  system:\n    goal:  { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5, effort: low }\n    fix:   { model: sonnet-4-6, effort: medium }\n";
         let err =
-            parse_claude_code_yaml(yaml).expect_err("missing system.verify must be rejected");
+            parse_claude_code_yaml(&agent_yaml(yaml)).expect_err("missing system.verify must be rejected");
         let msg = format!("{err}");
         assert!(
             msg.contains("verify"),
@@ -596,7 +647,7 @@ mod tests {
     #[test]
     fn active_azure_with_missing_verify_rejected() {
         let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://e.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: dep-opus,   effort: high   }\n    query: { model: dep-haiku,  effort: low    }\n    fix:   { model: dep-sonnet, effort: medium }\n";
-        let err = parse_claude_code_yaml(yaml).expect_err("missing azure.verify must be rejected");
+        let err = parse_claude_code_yaml(&agent_yaml(yaml)).expect_err("missing azure.verify must be rejected");
         let msg = format!("{err}");
         assert!(
             msg.contains("verify"),
@@ -612,7 +663,7 @@ mod tests {
         // active=system with full system block (incl. verify); azure
         // block partial (no verify) — must parse OK.
         let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6, effort: high }\n    query:  { model: haiku-4-5, effort: low }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6, effort: high }\n  azure:\n    base_url: https://e.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: dep-opus,   effort: high   }\n    query: { model: dep-haiku,  effort: low    }\n    fix:   { model: dep-sonnet, effort: medium }\n";
-        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).unwrap();
         assert!(
             matches!(outcome, ParseOutcome::New(_)),
             "non-active azure missing verify must NOT block load"
@@ -623,7 +674,7 @@ mod tests {
     #[test]
     fn system_profile_loads_with_all_four_verbs_including_verify() {
         let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6, effort: high }\n    query:  { model: haiku-4-5, effort: low }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6, effort: high }\n";
-        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
             other => panic!("expected New, got {other:?}"),
@@ -637,7 +688,7 @@ mod tests {
     #[test]
     fn azure_profile_loads_with_all_four_verbs_including_verify() {
         let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://e.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: dep-opus,   effort: high   }\n    query:  { model: dep-haiku,  effort: low    }\n    fix:    { model: dep-sonnet, effort: medium }\n    verify: { model: dep-opus,   effort: high   }\n";
-        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
             other => panic!("expected New, got {other:?}"),
@@ -653,7 +704,7 @@ mod tests {
     #[test]
     fn active_defaults_to_system_when_unspecified() {
         let yaml = "claude_code:\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n";
-        let outcome = parse_claude_code_yaml(yaml).unwrap();
+        let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).unwrap();
         let cfg = match outcome {
             ParseOutcome::New(cfg) => cfg,
             other => panic!("expected New, got {other:?}"),
@@ -691,7 +742,7 @@ mod tests {
         #[test]
         fn system_alias_literal_is_not_translated_in_azure() {
             let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: opus-4-6, effort: high   }\n    query:  { model: opus-4-6, effort: low    }\n    fix:    { model: opus-4-6, effort: medium }\n    verify: { model: opus-4-6, effort: high   }\n";
-            let outcome = parse_claude_code_yaml(yaml).unwrap();
+            let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).unwrap();
             let cfg = match outcome {
                 ParseOutcome::New(c) => c,
                 other => panic!("expected New, got {other:?}"),
@@ -707,7 +758,7 @@ mod tests {
         #[test]
         fn long_azure_deployment_name_preserved_verbatim() {
             let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: claude-opus-4-6-2026V2,   effort: high   }\n    query:  { model: claude-haiku-4-5-2026V2,  effort: low    }\n    fix:    { model: claude-sonnet-4-6-2026V2, effort: medium }\n    verify: { model: claude-opus-4-6-2026V2,   effort: high   }\n";
-            let cfg = match parse_claude_code_yaml(yaml).unwrap() {
+            let cfg = match parse_claude_code_yaml(&agent_yaml(yaml)).unwrap() {
                 ParseOutcome::New(c) => c,
                 other => panic!("expected New, got {other:?}"),
             };
@@ -722,7 +773,7 @@ mod tests {
         #[test]
         fn empty_azure_model_rejected() {
             let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:  { model: '', effort: high }\n    query: { model: dep-haiku, effort: low }\n    fix:   { model: dep-sonnet, effort: medium }\n";
-            let err = parse_claude_code_yaml(yaml).expect_err("empty model rejected");
+            let err = parse_claude_code_yaml(&agent_yaml(yaml)).expect_err("empty model rejected");
             let msg = format!("{err}");
             assert!(msg.contains("model"), "got: {msg}");
         }
@@ -731,7 +782,7 @@ mod tests {
         #[test]
         fn azure_model_case_preserved() {
             let yaml = "claude_code:\n  active: azure\n  azure:\n    base_url: https://x.example.com/anthropic\n    keyring_service: codebus-azure\n    goal:   { model: MyDeployment-Opus-V2, effort: high   }\n    query:  { model: dep-haiku,            effort: low    }\n    fix:    { model: dep-sonnet,           effort: medium }\n    verify: { model: MyDeployment-Opus-V2, effort: high   }\n";
-            let cfg = match parse_claude_code_yaml(yaml).unwrap() {
+            let cfg = match parse_claude_code_yaml(&agent_yaml(yaml)).unwrap() {
                 ParseOutcome::New(c) => c,
                 other => panic!("expected New, got {other:?}"),
             };
@@ -739,16 +790,4 @@ mod tests {
         }
     }
 
-    /// Top-level verb under `claude_code` AND a `system` / `azure` block in
-    /// the same file is ambiguous — reject explicitly rather than guessing.
-    #[test]
-    fn mixing_legacy_verbs_and_profile_blocks_rejected() {
-        let yaml = "claude_code:\n  goal: { model: opus, effort: high }\n  system:\n    goal: { model: opus-4-6, effort: high }\n    query: { model: haiku-4-5, effort: low }\n    fix:   { model: sonnet-4-6, effort: medium }\n";
-        let err = parse_claude_code_yaml(yaml).expect_err("mixing schemas must be rejected");
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("top-level") || msg.contains("legacy"),
-            "got: {msg}"
-        );
-    }
 }

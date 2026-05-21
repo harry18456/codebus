@@ -16,15 +16,20 @@ describe("SettingsModal", () => {
     useSettingsStore.setState({
       config: {
         app: { quiz: { pass_threshold: 80, default_length: 5 } },
-        // Profile-mode schema (post-stage-a). Legacy flat shape is
-        // unsupported as of the `stage-b-app-endpoint-settings` change.
-        claude_code: {
-          active: "system",
-          system: {
-            goal: { model: "opus-4-6", effort: "high" },
-            query: { model: "haiku-4-5", effort: "low" },
-            fix: { model: "sonnet-4-6", effort: "medium" },
-            verify: { model: "opus-4-6", effort: "high" },
+        // Unified provider schema: the claude endpoint block lives at
+        // `agent.providers.claude`.
+        agent: {
+          active_provider: "claude",
+          providers: {
+            claude: {
+              active: "system",
+              system: {
+                goal: { model: "opus-4-6", effort: "high" },
+                query: { model: "haiku-4-5", effort: "low" },
+                fix: { model: "sonnet-4-6", effort: "medium" },
+                verify: { model: "opus-4-6", effort: "high" },
+              },
+            },
           },
         },
         pii: { scanner: "regex_basic" },
@@ -145,21 +150,26 @@ describe("SettingsModal", () => {
     useSettingsStore.setState({
       config: {
         app: { quiz: { pass_threshold: 80, default_length: 5 } },
-        claude_code: {
-          active: "azure",
-          system: {
-            goal: { model: "opus-4-6", effort: "high" },
-            query: { model: "haiku-4-5", effort: "low" },
-            fix: { model: "sonnet-4-6", effort: "medium" },
-            verify: { model: "opus-4-6", effort: "high" },
-          },
-          azure: {
-            base_url: "", // missing → invalid
-            keyring_service: "codebus-azure",
-            goal: { model: "", effort: "high" },
-            query: { model: "", effort: "low" },
-            fix: { model: "", effort: "medium" },
-            verify: { model: "", effort: "high" },
+        agent: {
+          active_provider: "claude",
+          providers: {
+            claude: {
+              active: "azure",
+              system: {
+                goal: { model: "opus-4-6", effort: "high" },
+                query: { model: "haiku-4-5", effort: "low" },
+                fix: { model: "sonnet-4-6", effort: "medium" },
+                verify: { model: "opus-4-6", effort: "high" },
+              },
+              azure: {
+                base_url: "", // missing → invalid
+                keyring_service: "codebus-azure",
+                goal: { model: "", effort: "high" },
+                query: { model: "", effort: "low" },
+                fix: { model: "", effort: "medium" },
+                verify: { model: "", effort: "high" },
+              },
+            },
           },
         },
       },
@@ -177,21 +187,26 @@ describe("SettingsModal", () => {
   it("Save button enables when active=azure becomes fully populated", async () => {
     const fullConfig = {
       app: { quiz: { pass_threshold: 80, default_length: 5 } },
-      claude_code: {
-        active: "azure",
-        system: {
-          goal: { model: "opus-4-6", effort: "high" },
-          query: { model: "haiku-4-5", effort: "low" },
-          fix: { model: "sonnet-4-6", effort: "medium" },
-          verify: { model: "opus-4-6", effort: "high" },
-        },
-        azure: {
-          base_url: "https://x.example.com/anthropic",
-          keyring_service: "codebus-azure",
-          goal: { model: "dep-x", effort: "high" },
-          query: { model: "dep-y", effort: "low" },
-          fix: { model: "dep-z", effort: "medium" },
-          verify: { model: "dep-x", effort: "high" },
+      agent: {
+        active_provider: "claude",
+        providers: {
+          claude: {
+            active: "azure",
+            system: {
+              goal: { model: "opus-4-6", effort: "high" },
+              query: { model: "haiku-4-5", effort: "low" },
+              fix: { model: "sonnet-4-6", effort: "medium" },
+              verify: { model: "opus-4-6", effort: "high" },
+            },
+            azure: {
+              base_url: "https://x.example.com/anthropic",
+              keyring_service: "codebus-azure",
+              goal: { model: "dep-x", effort: "high" },
+              query: { model: "dep-y", effort: "low" },
+              fix: { model: "dep-z", effort: "medium" },
+              verify: { model: "dep-x", effort: "high" },
+            },
+          },
         },
       },
     }
@@ -227,15 +242,20 @@ describe("SettingsModal", () => {
     useSettingsStore.setState({
       config: {
         app: { quiz: { pass_threshold: 80, default_length: 5 } },
-        claude_code: {
-          active: "system",
-          system: {
-            // Legacy yaml value outside the SYSTEM_EFFORTS enum — UI
-            // SHALL surface as invalid and block Save until re-selected.
-            goal: { model: "opus-4-6", effort: "super-high" },
-            query: { model: "haiku-4-5", effort: "low" },
-            fix: { model: "sonnet-4-6", effort: "medium" },
-            verify: { model: "opus-4-6", effort: "high" },
+        agent: {
+          active_provider: "claude",
+          providers: {
+            claude: {
+              active: "system",
+              system: {
+                // Legacy yaml value outside the SYSTEM_EFFORTS enum — UI
+                // SHALL surface as invalid and block Save until re-selected.
+                goal: { model: "opus-4-6", effort: "super-high" },
+                query: { model: "haiku-4-5", effort: "low" },
+                fix: { model: "sonnet-4-6", effort: "medium" },
+                verify: { model: "opus-4-6", effort: "high" },
+              },
+            },
           },
         },
       },
@@ -282,13 +302,18 @@ describe("SettingsModal", () => {
         // Un-migrated legacy config: default_length still under app.quiz,
         // no top-level quiz.* key yet.
         app: { quiz: { pass_threshold: 80, default_length: 8 } },
-        claude_code: {
-          active: "system",
-          system: {
-            goal: { model: "opus-4-6", effort: "high" },
-            query: { model: "haiku-4-5", effort: "low" },
-            fix: { model: "sonnet-4-6", effort: "medium" },
-            verify: { model: "opus-4-6", effort: "high" },
+        agent: {
+          active_provider: "claude",
+          providers: {
+            claude: {
+              active: "system",
+              system: {
+                goal: { model: "opus-4-6", effort: "high" },
+                query: { model: "haiku-4-5", effort: "low" },
+                fix: { model: "sonnet-4-6", effort: "medium" },
+                verify: { model: "opus-4-6", effort: "high" },
+              },
+            },
           },
         },
         pii: { scanner: "regex_basic" },

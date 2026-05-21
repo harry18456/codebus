@@ -401,7 +401,7 @@ fn goal_spawn_forwards_user_configured_model() {
     fs::create_dir_all(&cfg_dir).unwrap();
     fs::write(
         cfg_dir.join("config.yaml"),
-        "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-7,   effort: max    }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n",
+        "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   { model: opus-4-7,   effort: max    }\n        query:  { model: haiku-4-5,  effort: low    }\n        fix:    { model: sonnet-4-6, effort: medium }\n        verify: { model: opus-4-6,   effort: high   }\n",
     )
     .unwrap();
 

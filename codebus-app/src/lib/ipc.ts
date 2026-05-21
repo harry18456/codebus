@@ -20,7 +20,16 @@ export interface AddVaultOptions {
  * the JSON shape through.
  */
 export interface GlobalConfig {
-  claude_code?: unknown
+  /**
+   * Unified agent config: `active_provider` selects the agent CLI, and each
+   * provider's endpoint block lives under `providers.<name>`. The claude
+   * provider's block ({ active, system, azure }) is read/written by the
+   * settings store via `agent.providers.claude`.
+   */
+  agent?: {
+    active_provider?: string
+    providers?: { claude?: unknown }
+  }
   pii?: unknown
   log?: unknown
   /**

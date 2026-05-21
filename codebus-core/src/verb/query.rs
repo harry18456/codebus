@@ -26,7 +26,7 @@
 //!
 //! No auto_commit at any point (query is read-only).
 
-use crate::agent::{InvokeAgentOptions, invoke};
+use crate::agent::{ClaudeBackend, Permission, SpawnSpec, invoke};
 use crate::config::{Verb, build_env_overrides, default_config_path, load_claude_code_config};
 use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
@@ -118,9 +118,11 @@ pub fn run_query(
     let query_resolved = cc_cfg.resolve(Verb::Query);
     let slash_command = format!("/codebus-query \"{}\"", options.text);
 
-    // Step 5: build env overrides (azure profile keyring fetch).
+    // Step 5: build env overrides (azure profile keyring fetch), then build
+    // the Claude backend (holds config for model resolution + env).
     let query_env =
         build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
+    let backend = ClaudeBackend::new(cc_cfg, query_env);
 
     // Fan out each VerbEvent to (a) the events sink and (b) the caller's
     // on_event closure. Built here so the Start banner below also lands
@@ -148,18 +150,17 @@ pub fn run_query(
     let invoke_report = {
         let fan_out = &mut fan_out;
         invoke(
-            InvokeAgentOptions {
-                slash_command,
-                vault_root: paths.root.clone(),
-                toolset: QUERY_TOOLSET,
-                bash_whitelist: None,
-                model: query_resolved.model.clone(),
-                effort: query_resolved.effort.clone(),
-                env: query_env,
+            &backend,
+            SpawnSpec {
+                verb: Verb::Query,
+                prompt: slash_command,
+                permission: Permission::ReadOnly,
+                command_allowance: None,
                 // query verb is one-shot (no session resume); chat verb is
                 // the only caller that sets Some(...) on this field.
                 resume_session_id: None,
             },
+            &paths.root,
             |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
         )

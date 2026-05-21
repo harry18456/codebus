@@ -36,7 +36,7 @@
 //! `codebus-cli/tests/quiz_flow.rs` (task 4.2).
 
 use crate::agent::claude_cli::InvokeReport;
-use crate::agent::{InvokeAgentOptions, invoke};
+use crate::agent::{ClaudeBackend, CommandPrefix, Permission, SpawnSpec, invoke};
 use crate::config::{Verb, build_env_overrides, default_config_path, load_claude_code_config};
 use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
@@ -314,7 +314,7 @@ fn load_quiz_agent_config() -> Result<
     (
         crate::config::ResolvedVerb,
         crate::config::ResolvedVerb,
-        crate::agent::EnvOverrides,
+        ClaudeBackend,
     ),
     VerbError,
 > {
@@ -327,25 +327,32 @@ fn load_quiz_agent_config() -> Result<
         }
         _ => Default::default(),
     };
+    // resolved / verify_resolved are kept for the caller's RunLog (model /
+    // effort fields); the backend resolves model/effort per spawn from its
+    // own copy of the config via the SpawnSpec's verb.
     let resolved = cc_cfg.resolve(Verb::Quiz);
     let verify_resolved = cc_cfg.resolve(Verb::Verify);
     let env = build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
-    Ok((resolved, verify_resolved, env))
+    let backend = ClaudeBackend::new(cc_cfg, env);
+    Ok((resolved, verify_resolved, backend))
 }
 
 /// Run one spawn, accumulating assistant `text` (Thought) into a single
 /// String while forwarding every stream event through `fan_out`. Emits
 /// `SpawnStart` before and `SpawnEnd` after.
+#[allow(clippy::too_many_arguments)]
 fn run_spawn(
     fan_out: &mut dyn FnMut(VerbEvent),
+    backend: &dyn crate::agent::AgentBackend,
     slash_command: String,
-    vault_root: std::path::PathBuf,
-    toolset: &'static [&'static str],
-    bash_whitelist: Option<&'static str>,
-    resolved: &crate::config::ResolvedVerb,
-    env: crate::agent::EnvOverrides,
+    vault_root: &std::path::Path,
+    spec_verb: Verb,
+    permission: Permission,
+    command_allowance: Option<CommandPrefix>,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<(String, InvokeReport), VerbError> {
+    // Lifecycle phase stays `Verb::Quiz` (UI grouping); `spec_verb` is the
+    // model-resolution key (Verify for the content-verify spawn).
     fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Quiz,
     }));
@@ -354,16 +361,15 @@ fn run_spawn(
         let acc = &mut accumulated;
         let fan_out = &mut *fan_out;
         invoke(
-            InvokeAgentOptions {
-                slash_command,
-                vault_root,
-                toolset,
-                bash_whitelist,
-                model: resolved.model.clone(),
-                effort: resolved.effort.clone(),
-                env,
+            backend,
+            SpawnSpec {
+                verb: spec_verb,
+                prompt: slash_command,
+                permission,
+                command_allowance,
                 resume_session_id: None,
             },
+            vault_root,
             |event: StreamEvent| {
                 if let StreamEvent::Thought { text } = &event {
                     acc.push_str(text);
@@ -406,7 +412,7 @@ pub fn run_quiz_plan<F: FnMut(VerbEvent)>(
         });
     }
 
-    let (resolved, _verify_resolved, env) = load_quiz_agent_config()?;
+    let (_resolved, _verify_resolved, backend) = load_quiz_agent_config()?;
 
     // The plan step is not persisted (RunLog/events.jsonl) — it is a
     // planning sub-step. Its stream is surfaced live via on_event for
@@ -415,12 +421,12 @@ pub fn run_quiz_plan<F: FnMut(VerbEvent)>(
 
     let (plan_text, plan_report) = run_spawn(
         &mut fan_out,
+        &backend,
         format!("/codebus-quiz plan: {}", options.topic),
-        paths.root.clone(),
-        QUIZ_TOOLSET,
+        &paths.root,
+        Verb::Quiz,
+        Permission::ReadOnly,
         None,
-        &resolved,
-        env,
         cancel.clone(),
     )?;
 
@@ -474,7 +480,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         });
     }
 
-    let (resolved, verify_resolved, env) = load_quiz_agent_config()?;
+    let (resolved, _verify_resolved, backend) = load_quiz_agent_config()?;
 
     let log_cfg = load_verb_log_config().map_err(|e| VerbError::ConfigParse {
         which: "log",
@@ -514,16 +520,16 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
     let goal_text = options.pages.join(",");
     let (gen_text, gen_report) = run_spawn(
         &mut fan_out,
+        &backend,
         format!(
             "/codebus-quiz generate: pages=[{}] count={}",
             options.pages.join(","),
             options.question_count
         ),
-        paths.root.clone(),
-        QUIZ_GENERATE_TOOLSET,
-        Some(QUIZ_BASH_WHITELIST),
-        &resolved,
-        env.clone(),
+        &paths.root,
+        Verb::Quiz,
+        Permission::ReadOnly,
+        Some(CommandPrefix::new(["codebus", "quiz", "validate"])),
         cancel.clone(),
     )?;
     let mut quiz_md =
@@ -578,17 +584,17 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         let verify = |body: &String| -> Result<Option<Vec<ContentDefect>>, VerbError> {
             let verify_prompt =
                 format!("/codebus-quiz verify: topic={topic_arg}\n\nQUIZ:\n{body}");
-            // verify-stage-independent-model: verify spawn uses
-            // `Verb::Verify` resolved settings, NOT `Verb::Quiz`.
-            // Repair / plan / generate spawns below keep using `&resolved`.
+            // verify-stage-independent-model: verify spawn passes
+            // `Verb::Verify` so the backend resolves the verify sub-block,
+            // NOT `Verb::Quiz`. Read-only, no command allowance.
             let vtext = match run_spawn(
                 &mut **fan_cell.borrow_mut(),
+                &backend,
                 verify_prompt,
-                paths.root.clone(),
-                QUIZ_TOOLSET,
+                &paths.root,
+                Verb::Verify,
+                Permission::ReadOnly,
                 None,
-                &verify_resolved,
-                env.clone(),
                 cancel.clone(),
             ) {
                 Ok((t, _)) => t,
@@ -625,12 +631,12 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
                 );
                 match run_spawn(
                     &mut **fan_cell.borrow_mut(),
+                    &backend,
                     repair_prompt,
-                    paths.root.clone(),
-                    QUIZ_GENERATE_TOOLSET,
-                    Some(QUIZ_BASH_WHITELIST),
-                    &resolved,
-                    env.clone(),
+                    &paths.root,
+                    Verb::Quiz,
+                    Permission::ReadOnly,
+                    Some(CommandPrefix::new(["codebus", "quiz", "validate"])),
                     cancel.clone(),
                 ) {
                     Ok((rtext, _)) => {

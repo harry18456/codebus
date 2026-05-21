@@ -94,7 +94,7 @@ fn goal_verify_spawn_uses_verb_verify_model_not_verb_goal_model() {
     assert!(run_init(tmp.path()).status.success());
     // goal=sonnet-4-6, verify=opus-4-6 — opus must surface in the
     // verify spawn argv, NOT sonnet.
-    let cfg_body = "claude_code:\n  active: system\n  system:\n    goal:   { model: sonnet-4-6, effort: medium }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\ngoal:\n  content_verify: true\n";
+    let cfg_body = "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   { model: sonnet-4-6, effort: medium }\n        query:  { model: haiku-4-5,  effort: low    }\n        fix:    { model: sonnet-4-6, effort: medium }\n        verify: { model: opus-4-6,   effort: high   }\ngoal:\n  content_verify: true\n";
     let out = run_goal_cfg(tmp.path(), "describe auth", "goal-verify-clean", Some(cfg_body));
     assert!(
         out.status.success(),

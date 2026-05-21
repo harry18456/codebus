@@ -24,7 +24,7 @@ fn write_config_with_service(home: &std::path::Path, service: &str) {
     std::fs::create_dir_all(&cfg_dir).unwrap();
     let cfg_path = cfg_dir.join("config.yaml");
     let body = format!(
-        "claude_code:\n  active: system\n  system:\n    goal:   {{ model: opus-4-6,   effort: high   }}\n    query:  {{ model: haiku-4-5,  effort: low    }}\n    fix:    {{ model: sonnet-4-6, effort: medium }}\n    verify: {{ model: opus-4-6,   effort: high   }}\n  azure:\n    base_url: https://placeholder.example.com/anthropic\n    keyring_service: {service}\n    goal:   {{ model: dep-opus,   effort: high   }}\n    query:  {{ model: dep-haiku,  effort: low    }}\n    fix:    {{ model: dep-sonnet, effort: medium }}\n    verify: {{ model: dep-opus,   effort: high   }}\n"
+        "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   {{ model: opus-4-6,   effort: high   }}\n        query:  {{ model: haiku-4-5,  effort: low    }}\n        fix:    {{ model: sonnet-4-6, effort: medium }}\n        verify: {{ model: opus-4-6,   effort: high   }}\n      azure:\n        base_url: https://placeholder.example.com/anthropic\n        keyring_service: {service}\n        goal:   {{ model: dep-opus,   effort: high   }}\n        query:  {{ model: dep-haiku,  effort: low    }}\n        fix:    {{ model: dep-sonnet, effort: medium }}\n        verify: {{ model: dep-opus,   effort: high   }}\n"
     );
     std::fs::write(cfg_path, body).unwrap();
 }

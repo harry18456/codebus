@@ -229,7 +229,7 @@ fn quiz_verify_spawn_uses_verb_verify_model_not_quiz_model() {
     // After the change, the verify spawn must invoke claude with
     // --model claude-opus-4-6 (NOT claude-haiku-4-5 which is what
     // Verb::Quiz resolves to).
-    let cfg_body = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-6,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\nquiz:\n  content_verify: true\n";
+    let cfg_body = "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   { model: opus-4-6,   effort: high   }\n        query:  { model: haiku-4-5,  effort: low    }\n        fix:    { model: sonnet-4-6, effort: medium }\n        verify: { model: opus-4-6,   effort: high   }\nquiz:\n  content_verify: true\n";
     let out = run_quiz_cfg(tmp.path(), "auth", "quiz-verify-clean", cfg_body);
     assert!(
         out.status.success(),
