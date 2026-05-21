@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }))
 
 import { invoke } from "@tauri-apps/api/core"
-import { useSettingsStore } from "./settings"
+import { readHooksConfig, useSettingsStore } from "./settings"
 
 const mockedInvoke = vi.mocked(invoke)
 
@@ -109,5 +109,50 @@ describe("settings store", () => {
     expect(useSettingsStore.getState().error).toBeTruthy()
     // dirty remains true so user can retry.
     expect(useSettingsStore.getState().dirty).toBe(true)
+  })
+
+  // --- pretooluse-image-block-toggle task 4.2 ---
+  // `readHooksConfig` must mirror the Rust HooksConfig contract:
+  // absent / non-object input → default (block on); explicit boolean
+  // wins; non-boolean → default (fail-safe to block).
+
+  describe("readHooksConfig (hooks namespace)", () => {
+    it("defaults to read_image_block=true when config has no hooks section", () => {
+      expect(readHooksConfig({})).toEqual({ read_image_block: true })
+    })
+
+    it("defaults to read_image_block=true when config is null", () => {
+      expect(readHooksConfig(null)).toEqual({ read_image_block: true })
+    })
+
+    it("defaults to read_image_block=true when hooks is not an object", () => {
+      expect(readHooksConfig({ hooks: "yes" } as unknown as Parameters<typeof readHooksConfig>[0])).toEqual({
+        read_image_block: true,
+      })
+    })
+
+    it("reads an explicit true", () => {
+      expect(
+        readHooksConfig({
+          hooks: { read_image_block: true },
+        } as unknown as Parameters<typeof readHooksConfig>[0]),
+      ).toEqual({ read_image_block: true })
+    })
+
+    it("reads an explicit false", () => {
+      expect(
+        readHooksConfig({
+          hooks: { read_image_block: false },
+        } as unknown as Parameters<typeof readHooksConfig>[0]),
+      ).toEqual({ read_image_block: false })
+    })
+
+    it("defaults to true when read_image_block is non-boolean (fail-safe)", () => {
+      expect(
+        readHooksConfig({
+          hooks: { read_image_block: "false" },
+        } as unknown as Parameters<typeof readHooksConfig>[0]),
+      ).toEqual({ read_image_block: true })
+    })
   })
 })

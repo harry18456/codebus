@@ -119,6 +119,17 @@ claude_code:
   #   fix:    { model: <your-sonnet-deployment-name>, effort: medium }
   #   verify: { model: <your-opus-deployment-name>,   effort: high   }
 
+# PreToolUse hook gates. Default behaviors are safe (block image / binary
+# reads to keep the regex_basic PII filter effective); flip individual
+# knobs to false at your own risk.
+hooks:
+  # Controls `codebus hook check-read` — the PreToolUse hook that blocks
+  # the agent from reading image / PDF / binary files (extensions like
+  # png / jpg / pdf / gif / webp / bmp / tiff / ico / heic / heif / avif).
+  # Default true (block). Set false to let the agent ingest these files;
+  # doing so bypasses the regex_basic PII filter (which only scans text).
+  read_image_block: true
+
 # Lint subsystem.
 lint:
   fix:

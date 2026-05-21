@@ -14,6 +14,7 @@
 //! - Fail-closed default — never silently allow on parse failure.
 
 use clap::Subcommand;
+use codebus_core::config::{HooksConfig, default_config_path, load_hooks_config};
 use serde::Deserialize;
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
@@ -190,7 +191,17 @@ fn is_image_path(path: &str) -> bool {
 /// Returns `Some(reason)` when the agent's Read tool invocation MUST be
 /// blocked (image extension hit OR fail-closed condition); `None` when
 /// the Read invocation may proceed silently.
-fn check_read_inner(stdin_body: &str) -> Option<String> {
+///
+/// `hooks_cfg.read_image_block` gates the entire body (verify-stage-
+/// independent-model-toggle change): when `false`, the function
+/// short-circuits to `None` for ANY input — including malformed JSON,
+/// empty stdin, and image extensions — because the user has explicitly
+/// turned off the Read gate. When `true`, the function executes the
+/// pre-toggle blocklist + fail-closed contract.
+fn check_read_inner(stdin_body: &str, hooks_cfg: &HooksConfig) -> Option<String> {
+    if !hooks_cfg.read_image_block {
+        return None;
+    }
     if stdin_body.trim().is_empty() {
         return Some("hook: empty stdin (no PreToolUse JSON received)".to_string());
     }
@@ -216,7 +227,17 @@ async fn check_read() -> ExitCode {
     if io::stdin().read_to_string(&mut buf).is_err() {
         return emit_block("hook: failed to read stdin");
     }
-    match check_read_inner(&buf) {
+    // verify-stage-independent-model-toggle: resolve the runtime gate
+    // BEFORE running the blocklist. Any failure to load the config
+    // (file absent, malformed yaml, missing section) falls back to
+    // `HooksConfig::default()` — fail-safe to block. `default_config_path`
+    // returning None (no resolvable home dir) is also treated as "no
+    // config → default", preserving the pre-toggle behavior.
+    let hooks_cfg = match default_config_path() {
+        Some(p) => load_hooks_config(&p).unwrap_or_default(),
+        None => HooksConfig::default(),
+    };
+    match check_read_inner(&buf, &hooks_cfg) {
         Some(reason) => emit_block(&reason),
         None => ExitCode::from(0),
     }
@@ -496,7 +517,7 @@ mod tests {
 
     #[test]
     fn check_read_fail_closed_on_empty_stdin() {
-        let reason = check_read_inner("");
+        let reason = check_read_inner("", &HooksConfig::default());
         assert!(reason.is_some(), "empty stdin must block");
         assert!(
             reason.as_ref().unwrap().contains("empty"),
@@ -508,12 +529,12 @@ mod tests {
     #[test]
     fn check_read_fail_closed_on_whitespace_only_stdin() {
         // Mirror check_bash's `buf.trim().is_empty()` semantics.
-        assert!(check_read_inner("   \n\t  ").is_some());
+        assert!(check_read_inner("   \n\t  ", &HooksConfig::default()).is_some());
     }
 
     #[test]
     fn check_read_fail_closed_on_malformed_json() {
-        let reason = check_read_inner("{not valid json");
+        let reason = check_read_inner("{not valid json", &HooksConfig::default());
         assert!(reason.is_some(), "malformed JSON must block");
         assert!(
             reason.as_ref().unwrap().contains("malformed"),
@@ -525,7 +546,7 @@ mod tests {
     #[test]
     fn check_read_fail_closed_on_missing_file_path() {
         let body = r#"{"tool_name":"Read","tool_input":{}}"#;
-        let reason = check_read_inner(body);
+        let reason = check_read_inner(body, &HooksConfig::default());
         assert!(reason.is_some(), "missing file_path must block");
         assert!(
             reason.as_ref().unwrap().contains("file_path"),
@@ -538,21 +559,21 @@ mod tests {
     fn check_read_fail_closed_on_non_string_file_path() {
         // Numeric file_path — type confusion / fuzzing case.
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":123}}"#;
-        let reason = check_read_inner(body);
+        let reason = check_read_inner(body, &HooksConfig::default());
         assert!(reason.is_some(), "non-string file_path must block");
     }
 
     #[test]
     fn check_read_fail_closed_on_null_file_path() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":null}}"#;
-        let reason = check_read_inner(body);
+        let reason = check_read_inner(body, &HooksConfig::default());
         assert!(reason.is_some(), "null file_path must block");
     }
 
     #[test]
     fn check_read_fail_closed_on_empty_string_file_path() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":""}}"#;
-        let reason = check_read_inner(body);
+        let reason = check_read_inner(body, &HooksConfig::default());
         assert!(reason.is_some(), "empty-string file_path must block");
         assert!(
             reason.as_ref().unwrap().contains("file_path"),
@@ -565,7 +586,7 @@ mod tests {
     fn check_read_fail_closed_on_missing_tool_input() {
         // Whole `tool_input` object missing.
         let body = r#"{"tool_name":"Read"}"#;
-        let reason = check_read_inner(body);
+        let reason = check_read_inner(body, &HooksConfig::default());
         assert!(reason.is_some(), "missing tool_input must block");
     }
 
@@ -575,7 +596,7 @@ mod tests {
     #[test]
     fn check_read_blocks_image_extension() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
-        let reason = check_read_inner(body);
+        let reason = check_read_inner(body, &HooksConfig::default());
         assert!(reason.is_some(), "image extension must block");
         let reason_str = reason.unwrap();
         assert!(
@@ -591,21 +612,21 @@ mod tests {
     #[test]
     fn check_read_blocks_image_extension_uppercase() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"assets/logo.JPG"}}"#;
-        assert!(check_read_inner(body).is_some());
+        assert!(check_read_inner(body, &HooksConfig::default()).is_some());
     }
 
     #[test]
     fn check_read_blocks_windows_path_image() {
         let body =
             r#"{"tool_name":"Read","tool_input":{"file_path":"C:\\repo\\assets\\img.png"}}"#;
-        assert!(check_read_inner(body).is_some());
+        assert!(check_read_inner(body, &HooksConfig::default()).is_some());
     }
 
     #[test]
     fn check_read_allows_text_extension() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/modules/uv-lib.md"}}"#;
         assert!(
-            check_read_inner(body).is_none(),
+            check_read_inner(body, &HooksConfig::default()).is_none(),
             "text file must pass through"
         );
     }
@@ -613,20 +634,20 @@ mod tests {
     #[test]
     fn check_read_allows_source_code() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"codebus-core/src/agent/claude_cli.rs"}}"#;
-        assert!(check_read_inner(body).is_none());
+        assert!(check_read_inner(body, &HooksConfig::default()).is_none());
     }
 
     #[test]
     fn check_read_allows_svg() {
         // SVG is XML, scannable by regex_basic — deliberately NOT blocked.
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagram.svg"}}"#;
-        assert!(check_read_inner(body).is_none());
+        assert!(check_read_inner(body, &HooksConfig::default()).is_none());
     }
 
     #[test]
     fn check_read_allows_no_extension() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"Makefile"}}"#;
-        assert!(check_read_inner(body).is_none());
+        assert!(check_read_inner(body, &HooksConfig::default()).is_none());
     }
 
     #[test]
@@ -635,7 +656,7 @@ mod tests {
         // contains backslashes (Windows).
         let body =
             r#"{"tool_name":"Read","tool_input":{"file_path":"C:\\repo\\img.png"}}"#;
-        let reason = check_read_inner(body).expect("must block");
+        let reason = check_read_inner(body, &HooksConfig::default()).expect("must block");
         let payload = format!(
             "{{\"decision\":\"block\",\"reason\":{}}}",
             json_escape(&reason)
@@ -649,5 +670,96 @@ mod tests {
                 .unwrap()
                 .contains("img.png")
         );
+    }
+
+    // --- pretooluse-image-block-toggle task 2.1 (RED) ---
+    //
+    // `check_read_inner` gains a `hooks_cfg: &HooksConfig` parameter.
+    // When `hooks_cfg.read_image_block` is false, the function MUST
+    // return None for any input (image / non-image / malformed JSON /
+    // empty / missing fields); the blocklist + fail-closed branches
+    // SHALL NOT execute. When true, behavior matches the unmodified
+    // `check_read_inner` contract — exercised by existing tests.
+
+    #[test]
+    fn check_read_config_off_allows_image_extension() {
+        let cfg = HooksConfig {
+            read_image_block: false,
+        };
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
+        assert!(
+            check_read_inner(body, &cfg).is_none(),
+            "read_image_block=false must allow image extensions"
+        );
+    }
+
+    #[test]
+    fn check_read_config_off_allows_uppercase_image() {
+        let cfg = HooksConfig {
+            read_image_block: false,
+        };
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"assets/logo.JPG"}}"#;
+        assert!(check_read_inner(body, &cfg).is_none());
+    }
+
+    #[test]
+    fn check_read_config_off_allows_pdf() {
+        let cfg = HooksConfig {
+            read_image_block: false,
+        };
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"docs/manual.pdf"}}"#;
+        assert!(check_read_inner(body, &cfg).is_none());
+    }
+
+    #[test]
+    fn check_read_config_off_short_circuits_empty_stdin() {
+        // When the gate is off, even empty stdin (which would normally
+        // be fail-closed → block) MUST be allowed — the entire stdin
+        // processing branch is short-circuited.
+        let cfg = HooksConfig {
+            read_image_block: false,
+        };
+        assert!(check_read_inner("", &cfg).is_none());
+    }
+
+    #[test]
+    fn check_read_config_off_short_circuits_malformed_json() {
+        let cfg = HooksConfig {
+            read_image_block: false,
+        };
+        assert!(check_read_inner("{not valid json", &cfg).is_none());
+    }
+
+    #[test]
+    fn check_read_config_off_short_circuits_missing_file_path() {
+        let cfg = HooksConfig {
+            read_image_block: false,
+        };
+        let body = r#"{"tool_name":"Read","tool_input":{}}"#;
+        assert!(check_read_inner(body, &cfg).is_none());
+    }
+
+    #[test]
+    fn check_read_config_on_blocks_image_like_before() {
+        // Mirror the existing blocks_image_extension test but with the
+        // explicit `read_image_block: true` config; behavior must be
+        // identical to the pre-toggle implementation.
+        let cfg = HooksConfig {
+            read_image_block: true,
+        };
+        let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
+        let reason = check_read_inner(body, &cfg);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("flow.png"));
+    }
+
+    #[test]
+    fn check_read_config_on_fails_closed_on_empty_stdin_like_before() {
+        let cfg = HooksConfig {
+            read_image_block: true,
+        };
+        let reason = check_read_inner("", &cfg);
+        assert!(reason.is_some());
+        assert!(reason.as_ref().unwrap().contains("empty"));
     }
 }

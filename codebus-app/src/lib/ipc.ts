@@ -206,6 +206,21 @@ export interface ClaudeCodeBlock {
   azure: AzureProfile | null
 }
 
+/**
+ * `pretooluse-image-block-toggle`: runtime gate for `codebus hook
+ * check-read`. When `read_image_block` is true (default), the hook
+ * subcommand blocks image / binary file extensions per the existing
+ * blocklist. When false, the hook short-circuits to allow.
+ */
+export interface HooksConfig {
+  read_image_block: boolean
+}
+
+/** Built-in defaults mirroring `HooksConfig::default()` in Rust. */
+export const HOOKS_CONFIG_DEFAULTS: HooksConfig = {
+  read_image_block: true,
+}
+
 /** Default keyring service when the user has not configured one yet. */
 export const DEFAULT_AZURE_KEYRING_SERVICE = "codebus-azure"
 

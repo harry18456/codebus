@@ -17,6 +17,7 @@ pub mod claude_code;
 pub mod endpoint;
 pub mod goal;
 pub mod global_starter;
+pub mod hooks;
 pub mod keyring;
 pub mod lint_fix;
 pub mod log;
@@ -32,6 +33,7 @@ pub use endpoint::{
     SystemVerbConfig,
 };
 pub use global_starter::{StarterOutcome, write_starter_config_if_missing};
+pub use hooks::{HooksConfig, load_hooks_config};
 pub use keyring::KeyringError;
 pub use lint_fix::{LintFixConfig, load_lint_fix_config};
 pub use log::{LogConfig, load_log_config};

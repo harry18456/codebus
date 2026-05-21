@@ -241,6 +241,41 @@ mod tests {
         );
     }
 
+    /// verify-stage-independent-model-toggle: the `hooks` namespace
+    /// SHALL round-trip cleanly including unknown subkeys so future
+    /// hook toggles can be added without losing data on save/reload.
+    /// Spec scenario "Hooks namespace survives save".
+    #[test]
+    fn hooks_namespace_round_trip_with_known_and_unknown_subkeys() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        let payload = json!({
+            "claude_code": {
+                "active": "system",
+                "system": {
+                    "goal":   { "model": "opus-4-6",   "effort": "high"   },
+                    "query":  { "model": "haiku-4-5",  "effort": "low"    },
+                    "fix":    { "model": "sonnet-4-6", "effort": "medium" },
+                    "verify": { "model": "opus-4-6",   "effort": "high"   }
+                }
+            },
+            "hooks": {
+                "read_image_block": false,
+                "future_hook_toggle": true
+            }
+        });
+
+        save_global_config_at(&path, &payload).unwrap();
+        let loaded = load_global_config_at(&path).unwrap();
+
+        assert_eq!(loaded["hooks"]["read_image_block"], json!(false));
+        assert_eq!(
+            loaded["hooks"]["future_hook_toggle"],
+            json!(true),
+            "unknown hook subkey must survive save→load"
+        );
+    }
+
     /// Spec: `save_global_config` SHALL reject an incomplete azure
     /// profile (active=azure with empty base_url etc.) so an invalid
     /// yaml never lands on disk.

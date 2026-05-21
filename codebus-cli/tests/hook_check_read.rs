@@ -8,21 +8,35 @@
 //! in `codebus-cli/src/commands/hook.rs`; this file pins the
 //! subprocess-level contract end-to-end.
 
+use std::fs;
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
+
+use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_codebus");
 
 /// Run `codebus hook check-read` with `body` on stdin; return (exit code,
 /// stdout, stderr).
 fn run_check_read(body: &str) -> (Option<i32>, String, String) {
-    let mut child = Command::new(BIN)
-        .args(["hook", "check-read"])
+    run_check_read_with_home(body, None)
+}
+
+/// Run `codebus hook check-read` with `body` on stdin and an optional
+/// `CODEBUS_HOME` override pointing at a temp dir containing the yaml
+/// config to load. When `home` is None, no override is set (the binary
+/// reads the real `~/.codebus/config.yaml`, if any).
+fn run_check_read_with_home(body: &str, home: Option<&Path>) -> (Option<i32>, String, String) {
+    let mut cmd = Command::new(BIN);
+    cmd.args(["hook", "check-read"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn codebus hook check-read");
+        .stderr(Stdio::piped());
+    if let Some(h) = home {
+        cmd.env("CODEBUS_HOME", h);
+    }
+    let mut child = cmd.spawn().expect("spawn codebus hook check-read");
     {
         let stdin = child.stdin.as_mut().expect("stdin pipe");
         stdin.write_all(body.as_bytes()).expect("write stdin");
@@ -33,6 +47,13 @@ fn run_check_read(body: &str) -> (Option<i32>, String, String) {
         String::from_utf8_lossy(&out.stdout).to_string(),
         String::from_utf8_lossy(&out.stderr).to_string(),
     )
+}
+
+/// Write a yaml body at `<home>/.codebus/config.yaml`.
+fn write_codebus_config(home: &Path, yaml: &str) {
+    let cfg_dir = home.join(".codebus");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::write(cfg_dir.join("config.yaml"), yaml).unwrap();
 }
 
 fn assert_block(stdout: &str) -> serde_json::Value {
@@ -167,6 +188,91 @@ fn fail_closed_on_empty_file_path() {
 fn fail_closed_on_non_string_file_path() {
     let body = r#"{"tool_name":"Read","tool_input":{"file_path":42}}"#;
     let (code, stdout, _) = run_check_read(body);
+    assert_eq!(code, Some(0));
+    assert_block(&stdout);
+}
+
+// --- verify-stage-independent-model-toggle task 2.4 ---
+// Spec scenarios on the runtime gate `hooks.read_image_block`:
+//
+// 1. Disabled config: hook ALWAYS allows regardless of stdin.
+// 2. Missing config file: hook falls back to default true (block).
+// 3. Absent hooks section: hook falls back to default true (block).
+
+#[test]
+fn config_false_allows_image_extension() {
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(home.path(), "hooks:\n  read_image_block: false\n");
+    let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
+    let (code, stdout, _) = run_check_read_with_home(body, Some(home.path()));
+    assert_eq!(code, Some(0));
+    assert!(
+        stdout.trim().is_empty(),
+        "hooks.read_image_block=false must produce empty stdout (allow); got `{stdout}`"
+    );
+}
+
+#[test]
+fn config_false_allows_non_image() {
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(home.path(), "hooks:\n  read_image_block: false\n");
+    let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/modules/uv-lib.md"}}"#;
+    let (code, stdout, _) = run_check_read_with_home(body, Some(home.path()));
+    assert_eq!(code, Some(0));
+    assert!(stdout.trim().is_empty());
+}
+
+#[test]
+fn config_false_short_circuits_malformed_stdin() {
+    // When the gate is off, even malformed stdin (which would normally
+    // be fail-closed → block) MUST be allowed.
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(home.path(), "hooks:\n  read_image_block: false\n");
+    let (code, stdout, _) = run_check_read_with_home("{not valid json", Some(home.path()));
+    assert_eq!(code, Some(0));
+    assert!(stdout.trim().is_empty());
+}
+
+#[test]
+fn config_true_blocks_image_extension() {
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(home.path(), "hooks:\n  read_image_block: true\n");
+    let body = r#"{"tool_name":"Read","tool_input":{"file_path":"docs/manual.pdf"}}"#;
+    let (code, stdout, _) = run_check_read_with_home(body, Some(home.path()));
+    assert_eq!(code, Some(0));
+    assert_block(&stdout);
+}
+
+#[test]
+fn absent_hooks_section_falls_back_to_block() {
+    // Yaml exists, parses fine, but has no hooks section. Per spec,
+    // this resolves to the default (read_image_block=true → block).
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(home.path(), "lint:\n  fix:\n    enabled: true\n");
+    let body = r#"{"tool_name":"Read","tool_input":{"file_path":"assets/img.png"}}"#;
+    let (code, stdout, _) = run_check_read_with_home(body, Some(home.path()));
+    assert_eq!(code, Some(0));
+    assert_block(&stdout);
+}
+
+#[test]
+fn missing_config_file_falls_back_to_block() {
+    // CODEBUS_HOME points at a directory with no .codebus/config.yaml.
+    // The hook subcommand SHALL still block image reads (fail-safe).
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    // Intentionally do NOT call write_codebus_config — no config file.
+    let body = r#"{"tool_name":"Read","tool_input":{"file_path":"assets/img.png"}}"#;
+    let (code, stdout, _) = run_check_read_with_home(body, Some(home.path()));
+    assert_eq!(code, Some(0));
+    assert_block(&stdout);
+}
+
+#[test]
+fn malformed_yaml_falls_back_to_block() {
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(home.path(), "hooks:\n  : :: not yaml\n");
+    let body = r#"{"tool_name":"Read","tool_input":{"file_path":"assets/img.png"}}"#;
+    let (code, stdout, _) = run_check_read_with_home(body, Some(home.path()));
     assert_eq!(code, Some(0));
     assert_block(&stdout);
 }

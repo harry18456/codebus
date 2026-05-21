@@ -370,6 +370,53 @@ describe("SettingsModal", () => {
       expect((cfg().goal as { content_verify?: boolean }).content_verify).toBe(true)
     })
 
+    // --- pretooluse-image-block-toggle task 5.1 (RED) ---
+    // The "Block image / binary reads" toggle row.
+    //
+    // Behavior contract from app-shell spec (Global Settings Modal
+    // Field Set, field #11):
+    // - Renders ON when config has no hooks section (default true).
+    // - Renders OFF when config has hooks.read_image_block: false.
+    // - Click toggles dirty and writes hooks.read_image_block to the
+    //   new boolean value.
+    // - Adjacent warning copy mentions the PII safety trade-off.
+
+    it("read_image_block toggle defaults ON when no hooks section is present", () => {
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      const tog = screen.getByTestId("read-image-block-toggle") as HTMLInputElement
+      expect(tog.checked).toBe(true)
+    })
+
+    it("read_image_block toggle reflects hooks.read_image_block=false from config", () => {
+      useSettingsStore.setState({
+        config: { hooks: { read_image_block: false } as Record<string, unknown> } as never,
+        initialConfig: {},
+        dirty: false,
+        loading: false,
+        saving: false,
+        error: null,
+      })
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      const tog = screen.getByTestId("read-image-block-toggle") as HTMLInputElement
+      expect(tog.checked).toBe(false)
+    })
+
+    it("read_image_block toggle off writes hooks.read_image_block=false and dirties", () => {
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      fireEvent.click(screen.getByTestId("read-image-block-toggle"))
+      expect(
+        (cfg().hooks as { read_image_block?: boolean }).read_image_block,
+      ).toBe(false)
+      expect(useSettingsStore.getState().dirty).toBe(true)
+    })
+
+    it("read_image_block toggle row renders security warning copy", () => {
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      expect(
+        screen.getByTestId("read-image-block-warning"),
+      ).toHaveTextContent(/PII filter/i)
+    })
+
     it("disable-logging control writes log.sink = none", () => {
       render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
       fireEvent.click(screen.getByTestId("log-disable-toggle"))

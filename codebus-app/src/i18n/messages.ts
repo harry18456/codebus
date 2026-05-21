@@ -132,6 +132,9 @@ const en = {
   "settings.fields.endpointVerify.label": "verify",
   "settings.fields.endpointVerify.tooltip":
     "Independent model for the content-verify spawn (quiz / goal). Pick a reasoning-strong model to catch hallucinations — default opus-4-6 / high encodes the \"cheap generation + expensive verification\" pattern.",
+  "settings.fields.readImageBlock.label": "Block image / binary reads",
+  "settings.fields.readImageBlock.warning":
+    "Disabling allows the agent to read images / PDFs / binary files into its context, bypassing the regex_basic PII filter (which only scans text). Leave on unless you know the repo has no PII risk.",
 
   // ---- Workspace shell ----
   "workspace.backToLobby": "← Back to Lobby",
@@ -359,6 +362,9 @@ const zh: Record<keyof typeof en, string> = {
   "settings.fields.endpointVerify.label": "verify",
   "settings.fields.endpointVerify.tooltip":
     "Content verify spawn（quiz / goal 共用）的獨立 model；建議用 reasoning 強的 model 把關。預設 opus-4-6 / high 對應「便宜出 + 貴審」策略。",
+  "settings.fields.readImageBlock.label": "擋圖片 / binary 讀取",
+  "settings.fields.readImageBlock.warning":
+    "關閉後 agent 可 ingest 圖片 / PDF / binary 檔到 context，bypass regex_basic PII filter（只掃文字）。確認 repo 無 PII 風險才關。",
 
   // ---- Workspace shell ----
   "workspace.backToLobby": "← 回到 Lobby",

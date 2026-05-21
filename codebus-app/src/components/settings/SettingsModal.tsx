@@ -122,6 +122,7 @@ export function SettingsModal({
     pii?: { scanner?: string; on_hit?: string; patterns_extra?: string[] }
     lint?: { fix?: { enabled?: boolean } }
     log?: { sink?: string; dir?: string }
+    hooks?: { read_image_block?: boolean }
   }
   const passThreshold = safeConfig.app?.quiz?.pass_threshold ?? 80
   // default_length moved to the shared top-level `quiz.*` namespace
@@ -142,6 +143,9 @@ export function SettingsModal({
   const quizContentVerify = safeConfig.quiz?.content_verify ?? false
   const goalContentVerify = safeConfig.goal?.content_verify ?? false
   const loggingDisabled = safeConfig.log?.sink === "none"
+  // pretouseluse-image-block-toggle: default true (block) when config
+  // omits the hooks section, matching `HooksConfig::default()` in Rust.
+  const readImageBlock = safeConfig.hooks?.read_image_block ?? true
   const patternsExtra: string[] = safeConfig.pii?.patterns_extra ?? []
   // A pattern is invalid when it cannot compile as a RegExp. Empty entries
   // (freshly added rows) are treated as not-yet-invalid so the user can
@@ -440,6 +444,30 @@ export function SettingsModal({
               className="text-[11px] text-fg-tertiary"
             >
               {t("settings.fields.goalContentVerify.cost")}
+            </div>
+          </Field>
+
+          {/* 4g. Read hook image block (pretouseluse-image-block-toggle) */}
+          <Field label={t("settings.fields.readImageBlock.label")}>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                data-testid="read-image-block-toggle"
+                checked={readImageBlock}
+                onChange={() =>
+                  update({
+                    hooks: {
+                      read_image_block: !readImageBlock,
+                    } as Record<string, unknown>,
+                  } as never)
+                }
+              />
+            </label>
+            <div
+              data-testid="read-image-block-warning"
+              className="text-[11px] text-fg-tertiary"
+            >
+              {t("settings.fields.readImageBlock.warning")}
             </div>
           </Field>
 

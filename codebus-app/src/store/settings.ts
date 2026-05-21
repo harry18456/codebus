@@ -5,8 +5,10 @@ import {
   type AzureProfile,
   type ClaudeCodeBlock,
   type GlobalConfig,
+  type HooksConfig,
   type SystemProfile,
   DEFAULT_AZURE_KEYRING_SERVICE,
+  HOOKS_CONFIG_DEFAULTS,
   SYSTEM_PROFILE_DEFAULTS,
   loadGlobalConfig as loadGlobalConfigIpc,
   saveGlobalConfig as saveGlobalConfigIpc,
@@ -160,6 +162,38 @@ function mergeSystemProfile(raw: unknown): SystemProfile {
     fix:    r.fix    ?? { ...SYSTEM_PROFILE_DEFAULTS.fix },
     verify: r.verify ?? { ...SYSTEM_PROFILE_DEFAULTS.verify },
   }
+}
+
+/**
+ * `pretooluse-image-block-toggle`: read a `HooksConfig` from a possibly-
+ * empty / partial `hooks` section. Mirrors {@link mergeSystemProfile} —
+ * absent / non-object input falls back to the built-in defaults; a
+ * `read_image_block` value that is not a boolean is also treated as
+ * absent (fail-safe default true). Forward-compat: unknown sibling
+ * subkeys (e.g. a future `hooks.write_image_block`) are ignored here;
+ * the IPC round-trip preserves them at the save layer.
+ */
+function mergeHooksConfig(raw: unknown): HooksConfig {
+  if (!raw || typeof raw !== "object") {
+    return { ...HOOKS_CONFIG_DEFAULTS }
+  }
+  const r = raw as { read_image_block?: unknown }
+  const block =
+    typeof r.read_image_block === "boolean"
+      ? r.read_image_block
+      : HOOKS_CONFIG_DEFAULTS.read_image_block
+  return { read_image_block: block }
+}
+
+/**
+ * Read the `hooks` config block from a possibly-empty global config.
+ * Always returns a fully populated `HooksConfig`. Callers SHALL use
+ * this helper instead of indexing `config.hooks` directly so missing /
+ * malformed input degrades to the safe default consistently.
+ */
+export function readHooksConfig(config: GlobalConfig | null | undefined): HooksConfig {
+  const raw = (config as { hooks?: unknown } | null | undefined)?.hooks
+  return mergeHooksConfig(raw)
 }
 
 function readAzureProfile(raw: unknown): AzureProfile | null {
