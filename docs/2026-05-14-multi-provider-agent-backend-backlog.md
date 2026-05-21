@@ -77,6 +77,31 @@
 
 ---
 
+## 2026-05-22 grounding + 拆解計畫（discuss 結論，逐點對過實作）
+
+Stage 1（archived change `agent-backend-seam`）已完成：`AgentBackend` trait（3 method：`build_command`/`parse_stream_line`/`extract_session_id`）+ `ClaudeBackend`（`compose_claude_cmd` 組 argv，含 `--strict-mcp-config` MCP 隔離，完好）+ 中性 `SpawnSpec`（`verb`/`prompt`/`permission`/`command_allowance`/`resume_session_id`）+ `invoke` 迴圈吃 `&dyn AgentBackend` + verb 改組 SpawnSpec + config 統一 `agent.providers.<name>.*`。
+
+逐點對實作核對結果（**有兩處與「純填 dispatch」直覺不符**）：
+
+- ✅ **trait 已 ready、Codex 是純加法**：`invoke(&dyn AgentBackend, ...)`（`codebus-core/src/agent/claude_cli.rs`）。加 `codex_backend.rs` 實作 3 方法即可。
+- ⚠️ **沒有 runtime backend dispatch**：每個 verb **硬編 `ClaudeBackend::new(...)`**（`codebus-core/src/verb/{goal,query,fix,chat,quiz}.rs`）。Stage 2 要新增「provider → `Box<dyn AgentBackend>`」選擇層 + 改每個 verb 的建構點。
+- ⚠️ **config 主動拒絕非 claude**：`codebus-core/src/config/endpoint.rs` 解析時 `active_provider` 只接受 `claude`，否則 reject（有對應測試）。Stage 2 要解除此 guard。
+- ⚠️ **GUI/CLI config 脫鉤（現存 Claude bug，非僅 codex blocker）**：後端 `codebus-app/src-tauri/src/ipc/config.rs` 已驗證 `agent.*` schema；但前端 `codebus-app/src/lib/ipc.ts`、`codebus-app/src/store/settings.ts` 仍用舊 `claude_code.*`，CLI `codebus-cli/src/commands/config.rs` 亦然 → GUI 端點編輯寫到 core 已不讀的 key，**Claude 端點設定目前被忽略**。
+- ⚠️ **skill bundle 只寫 `.claude/`**：`codebus-core/src/skill_bundle/mod.rs`（`base.join(".claude")`）無 `.codex`。雙寫 `.codex/skills/` 為淨新增。
+- ❓ **MCP 隔離 spike 缺口**：2026-05-20 spike 表未涵蓋 codex 的 MCP 載入層隔離旗標。Claude 端 `--strict-mcp-config` 已是必備（archived `spawn-mcp-isolation`），CodexBackend 必須有等價隔離，否則重蹈 MCP 洩漏。**動 CodexBackend 前必補 spike。**
+
+### 建議拆成 3 個 change（依序）
+
+1. **`agent-config-rewire`（前置，knowable、無 spike、無 placeholder）**：前端 `ipc.ts`/`settings.ts` + CLI `config.rs` 從 `claude_code.*` 改對齊 core 的 `agent.providers.*`，修好現存 Claude 端點 GUI 脫鉤；同時新增 provider dispatch 選擇層、解除 `active_provider` 非-claude reject guard（仍 claude-only 路由，dispatch 點真正可路由）。**先做這個。**
+2. **`codex-spike`（investigation）**：實機跑 codex 當前版，確認 contract 仍成立 + 找出 MCP 載入層隔離旗標 + sandbox 對映（query/chat→read-only、goal/fix→workspace-write）。產出餵 #3。
+3. **`codex-backend`（純加法，依賴 1+2）**：`codex_backend.rs` 實作 trait 3 方法、`parse_codex_stream_line`、session id（`thread.started.thread_id`）、`agent.providers.codex.*` config profile + Azure variant、skill bundle 雙寫 `.codex/skills/`。
+
+### 動工前仍要回答的 driver 問題
+
+有具體要用 codex / Azure OpenAI 的場景嗎？還是先把能力備好？若只是備用，#1（修現存 Claude config bug）本身就有獨立價值、可先做；#2/#3 等有真實 driver 再動。
+
+---
+
 ## 觀察
 
 codebus 一直以來定位為 multi-AI-provider 工具，但目前實作完全硬耦合到 `claude` binary：

@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | 2026-05-14 | 全域 font-scale / accessibility text size | accessibility gap | 中（2-3 個半天） | [app-font-scale](2026-05-14-app-font-scale-backlog.md) |
 | 2026-05-14 | UI 無障礙（對比度 + 鍵盤導航） | accessibility gap | 中（2-3 個半天） | [ui-accessibility](2026-05-14-ui-accessibility-backlog.md) |
-| 2026-05-14 | multi-provider agent backend（Codex CLI + Azure） | 架構擴充性 | 重（1 週以上） | [multi-provider-agent-backend](2026-05-14-multi-provider-agent-backend-backlog.md) |
+| 2026-05-14 | multi-provider agent backend（Codex CLI + Azure） | 架構擴充性 | 重（Stage 1 trait seam 已 archived；剩 3 change：agent-config-rewire → codex-spike → codex-backend，見 doc 2026-05-22 拆解） | [multi-provider-agent-backend](2026-05-14-multi-provider-agent-backend-backlog.md) |
 | 2026-05-14 | OpenAI Privacy Filter 整合（local 語意層 PII） | PII 保護強化 | 重（3-5 個半天） | [openai-privacy-filter](2026-05-14-openai-privacy-filter-backlog.md) |
 | 2026-05-14 | RAG index + search（LanceDB，after F） | 知識檢索品質 | 重（1 週以上） | [rag-index-search](2026-05-14-rag-index-search-backlog.md) |
 | 2026-05-14 | codebus 作為 MCP Server（query-only，after F） | 擴充性 / 生態整合 | 中-重（3-5 個半天） | [mcp-server](2026-05-14-mcp-server-backlog.md) |
