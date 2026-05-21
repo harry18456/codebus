@@ -22,7 +22,19 @@ pub enum RegisterOutcome {
 struct VaultEntry {
     path: String,
     ts: u64,
+    /// Obsidian writes `open: true` ONLY for the currently-open vault and
+    /// OMITS the field entirely for every closed vault. So `open` MUST be
+    /// optional on read (`serde(default)` → `false` when absent), otherwise
+    /// deserializing any real-world `obsidian.json` that has at least one
+    /// closed vault fails with "missing field `open`" and breaks both
+    /// `register_at` and `lookup_vault_id`. On write we omit `open` when it
+    /// is `false`, matching Obsidian's own format for closed vaults.
+    #[serde(default, skip_serializing_if = "is_false")]
     open: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -313,6 +325,51 @@ mod tests {
         fs::create_dir_all(&wiki).unwrap();
         let err = lookup_vault_id_at(&wiki, &json).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// Regression: a real-world `obsidian.json` where a CLOSED vault entry
+    /// omits the `open` field (Obsidian only writes `open` for the active
+    /// vault) MUST still parse — both lookup and register previously failed
+    /// with "missing field `open`", breaking the whole Obsidian feature.
+    #[test]
+    fn entry_without_open_field_parses_and_registers() {
+        let tmp = TempDir::new().unwrap();
+        let json = tmp.path().join("obsidian/obsidian.json");
+        fs::create_dir_all(json.parent().unwrap()).unwrap();
+        // Shape mirrors a live obsidian.json: first vault has NO `open`
+        // (closed), second has `open: true` (active).
+        fs::write(
+            &json,
+            r#"{"vaults":{"aaaa1111bbbb2222":{"path":"\\?\\D:\\repo-a\\.codebus\\wiki","ts":111},"cccc3333dddd4444":{"path":"\\?\\D:\\repo-b\\.codebus\\wiki","ts":222,"open":true}}}"#,
+        )
+        .unwrap();
+
+        let wiki = tmp.path().join("repo-c/.codebus/wiki");
+        fs::create_dir_all(&wiki).unwrap();
+
+        // lookup must NOT error on the missing-`open` entry (returns None for
+        // an unregistered path, but parses the file fine).
+        assert_eq!(
+            lookup_vault_id_at(&wiki, &json).expect("missing open must parse"),
+            None
+        );
+
+        // register must succeed (not IoError) and add repo-c.
+        match register_at(&wiki, &json) {
+            RegisterOutcome::Registered { .. } => {}
+            other => panic!("expected Registered, got {other:?}"),
+        }
+        assert!(lookup_vault_id_at(&wiki, &json).unwrap().is_some());
+
+        // The pre-existing closed entry survives the round-trip and stays
+        // without an `open` key (skip_serializing_if when false).
+        let body = fs::read_to_string(&json).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let a = &v["vaults"]["aaaa1111bbbb2222"];
+        assert_eq!(a["ts"], serde_json::json!(111));
+        assert!(a.get("open").is_none(), "closed entry stays open-less: {a}");
+        // The active entry keeps open: true.
+        assert_eq!(v["vaults"]["cccc3333dddd4444"]["open"], serde_json::json!(true));
     }
 
     #[test]
