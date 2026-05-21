@@ -182,6 +182,12 @@ export function QuizTab({
   const [liveEvents, setLiveEvents] = useState<VerbEvent[]>([])
   const unlistenRef = useRef<UnlistenFn | null>(null)
   const streamUnlistenRef = useRef<UnlistenFn | null>(null)
+  // quiz-double-spawn-guard: latch the `pendingPage` value the Page-flow
+  // effect already fired generation for, so a repeated effect invocation
+  // with the same value (React StrictMode double-invoke in dev) does NOT
+  // spawn a second quiz. Reset to null when `pendingPage` clears so the
+  // same page can be re-quizzed in a later trigger.
+  const firedForPageRef = useRef<string | null>(null)
   // Monotonic counter bumped by the quiz-changed watcher event. Included
   // in the history-load effect's deps so an external attempt write (e.g.
   // terminal `codebus quiz`) re-runs the load and the new row appears
@@ -379,13 +385,21 @@ export function QuizTab({
   // onPendingConsumed) so the same page can be re-quizzed later.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (pendingPage) {
-      onPendingConsumed?.()
-      void startGenerate([pendingPage], {
-        kind: "wiki_preview",
-        target_page: pendingPage,
-      })
+    if (!pendingPage) {
+      // Cleared (consumed) — reset the latch so the same page can be
+      // re-quizzed when `pendingPage` is set again later.
+      firedForPageRef.current = null
+      return
     }
+    // StrictMode double-invoke / repeated render with the same value:
+    // fire generation only once per distinct pendingPage value.
+    if (firedForPageRef.current === pendingPage) return
+    firedForPageRef.current = pendingPage
+    onPendingConsumed?.()
+    void startGenerate([pendingPage], {
+      kind: "wiki_preview",
+      target_page: pendingPage,
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPage])
 

@@ -113,7 +113,11 @@ pub struct QuizGenerateTerminalPayload {
 }
 
 fn quiz_run_id(prefix: &str) -> String {
-    let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    // quiz-double-spawn-guard: millisecond precision so two spawns within the
+    // same wall-clock second receive distinct ids and do not collide in the
+    // ActiveRuns map (a collision would overwrite the first run's cancel
+    // handle).
+    let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     format!("quiz-{prefix}-{}", started_at.replace(':', "-"))
 }
 
@@ -166,6 +170,16 @@ where
         + Send
         + 'static,
 {
+    // quiz-double-spawn-guard: reject a second concurrent quiz spawn while
+    // any quiz run (plan or generate) is active, mirroring goal/chat. A
+    // single user trigger that double-fires (e.g. StrictMode) thus produces
+    // at most one quiz run.
+    if active_runs.has_quiz_run() {
+        return Err(AppError::Invalid {
+            field: "active_runs".into(),
+            message: "a quiz run is already active".into(),
+        });
+    }
     let run_id = quiz_run_id("plan");
     let cancel = Arc::new(AtomicBool::new(false));
     active_runs.insert(run_id.clone(), cancel.clone());
@@ -295,6 +309,14 @@ where
         + Send
         + 'static,
 {
+    // quiz-double-spawn-guard: reject a second concurrent quiz spawn while
+    // any quiz run (plan or generate) is active, mirroring goal/chat.
+    if active_runs.has_quiz_run() {
+        return Err(AppError::Invalid {
+            field: "active_runs".into(),
+            message: "a quiz run is already active".into(),
+        });
+    }
     let run_id = quiz_run_id("generate");
     let cancel = Arc::new(AtomicBool::new(false));
     active_runs.insert(run_id.clone(), cancel.clone());
@@ -587,6 +609,7 @@ pub fn write_quiz_progress(
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    use std::sync::atomic::Ordering;
 
     fn collect<P: Send + 'static>() -> (Arc<Mutex<Vec<P>>>, impl Fn(P) + Send + 'static) {
         let store = Arc::new(Mutex::new(Vec::new()));
@@ -699,6 +722,77 @@ mod tests {
             }
             other => panic!("expected Succeeded, got {other:?}"),
         }
+    }
+
+    // --- quiz-double-spawn-guard: concurrency reject + run_id precision ---
+
+    /// A second quiz generate spawn is rejected while a quiz run is active,
+    /// and the injected runner is NOT invoked (no second background run).
+    #[test]
+    fn generate_rejected_when_quiz_run_already_active() {
+        let active = Arc::new(ActiveRuns::default());
+        // Simulate a quiz run already in flight.
+        active.insert(
+            "quiz-generate-2026-05-21T05-37-14.000Z".into(),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let (_e, emit) = collect::<QuizStreamPayload>();
+        let (_t, emit_t) = collect::<QuizGenerateTerminalPayload>();
+        let ran = Arc::new(AtomicBool::new(false));
+        let ran_in_runner = ran.clone();
+
+        let result = spawn_quiz_generate_with_runner(
+            active.clone(),
+            PathBuf::from("/tmp/v"),
+            vec!["wiki/a.md".into()],
+            5,
+            QuizTriggerArg::AiPlanned { topic: "auth".into() },
+            false,
+            emit,
+            emit_t,
+            move |_repo, _opts, _on_event, _cancel| {
+                ran_in_runner.store(true, Ordering::Relaxed);
+                Ok(QuizReport {
+                    quiz_md: "## Q1. x".into(),
+                    planned_pages: vec![],
+                    accumulated_tokens: Default::default(),
+                    started_at: "t0".into(),
+                    finished_at: "t1".into(),
+                    agent_exit_code: Some(0),
+                    events_log: None,
+                    validation: codebus_core::verb::quiz::QuizValidation::Ok,
+                    content_review: None,
+                })
+            },
+        );
+
+        match result {
+            Err(AppError::Invalid { field, .. }) => assert_eq!(field, "active_runs"),
+            other => panic!("expected Invalid(active_runs), got {other:?}"),
+        }
+        // Give any (erroneously) spawned thread a moment; it must not run.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(
+            !ran.load(Ordering::Relaxed),
+            "runner SHALL NOT be invoked when a quiz run is already active"
+        );
+    }
+
+    /// quiz_run_id carries sub-second (millisecond) precision so same-second
+    /// spawns get distinct ids (the timestamp keeps its `.` fractional part).
+    #[test]
+    fn quiz_run_id_has_millisecond_precision() {
+        let id = quiz_run_id("generate");
+        assert!(
+            id.contains('.'),
+            "run id must carry a millisecond fraction: {id}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert_ne!(
+            quiz_run_id("generate"),
+            id,
+            "two ids generated >=1ms apart must differ"
+        );
     }
 
     // --- quiz-content-verify task 5.1 (design D8; spec app-workspace /

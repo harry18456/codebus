@@ -71,6 +71,16 @@ impl ActiveRuns {
         let map = self.0.lock().expect("active_runs mutex poisoned");
         map.keys().any(|k| !k.starts_with("chat-"))
     }
+
+    /// Whether any quiz run (RunId keyed with the `quiz-` prefix, covering
+    /// both `quiz-plan-*` and `quiz-generate-*`) is currently active. Used
+    /// by `spawn_quiz_plan` / `spawn_quiz_generate`'s pre-spawn check to
+    /// reject a second concurrent quiz spawn (quiz-double-spawn-guard) —
+    /// mirrors `has_chat_turn` / `has_goal_run`.
+    pub fn has_quiz_run(&self) -> bool {
+        let map = self.0.lock().expect("active_runs mutex poisoned");
+        map.keys().any(|k| k.starts_with("quiz-"))
+    }
 }
 
 #[cfg(test)]
@@ -127,6 +137,27 @@ mod tests {
         runs.insert("2026-05-14T10-20-30Z".into(), Arc::new(AtomicBool::new(false)));
         assert!(runs.has_goal_run());
         assert!(!runs.has_chat_turn(), "goal entry SHALL NOT register as chat");
+    }
+
+    /// quiz-double-spawn-guard: has_quiz_run detects the `quiz-` prefix and
+    /// distinguishes quiz ids from chat / goal ids.
+    #[test]
+    fn has_quiz_run_detects_quiz_prefix() {
+        let runs = ActiveRuns::new();
+        assert!(!runs.has_quiz_run());
+        runs.insert(
+            "quiz-generate-2026-05-21T05-37-14Z".into(),
+            Arc::new(AtomicBool::new(false)),
+        );
+        assert!(runs.has_quiz_run());
+    }
+
+    #[test]
+    fn has_quiz_run_false_for_chat_and_goal_ids() {
+        let runs = ActiveRuns::new();
+        runs.insert("chat-2026-05-21T05-37-14Z".into(), Arc::new(AtomicBool::new(false)));
+        runs.insert("2026-05-21T05-37-14Z".into(), Arc::new(AtomicBool::new(false)));
+        assert!(!runs.has_quiz_run(), "chat / goal ids SHALL NOT register as quiz");
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // Mock Tauri core/event BEFORE importing the component (mirrors
@@ -238,6 +239,29 @@ describe("QuizTab", () => {
     )
     expect(invokedCommands()).not.toContain("spawn_quiz_plan")
     expect(screen.queryByTestId("quiz-history")).not.toBeInTheDocument()
+  })
+
+  // quiz-double-spawn-guard: the Page-flow effect must fire generation
+  // exactly once even when the effect is invoked twice for the same
+  // `pendingPage` value (React StrictMode double-invoke in dev was
+  // producing two quiz attempts from a single "Quiz me on this" click).
+  it("Page flow fires generate once under StrictMode double-invoke", async () => {
+    render(
+      <StrictMode>
+        <QuizTab
+          vaultPath="/v"
+          pendingPage="wiki/modules/auth.md"
+          onPendingConsumed={vi.fn()}
+        />
+      </StrictMode>,
+    )
+    await waitFor(() =>
+      expect(invokedCommands()).toContain("spawn_quiz_generate"),
+    )
+    const genCalls = invokeMock.mock.calls.filter(
+      (c) => c[0] === "spawn_quiz_generate",
+    )
+    expect(genCalls).toHaveLength(1)
   })
 
   // --- task 5.2: plan-confirm-generate flow ---

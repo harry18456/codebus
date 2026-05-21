@@ -1,0 +1,12 @@
+## 1. 前端 single-fire guard（codebus-app）
+
+- [x] 1.1 [P] **TDD**：先在 `codebus-app/src/components/workspace/QuizTab.test.tsx` 加回歸測試——模擬 Page-flow（設定 `pendingPage`）在 effect 重複 invoke 同一值（StrictMode double-invoke 或同值重 render）下，斷言 `spawnQuizGenerate`（mock invoke `spawn_quiz_generate`）只被呼叫一次（初始 RED）；再在 `QuizTab.tsx` 的 Page-flow `useEffect` 加 `useRef`（per-value latch，記錄已對哪個 `pendingPage` 觸發過），同值第二次 invoke no-op，沿用既有 `onPendingConsumed?.()`。落實 design Decision「前端：useRef re-entry guard（不改 effect 依賴）」與 app-workspace `Quiz Spawn Single-Fire and Concurrency Guard` 的 frontend single-fire scenario。Verify: `npx vitest run --no-coverage QuizTab` 全綠且該 case 斷言 invoke 次數 == 1。
+
+## 2. 後端併發拒絕 + run_id 去撞號（codebus-app-tauri）
+
+- [x] 2.1 [P] **TDD**：在 `codebus-app/src-tauri/src/state/active_runs.rs` 加 `pub fn has_quiz_run(&self) -> bool`（key 以 `quiz-` 前綴判定），並加單元測試：含 `quiz-` key → true、只含 `chat-` 或無前綴（goal）key → false。落實 design Decision「後端：`ActiveRuns::has_quiz_run()` + spawn 併發拒絕」與 app-workspace 的 `has_quiz_run distinguishes...` scenario。Verify: `cargo test --package codebus-app-tauri state::active_runs` 全綠。
+- [x] 2.2 **TDD**：在 `codebus-app/src-tauri/src/ipc/quiz.rs`——(a) `spawn_quiz_plan_with_runner` 與 `spawn_quiz_generate_with_runner` 在 spawn 前檢查 `active_runs.has_quiz_run()`，為真則回 `AppError::Invalid { field: "active_runs", message: "a quiz run is already active" }` 且不 insert、不呼叫 runner；(b) `quiz_run_id` 由 `SecondsFormat::Secs` 改 `SecondsFormat::Millis`。先寫測試（RED）：預先 `active_runs.insert` 一個 `quiz-...` key 後，以注入式 runner 呼叫 `spawn_quiz_generate_with_runner` 斷言回 `AppError::Invalid{field:"active_runs"}` 且 runner 未被呼叫；另測 `quiz_run_id` 連兩次呼叫產出不同字串。落實 design Decision「後端：`ActiveRuns::has_quiz_run()` + spawn 併發拒絕」「後端：`quiz_run_id` 改毫秒精度」與 app-workspace 的 `Second concurrent quiz spawn is rejected` / `Quiz run ids ... distinct` scenario。**依賴 2.1（`has_quiz_run`）**。本 change 依 design Decision「TOCTOU 取捨（明示）」**不**引入 atomic check-and-insert（check 與 insert 仍兩次鎖取得），殘餘 race 由前端 guard 消除已知同步雙觸發後視為可接受。Verify: `cargo test --package codebus-app-tauri ipc::quiz` 全綠。
+
+## 3. 回歸驗證
+
+- [x] 3.1 全套件回歸：`cargo test --package codebus-app-tauri` 與 `npx vitest run --no-coverage QuizTab`（必要時整包前端）皆全綠；確認既有 quiz plan/generate 正常路徑（單一觸發）不因新增拒絕而失敗（既有 quiz IPC 測試的注入式 runner 路徑在「無前置 active quiz run」前提下仍 spawn 成功）。落實 design「Acceptance criteria」回歸條件。Verify: 兩套件 0 failed。
