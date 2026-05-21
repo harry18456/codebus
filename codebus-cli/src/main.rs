@@ -78,7 +78,12 @@ async fn main() -> ExitCode {
     // run (per the "Detection runs once per process" scenario). Hook sub-
     // command is internal (Claude Code stdin/stdout JSON contract) and
     // therefore does not consume render options.
-    let render_opts = RenderOptions::detect();
+    let mut render_opts = RenderOptions::detect();
+    // cli-debug-stream-detail: --debug switches the agent-stream renderer to
+    // verbose (full tool input / result, no truncation). Default mode keeps
+    // the compact rendering. Applies to the agent-spawning verbs that consume
+    // this snapshot (goal / query / fix / chat).
+    render_opts.verbose = cli.debug;
     match cli.command {
         None | Some(Command::Init) => {
             commands::init::run(

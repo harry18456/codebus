@@ -1,0 +1,12 @@
+## 1. RenderOptions verbose 欄位（codebus-core）
+
+- [x] 1.1 在 `codebus-core/src/render/options.rs` 的 `RenderOptions` 加 `pub verbose: bool` 欄位；`detect` / `detect_with_vault_id` / `no_styling` / `explicit` 四個 constructor 的 struct literal 一律補 `verbose: false`，**不改 `explicit` 的 4-參數簽名**（落實 design Decision「`RenderOptions` 加 `pub verbose: bool`，欄位賦值串入」）。加單元測試：`detect()` 與 `no_styling()` 的 `verbose` 皆為 `false`。Verify: `cargo test --package codebus-core render::options` 全綠、`explicit()` 既有呼叫點不需改動即編譯通過。
+
+## 2. format_event verbose 分支（codebus-core）
+
+- [x] 2.1 **測試先寫（RED）**：在 `codebus-core/src/render/stream_event.rs` tests 模組加 verbose 渲染測試，逐條對應 `agent-stream-rendering` spec 的 `Stream Event Terminal Rendering` requirement 新增的 verbose scenario：(a) ToolResult 500 字 output 在 verbose 下完整出現、不含 `…` 截斷尾；(b) Read 結果（含 `(N lines)` 形式）verbose 下顯示完整 output 而非只 `(N lines)`；(c) Write 成功 echo（`File created successfully…`）verbose 下不為空字串、含原文；(d) Write ToolUse 的 `input` 含 `content` 時，verbose 下輸出含完整 content 字串（非只 file_path）；(e) 一般 tool（Grep）的 array input 在 verbose 下展開（含 `*.rs`）而非收成 `[N items]`。初始狀態應 FAIL（verbose 分支未實作）。Verify: `cargo test --package codebus-core render::stream_event` 出現新測試紅燈。
+- [x] 2.2 **實作（GREEN）**：在 `format_event` 依 `opts.verbose` 分支（落實 design Decision「`format_event` 依 `opts.verbose` 分支；verbose = 完整 input/result」、實作 `agent-stream-rendering` 的 `Stream Event Terminal Rendering` requirement verbose 分支）：`verbose=false` 維持現有精簡/截斷路徑逐字節不變；`verbose=true` 時——所有 `ToolUse`（含 Write/Edit）印 `<name>` + 完整 `input` JSON（pretty、四格縮排）、`ToolResult` 印完整 `output`（不截 200 字、不替換 Read 行數、不抑制 Write echo），`Thought`/`Usage` 不變。Verify: 2.1 全綠，且既有 compact 測試（200 字截斷 / Read 行數 / Write echo 抑制 / Write path / Grep 摘要 / Thought / Usage / path 正規化）仍全綠（回歸鎖定）。
+
+## 3. 串入 --debug（codebus-cli）
+
+- [x] 3.1 在 `codebus-cli/src/main.rs` 建立 `RenderOptions` 後，依既有全域旗標 `cli.debug` 設 `render_opts.verbose = cli.debug`，使 agent-spawning verb（goal/query/fix/chat）的 `print_event` 渲染閉包拿到正確 verbose 值（落實 design Decision「複用 `--debug`，不新增旗標」與 Implementation Contract「`main.rs` 依 `cli.debug` 設 `render_opts.verbose`」，並接線 `cli` spec 的 `Debug Flag Output` requirement 兩 scenario「Debug flag enables verbose agent stream rendering」/「Default mode keeps compact agent stream rendering」）。Verify: `cargo build --package codebus-cli` 通過；確認 `--debug` 路徑下傳給渲染的 `RenderOptions.verbose` 為 true、無 `--debug` 為 false（程式碼接線確認）；`cargo test --package codebus-cli` 全綠（既有 CLI 整合測試不因此 fail）。

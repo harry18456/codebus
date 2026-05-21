@@ -50,6 +50,15 @@ pub fn format_event(event: &StreamEvent, opts: &RenderOptions) -> String {
         }
         StreamEvent::ToolUse { name, input } => {
             if name == "Write" || name == "Edit" {
+                // Verbose: show the complete input JSON (incl. written /
+                // edited content) instead of only the file path.
+                if opts.verbose {
+                    return format!(
+                        "{} [正在生成]\n{}",
+                        lead("✍️", "+", opts),
+                        indent(&pretty_input(input))
+                    );
+                }
                 let fp = input
                     .get("file_path")
                     .and_then(Value::as_str)
@@ -57,14 +66,22 @@ pub fn format_event(event: &StreamEvent, opts: &RenderOptions) -> String {
                     .unwrap_or_else(|| "(unknown)".into());
                 format!("{} [正在生成]\n{INDENT}{fp}", lead("✍️", "+", opts))
             } else {
-                let args = format_tool_args(input);
-                format!(
-                    "{} [呼叫工具]\n{INDENT}{name}({args})",
-                    lead("🛠️", "→", opts)
-                )
+                // Verbose: full input JSON (no array/object collapsing).
+                let body = if opts.verbose {
+                    format!("{name}\n{}", pretty_input(input))
+                } else {
+                    format!("{name}({})", format_tool_args(input))
+                };
+                format!("{} [呼叫工具]\n{}", lead("🛠️", "→", opts), indent(&body))
             }
         }
         StreamEvent::ToolResult { output, is_error } => {
+            // Verbose: surface the complete output verbatim — no Write-echo
+            // suppression, no read-line-count substitution, no truncation.
+            if opts.verbose {
+                let _ = is_error;
+                return format!("{} [觀察結果]\n{}", lead("👀", "←", opts), indent(output));
+            }
             if is_write_success_echo(output) {
                 return String::new();
             }
@@ -94,6 +111,13 @@ pub fn print_event(event: &StreamEvent, opts: &RenderOptions) {
     if !s.is_empty() {
         println!("{s}");
     }
+}
+
+/// Full tool input for verbose mode: pretty-printed JSON. Falls back to the
+/// compact JSON form if pretty-printing somehow fails (it does not for valid
+/// `Value`s, but the `Result` is handled rather than unwrapped).
+fn pretty_input(input: &Value) -> String {
+    serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string())
 }
 
 /// Compact key=value summary of tool input. Best-effort: known string fields
@@ -304,5 +328,85 @@ mod tests {
         );
         assert!(s.contains("C:/repo/wiki/foo.md"), "got: {s:?}");
         assert!(!s.contains("\\repo"), "backslash leaked: {s:?}");
+    }
+
+    // ---- cli-debug-stream-detail: verbose mode rendering ----
+
+    fn verbose_on() -> RenderOptions {
+        let mut o = RenderOptions::explicit(true, false, false, None);
+        o.verbose = true;
+        o
+    }
+
+    /// Spec scenario: "Verbose mode renders full tool result without truncation"
+    #[test]
+    fn verbose_toolresult_not_truncated() {
+        let long: String = "x".repeat(500);
+        let s = format_event(
+            &StreamEvent::ToolResult {
+                output: long.clone(),
+                is_error: false,
+            },
+            &verbose_on(),
+        );
+        assert!(s.contains(&long), "full 500-char output must appear: {s:?}");
+        assert!(!s.contains('…'), "no truncation marker in verbose: {s:?}");
+    }
+
+    /// Spec scenario: "Verbose mode renders read result fully instead of line count"
+    #[test]
+    fn verbose_toolresult_read_full_not_line_count() {
+        let s = format_event(
+            &StreamEvent::ToolResult {
+                output: "fn main() {}\n(3 lines)".into(),
+                is_error: false,
+            },
+            &verbose_on(),
+        );
+        assert!(s.contains("fn main() {}"), "full output expected: {s:?}");
+    }
+
+    /// Spec scenario: "Verbose mode does not suppress Write-success echo"
+    #[test]
+    fn verbose_toolresult_write_echo_not_suppressed() {
+        let s = format_event(
+            &StreamEvent::ToolResult {
+                output: "File created successfully at /x.md".into(),
+                is_error: false,
+            },
+            &verbose_on(),
+        );
+        assert!(!s.is_empty(), "verbose must not suppress echo: {s:?}");
+        assert!(s.contains("File created successfully"), "got: {s:?}");
+    }
+
+    /// Spec scenario: "Verbose mode renders full tool input for Write"
+    #[test]
+    fn verbose_tooluse_write_shows_full_input() {
+        let s = format_event(
+            &StreamEvent::ToolUse {
+                name: "Write".into(),
+                input: json!({"file_path": "/x.md", "content": "hello world body"}),
+            },
+            &verbose_on(),
+        );
+        assert!(
+            s.contains("hello world body"),
+            "full written content expected: {s:?}"
+        );
+    }
+
+    /// Spec scenario: "Verbose mode renders full tool input for other tools"
+    #[test]
+    fn verbose_tooluse_other_expands_array_input() {
+        let s = format_event(
+            &StreamEvent::ToolUse {
+                name: "Grep".into(),
+                input: json!({"pattern": "needle", "glob": ["*.rs", "*.toml"]}),
+            },
+            &verbose_on(),
+        );
+        assert!(s.contains("needle"), "pattern expected: {s:?}");
+        assert!(s.contains("*.rs"), "array must be expanded, not collapsed: {s:?}");
     }
 }

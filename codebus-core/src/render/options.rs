@@ -32,6 +32,11 @@ pub struct RenderOptions {
     /// `obsidian://open?vault=<id>&file=<rel>`. `None` disables OSC 8
     /// emission for the lint output even when `use_hyperlinks` is true.
     pub vault_id: Option<String>,
+    /// When true, the agent-stream renderer surfaces complete tool input and
+    /// complete tool result without summarization / truncation / suppression
+    /// (the CLI sets this from the `--debug` flag). Defaults to false in every
+    /// constructor, preserving the compact rendering as the default mode.
+    pub verbose: bool,
 }
 
 impl RenderOptions {
@@ -56,6 +61,7 @@ impl RenderOptions {
             use_color,
             use_hyperlinks,
             vault_id,
+            verbose: false,
         }
     }
 
@@ -68,6 +74,7 @@ impl RenderOptions {
             use_color: false,
             use_hyperlinks: false,
             vault_id: None,
+            verbose: false,
         }
     }
 
@@ -86,6 +93,7 @@ impl RenderOptions {
             use_color,
             use_hyperlinks,
             vault_id,
+            verbose: false,
         }
     }
 }
@@ -163,5 +171,15 @@ mod tests {
     fn detect_with_vault_id_carries_through() {
         let opts = RenderOptions::detect_with_vault_id(Some("my-vault".into()));
         assert_eq!(opts.vault_id.as_deref(), Some("my-vault"));
+    }
+
+    /// cli-debug-stream-detail: verbose defaults to false in every
+    /// constructor so compact rendering stays the default mode.
+    #[test]
+    fn verbose_defaults_to_false() {
+        assert!(!RenderOptions::detect().verbose);
+        assert!(!RenderOptions::no_styling().verbose);
+        assert!(!RenderOptions::detect_with_vault_id(Some("v".into())).verbose);
+        assert!(!RenderOptions::explicit(true, true, false, None).verbose);
     }
 }
