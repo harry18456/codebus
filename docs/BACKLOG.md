@@ -15,6 +15,8 @@
 | 2026-05-14 | MyCoder CLI 整合 | pending（等對方 CLI 長出 contract，見 2026-05-20 spike 結論） | 中（spike 後定） | [mycoder-cli](2026-05-14-mycoder-cli-backlog.md) |
 | 2026-05-14 | GitHub 倉庫設定（Actions CI + Release + Issue templates） | release readiness | 輕-中（1-2 個半天） | [github-repo-setup](2026-05-14-github-repo-setup-backlog.md) |
 | 2026-05-14 | Settings 缺少 chat verb 的 model / effort 設定 | UX gap（設定不透明） | 輕-中（方案 A 半天 / 方案 B 1-2 半天） | [settings-chat-model](2026-05-14-settings-chat-model-backlog.md) |
+| 2026-05-21 | App Activity Stream 顯示完整 AI 回覆細節（CLI 詳細模式的前端對齊） | UX 補強 | 輕-中（觸發 UX 定案後約 1 個半天） | [app-stream-verbose-detail](2026-05-21-app-stream-verbose-detail-backlog.md) |
+| 2026-05-21 | 確認 swap 對 subagent 的控制與限制（驗證測試） | security 驗證缺口 | 輕（實測半天，修補另計） | [subagent-sandbox-control](2026-05-21-subagent-sandbox-control-backlog.md) |
 
 ## 已 archived 項目
 
