@@ -21,6 +21,18 @@ agent 自述「NO TASK TOOL」，並指出 `agents.md` 定義的 planner / code-
 
 附帶觀察（非漏洞）：`--tools Read,Glob,Grep` 實際 init 多出 `LSP`（claude 自動帶的唯讀語言工具）。良性、與 subagent 無關，但代表 codebus 的 toolset 不完全等於它明列的清單——若日後要嚴格鎖定，可另議（非本條範圍）。
 
+## 控制性（2026-05-21 實測延伸 — 「能否使用 / 能否控制 subagent」）
+
+承上，原始問題其實是雙向的：除了「會不會逃逸」，也包含「codebus 能不能**主動啟用並控制** subagent」。實測結論：**完全可控、可用**。
+
+- **能否使用**：可以。subagent 現在關著純粹因為 `Task` 不在 codebus 的 toolset。實測在 `--tools` 加上 `Task` → init tools 出現 `Task`、模型成功透過 `Agent` tool（`subagent_type`）啟動 subagent。
+- **控制「有哪些 subagent」**：以 spawn cwd（= vault root）下的 `.claude/agents/<name>.md` 定義為準。實測在 temp vault 放一個 `reader`（`tools: Read`）→ 模型以 `subagent_type: 'reader'` 啟動該自訂 agent、讀檔並正確回傳內容；未放定義時 fallback 到內建 `general-purpose`。codebus 可藉「ship 哪些 agent 定義進 vault」控制可用集合。
+- **控制「每個 subagent 的工具 / 模型」**：各 agent frontmatter 的 `tools:` / `model:`。
+
+**仍未驗證（若日後要啟用 Task 必須先確認）**：被啟動的 subagent 是否**繼承** parent 的 `--strict-mcp-config`（MCP 隔離）與 `--tools` 上限。這從 parent 的 stream-json 不易觀察（subagent 的 init 不會 surface 到 parent stream）。若不繼承，啟用 Task 可能在 subagent 層重開 MCP 漏洞——啟用前需專門測這條。
+
+**現況決策**：codebus 維持 subagent 關閉（toolset 不含 Task），符合當前「單一受限 agent」的 sandbox 模型。若未來要引入受控 subagent（例如平行化、專職 reviewer），再起獨立 change，並把「subagent 是否繼承 MCP/tool 隔離」列為該 change 的首要驗證項。
+
 ---
 
 ## 觀察
