@@ -29,9 +29,14 @@ agent 自述「NO TASK TOOL」，並指出 `agents.md` 定義的 planner / code-
 - **控制「有哪些 subagent」**：以 spawn cwd（= vault root）下的 `.claude/agents/<name>.md` 定義為準。實測在 temp vault 放一個 `reader`（`tools: Read`）→ 模型以 `subagent_type: 'reader'` 啟動該自訂 agent、讀檔並正確回傳內容；未放定義時 fallback 到內建 `general-purpose`。codebus 可藉「ship 哪些 agent 定義進 vault」控制可用集合。
 - **控制「每個 subagent 的工具 / 模型」**：各 agent frontmatter 的 `tools:` / `model:`。
 
-**仍未驗證（若日後要啟用 Task 必須先確認）**：被啟動的 subagent 是否**繼承** parent 的 `--strict-mcp-config`（MCP 隔離）與 `--tools` 上限。這從 parent 的 stream-json 不易觀察（subagent 的 init 不會 surface 到 parent stream）。若不繼承，啟用 Task 可能在 subagent 層重開 MCP 漏洞——啟用前需專門測這條。
+**繼承驗證（2026-05-21 實測，已釐清 — 安全）**：原本擔心「subagent 不繼承 parent 的 `--tools` / `--strict-mcp-config`，啟用 Task 後在 subagent 層重開漏洞」。用「讓 subagent 嘗試越權動作、再看 ground truth」的方式測：
 
-**現況決策**：codebus 維持 subagent 關閉（toolset 不含 Task），符合當前「單一受限 agent」的 sandbox 模型。若未來要引入受控 subagent（例如平行化、專職 reviewer），再起獨立 change，並把「subagent 是否繼承 MCP/tool 隔離」列為該 change 的首要驗證項。
+- **`--tools` 上限**：parent `--tools` 無 Write，定義一個 frontmatter 寫 `tools: Read, Write` 的 `writer` subagent，叫它建檔。結果：檔案**未生成**，subagent 自報「No such tool available: Write. Write exists but is not enabled in this context」。→ subagent **無法取得 parent 未授予的工具**，parent `--tools` 是硬天花板。
+- **MCP 隔離**：parent 帶 `--strict-mcp-config` 時 subagent 回報「NO MCP TOOLS」。對照組——parent **不帶** `--strict-mcp-config`（parent init 確實有 8 個 claude.ai 連接器 mcp 工具）時，`tools: Read` 的 subagent **仍回報「NO MCP TOOLS」**。→ subagent 不會自動繼承 ambient MCP；其有效工具集 ≈ (agent def `tools:`) ∩ (parent `--tools` 天花板)。
+
+**綜合結論**：subagent 受 parent 的 `--tools` 與 MCP 隔離雙重約束，**啟用 Task 不會突破 read-only 上限、也不會在 subagent 層重開 MCP 漏洞**。先前的「未驗證風險」消除。
+
+**現況決策**：codebus 仍維持 subagent 關閉（toolset 不含 Task），符合「單一受限 agent」模型。但**安全面已不再是阻礙**——若未來要引入受控 subagent（平行化 / 專職 reviewer），可放心啟用 Task，控制點為「ship 哪些 agent 定義 + 各 def 的 `tools:`」，且 parent 上限與 MCP 隔離會自動套用到 subagent。屆時仍建議起獨立 change 並做一次同樣的 ground-truth 回歸。
 
 ---
 
