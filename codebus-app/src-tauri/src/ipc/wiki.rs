@@ -22,7 +22,9 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use codebus_core::vault::obsidian_register::{lookup_vault_id_at, obsidian_json_path};
+use codebus_core::vault::obsidian_register::{
+    lookup_vault_id_at, obsidian_json_path, register_at,
+};
 use serde::{Deserialize, Serialize};
 
 use super::IpcResult;
@@ -190,7 +192,7 @@ fn strip_frontmatter(content: &str) -> &str {
 #[tauri::command]
 pub async fn get_obsidian_vault_id(vault_path: String) -> IpcResult<Option<String>> {
     let wiki_root = Path::new(&vault_path).join(".codebus").join("wiki");
-    resolve_vault_id(&wiki_root, obsidian_json_path().as_deref())
+    register_and_resolve_vault_id(&wiki_root, obsidian_json_path().as_deref())
 }
 
 /// Open the wiki page identified by `slug` in Obsidian.
@@ -206,10 +208,38 @@ pub async fn open_wiki_in_obsidian(vault_path: String, slug: String) -> IpcResul
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(AppError::internal)
 }
 
-/// Shared body of [`get_obsidian_vault_id`]. `json_path` is `None` when
-/// Obsidian's config dir is absent, mirroring `lookup_vault_id`'s own
-/// "no config dir → Ok(None)" semantics. An `Err` from the core helper
-/// (parse failure) maps to `AppError`.
+/// Probe body of [`get_obsidian_vault_id`]: ensure the vault is registered in
+/// Obsidian, then resolve its id. Because codebus-app creates/binds vaults
+/// without init-time Obsidian registration, this is the universal touchpoint
+/// that registers any vault the user views (new OR pre-existing) so the
+/// `[Open in Obsidian]` button works.
+///
+/// Registration is idempotent (re-registering only refreshes the timestamp)
+/// and fail-soft: a `RegisterOutcome::ObsidianNotInstalled` (config dir
+/// absent → `json_path` is `None`) writes nothing, and an `IoError` is
+/// swallowed — either way the subsequent [`resolve_vault_id`] reports the
+/// resulting state (`None` → button hidden). This wrapper deliberately does
+/// NOT live in [`resolve_vault_id`]: the `open_wiki_in_obsidian` action reuses
+/// the pure-lookup `resolve_vault_id` so it still rejects an unregistered
+/// vault rather than silently registering at click time.
+fn register_and_resolve_vault_id(
+    wiki_root: &Path,
+    json_path: Option<&Path>,
+) -> Result<Option<String>, AppError> {
+    if let Some(p) = json_path {
+        // Idempotent + fail-soft: ignore the outcome; resolve_vault_id below
+        // reports the resulting registration state.
+        let _ = register_at(wiki_root, p);
+    }
+    resolve_vault_id(wiki_root, json_path)
+}
+
+/// Pure-lookup resolver. `json_path` is `None` when Obsidian's config dir is
+/// absent, mirroring `lookup_vault_id`'s own "no config dir → Ok(None)"
+/// semantics. An `Err` from the core helper (parse failure) maps to
+/// `AppError`. Used by both the probe (via
+/// [`register_and_resolve_vault_id`]) and the `open_wiki_in_obsidian` action
+/// (which relies on the pure-lookup behavior to reject unregistered vaults).
 fn resolve_vault_id(
     wiki_root: &Path,
     json_path: Option<&Path>,
@@ -480,6 +510,63 @@ mod tests {
 
         let err = resolve_vault_id(&wiki_root, Some(&json)).expect_err("must error");
         assert!(matches!(err, AppError::Io { .. }), "got {err:?}");
+    }
+
+    /// Task 1.1 — the probe registers a not-yet-registered vault and then
+    /// resolves to Some; the entry is persisted to obsidian.json.
+    #[test]
+    fn probe_registers_unregistered_vault() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let json = tmp.path().join("obsidian/obsidian.json");
+        fs::create_dir_all(json.parent().unwrap()).unwrap();
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        fs::create_dir_all(&wiki_root).unwrap();
+
+        // Pure lookup sees no entry yet (action path would reject).
+        assert_eq!(resolve_vault_id(&wiki_root, Some(&json)).unwrap(), None);
+
+        // Probe registers, then resolves to Some.
+        let got = register_and_resolve_vault_id(&wiki_root, Some(&json)).unwrap();
+        assert!(got.is_some(), "probe must register then return Some");
+        // Entry persisted: a subsequent pure lookup now finds the same id.
+        assert_eq!(resolve_vault_id(&wiki_root, Some(&json)).unwrap(), got);
+    }
+
+    /// Task 1.1 — probe registration is idempotent: two calls return the same
+    /// id and leave exactly one entry for the wiki path.
+    #[test]
+    fn probe_register_is_idempotent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let json = tmp.path().join("obsidian/obsidian.json");
+        fs::create_dir_all(json.parent().unwrap()).unwrap();
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        fs::create_dir_all(&wiki_root).unwrap();
+
+        let first = register_and_resolve_vault_id(&wiki_root, Some(&json)).unwrap();
+        let second = register_and_resolve_vault_id(&wiki_root, Some(&json)).unwrap();
+        assert!(first.is_some());
+        assert_eq!(first, second);
+
+        let body = fs::read_to_string(&json).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let vaults = v.get("vaults").and_then(|m| m.as_object()).unwrap();
+        assert_eq!(vaults.len(), 1, "idempotent: exactly one vault entry");
+    }
+
+    /// Task 1.3 — probe with no Obsidian config dir (None json path) returns
+    /// Ok(None) and writes nothing (no regression for users without Obsidian).
+    #[test]
+    fn probe_returns_none_and_writes_nothing_when_no_config_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        fs::create_dir_all(&wiki_root).unwrap();
+
+        let got = register_and_resolve_vault_id(&wiki_root, None).unwrap();
+        assert_eq!(got, None);
+        assert!(
+            !tmp.path().join("obsidian/obsidian.json").exists(),
+            "no obsidian.json may be created when config dir is absent"
+        );
     }
 
     /// Task 1.3 — registered vault + real sub-folder slug → spec URL.

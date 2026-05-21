@@ -2572,15 +2572,22 @@ tests:
 ---
 ### Requirement: Open Wiki Page In Obsidian
 
-The system SHALL let the user open the currently-previewed wiki page in Obsidian directly from the codebus-app Wiki tab, leveraging the Obsidian vault registration that `codebus init` already performs (`codebus_core::vault::obsidian_register`). This requirement defines two Tauri IPC commands (a visibility probe and an open action) and the WikiPreview button that drives them. These commands are defined separately from the `Tauri IPC Commands for Goal Lifecycle and Wiki Read` requirement, following the same precedent by which the chat-turn lifecycle commands live in their own requirement.
+The system SHALL let the user open the currently-previewed wiki page in Obsidian directly from the codebus-app Wiki tab. Because codebus-app creates and binds vaults WITHOUT performing Obsidian registration (the app's init path passes `no_obsidian_register: true` and the app has no equivalent of the CLI's init-time registration), the app SHALL ensure registration at vault view time via the `get_obsidian_vault_id` probe described below, rather than assuming `codebus init` already registered the vault. This requirement defines two Tauri IPC commands (a register-and-resolve probe and an open action) and the WikiPreview button that drives them. These commands are defined separately from the `Tauri IPC Commands for Goal Lifecycle and Wiki Read` requirement, following the same precedent by which the chat-turn lifecycle commands live in their own requirement.
 
 #### IPC command: get_obsidian_vault_id
 
-`get_obsidian_vault_id(vault_path: String) -> Result<Option<String>, AppError>` SHALL resolve the Obsidian vault id for the vault's wiki directory by calling `codebus_core::vault::obsidian_register::lookup_vault_id(<vault_path>/.codebus/wiki)`. The result mapping SHALL be:
+`get_obsidian_vault_id(vault_path: String) -> Result<Option<String>, AppError>` SHALL, in order:
 
-- `Ok(Some(id))` from the core helper → `Ok(Some(id))` (the 16-char SHA-256 prefix Obsidian uses as the vault key).
+1. Attempt to register `<vault_path>/.codebus/wiki` into the user-level `obsidian.json` by calling `codebus_core::vault::obsidian_register::register_vault`. This step SHALL be idempotent (re-registering an already-present vault updates the existing entry's timestamp and SHALL NOT create a duplicate entry) and fail-soft (a `RegisterOutcome::ObsidianNotInstalled` or `RegisterOutcome::IoError` SHALL NOT abort the command, SHALL NOT surface an error, and SHALL leave step 2 to report the resulting state). When Obsidian is not installed (config dir absent) no file SHALL be written.
+2. Resolve the Obsidian vault id for the wiki directory by calling `codebus_core::vault::obsidian_register::lookup_vault_id(<vault_path>/.codebus/wiki)`.
+
+The result mapping (from step 2) SHALL be:
+
+- `Ok(Some(id))` from the core helper → `Ok(Some(id))` (the 16-char SHA-256 prefix Obsidian uses as the vault key). After step 1 succeeds for an installed Obsidian, a previously-unregistered vault SHALL resolve to `Some(id)` on this same call.
 - `Ok(None)` (no `obsidian.json`, Obsidian config dir absent, or no entry matches the wiki path) → `Ok(None)`.
 - `Err(io_error)` (the `obsidian.json` exists but cannot be read or parsed) → `Err(AppError)` — a fail-soft signal the frontend treats identically to `None` (button hidden), never a hard crash.
+
+The registration in step 1 is the universal touchpoint that makes the button work for BOTH newly-created and pre-existing vaults: the frontend wiki store calls this command whenever a vault's wiki is loaded, so any vault the user views is registered (or refreshed) at that moment without requiring a re-init.
 
 #### IPC command: open_wiki_in_obsidian
 
@@ -2600,15 +2607,25 @@ The Wiki preview footer action area (the same area that hosts `[Quiz me on this]
 
 When the cached vault id is null (vault not registered, or the probe returned an error), the button SHALL NOT be present in the DOM at all (hidden, not disabled).
 
+#### Scenario: get_obsidian_vault_id registers an unregistered vault then returns Some
+
+- **WHEN** Obsidian is installed (config dir present) AND the vault's wiki path is NOT yet in `obsidian.json` AND the frontend calls `invoke("get_obsidian_vault_id", { vault_path })`
+- **THEN** the command SHALL register the wiki path into `obsidian.json` AND return `Ok(Some(<id>))` where `<id>` is the 16-char vault key for that path
+
+#### Scenario: get_obsidian_vault_id registration is idempotent
+
+- **WHEN** the frontend calls `invoke("get_obsidian_vault_id", { vault_path })` twice for the same vault while Obsidian is installed
+- **THEN** both calls SHALL return `Ok(Some(<id>))` with the same `<id>` AND `obsidian.json` SHALL contain exactly one entry for that wiki path (the second call updates the timestamp, not a duplicate)
+
 #### Scenario: get_obsidian_vault_id returns Some for a registered vault
 
 - **WHEN** the frontend calls `invoke("get_obsidian_vault_id", { vault_path })` AND the user's `obsidian.json` contains an entry whose path matches `<vault_path>/.codebus/wiki`
 - **THEN** the command SHALL return `Ok(Some(<id>))` where `<id>` is the 16-char vault key
 
-#### Scenario: get_obsidian_vault_id returns None when Obsidian not registered
+#### Scenario: get_obsidian_vault_id returns None and writes nothing when Obsidian not installed
 
-- **WHEN** the frontend calls `invoke("get_obsidian_vault_id", { vault_path })` AND no `obsidian.json` exists OR no entry matches the wiki path
-- **THEN** the command SHALL return `Ok(None)`
+- **WHEN** the Obsidian config dir is absent AND the frontend calls `invoke("get_obsidian_vault_id", { vault_path })`
+- **THEN** the command SHALL return `Ok(None)` AND SHALL NOT create or write any `obsidian.json` file (the button stays hidden, no regression for users without Obsidian)
 
 #### Scenario: get_obsidian_vault_id maps a parse failure to AppError (fail-soft)
 
@@ -2646,30 +2663,15 @@ When the cached vault id is null (vault not registered, or the probe returned an
 
 #### Scenario: Button hidden when vault id is null
 
-- **WHEN** the wiki store's cached Obsidian vault id is null
-- **THEN** the `[Open in Obsidian]` button SHALL NOT be present in the DOM (hidden, not merely disabled)
+- **WHEN** the wiki store's cached Obsidian vault id is null (vault not registered after the probe, or the probe returned an error)
+- **THEN** the `[Open in Obsidian]` button SHALL NOT be present in the DOM
 
-#### Scenario: Clicking the button invokes the open command with the current slug
-
-- **WHEN** the preview shows the page with slug `uv-lib` AND the vault id is non-null AND the user clicks `[Open in Obsidian]`
-- **THEN** the frontend SHALL call `invoke("open_wiki_in_obsidian", { vault_path, slug: "uv-lib" })` exactly once
 
 <!-- @trace
-source: wiki-open-in-obsidian
-updated: 2026-05-21
+source: app-obsidian-register-on-open
+updated: 2026-05-22
 code:
-  - codebus-core/src/vault/obsidian_register.rs
-  - codebus-app/src/lib/ipc.ts
-  - codebus-app/src/store/wiki.ts
   - codebus-app/src-tauri/src/ipc/wiki.rs
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - codebus-app/src/i18n/messages.ts
-  - docs/v3-roadmap.md
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-tests:
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
-  - codebus-app/src/store/wiki.test.ts
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
 -->
 
 ---
