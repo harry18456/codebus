@@ -4,7 +4,22 @@
 **Surfaced during:** discuss 2026-05-21（MCP 隔離實測後延伸——同類 sandbox 邊界問題）
 **Severity:** security 驗證缺口（未知 = 風險，需實測釐清）
 **Owner:** harry
-**Status:** open
+**Status:** resolved — 實測確認安全，無需修補（2026-05-21）
+
+---
+
+## 驗證結果（2026-05-21 實測）
+
+用 codebus 完全相同的 spawn flag（含 `spawn-mcp-isolation` 後的 `--strict-mcp-config --mcp-config '{"mcpServers":{}}'`）跑 `claude -p`，看 init 事件的 `tools` 清單：
+
+- **query / chat toolset**（`--tools Read,Glob,Grep`）→ session tools = `Glob, Grep, LSP, Read`。**無 Task**。
+- **goal toolset**（`--tools Read,Glob,Grep,Write,Edit`）→ session tools = `Edit, Glob, Grep, LSP, Read, Write`。**無 Task**。
+
+agent 自述「NO TASK TOOL」，並指出 `agents.md` 定義的 planner / code-reviewer 等 subagent 需要 Task 工具才能啟動，而 session 未提供。
+
+**結論**：跟 MCP（`--tools` 擋不住、會洩漏）**相反**，`Task` 是內建工具，`--tools` 沒列就**確實排除**。codebus spawn 出來的 agent 根本拿不到 Task → 無法啟動任何 subagent → 不存在「subagent 繞過 toolset / MCP 隔離」的途徑。本軸的 sandbox 成立，**無需修補**。
+
+附帶觀察（非漏洞）：`--tools Read,Glob,Grep` 實際 init 多出 `LSP`（claude 自動帶的唯讀語言工具）。良性、與 subagent 無關，但代表 codebus 的 toolset 不完全等於它明列的清單——若日後要嚴格鎖定，可另議（非本條範圍）。
 
 ---
 
