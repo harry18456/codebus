@@ -18,9 +18,11 @@
 //! frontmatter or the YAML cannot be parsed, the slug doubles as the
 //! title so the file tree still renders.
 
+use std::fmt::Write as _;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
+use codebus_core::vault::obsidian_register::{lookup_vault_id_at, obsidian_json_path};
 use serde::{Deserialize, Serialize};
 
 use super::IpcResult;
@@ -168,6 +170,121 @@ fn strip_frontmatter(content: &str) -> &str {
     content
 }
 
+// ---- Open in Obsidian -----------------------------------------------------
+//
+// Spec touchpoints (wiki-open-in-obsidian):
+// - `app-workspace § Open Wiki Page In Obsidian` (`get_obsidian_vault_id`
+//   probe + `open_wiki_in_obsidian` action + the URL-builder contract).
+//
+// The vault id is the 16-char SHA-256 prefix Obsidian uses as its vault key,
+// resolved via `codebus_core::vault::obsidian_register` — the same source the
+// CLI lint OSC 8 hyperlinks use, so the app and the terminal target identical
+// `obsidian://open?vault=<id>&file=<rel>` URLs.
+
+/// Resolve the Obsidian vault id registered for `<vault>/.codebus/wiki`.
+///
+/// Probe half of the design's two-command split — the frontend caches the
+/// result and only renders `[Open in Obsidian]` when it is `Some`. `Err`
+/// (obsidian.json present but unreadable / unparseable) is fail-soft: the
+/// frontend treats it identically to `None`.
+#[tauri::command]
+pub async fn get_obsidian_vault_id(vault_path: String) -> IpcResult<Option<String>> {
+    let wiki_root = Path::new(&vault_path).join(".codebus").join("wiki");
+    resolve_vault_id(&wiki_root, obsidian_json_path().as_deref())
+}
+
+/// Open the wiki page identified by `slug` in Obsidian.
+///
+/// Action half of the split. Re-resolves the vault id on every call rather
+/// than trusting a frontend-supplied cached id, so a vault that becomes
+/// unregistered while the app is open is caught here (design Decision
+/// "action command 重新解析 id").
+#[tauri::command]
+pub async fn open_wiki_in_obsidian(vault_path: String, slug: String) -> IpcResult<()> {
+    let wiki_root = Path::new(&vault_path).join(".codebus").join("wiki");
+    let url = resolve_obsidian_url(&wiki_root, obsidian_json_path().as_deref(), &slug)?;
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(AppError::internal)
+}
+
+/// Shared body of [`get_obsidian_vault_id`]. `json_path` is `None` when
+/// Obsidian's config dir is absent, mirroring `lookup_vault_id`'s own
+/// "no config dir → Ok(None)" semantics. An `Err` from the core helper
+/// (parse failure) maps to `AppError`.
+fn resolve_vault_id(
+    wiki_root: &Path,
+    json_path: Option<&Path>,
+) -> Result<Option<String>, AppError> {
+    match json_path {
+        Some(p) => lookup_vault_id_at(wiki_root, p).map_err(AppError::from),
+        None => Ok(None),
+    }
+}
+
+/// Steps 1–4 of `open_wiki_in_obsidian` (everything except the actual
+/// `open_url` spawn) factored out so the URL can be asserted in tests
+/// without launching Obsidian.
+fn resolve_obsidian_url(
+    wiki_root: &Path,
+    json_path: Option<&Path>,
+    slug: &str,
+) -> Result<String, AppError> {
+    let vault_id = resolve_vault_id(wiki_root, json_path)?.ok_or_else(|| AppError::Invalid {
+        field: "obsidian".into(),
+        message: "vault not registered in Obsidian".into(),
+    })?;
+    let abs_page = find_page_by_slug(wiki_root, slug).ok_or_else(|| AppError::Invalid {
+        field: "slug".into(),
+        message: "no such wiki page".into(),
+    })?;
+    build_obsidian_url(&vault_id, wiki_root, &abs_page).ok_or_else(|| AppError::Invalid {
+        field: "slug".into(),
+        message: "could not build obsidian url".into(),
+    })
+}
+
+/// Build `obsidian://open?vault=<id>&file=<rel>` where `<rel>` is `abs_page`
+/// relative to `wiki_root`, separators normalized to `/`, each segment
+/// percent-encoded. Returns `None` when `abs_page` is not under `wiki_root`,
+/// resolves to an empty relative path, or contains a non-`Normal` component
+/// (`..` / a root) that has no place in a vault-relative wiki path.
+fn build_obsidian_url(vault_id: &str, wiki_root: &Path, abs_page: &Path) -> Option<String> {
+    let rel = abs_page.strip_prefix(wiki_root).ok()?;
+    let mut segments = Vec::new();
+    for comp in rel.components() {
+        match comp {
+            Component::Normal(os) => segments.push(percent_encode_segment(os.to_str()?)),
+            _ => return None,
+        }
+    }
+    if segments.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "obsidian://open?vault={vault_id}&file={}",
+        segments.join("/")
+    ))
+}
+
+/// Percent-encode one path segment per RFC 3986 unreserved set
+/// (`A-Za-z0-9-._~` kept; everything else `%XX` per UTF-8 byte). `/` never
+/// appears inside a segment, so it is not special-cased here (segments are
+/// joined with a literal `/` afterward). Matches the encoder behind the CLI
+/// lint OSC 8 URLs so both targets agree byte-for-byte.
+fn percent_encode_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char);
+            }
+            other => {
+                let _ = write!(out, "%{other:02X}");
+            }
+        }
+    }
+    out
+}
+
 // ---- tests ----------------------------------------------------------------
 
 #[cfg(test)]
@@ -267,5 +384,149 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let pages = list_wiki_pages_impl(&tmp.path().join("missing")).unwrap();
         assert!(pages.is_empty());
+    }
+
+    // ---- Open in Obsidian (wiki-open-in-obsidian) ----
+
+    /// Task 1.1 / spec `Example: relative path + encoding cases` — the four
+    /// table rows mapping `(slug, abs wiki path) -> file=` value.
+    #[test]
+    fn build_obsidian_url_matches_spec_examples() {
+        let wiki_root = Path::new("/v/.codebus/wiki");
+        let vault_id = "abc123def456abcd";
+        let cases = [
+            ("modules/uv-lib.md", "modules/uv-lib.md"),
+            ("concepts/project-purpose.md", "concepts/project-purpose.md"),
+            ("index.md", "index.md"),
+            (
+                "processes/授權流程.md",
+                "processes/%E6%8E%88%E6%AC%8A%E6%B5%81%E7%A8%8B.md",
+            ),
+        ];
+        for (rel, expected_file) in cases {
+            let abs = wiki_root.join(rel);
+            let url = build_obsidian_url(vault_id, wiki_root, &abs)
+                .unwrap_or_else(|| panic!("expected Some for {rel}"));
+            assert_eq!(
+                url,
+                format!("obsidian://open?vault={vault_id}&file={expected_file}"),
+                "row {rel}"
+            );
+        }
+    }
+
+    /// Task 1.1 — `abs_page` outside `wiki_root` has no vault-relative form.
+    #[test]
+    fn build_obsidian_url_returns_none_outside_wiki_root() {
+        let wiki_root = Path::new("/v/.codebus/wiki");
+        let outside = Path::new("/v/other/page.md");
+        assert!(build_obsidian_url("id", wiki_root, outside).is_none());
+    }
+
+    /// Helper: register `wiki` into a temp `obsidian.json` and return the id.
+    fn register_temp_vault(wiki: &Path, json_path: &Path) -> String {
+        use codebus_core::vault::obsidian_register::{register_at, RegisterOutcome};
+        match register_at(wiki, json_path) {
+            RegisterOutcome::Registered { vault_id, .. } => vault_id,
+            other => panic!("setup register failed: {other:?}"),
+        }
+    }
+
+    /// Task 1.2 — registered vault → `Ok(Some(id))`.
+    #[test]
+    fn get_obsidian_vault_id_returns_some_for_registered_vault() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let json = tmp.path().join("obsidian/obsidian.json");
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        fs::create_dir_all(&wiki_root).unwrap();
+        let id = register_temp_vault(&wiki_root, &json);
+
+        let got = resolve_vault_id(&wiki_root, Some(&json)).unwrap();
+        assert_eq!(got, Some(id));
+    }
+
+    /// Task 1.2 — no obsidian.json (config dir present, file absent) → `None`.
+    #[test]
+    fn get_obsidian_vault_id_returns_none_when_unregistered() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let json = tmp.path().join("obsidian/obsidian.json");
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        fs::create_dir_all(&wiki_root).unwrap();
+
+        let got = resolve_vault_id(&wiki_root, Some(&json)).unwrap();
+        assert_eq!(got, None);
+    }
+
+    /// Task 1.2 — Obsidian config dir absent (`None` json path) → `Ok(None)`.
+    #[test]
+    fn get_obsidian_vault_id_returns_none_when_no_config_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        fs::create_dir_all(&wiki_root).unwrap();
+
+        let got = resolve_vault_id(&wiki_root, None).unwrap();
+        assert_eq!(got, None);
+    }
+
+    /// Task 1.2 — malformed obsidian.json → `Err(AppError)` (fail-soft).
+    #[test]
+    fn get_obsidian_vault_id_maps_parse_failure_to_app_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let json = tmp.path().join("obsidian/obsidian.json");
+        fs::create_dir_all(json.parent().unwrap()).unwrap();
+        fs::write(&json, b"not json {[").unwrap();
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        fs::create_dir_all(&wiki_root).unwrap();
+
+        let err = resolve_vault_id(&wiki_root, Some(&json)).expect_err("must error");
+        assert!(matches!(err, AppError::Io { .. }), "got {err:?}");
+    }
+
+    /// Task 1.3 — registered vault + real sub-folder slug → spec URL.
+    #[test]
+    fn open_wiki_in_obsidian_builds_url_for_valid_slug() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let json = tmp.path().join("obsidian/obsidian.json");
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        write_file(&wiki_root, "modules/uv-lib.md", "# uv-lib\n");
+        let id = register_temp_vault(&wiki_root, &json);
+
+        let url = resolve_obsidian_url(&wiki_root, Some(&json), "uv-lib").unwrap();
+        assert_eq!(
+            url,
+            format!("obsidian://open?vault={id}&file=modules/uv-lib.md")
+        );
+    }
+
+    /// Task 1.3 — unregistered vault → `AppError::Invalid { field: "obsidian" }`.
+    #[test]
+    fn open_wiki_in_obsidian_rejects_unregistered_vault() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let json = tmp.path().join("obsidian/obsidian.json");
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        write_file(&wiki_root, "modules/uv-lib.md", "# uv-lib\n");
+
+        let err = resolve_obsidian_url(&wiki_root, Some(&json), "uv-lib").expect_err("must fail");
+        match err {
+            AppError::Invalid { field, .. } => assert_eq!(field, "obsidian"),
+            other => panic!("expected Invalid(obsidian), got {other:?}"),
+        }
+    }
+
+    /// Task 1.3 — registered vault but unknown slug → `Invalid { field: "slug" }`.
+    #[test]
+    fn open_wiki_in_obsidian_rejects_unknown_slug() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let json = tmp.path().join("obsidian/obsidian.json");
+        let wiki_root = tmp.path().join("repo/.codebus/wiki");
+        write_file(&wiki_root, "modules/uv-lib.md", "# uv-lib\n");
+        register_temp_vault(&wiki_root, &json);
+
+        let err =
+            resolve_obsidian_url(&wiki_root, Some(&json), "no-such-page").expect_err("must fail");
+        match err {
+            AppError::Invalid { field, .. } => assert_eq!(field, "slug"),
+            other => panic!("expected Invalid(slug), got {other:?}"),
+        }
     }
 }

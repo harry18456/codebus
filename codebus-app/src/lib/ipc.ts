@@ -94,6 +94,8 @@ export type IpcCommandName =
   | "get_run_detail"
   | "list_wiki_pages"
   | "read_wiki_page"
+  | "get_obsidian_vault_id"
+  | "open_wiki_in_obsidian"
   | "spawn_chat_turn"
   | "cancel_chat_turn"
   | "spawn_quiz_plan"
@@ -903,4 +905,32 @@ export async function readWikiPage(
     vaultPath,
     pageSlug,
   })
+}
+
+/**
+ * Resolve the Obsidian vault id (16-char SHA-256 prefix) registered for the
+ * vault's wiki directory, or `null` when the vault is not registered in
+ * Obsidian. The store calls this once when a vault's wiki loads to decide
+ * whether to render `[Open in Obsidian]`. A backend `AppError` (obsidian.json
+ * present but unparseable) is fail-soft — callers treat it identically to
+ * `null` and hide the button.
+ */
+export async function getObsidianVaultId(
+  vaultPath: string,
+): Promise<string | null> {
+  return invokeTyped<string | null>("get_obsidian_vault_id", { vaultPath })
+}
+
+/**
+ * Open the wiki page identified by `slug` in Obsidian. The backend
+ * re-resolves the vault id, locates the page file, builds the
+ * `obsidian://open?vault=<id>&file=<rel>` URL, and hands it to the OS.
+ * Rejects with `AppError::Invalid { field: "obsidian" }` when the vault is
+ * no longer registered, or `{ field: "slug" }` when no page matches.
+ */
+export async function openWikiInObsidian(
+  vaultPath: string,
+  slug: string,
+): Promise<void> {
+  return invokeTyped<void>("open_wiki_in_obsidian", { vaultPath, slug })
 }

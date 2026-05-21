@@ -74,8 +74,11 @@ pub fn lookup_vault_id(wiki_path: &Path) -> io::Result<Option<String>> {
 
 /// Inner, testable form of [`lookup_vault_id`]. Tests drive this directly
 /// with a controlled `json_path` so they don't depend on the live
-/// `dirs::config_dir()` lookup.
-pub(crate) fn lookup_vault_id_at(wiki_path: &Path, json_path: &Path) -> io::Result<Option<String>> {
+/// `dirs::config_dir()` lookup. Also consumed by the codebus-app Tauri
+/// `get_obsidian_vault_id` / `open_wiki_in_obsidian` commands, which pair it
+/// with [`obsidian_json_path`] so those commands stay unit-testable against a
+/// temp `obsidian.json` rather than the user's live config dir.
+pub fn lookup_vault_id_at(wiki_path: &Path, json_path: &Path) -> io::Result<Option<String>> {
     let bytes = match fs::read(json_path) {
         Ok(b) => b,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),

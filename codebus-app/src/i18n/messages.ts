@@ -208,6 +208,7 @@ const en = {
     "No wiki pages yet — run a goal to start documenting",
   "workspace.wiki.toggleTreeAria": "Toggle Pages tree",
   "workspace.wiki.pageNotFound": "Page not found",
+  "workspace.wiki.openInObsidian": "Open in Obsidian",
 
   // ---- Workspace · Quiz placeholder ----
   "workspace.quiz.placeholder": "Coming soon — quiz flow ships in v3-app-quiz",
@@ -438,6 +439,7 @@ const zh: Record<keyof typeof en, string> = {
     "目前還沒有 wiki page — 跑一個 goal 開始整理文件",
   "workspace.wiki.toggleTreeAria": "切換 Pages 樹狀結構",
   "workspace.wiki.pageNotFound": "找不到頁面",
+  "workspace.wiki.openInObsidian": "在 Obsidian 開啟",
 
   // ---- Workspace · Quiz placeholder ----
   "workspace.quiz.placeholder":

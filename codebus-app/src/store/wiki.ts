@@ -2,6 +2,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { create } from "zustand"
 
 import {
+  getObsidianVaultId,
   listWikiPages,
   readWikiPage,
   type GoalTerminalPayload,
@@ -29,6 +30,13 @@ interface WikiState {
   pages: Record<string, WikiPageMeta>
   currentPath: string | null
   body: string | null
+  /**
+   * Cached Obsidian vault id (16-char SHA-256 prefix) for the current
+   * vault, or null when the vault is not registered in Obsidian / the
+   * probe failed. Drives WikiPreview's `[Open in Obsidian]` visibility —
+   * fetched once per vault inside `listPages`, cleared on `reset`.
+   */
+  obsidianVaultId: string | null
   listPages: (vaultPath: string) => Promise<void>
   loadPage: (vaultPath: string, slug: string) => Promise<void>
   reset: () => void
@@ -59,11 +67,14 @@ export const useWikiStore = create<WikiState>((set, get) => {
     pages: {},
     currentPath: null,
     body: null,
+    obsidianVaultId: null,
     _bodyCache: {},
     _currentVaultPath: null,
 
     async listPages(vaultPath) {
-      set({ _currentVaultPath: vaultPath })
+      // Clear the previous vault's cached id up-front so a vault switch
+      // never briefly shows the prior vault's Open-in-Obsidian button.
+      set({ _currentVaultPath: vaultPath, obsidianVaultId: null })
       const meta = await listWikiPages(vaultPath)
       const index: Record<string, WikiPageMeta> = {}
       for (const page of meta) {
@@ -72,6 +83,14 @@ export const useWikiStore = create<WikiState>((set, get) => {
         index[page.slug] = page
       }
       set({ pages: index })
+      // Fail-soft Obsidian probe: a parse error / missing config must
+      // never sink the page list, so it runs after pages are set and
+      // collapses both null and error to a hidden button.
+      try {
+        set({ obsidianVaultId: (await getObsidianVaultId(vaultPath)) ?? null })
+      } catch {
+        set({ obsidianVaultId: null })
+      }
     },
 
     async loadPage(vaultPath, slug) {
@@ -93,6 +112,7 @@ export const useWikiStore = create<WikiState>((set, get) => {
         pages: {},
         currentPath: null,
         body: null,
+        obsidianVaultId: null,
         _bodyCache: {},
         _currentVaultPath: null,
       })

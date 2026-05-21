@@ -21,6 +21,7 @@ describe("WikiPreview", () => {
       pages: {},
       currentPath: null,
       body: null,
+      obsidianVaultId: null,
       _bodyCache: {},
     })
   })
@@ -30,6 +31,7 @@ describe("WikiPreview", () => {
       pages: {},
       currentPath: null,
       body: null,
+      obsidianVaultId: null,
       _bodyCache: {},
     })
   })
@@ -157,6 +159,56 @@ describe("WikiPreview", () => {
     })
     render(<WikiPreview vaultPath="/v" body={"# Log"} />)
     expect(screen.queryByTestId("quiz-me-on-this")).not.toBeInTheDocument()
+  })
+
+  // --- task 4.1: [Open in Obsidian] button ---
+  // Spec: app-workspace § Open Wiki Page In Obsidian — the button renders
+  // iff the store's cached `obsidianVaultId` is non-null, on BOTH content
+  // and nav pages (unlike Quiz which is content-only), and clicking it
+  // invokes `open_wiki_in_obsidian` once with the current page's slug.
+
+  it("shows [Open in Obsidian] alongside Quiz on a content page when vault id is present", () => {
+    useWikiStore.setState({
+      currentPath: "uv-lib",
+      obsidianVaultId: "abc123def456abcd",
+    })
+    render(<WikiPreview vaultPath="/v" body={"# uv-lib\n\nbody"} />)
+    expect(screen.getByTestId("open-in-obsidian")).toBeInTheDocument()
+    expect(screen.getByTestId("quiz-me-on-this")).toBeInTheDocument()
+  })
+
+  it("shows [Open in Obsidian] (but not Quiz) on a nav page when vault id is present", () => {
+    useWikiStore.setState({
+      currentPath: "/v/.codebus/wiki/index.md",
+      obsidianVaultId: "abc123def456abcd",
+    })
+    render(<WikiPreview vaultPath="/v" body={"# Index"} />)
+    expect(screen.getByTestId("open-in-obsidian")).toBeInTheDocument()
+    expect(screen.queryByTestId("quiz-me-on-this")).not.toBeInTheDocument()
+  })
+
+  it("hides [Open in Obsidian] entirely when vault id is null", () => {
+    useWikiStore.setState({
+      currentPath: "uv-lib",
+      obsidianVaultId: null,
+    })
+    render(<WikiPreview vaultPath="/v" body={"# uv-lib"} />)
+    expect(screen.queryByTestId("open-in-obsidian")).not.toBeInTheDocument()
+  })
+
+  it("clicking [Open in Obsidian] invokes open_wiki_in_obsidian once with the current slug", () => {
+    invokeMock.mockResolvedValue(undefined)
+    useWikiStore.setState({
+      currentPath: "uv-lib",
+      obsidianVaultId: "abc123def456abcd",
+    })
+    render(<WikiPreview vaultPath="/v" body={"# uv-lib"} />)
+    fireEvent.click(screen.getByTestId("open-in-obsidian"))
+    expect(invokeMock).toHaveBeenCalledTimes(1)
+    expect(invokeMock).toHaveBeenCalledWith("open_wiki_in_obsidian", {
+      vaultPath: "/v",
+      slug: "uv-lib",
+    })
   })
 
   // ---- Watcher integration (codebus-fs-watcher) ----

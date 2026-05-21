@@ -4,6 +4,8 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { Button } from "@/components/ui/button"
+import { useT } from "@/i18n/useT"
+import { openWikiInObsidian } from "@/lib/ipc"
 import { transformBodyWikilinks } from "@/lib/milkdown-wikilink"
 import { useWikiStore } from "@/store/wiki"
 import { useWatcherEvent } from "@/hooks/useWatcherEvent"
@@ -77,6 +79,8 @@ export function WikiPreview({
   const loadPage = useWikiStore((s) => s.loadPage)
   const pages = useWikiStore((s) => s.pages)
   const currentPath = useWikiStore((s) => s.currentPath)
+  const obsidianVaultId = useWikiStore((s) => s.obsidianVaultId)
+  const t = useT()
 
   // Re-fetch the currently displayed page when the watcher reports a
   // content change for its exact path. Edits to other `.md` files are
@@ -291,14 +295,25 @@ export function WikiPreview({
       >
         {transformed}
         </ReactMarkdown>
-        {currentPath && !isNavPage(currentPath) && (
-          <div className="mt-10 border-t border-border pt-5">
-            <Button
-              data-testid="quiz-me-on-this"
-              onClick={() => onQuizMeOnThis?.(currentPath)}
-            >
-              Quiz me on this
-            </Button>
+        {currentPath && (obsidianVaultId !== null || !isNavPage(currentPath)) && (
+          <div className="mt-10 flex gap-3 border-t border-border pt-5">
+            {!isNavPage(currentPath) && (
+              <Button
+                data-testid="quiz-me-on-this"
+                onClick={() => onQuizMeOnThis?.(currentPath)}
+              >
+                Quiz me on this
+              </Button>
+            )}
+            {obsidianVaultId !== null && (
+              <Button
+                data-testid="open-in-obsidian"
+                variant="secondary"
+                onClick={() => void openWikiInObsidian(vaultPath, currentPath)}
+              >
+                {t("workspace.wiki.openInObsidian")}
+              </Button>
+            )}
           </div>
         )}
       </div>

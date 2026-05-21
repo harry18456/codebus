@@ -135,4 +135,65 @@ describe("useWikiStore", () => {
     await Promise.resolve()
     expect(invokeMock.mock.calls.length).toBe(callsBefore)
   })
+
+  // ---- Obsidian vault id probe (wiki-open-in-obsidian task 3.1) ----
+  //
+  // The store fetches the Obsidian vault id once when a vault's wiki loads
+  // (folded into `listPages`) and caches it so WikiPreview can decide whether
+  // to render `[Open in Obsidian]`. A null probe OR a probe error both cache
+  // null (fail-soft) — the button stays hidden either way.
+
+  function mockByCommand(map: Record<string, unknown>) {
+    invokeMock.mockImplementation((command: string) => {
+      if (command in map) {
+        const v = map[command]
+        return v instanceof Error ? Promise.reject(v) : Promise.resolve(v)
+      }
+      return Promise.resolve(undefined)
+    })
+  }
+
+  it("listPages caches the Obsidian vault id when the probe returns one", async () => {
+    mockByCommand({
+      list_wiki_pages: [
+        { slug: "a", path: "/v/.codebus/wiki/a.md", title: "A" },
+      ],
+      get_obsidian_vault_id: "abc123def456abcd",
+    })
+    await useWikiStore.getState().listPages("/v")
+    expect(useWikiStore.getState().obsidianVaultId).toBe("abc123def456abcd")
+  })
+
+  it("listPages caches null when the vault is not registered in Obsidian", async () => {
+    mockByCommand({
+      list_wiki_pages: [],
+      get_obsidian_vault_id: null,
+    })
+    await useWikiStore.getState().listPages("/v")
+    expect(useWikiStore.getState().obsidianVaultId).toBeNull()
+  })
+
+  it("listPages caches null (fail-soft) and still lists pages when the probe errors", async () => {
+    mockByCommand({
+      list_wiki_pages: [
+        { slug: "a", path: "/v/.codebus/wiki/a.md", title: "A" },
+      ],
+      get_obsidian_vault_id: new Error("obsidian.json parse failed"),
+    })
+    await useWikiStore.getState().listPages("/v")
+    expect(useWikiStore.getState().obsidianVaultId).toBeNull()
+    // The page list SHALL survive a probe failure.
+    expect(Object.keys(useWikiStore.getState().pages)).toEqual(["a"])
+  })
+
+  it("reset clears the cached Obsidian vault id to null", async () => {
+    mockByCommand({
+      list_wiki_pages: [],
+      get_obsidian_vault_id: "abc123def456abcd",
+    })
+    await useWikiStore.getState().listPages("/v")
+    expect(useWikiStore.getState().obsidianVaultId).toBe("abc123def456abcd")
+    useWikiStore.getState().reset()
+    expect(useWikiStore.getState().obsidianVaultId).toBeNull()
+  })
 })
