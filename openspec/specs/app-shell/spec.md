@@ -384,12 +384,13 @@ The Settings modal SHALL be invoked by the bottom-left gear in either Lobby or W
 8. Log sink (path display + Change folder link) with an additional control that disables logging entirely by writing `log.sink: none`
 9. Quiz pass threshold (slider 50–100%, displayed value with `%` unit suffix)
 10. Default quiz length (slider 3–10, displayed value with `questions` unit suffix)
+11. Block image / binary reads (toggle) mapping to `hooks.read_image_block`. The toggle SHALL display the current resolved boolean value (default `true` when the config key is absent), and changing it SHALL set `hooks.read_image_block` to the new value on the next Save. The toggle SHALL be accompanied by visible copy stating that disabling it allows the agent to read image / PDF / binary files into its context AND that doing so bypasses the regex_basic PII filter (which only scans text). This copy SHALL be a security-conscious warning, not a neutral description, because the default is `true` (block) and disabling it weakens the PII safety floor.
 
 The Endpoint Section SHALL render a read-only `chat` row that displays the model and effort the `chat` verb inherits from the `query` verb, in the form "沿用 query（<model> / <effort>）", kept in sync with the editable `query` row. The `chat` row SHALL NOT be editable and SHALL NOT introduce any `chat`-specific configuration key.
 
 No theme toggle, language switcher, or per-vault override section SHALL be present. Sub-labels under fields SHALL NOT promise features absent from v1. The PII on-hit field SHALL display copy stating that Critical-severity matches are always masked regardless of this setting (the security floor cannot be disabled from the UI). The Quiz content verify and Goal content verify toggles SHALL each display copy stating that enabling them incurs additional verify/repair agent spawns.
 
-The `save_global_config` IPC SHALL preserve every known and unknown subkey under any namespace it does not exclusively own. In particular, when enriching the `quiz` namespace with the resolved `default_length`, the IPC SHALL merge into the existing `quiz` object rather than replace it, so sibling keys (e.g. `quiz.content_verify`) set by the Settings UI survive a save→load round-trip. Unknown top-level YAML sections SHALL likewise continue to round-trip unchanged.
+The `save_global_config` IPC SHALL preserve every known and unknown subkey under any namespace it does not exclusively own. In particular, when enriching the `quiz` namespace with the resolved `default_length`, the IPC SHALL merge into the existing `quiz` object rather than replace it, so sibling keys (e.g. `quiz.content_verify`) set by the Settings UI survive a save→load round-trip. Unknown top-level YAML sections SHALL likewise continue to round-trip unchanged. The `hooks` namespace SHALL likewise round-trip through Save without losing unknown subkeys (forward-compat for future hook toggles).
 
 #### Scenario: Modal opens from Lobby gear
 
@@ -445,36 +446,27 @@ The `save_global_config` IPC SHALL preserve every known and unknown subkey under
 - **WHEN** `save_global_config` writes the payload to disk and a subsequent `load_global_config` reads it back
 - **THEN** the reloaded payload still contains `quiz.default_length: 7` AND `quiz.content_verify: true`
 
+#### Scenario: Block image reads toggle defaults on when config key is absent
 
-<!-- @trace
-source: settings-config-frontend
-updated: 2026-05-20
-code:
-  - codebus-core/src/verb/goal.rs
-  - codebus-app/src/components/settings/EndpointSection.tsx
-  - codebus-core/src/git/mod.rs
-  - codebus-cli/src/commands/goal.rs
-  - codebus-core/src/verb/content_verify.rs
-  - docs/2026-05-14-pii-settings-ui-backlog.md
-  - codebus-core/src/git/nested_repo.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/2026-05-19-settings-config-coverage-backlog.md
-  - docs/BACKLOG.md
-  - codebus-core/src/config/goal.rs
-  - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-core/src/verb/mod.rs
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/verb/quiz.rs
-  - docs/2026-05-19-raw-sync-nested-git-leak-backlog.md
-  - codebus-app/src/i18n/messages.ts
-  - codebus-core/src/config/mod.rs
-tests:
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/settings/EndpointSection.test.tsx
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/goal_content_verify_cli.rs
--->
+- **WHEN** `~/.codebus/config.yaml` has no `hooks` section AND the user opens the Settings modal
+- **THEN** the "Block image / binary reads" toggle SHALL render in the ON position (matches the runtime default of `hooks.read_image_block: true`)
+
+#### Scenario: Block image reads toggle displays security warning copy
+
+- **WHEN** the Settings modal renders the "Block image / binary reads" toggle
+- **THEN** the toggle SHALL display visible copy warning that disabling it allows the agent to read image and binary files which would bypass the regex_basic PII filter
+
+#### Scenario: Disabling block image reads writes hooks.read_image_block false
+
+- **GIVEN** `~/.codebus/config.yaml` has no `hooks` section AND the toggle is ON
+- **WHEN** the user clicks the "Block image / binary reads" toggle to OFF and clicks Save
+- **THEN** `~/.codebus/config.yaml` contains a `hooks` section with `read_image_block: false` after save AND reopening Settings shows the toggle in the OFF position
+
+#### Scenario: Hooks namespace survives save
+
+- **GIVEN** the in-memory config payload has `hooks.read_image_block: false` AND `hooks.future_hook_toggle: true` (forward-compat unknown subkey)
+- **WHEN** `save_global_config` writes the payload to disk and a subsequent `load_global_config` reads it back
+- **THEN** the reloaded payload still contains `hooks.read_image_block: false` AND `hooks.future_hook_toggle: true`
 
 ---
 ### Requirement: AppConfig Namespace Isolation
