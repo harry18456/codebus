@@ -12,6 +12,12 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-22 19:03Z — T3 spike chat-display-polish
+- 狀態: DONE
+- 做了: 核對 2026-05-21 backlog。app 端 AssistantMarkdownBlock 缺 remarkGfm（WikiPreview 有、dep 已在）、WIKI_HREF_RE 只路由 markdown link 不處理 [[slug]]、milkdown-wikilink 的 transformBodyWikilinks/WikilinkLink 現成可重用；CLI chat.rs:192 raw println 無 markdown。皆屬實。標註：本條 provider-agnostic、無 PE2 耦合（operate on 正規化 Thought，兩 provider 一致）→ 可獨立先行；CLI [[slug]] 連結化已切給 cli-wikilink-link-target。
+- 產出: docs/2026-05-22-chat-display-polish-spike.md
+- 下一步: 佇列下一個 TODO 是 T4（github-repo-setup spike）。
+
 ## 2026-05-22 19:1xZ — T2 spike app-stream-verbose-detail
 - 狀態: DONE
 - 做了: 對現碼核對 2026-05-21 backlog（設計已收斂）：截斷只在前端 ActivityStreamItem（tool_result return null、summarizeToolInput 截斷）、後端資料完整（ipc.ts:557-560）、foldTimeline 只折 thought（pairing 是 net-new）、6 surface 共用、ThoughtItem 是展開範本。全屬實。新發現：T2 與 PE2-C2 順序耦合——codex 編輯(apply_patch)目前無 event，T2 對 codex goal/fix 沒東西可展開，建議 PE2-C2 先行或併同。
