@@ -1,3 +1,8 @@
 {
-  "includeGitInstructions": false
+  "includeGitInstructions": false,
+  "permissions": {
+    "allow": [
+      "Bash(node codebus-app/scripts/cdp.mjs:*)"
+    ]
+  }
 }
