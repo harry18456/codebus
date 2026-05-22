@@ -12,6 +12,12 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-22 19:1xZ — T2 spike app-stream-verbose-detail
+- 狀態: DONE
+- 做了: 對現碼核對 2026-05-21 backlog（設計已收斂）：截斷只在前端 ActivityStreamItem（tool_result return null、summarizeToolInput 截斷）、後端資料完整（ipc.ts:557-560）、foldTimeline 只折 thought（pairing 是 net-new）、6 surface 共用、ThoughtItem 是展開範本。全屬實。新發現：T2 與 PE2-C2 順序耦合——codex 編輯(apply_patch)目前無 event，T2 對 codex goal/fix 沒東西可展開，建議 PE2-C2 先行或併同。
+- 產出: docs/2026-05-22-app-stream-verbose-spike.md
+- 下一步: 佇列下一個 TODO 是 T3（chat-display-polish spike）。
+
 ## 2026-05-22 18:43Z — T1 spike settings-chat-model
 - 狀態: DONE
 - 做了: 盤 chat model/effort 解析。發現 backlog 已部分過時：方案 A（read-only hint）在 Claude 已實作（EndpointSection.tsx:240 endpoint-chat-row），只缺 Codex 端（CodexEndpointSection.tsx 無 chat 列）。Verb::Verify 是方案 B 的現成範本（不 fallback 的 per-verb 子塊）。方案 B 因 codex 加入範圍變大（兩 provider 都要加 chat 子塊），給了完整 file-level 清單。
