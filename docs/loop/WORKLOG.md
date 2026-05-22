@@ -12,6 +12,12 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-22 19:43Z — T7 品質檢查 cli
+- 狀態: DONE
+- 做了: 精讀 hook.rs（PreToolUse Bash/Read 閘）。找到高優先安全項 F4：is_allowed_bash_command 用 split_whitespace 只查 argv[0]=codebus + argv[1]=lint/quiz validate，不檢查其後 → shell 串接（codebus lint; rm -rf / 等）通過前綴檢查。command 會丟 sh -c 執行 → 可能 sandbox 逃逸。待驗證 Claude Code 串接是否拆段問 hook；不論如何建議 defense-in-depth 拒 shell 元字元。測試完全沒覆蓋串接案例。Read hook（image block）設計紮實。已進 BACKLOG。
+- 產出: docs/2026-05-22-cli-quality-review.md（+ BACKLOG F4 列）
+- 下一步: 佇列下一個 TODO 是 T8（codebus-app 前端品質檢查）。
+
 ## 2026-05-22 19:33Z — T6 品質檢查 core (Part 1: pii + git)
 - 狀態: DONE
 - 做了: 深讀 PII redaction 路徑（pii/ + raw_sync.rs）+ git/。找到真實 latent bug F1：mask_matches 註解假設 match 非重疊，但 scan() 從不合併跨 rule 重疊/巢狀 match → 倒序 replace_range 對重疊不安全，可能漏遮 secret 或輸出損壞（custom pattern 框 builtin 最易觸發）。F2：>5MiB 檔靜默排除無 warn。F3：changed_paths_under 把 deleted page 也算 changed。F1 已加進 BACKLOG（輕，interval-merge 約半天）。core 零 TODO/FIXME、安全 floor 設計正確。
