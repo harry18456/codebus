@@ -12,6 +12,12 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-22 19:4xZ — T5 spike goal-subagent-delegation
+- 狀態: DONE
+- 做了: 核對 grounding（GOAL_TOOLSET=Read/Glob/Grep/Write/Edit 無 Task、core 無 Task 引用、無 .claude/agents ship）皆屬實。關鍵阻塞（general-purpose 能否寫檔）需真實 claude run，loop 做不到。新缺口：整套 Task+--tools 機制 claude-only，codex 有內建 spawn_agent 不受 --tools 天花板約束、subagent-sandbox-control 安全驗證不涵蓋 codex → 此條變 provider-specific 兩套機制。建議維持 deferral + 更新原 backlog 補 provider 維度。
+- 產出: docs/2026-05-22-goal-subagent-delegation-spike.md
+- 下一步: 佇列下一個 TODO 是 T6（codebus-core 品質檢查 — 第一個非 backlog 的淨分析任務）。
+
 ## 2026-05-22 19:13Z — T4 spike github-repo-setup
 - 狀態: DONE
 - 做了: 核對 2026-05-14 backlog（過時最多的一條）。發現 3 drift：(1) 套件管理器是 npm 非 pnpm（package-lock.json）；(2) release 依賴的 F(v3-app-polish-ship) 未 archive 且 tauri.conf bundle.active=false → release workflow 無法寫；(3) workspace 含 src-tauri，cargo test --workspace 在 Linux 需 webkit2gtk 系統依賴。草擬了修正後的 CI workflow（core/cli 三平台 + app npm vitest/tsc + tauri-build-check 含 apt deps）+ issue/PR templates，皆可立即落地。release workflow 標 BLOCKED 待 F。
