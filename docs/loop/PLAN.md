@@ -8,7 +8,7 @@
 2. **絕不**編輯 `codebus-core/`、`codebus-cli/`、`codebus-app/`、`Cargo.*`、`.github/`、`openspec/specs/`、`openspec/changes/` 或任何 docs/ 以外的檔案。任務若需要動到這些 → 標 `BLOCKED`。
 3. 不跑破壞性 git 指令；只 `add` docs/ + `commit` + `push -u origin claude/backlog-review-HTtCI`。
 4. 遇到模糊 / 高風險 / 需要動實作的 → 在該任務標 `BLOCKED` 並在 WORKLOG 寫原因，**跳過去挑下一個 TODO**，不硬幹。
-5. 每輪**完成一個** DONE 就停（中途若有任務變 BLOCKED 不算數，繼續挑下一個直到一個成功 DONE）。佇列全空時，在 WORKLOG 記「PLAN exhausted — 等 harry 補新任務」然後停，不要自己發明大改造。
+5. 每輪**完成一個** DONE 就停（中途若有任務變 BLOCKED 不算數，繼續挑下一個直到一個成功 DONE）。佇列全空時，**進入「自我再規劃協定」**（見下方），不要憑空發明大改造。
 6. 產出文件命名 `docs/2026-05-DD-<slug>.md`，並在對應 backlog 行尾補連結（編輯 `docs/BACKLOG.md` 屬寫 doc，允許）。
 
 ## 每輪流程
@@ -44,6 +44,30 @@
 | T12 | TODO | spike: rag-index-search（LanceDB） | `docs/2026-05-DD-rag-index-search-spike.md` | 盤 vault 內容來源、index 設計選項、工程量 + 風險 |
 | T13 | TODO | spike: openai-privacy-filter（local 語意層 PII） | `docs/2026-05-DD-openai-privacy-filter-spike.md` | 盤現有 pii module、語意層方案、與既有 regex filter 的關係 |
 
-## 完成後
+## 自我再規劃協定（RP）
 
-佇列全 DONE 後 loop 進入 no-op 等待狀態。harry 回來檢視 docs/ 產出，決定哪些 spike 要轉成真正的實作 change（那需要解除「只讀」邊界，另起任務）。
+任務佇列無剩餘 `TODO` 時觸發。**全程仍受鐵則約束（只讀 + 寫 doc）**，所以自我發明的任務頂多產低價值 doc，動不了 code——但仍要克制 churn。依序判斷該輪做哪一步：
+
+**RP-A — 收斂 / review 已完成的產出（佇列剛清空後的第一輪一定先做這個）**
+- 重讀本輪期所有產出的 spike / review / audit doc，檢查：彼此矛盾？有缺口？該交叉連結？哪些 spike 已成熟到可轉成真正的實作 change？
+- 寫 `docs/2026-05-DD-loop-roundup.md`：總結已完成什麼、未解問題、**「建議 harry 核准的下一步實作清單」**（標明哪些需要解除「只讀」邊界）。
+- 這輪標 DONE。
+
+**RP-B — 提出並執行新的只讀任務（RP-A 之後的輪次）**
+- 從這些來源找**真正有價值**的新 read-only/doc 工作：BACKLOG.md 還沒探勘的開放項目、RP-A roundup 點出的缺口、前面 review 發現但還沒深挖的 smell。
+- 每輪最多新增 **3** 個候選，寫進下方「候選任務（自我生成）」表，類型限 spike / review / audit（產 doc，不碰實作）。**不得與已 DONE 的主題重複。**
+- 然後就地挑一個候選執行（升為該輪的 DONE），其餘留在候選表等下一輪。
+- 候選表的內容會在 WORKLOG 留痕，harry 可隨時刪減。
+
+**RP-C — 真的沒有有價值的新工作時**
+- 不要為了跑而捏造 filler。在 WORKLOG 記「無新增有價值任務 — 等 harry」並停這輪。下一輪再評估一次。
+
+### 候選任務（自我生成 — RP-B 寫入）
+
+| # | 狀態 | 任務 | 產出 | 來源 / 理由 |
+|---|---|---|---|---|
+| _（loop 於 RP-B 階段追加）_ | | | | |
+
+---
+
+harry 回來檢視 docs/ 產出（尤其 `loop-roundup`），決定哪些 spike 要轉成真正的實作 change——那需要另起任務並明確解除「只讀」邊界。
