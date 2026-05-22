@@ -26,8 +26,8 @@
 //!
 //! No auto_commit at any point (query is read-only).
 
-use crate::agent::{ClaudeBackend, Permission, SpawnSpec, invoke};
-use crate::config::{Verb, build_env_overrides, default_config_path, load_claude_code_config};
+use crate::agent::{Permission, SpawnSpec, build_backend, invoke, load_provider_config};
+use crate::config::{Verb, default_config_path};
 use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
 use crate::log::verb_log::{load_verb_log_config, resolve_sink_dir, write_run_log};
@@ -91,7 +91,7 @@ pub fn run_query(
     // Step 2: load claude_code + log config (log config needed for events sink).
     let cc_cfg = match default_config_path() {
         Some(p) if p.exists() => {
-            load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
+            load_provider_config(&p).map_err(|e| VerbError::ConfigParse {
                 which: "claude_code",
                 source: e,
             })?
@@ -120,9 +120,8 @@ pub fn run_query(
 
     // Step 5: build env overrides (azure profile keyring fetch), then build
     // the Claude backend (holds config for model resolution + env).
-    let query_env =
-        build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
-    let backend = ClaudeBackend::new(cc_cfg, query_env);
+    let backend =
+        build_backend(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
     // Fan out each VerbEvent to (a) the events sink and (b) the caller's
     // on_event closure. Built here so the Start banner below also lands
@@ -150,7 +149,7 @@ pub fn run_query(
     let invoke_report = {
         let fan_out = &mut fan_out;
         invoke(
-            &backend,
+            &*backend,
             SpawnSpec {
                 verb: Verb::Query,
                 prompt: slash_command,

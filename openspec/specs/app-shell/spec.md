@@ -30,9 +30,9 @@ The codebus-app SHALL launch as a Tauri v2 desktop application binding `codebus-
 
 The system SHALL expose exactly fifteen Tauri commands invokable from the frontend: `list_vaults`, `add_vault`, `remove_vault`, `load_global_config`, `save_global_config`, `set_endpoint_key`, `get_endpoint_key`, `delete_endpoint_key`, `check_cli_installed`, `spawn_goal`, `cancel_goal`, `list_runs`, `get_run_detail`, `list_wiki_pages`, `read_wiki_page`. No other Tauri commands SHALL be registered by this change. Each command SHALL have a stable name (snake_case), a typed argument shape, and a typed return shape mirroring the design contract.
 
-The `check_cli_installed` command SHALL accept a `provider: String` argument whose only legal value is the literal `"claude_code"`. The command SHALL probe whether the agentic CLI binary for that provider is reachable by spawning `<binary> --version`. It SHALL return a `CliStatus` enum (serialised as `serde(tag = "kind", rename_all = "snake_case")` with variants `installed { version }` and `not_installed`). Any spawn failure — binary missing, non-zero exit, empty stdout — SHALL collapse to `not_installed`; the underlying error SHALL NOT surface to the frontend. Future provider values (`codex`, `gemini_cli`, etc.) extend this match arm in a separate change.
+The `check_cli_installed` command SHALL accept a `provider: String` argument whose legal values are the literals `"claude_code"` and `"codex"`. The command SHALL probe whether the agentic CLI binary for that provider is reachable by spawning `<binary> --version`. It SHALL return a `CliStatus` enum (serialised as `serde(tag = "kind", rename_all = "snake_case")` with variants `installed { version }` and `not_installed`). Any spawn failure — binary missing, non-zero exit, empty stdout — SHALL collapse to `not_installed`; the underlying error SHALL NOT surface to the frontend. A `provider` value outside the legal set SHALL collapse to `not_installed` (never an error to the frontend). Further provider values (`gemini_cli`, etc.) extend this match arm in a separate change.
 
-The three keyring-management commands (`set_endpoint_key` / `get_endpoint_key` / `delete_endpoint_key`) SHALL accept a `profile: String` argument whose only legal value is the literal `"azure"`. Any other profile value SHALL reject the call with `AppError::Invalid { field: "profile", message: ... }`. The commands SHALL delegate to the codebus-core keyring helpers (`store_azure_key` / `probe_keyring_only` / `delete_azure_key`) — there is no separate keyring backend implementation in the app crate.
+The three keyring-management commands (`set_endpoint_key` / `get_endpoint_key` / `delete_endpoint_key`) SHALL accept a `service: String` argument naming the OS keyring service to act on. The Settings editor supplies the active provider's `azure.keyring_service` (defaulting to `codebus-claude-azure` for claude / `codebus-codex-azure` for codex), so claude and codex keys occupy DISTINCT keyring entries and the GUI writes to exactly the service the user sees — without a stale on-disk config lookup. An empty / whitespace-only `service` SHALL reject the call with `AppError::Invalid { field: "service", message: ... }`. The commands SHALL delegate to the codebus-core keyring helpers (`store_azure_key` / `probe_keyring_only` / `delete_azure_key`) — there is no separate keyring backend implementation in the app crate.
 
 `set_endpoint_key` SHALL accept a `key: String` argument and store the value via the codebus-core helper. On success it SHALL return `Ok(())`. The key value SHALL NOT be cached anywhere in the app process beyond the Tauri command call boundary.
 
@@ -42,140 +42,70 @@ The three keyring-management commands (`set_endpoint_key` / `get_endpoint_key` /
 
 The six new commands `spawn_goal`, `cancel_goal`, `list_runs`, `get_run_detail`, `list_wiki_pages`, and `read_wiki_page` are defined normatively in the `app-workspace` capability (Tauri IPC Commands for Goal Lifecycle and Wiki Read requirement). Their argument shapes, return types, and error behavior live in that capability; this registry requirement only pins their existence and total count.
 
-#### Scenario: Frontend invokes list_vaults
+#### Scenario: check_cli_installed probes claude binary
 
-- **WHEN** the frontend calls `invoke("list_vaults")`
-- **THEN** the command returns an array of `VaultEntry` objects, each with `path`, `display_name`, `last_opened`, and `is_missing` fields
+- **WHEN** the frontend invokes `check_cli_installed("claude_code")`
+- **THEN** the command SHALL probe the claude binary and return `installed { version }` or `not_installed`
 
-#### Scenario: Frontend invokes set_endpoint_key with azure profile
+#### Scenario: check_cli_installed probes codex binary
 
-- **WHEN** the frontend calls `invoke("set_endpoint_key", { profile: "azure", key: "sk-test" })`
-- **THEN** the keyring entry `(<keyring_service from config>, "default")` SHALL contain `sk-test` AND the command SHALL return `Ok(())` AND no record of the key value SHALL persist in any in-memory app state beyond the call boundary
+- **WHEN** the frontend invokes `check_cli_installed("codex")`
+- **THEN** the command SHALL probe the codex binary and return `installed { version }` or `not_installed` (a missing codex binary collapses to `not_installed`, never a frontend error)
 
-#### Scenario: Frontend invokes get_endpoint_key for an existing entry
+#### Scenario: Unknown provider collapses to not_installed
 
-- **WHEN** the frontend calls `invoke("get_endpoint_key", { profile: "azure" })` AND a keyring entry exists for the configured service
-- **THEN** the command SHALL return `{ kind: "set" }` AND the response payload SHALL NOT contain the key value
-
-#### Scenario: Frontend invokes get_endpoint_key with no entry present
-
-- **WHEN** the frontend calls `invoke("get_endpoint_key", { profile: "azure" })` AND no keyring entry exists for the configured service
-- **THEN** the command SHALL return `{ kind: "unset" }`
-
-#### Scenario: Frontend invokes delete_endpoint_key when no entry exists
-
-- **WHEN** the frontend calls `invoke("delete_endpoint_key", { profile: "azure" })` AND no keyring entry exists for the configured service
-- **THEN** the command SHALL return `Ok(())` (idempotent)
-
-#### Scenario: Unknown profile value rejected
-
-- **WHEN** the frontend calls any of the three keyring commands with `profile: "bedrock"` (or any value other than `"azure"`)
-- **THEN** the command SHALL reject with `AppError` having `kind: "invalid"`, `field: "profile"`, and a `message` naming the rejected value
-
-#### Scenario: Config parse failure aborts keyring command
-
-- **WHEN** the frontend calls any of the three keyring commands AND `~/.codebus/config.yaml` exists but fails to parse
-- **THEN** the command SHALL reject with `AppError` having `kind: "config_parse"` AND a `message` naming the failing section AND the keyring entry SHALL NOT be touched (no `store_azure_key` / `probe_keyring_only` / `delete_azure_key` call performed)
-
-#### Scenario: check_cli_installed returns installed status when binary is reachable
-
-- **WHEN** the frontend calls `invoke("check_cli_installed", { provider: "claude_code" })` AND `claude --version` exits zero with non-empty stdout
-- **THEN** the command SHALL return `{ kind: "installed", version: "<version-string>" }` where `<version-string>` is the trimmed stdout
-
-#### Scenario: check_cli_installed returns not_installed on probe failure
-
-- **WHEN** the frontend calls `invoke("check_cli_installed", { provider: "claude_code" })` AND the `claude` binary is not on PATH
-- **THEN** the command SHALL return `{ kind: "not_installed" }` AND SHALL NOT surface the underlying spawn error
-
-#### Scenario: check_cli_installed rejects unknown provider
-
-- **WHEN** the frontend calls `invoke("check_cli_installed", { provider: "codex" })`
-- **THEN** the command SHALL reject with `AppError` having `kind: "invalid"`, `field: "provider"`, and a `message` naming the rejected value
-
-#### Scenario: Unregistered commands fail invocation
-
-- **WHEN** the frontend attempts to invoke any command name other than the fifteen registered
-- **THEN** Tauri returns a command-not-found error and the call rejects
-
-#### Scenario: Help registry lists exactly fifteen commands
-
-- **WHEN** the developer inspects the Tauri command registration in the app shell's `lib.rs`
-- **THEN** exactly the fifteen named commands listed in this requirement are registered AND no additional ad-hoc commands appear
+- **WHEN** the frontend invokes `check_cli_installed("gemini_cli")`
+- **THEN** the command SHALL return `not_installed` without surfacing an error
 
 
 <!-- @trace
-source: v3-app-workspace-goal
-updated: 2026-05-14
+source: codex-settings-ui
+updated: 2026-05-23
 code:
+  - codebus-core/src/agent/dispatch.rs
   - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-core/src/render/banner.rs
-  - codebus-app/src-tauri/gen/schemas/acl-manifests.json
-  - codebus-app/src/components/LoadingOverlay.tsx
-  - codebus-app/src/components/workspace/WikiTree.tsx
-  - codebus-app/src/lib/ipc.ts
-  - docs/2026-05-14-skill-bundles-vault-only-backlog.md
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/capabilities/default.json
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - codebus-app/src/store/route.ts
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - codebus-app/src/components/workspace/RunDetailRunning.tsx
-  - codebus-app/src/components/workspace/ActivityStreamItem.tsx
-  - codebus-app/src/lib/milkdown-wikilink.tsx
-  - codebus-app/src-tauri/src/state/app_state.rs
-  - codebus-app/src/App.tsx
-  - codebus-app/src/components/workspace/RunListItem.tsx
-  - codebus-app/src/components/workspace/RunDetailCancelled.tsx
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/verb/goal.rs
-  - codebus-app/src/store/goals.ts
-  - codebus-app/src-tauri/gen/schemas/desktop-schema.json
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - codebus-app/src/components/workspace/RunDetailDone.tsx
-  - codebus-app/package.json
-  - codebus-app/src/store/wiki.ts
-  - docs/2026-05-14-git-context-tool-backlog.md
+  - codebus-core/src/config/codex.rs
+  - codebus-core/src/agent/codex_backend.rs
   - codebus-core/src/verb/fix.rs
-  - codebus-app/src/i18n/messages.ts
-  - codebus-app/src-tauri/gen/schemas/capabilities.json
-  - codebus-app/src-tauri/src/state/active_runs.rs
-  - codebus-app/src/components/workspace/GoalsTab.tsx
-  - codebus-app/src/components/workspace/WorkspaceStub.tsx
-  - codebus-app/src-tauri/gen/schemas/windows-schema.json
-  - codebus-app/src-tauri/src/state/mod.rs
-  - codebus-app/src-tauri/src/ipc/wiki.rs
-  - codebus-app/src/components/workspace/NewGoalModal.tsx
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src-tauri/Cargo.toml
-  - codebus-app/src-tauri/src/lib.rs
-  - docs/BACKLOG.md
-  - codebus-app/src/components/workspace/WikiTab.tsx
-  - Cargo.toml
+  - codebus-app/src/store/settings.ts
+  - codebus-app/src/components/workspace/ChatTranscript.tsx
+  - codebus-app/src/components/settings/EndpointSection.tsx
+  - codebus-core/src/stream/codex_parser.rs
+  - codebus-core/src/config/endpoint.rs
+  - codebus-core/src/agent/claude_backend.rs
+  - codebus-core/src/vault/init.rs
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - codebus-cli/src/commands/config.rs
+  - codebus-core/src/verb/goal.rs
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
+  - codebus-app/src-tauri/src/ipc/cli_status.rs
+  - codebus-core/src/config/mod.rs
+  - codebus-app/src/components/settings/CodexEndpointSection.tsx
+  - codebus-core/src/verb/error.rs
+  - codebus-app/src-tauri/src/ipc/keyring.rs
+  - codebus-core/src/stream/mod.rs
+  - codebus-core/src/config/claude_code.rs
+  - codebus-app/src/lib/ipc.ts
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-core/src/verb/chat.rs
+  - codebus-app/src/store/chat.ts
+  - codebus-app/src/store/goals.ts
+  - codebus-app/src/components/settings/SetKeyDialog.tsx
+  - codebus-core/src/agent/mod.rs
+  - codebus-core/src/verb/query.rs
+  - codebus-app/src/lib/providers.ts
+  - codebus-app/src/components/settings/SettingsModal.tsx
 tests:
-  - codebus-app/src/hooks/useNewVaultShortcut.test.tsx
-  - codebus-app/src/components/workspace/WorkspaceStub.test.tsx
-  - codebus-app/src/lib/milkdown-wikilink.test.tsx
-  - codebus-app/src/components/workspace/RunDetailRunning.test.tsx
-  - codebus-app/src/components/workspace/RunDetailDone.test.tsx
-  - codebus-app/src/hooks/useLobbyDragDrop.test.tsx
-  - codebus-app/src/lib/ipc.test.ts
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-app/src/components/workspace/GoalsTab.test.tsx
-  - codebus-app/src/components/workspace/Workspace.test.tsx
+  - codebus-app/src/components/settings/SettingsModal.codex.test.tsx
+  - codebus-app/src/lib/providers.test.ts
   - codebus-app/src/store/goals.test.ts
-  - codebus-app/src/components/workspace/RunListItem.test.tsx
-  - codebus-app/src/components/workspace/WikiTab.test.tsx
-  - codebus-app/src/store/wiki.test.ts
-  - codebus-app/src/components/workspace/NewGoalModal.test.tsx
-  - codebus-app/src/test/forbidden-behaviors.test.tsx
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-app/src/store/route.test.ts
-  - codebus-app/src/i18n/workspace.test.ts
-  - codebus-app/src/components/workspace/WikiTree.test.tsx
-  - codebus-app/src/components/lobby/Lobby.test.tsx
-  - codebus-app/src/components/workspace/RunDetailCancelled.test.tsx
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
+  - codebus-app/src/lib/codex-validation.test.ts
+  - codebus-app/src/components/settings/EndpointSection.test.tsx
+  - codebus-app/src-tauri/tests/keyring_ipc.rs
+  - codebus-app/src/components/settings/CodexEndpointSection.test.tsx
+  - codebus-app/src/store/chat.test.ts
+  - codebus-cli/tests/parse_error_aborts_all_verbs.rs
 -->
 
 ---
@@ -734,154 +664,161 @@ tests:
 ---
 ### Requirement: Settings UI CLI Status Field
 
-The Settings modal SHALL render a CLI Status row that probes whether the agentic CLI binary for each supported provider is installed. The row SHALL invoke `check_cli_installed` on modal open AND SHALL display one of three states: `Checking…` (probe in flight), `Installed · <version>` (success), or `Not installed` (any failure). When the state is `Not installed`, the row SHALL render an inline hint instructing the user to install the CLI before configuring the endpoint. The row SHALL replace the prior `Authentication` / OAuth-status pseudo-field — the v1 OAuth label was a placeholder that did not reflect any real auth state.
+The Settings modal SHALL render a CLI Status row that probes whether the agentic CLI binary for the currently selected provider is installed. The row SHALL invoke `check_cli_installed` with the selected provider's `cliBinaryId` (from the provider registry) on modal open AND whenever the selected provider changes. It SHALL display one of three states: `Checking…` (probe in flight), `Installed · <version>` (success), or `Not installed` (any failure). When the state is `Not installed`, the row SHALL render an inline hint instructing the user to install that provider's CLI before configuring the endpoint. The row label SHALL reflect the selected provider's `displayName`.
 
-#### Scenario: CLI status row shows Installed after a successful probe
+#### Scenario: CLI status row probes claude when claude is selected
 
-- **WHEN** the user opens the Settings modal AND `check_cli_installed("claude_code")` returns `{ kind: "installed", version: "2.1.139 (Claude Code)" }`
-- **THEN** the Settings UI SHALL display a status badge containing the text `Installed` AND the version string `2.1.139 (Claude Code)`
+- **WHEN** the selected provider is `claude` AND `check_cli_installed("claude_code")` returns `{ kind: "installed", version: "2.1.139 (Claude Code)" }`
+- **THEN** the Settings UI SHALL display a status badge containing `Installed` AND the version string `2.1.139 (Claude Code)`
 
-#### Scenario: CLI status row shows Not installed when probe fails
+#### Scenario: CLI status row probes codex when codex is selected
 
-- **WHEN** the user opens the Settings modal AND `check_cli_installed("claude_code")` returns `{ kind: "not_installed" }`
-- **THEN** the Settings UI SHALL display a status badge containing the text `Not installed` AND an inline hint instructing the user to install the CLI
+- **WHEN** the selected provider is `codex` AND `check_cli_installed("codex")` returns `{ kind: "not_installed" }`
+- **THEN** the Settings UI SHALL display a status badge containing `Not installed` AND an inline hint instructing the user to install the codex CLI
+
+
+<!-- @trace
+source: codex-settings-ui
+updated: 2026-05-23
+code:
+  - codebus-core/src/agent/dispatch.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
+  - codebus-core/src/config/codex.rs
+  - codebus-core/src/agent/codex_backend.rs
+  - codebus-core/src/verb/fix.rs
+  - codebus-app/src/store/settings.ts
+  - codebus-app/src/components/workspace/ChatTranscript.tsx
+  - codebus-app/src/components/settings/EndpointSection.tsx
+  - codebus-core/src/stream/codex_parser.rs
+  - codebus-core/src/config/endpoint.rs
+  - codebus-core/src/agent/claude_backend.rs
+  - codebus-core/src/vault/init.rs
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - codebus-cli/src/commands/config.rs
+  - codebus-core/src/verb/goal.rs
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
+  - codebus-app/src-tauri/src/ipc/cli_status.rs
+  - codebus-core/src/config/mod.rs
+  - codebus-app/src/components/settings/CodexEndpointSection.tsx
+  - codebus-core/src/verb/error.rs
+  - codebus-app/src-tauri/src/ipc/keyring.rs
+  - codebus-core/src/stream/mod.rs
+  - codebus-core/src/config/claude_code.rs
+  - codebus-app/src/lib/ipc.ts
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-core/src/verb/chat.rs
+  - codebus-app/src/store/chat.ts
+  - codebus-app/src/store/goals.ts
+  - codebus-app/src/components/settings/SetKeyDialog.tsx
+  - codebus-core/src/agent/mod.rs
+  - codebus-core/src/verb/query.rs
+  - codebus-app/src/lib/providers.ts
+  - codebus-app/src/components/settings/SettingsModal.tsx
+tests:
+  - codebus-app/src/components/settings/SettingsModal.codex.test.tsx
+  - codebus-app/src/lib/providers.test.ts
+  - codebus-app/src/store/goals.test.ts
+  - codebus-app/src/lib/codex-validation.test.ts
+  - codebus-app/src/components/settings/EndpointSection.test.tsx
+  - codebus-app/src-tauri/tests/keyring_ipc.rs
+  - codebus-app/src/components/settings/CodexEndpointSection.test.tsx
+  - codebus-app/src/store/chat.test.ts
+  - codebus-cli/tests/parse_error_aborts_all_verbs.rs
+-->
 
 ---
 ### Requirement: Settings UI Endpoint Section
 
-The Settings modal SHALL render an Endpoint section that lets the user configure the Claude Code endpoint profile schema and manage the Azure API key entirely from the GUI. The section heading SHALL read `Claude Code endpoint settings` (or the locale-specific translation) and SHALL NOT include a provider-selector control — single-implementation selectors are out of scope until a second provider is integrated.
+The Settings modal SHALL render a provider selector AND an Endpoint section that lets the user configure the currently selected provider's endpoint profiles entirely from the GUI. The provider selector SHALL list the providers in the registry (`claude`, `codex`); selecting one SHALL set `agent.active_provider` and SHALL switch the Endpoint section to that provider's editor component and the CLI Status row to that provider's binary probe. The Endpoint section heading SHALL reflect the selected provider's `displayName`.
 
-The section SHALL contain three controls plus two sub-sections:
+The Endpoint editor rendered SHALL be the registry entry's editor component for the selected provider:
 
-1. An `active` radio group with exactly two options, `system` and `azure`. Selecting an option SHALL mutate the in-memory `claude_code.active` field; it SHALL NOT clear any field values in the non-selected profile sub-section.
-2. A System Profile sub-section containing four verb rows (`goal` / `query` / `fix` / `verify`). Each row SHALL contain a `model` `<select>` with exactly four `<option>` values (`opus-4-7`, `opus-4-6`, `haiku-4-5`, `sonnet-4-6`) AND an `effort` `<select>` with exactly six `<option>` values (`low`, `medium`, `high`, `xhigh`, `max`, `auto`). The `verify` row SHALL be visually positioned after the `fix` row to convey the "verification follows main action" sequence.
-3. An Azure Profile sub-section containing: a `base_url` text input, a `keyring_service` text input (pre-filled with the default `codebus-azure` when the underlying config field is empty or absent), an API-key status indicator (`Set` / `Unset`) with `Set new...` and `Delete` action buttons, AND four verb rows each containing a free-text `model` (deployment name) input AND an `effort` `<select>` with exactly six `<option>` values (`low`, `medium`, `high`, `xhigh`, `max`, `auto`).
+- The claude editor SHALL contain an `active` radio group (`system` / `azure`); a System Profile sub-section with four verb rows (`goal` / `query` / `fix` / `verify`), each row a free-text `model` combobox input wired to a suggestion `<datalist>` of the known aliases (`opus-4-7`, `opus-4-6`, `haiku-4-5`, `sonnet-4-6`) — a newly-released Claude model MAY be typed directly (codebus-core relaxed `SystemModel` to a free string translated to the CLI `--model` flag via the `claude-` prefix) — AND an `effort` `<select>` with six options (`low`, `medium`, `high`, `xhigh`, `max`, `auto`); and an Azure Profile sub-section with a `base_url` text input, a `keyring_service` text input (default `codebus-claude-azure`), an API-key status indicator with `Set new...` / `Delete` buttons, AND four verb rows each with a free-text `model` (deployment name) input AND an `effort` `<select>`.
+- The codex editor SHALL contain an `active` radio group over the codex provider's declared profiles (`system` / `azure`); a System Profile sub-section with four verb rows each containing a free-text `model` input (codex model names are arbitrary strings, NOT a closed enum) AND an `effort` input; and an Azure Profile sub-section with a `base_url` text input, an `api_version` text input, a `keyring_service` text input (default `codebus-azure`), the API-key status indicator with `Set new...` / `Delete` buttons, AND four verb rows each with a free-text deployment-name `model` input AND an `effort` input.
 
-Both profile sub-sections SHALL be present in the DOM regardless of the `active` value, organised as an **accordion**: the sub-section whose name matches `active` SHALL be expanded; the other sub-section SHALL be collapsed showing only its header (which SHALL include an `(inactive)` label). The user SHALL be able to click the collapsed header to expand the inactive sub-section and edit cold-storage configuration. When the user toggles the `active` radio, the newly-active sub-section SHALL auto-expand AND the previously-active sub-section SHALL auto-collapse; this auto-folding SHALL NOT delete or reset any form input values (collapsed inputs remain in the DOM, hidden via CSS, so values persist).
+Both profile sub-sections of the active provider SHALL be present in the DOM organised as an accordion: the sub-section whose name matches the provider's `active` value SHALL be expanded; the other SHALL be collapsed showing only its header with an `(inactive)` label. Toggling the `active` radio SHALL auto-expand the newly-active sub-section and auto-collapse the previously-active one WITHOUT clearing any form input values.
 
-The `Save` button at the Settings modal level SHALL persist only yaml content via `save_global_config`; it SHALL NOT carry the Azure API key. The API key SHALL flow exclusively through the three `*_endpoint_key` IPC commands triggered by the `Set new...` / `Delete` action buttons.
+The `Save` button SHALL persist only yaml content via `save_global_config`; it SHALL NOT carry any API key. API keys SHALL flow exclusively through the three `*_endpoint_key` IPC commands. The Settings UI SHALL NOT include a Test Connection button.
 
-The Settings UI SHALL NOT include a Test Connection / endpoint reachability button — verification SHALL require running `codebus query "ping"` from the terminal.
+The Settings modal SHALL perform client-side validation of the selected provider's endpoint block before allowing Save, using the registry entry's `validate(block)` function. The validation rules SHALL match the corresponding codebus-core parser (`parse_claude_code_yaml` for claude, `parse_codex_yaml` for codex) so the frontend and the `save_global_config` backend gate produce the same reject/accept decision. On failure the modal SHALL disable Save, render an inline validation summary listing each failing field, AND apply `aria-invalid="true"` to the offending inputs. The backend `save_global_config` SHALL validate the active provider's block via the matching core parser and reject an invalid block before writing the file.
 
-The Settings modal SHALL perform client-side validation of the `claude_code` block before allowing the user to save. Specifically: when `active === "azure"`, all of `base_url`, `keyring_service`, AND each verb's `model` (deployment name) SHALL be non-empty strings (trimmed), where "each verb" means all four of `goal`, `query`, `fix`, `verify`. Additionally, every verb's `effort` field (in BOTH `system` and `azure` profiles, regardless of which is active, for all four verbs) SHALL be one of the six values `low`, `medium`, `high`, `xhigh`, `max`, `auto` — values outside this set (including the empty string and any legacy value loaded from yaml) SHALL be treated as invalid. When any validation rule fails, the modal SHALL disable the Save button AND SHALL render an inline validation summary listing each failing field AND SHALL apply `aria-invalid="true"` to the offending inputs. The validation rules SHALL match the codebus-core `Endpoint Profile Schema` validation so the frontend and `save_global_config` backend gate produce the same reject/accept decision for fields covered by the backend (note: the backend keeps `effort` as a freeform `String` for yaml backward compatibility, so the effort enum constraint is enforced only at the UI layer).
+The codex provider's validation SHALL require, when codex `active === "azure"`, non-empty `base_url`, `api_version`, `keyring_service`, AND each verb's `model`; and when `active === "system"`, non-empty `model` for each verb. Unknown codex `model` strings SHALL NOT be rejected (codex models are not a closed enum).
 
-The Settings UI SHALL preserve a loaded `effort` value verbatim in in-memory state even when that value is not in the enum, so that legacy yaml content (e.g. `effort: super-high` written by an earlier version or hand-edit) is not silently coerced or discarded; the value SHALL surface through the validation summary so the user re-selects a valid value before Save becomes enabled. The `<select>` trigger for an invalid effort value SHALL render with no option visually selected (empty trigger label).
+#### Scenario: Selecting codex switches editor and CLI probe
 
-#### Scenario: Save button is disabled when active=azure has empty required fields
+- **WHEN** the user selects `codex` in the provider selector
+- **THEN** `agent.active_provider` SHALL become `codex` AND the Endpoint section SHALL render the codex editor (free-text model inputs plus an `api_version` field in the azure sub-section) AND the CLI Status row SHALL probe the codex binary
 
-- **WHEN** `claude_code.active === "azure"` AND `claude_code.azure.base_url` is the empty string (or any required azure field is empty, including `claude_code.azure.verify.model`) AND the user has edited any setting (dirty)
-- **THEN** the Save button SHALL be disabled AND the Endpoint section SHALL render an inline validation summary listing the failing fields
+#### Scenario: Claude editor uses a free-text model combobox
 
-#### Scenario: Empty azure field gets aria-invalid
+- **WHEN** the selected provider is `claude`
+- **THEN** the System Profile model control SHALL be a free-text input wired to a suggestion `<datalist>` of the four known aliases, AND typing a not-yet-known model (e.g. `opus-4-8`) SHALL be accepted (no closed-enum rejection)
 
-- **WHEN** `claude_code.active === "azure"` AND `claude_code.azure.goal.model` is the empty string
-- **THEN** the `azure-deployment-goal` input SHALL have `aria-invalid="true"` AND the validation summary SHALL list `claude_code.azure.goal.model`
+#### Scenario: Codex azure requires base_url, api_version, keyring_service, and verb models
 
-#### Scenario: Empty azure verify field gets aria-invalid
+- **WHEN** the selected provider is `codex`, codex `active === "azure"`, AND `api_version` (or any required azure field) is the empty string AND the user has edited a setting
+- **THEN** the Save button SHALL be disabled AND the validation summary SHALL list the failing field(s) including `api_version`
 
-- **WHEN** `claude_code.active === "azure"` AND `claude_code.azure.verify.model` is the empty string
-- **THEN** the `azure-deployment-verify` input SHALL have `aria-invalid="true"` AND the validation summary SHALL list `claude_code.azure.verify.model`
+#### Scenario: Codex system accepts arbitrary model strings
 
-#### Scenario: Save button enables when active=azure becomes fully populated
+- **WHEN** the selected provider is `codex`, codex `active === "system"`, AND a verb `model` is set to `gpt-5.5`
+- **THEN** validation SHALL accept it (no closed-enum rejection) AND, if all verbs' models are non-empty and the user has edited a setting, the Save button SHALL be enabled
 
-- **WHEN** `claude_code.active === "azure"` AND all azure required fields are non-empty (all four verbs' models, base_url, keyring_service) AND every verb's effort in both profiles (all four verbs) is one of `low` / `medium` / `high` / `xhigh` / `max` / `auto` AND the user has edited any setting (dirty)
-- **THEN** the Save button SHALL be enabled AND the Endpoint section SHALL NOT render a validation summary
+#### Scenario: Backend rejects an invalid codex block on save
 
-#### Scenario: Active radio switch preserves non-active profile inputs
+- **WHEN** `save_global_config` receives a config with `agent.active_provider: codex` and a codex block whose active profile is missing a required verb
+- **THEN** the command SHALL reject with an `AppError` (validated via `parse_codex_yaml`) AND SHALL NOT write the file
 
-- **WHEN** the user has typed `https://example.com/anthropic` into the azure `base_url` input AND `active` is currently `system` AND the user toggles `active` to `azure` then back to `system`
-- **THEN** the azure `base_url` input SHALL still contain `https://example.com/anthropic` (the value SHALL NOT be cleared by the toggle) — even though auto-fold collapses the azure sub-section back to a header when `active` returns to `system`
-
-#### Scenario: Initial render collapses the non-active sub-section
-
-- **WHEN** the Endpoint section first renders AND `claude_code.active` is `system`
-- **THEN** the System Profile sub-section SHALL be expanded (its verb rows and inputs visible) AND the Azure Profile sub-section SHALL be collapsed (only its header with `(inactive)` label visible)
-
-#### Scenario: User can expand inactive sub-section to edit cold storage
-
-- **WHEN** `active` is `system` AND the user clicks the Azure Profile collapsed header
-- **THEN** the Azure Profile sub-section SHALL expand revealing its inputs AND the System Profile sub-section SHALL remain expanded (the user-driven expansion of the inactive sub-section SHALL NOT collapse the active one)
-
-#### Scenario: Toggling active auto-collapses the previously-active sub-section
-
-- **WHEN** the System Profile is expanded (active) AND the user toggles `active` to `azure`
-- **THEN** the Azure Profile SHALL expand AND the System Profile SHALL collapse to its header — but the System Profile verb model dropdowns and effort dropdowns SHALL remain in the DOM (hidden via CSS) so their values persist across toggles
-
-#### Scenario: System model dropdown lists exactly four versioned options
-
-- **WHEN** the System Profile sub-section is rendered AND the user opens any of the four verb `model` dropdowns
-- **THEN** the dropdown SHALL list exactly four options whose `value` attributes are `opus-4-7`, `opus-4-6`, `haiku-4-5`, `sonnet-4-6` in that order
-
-#### Scenario: System effort dropdown lists exactly six options
-
-- **WHEN** the System Profile sub-section is rendered AND the user opens any of the four verb `effort` dropdowns
-- **THEN** the dropdown SHALL list exactly six options whose `value` attributes are `low`, `medium`, `high`, `xhigh`, `max`, `auto` in that order
-
-#### Scenario: Azure effort dropdown lists exactly six options
-
-- **WHEN** the Azure Profile sub-section is rendered AND the user opens any of the four verb `effort` dropdowns
-- **THEN** the dropdown SHALL list exactly six options whose `value` attributes are `low`, `medium`, `high`, `xhigh`, `max`, `auto` in that order AND the option set SHALL be identical to the System Profile effort dropdown
-
-#### Scenario: Legacy invalid effort value renders empty select trigger and flags validation
-
-- **WHEN** `~/.codebus/config.yaml` loads with `claude_code.system.goal.effort` set to `super-high` (a value outside the enum) AND the user opens the Settings modal
-- **THEN** the `system-effort-goal` `<select>` trigger SHALL render with no option visually selected (empty trigger label) AND the in-memory state SHALL retain the value `super-high` verbatim AND the validation summary SHALL list `claude_code.system.goal.effort` AND the `<select>` SHALL have `aria-invalid="true"` AND the Save button SHALL be disabled
-
-#### Scenario: Selecting a valid effort clears the invalid flag and enables Save
-
-- **WHEN** the Settings modal is open with `claude_code.system.goal.effort` equal to the invalid value `super-high` AND the Save button is disabled AND the user selects `medium` from the `system-effort-goal` dropdown AND no other fields are invalid
-- **THEN** the in-memory state SHALL update `claude_code.system.goal.effort` to `medium` AND the validation summary SHALL no longer list `claude_code.system.goal.effort` AND the `<select>` SHALL NOT have `aria-invalid` AND the Save button SHALL be enabled
-
-#### Scenario: Inactive profile invalid effort still blocks Save
-
-- **WHEN** `claude_code.active === "system"` AND every system verb effort is a valid enum value AND every azure required field is populated AND `claude_code.azure.fix.effort` equals `extreme` (a value outside the enum)
-- **THEN** the Save button SHALL be disabled AND the validation summary SHALL list `claude_code.azure.fix.effort` AND the `azure-effort-fix` `<select>` SHALL have `aria-invalid="true"`
-
-#### Scenario: Verify row renders and behaves identically to other verb rows
-
-- **WHEN** the System Profile sub-section is rendered
-- **THEN** a `verify` verb row SHALL be present AND its `model` dropdown SHALL list the same four versioned options as the other verb rows AND its `effort` dropdown SHALL list the same six options AND user interaction (selecting model or effort) SHALL mutate `claude_code.system.verify` in the same shape as the other verb rows
-
-#### Scenario: Azure verify deployment-name input renders and validates
-
-- **WHEN** the Azure Profile sub-section is rendered AND `claude_code.active === "azure"` AND `claude_code.azure.verify.model` is the empty string
-- **THEN** a `verify` verb row SHALL be present containing a free-text deployment-name input identified as `azure-deployment-verify` AND the input SHALL have `aria-invalid="true"` AND the validation summary SHALL list `claude_code.azure.verify.model` AND the Save button SHALL be disabled
-
-#### Scenario: Azure keyring_service input is pre-filled when config field is empty
-
-- **WHEN** `~/.codebus/config.yaml` either does not exist OR exists with `claude_code.azure.keyring_service` empty / absent AND the user opens the Settings modal
-- **THEN** the Azure `keyring_service` input SHALL display the value `codebus-azure`
-
-#### Scenario: Set new... button opens key entry modal
-
-- **WHEN** the user clicks the `Set new...` button in the Azure Profile sub-section
-- **THEN** a modal SHALL open containing a password-masked `<input type="password">` AND a `Confirm` button AND a `Cancel` button
-
-#### Scenario: Confirming the key entry modal stores the key without persisting it client-side
-
-- **WHEN** the user enters `sk-modal-test` into the password input AND clicks `Confirm`
-- **THEN** the modal SHALL invoke `set_endpoint_key("azure", "sk-modal-test")` AND on success the modal SHALL close AND the API-key status indicator SHALL update to `Set` AND no DOM element OR app state SHALL retain the entered key value
-
-#### Scenario: Delete button removes the keyring entry and updates status
-
-- **WHEN** the API-key status indicator currently shows `Set` AND the user clicks the `Delete` button
-- **THEN** the UI SHALL invoke `delete_endpoint_key("azure")` AND on success the status indicator SHALL update to `Unset`
-
-#### Scenario: Save button does not transmit the API key
-
-- **WHEN** the user has made any edits to the System / Azure profile fields AND clicks the `Save` button
-- **THEN** the resulting `save_global_config` payload SHALL contain the edited `claude_code` block (with all four verb sub-blocks including `verify`) AND SHALL NOT contain any key, field, or string value matching the Azure API key value
 
 <!-- @trace
-source: endpoint-effort-dropdown, verify-stage-independent-model
-updated: 2026-05-20
+source: codex-settings-ui
+updated: 2026-05-23
 code:
+  - codebus-core/src/agent/dispatch.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
+  - codebus-core/src/config/codex.rs
+  - codebus-core/src/agent/codex_backend.rs
+  - codebus-core/src/verb/fix.rs
+  - codebus-app/src/store/settings.ts
+  - codebus-app/src/components/workspace/ChatTranscript.tsx
   - codebus-app/src/components/settings/EndpointSection.tsx
+  - codebus-core/src/stream/codex_parser.rs
+  - codebus-core/src/config/endpoint.rs
+  - codebus-core/src/agent/claude_backend.rs
+  - codebus-core/src/vault/init.rs
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - codebus-cli/src/commands/config.rs
+  - codebus-core/src/verb/goal.rs
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
+  - codebus-app/src-tauri/src/ipc/cli_status.rs
+  - codebus-core/src/config/mod.rs
+  - codebus-app/src/components/settings/CodexEndpointSection.tsx
+  - codebus-core/src/verb/error.rs
+  - codebus-app/src-tauri/src/ipc/keyring.rs
+  - codebus-core/src/stream/mod.rs
+  - codebus-core/src/config/claude_code.rs
   - codebus-app/src/lib/ipc.ts
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-core/src/verb/chat.rs
+  - codebus-app/src/store/chat.ts
+  - codebus-app/src/store/goals.ts
+  - codebus-app/src/components/settings/SetKeyDialog.tsx
+  - codebus-core/src/agent/mod.rs
+  - codebus-core/src/verb/query.rs
+  - codebus-app/src/lib/providers.ts
+  - codebus-app/src/components/settings/SettingsModal.tsx
 tests:
-  - codebus-app/src/lib/ipc.effort.test.ts
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/components/settings/SettingsModal.codex.test.tsx
+  - codebus-app/src/lib/providers.test.ts
+  - codebus-app/src/store/goals.test.ts
+  - codebus-app/src/lib/codex-validation.test.ts
   - codebus-app/src/components/settings/EndpointSection.test.tsx
+  - codebus-app/src-tauri/tests/keyring_ipc.rs
+  - codebus-app/src/components/settings/CodexEndpointSection.test.tsx
+  - codebus-app/src/store/chat.test.ts
+  - codebus-cli/tests/parse_error_aborts_all_verbs.rs
 -->
 
 ---
@@ -979,4 +916,78 @@ tests:
   - codebus-app/src/store/vault-watcher-status.test.ts
   - codebus-app/src/components/workspace/WikiPreview.test.tsx
   - codebus-app/src/components/lobby/Lobby.test.tsx
+-->
+
+---
+### Requirement: Settings Provider Registry
+
+The Settings layer SHALL drive its provider-specific behavior from a single provider registry rather than hard-coding the claude provider. Each registry entry SHALL declare: a stable `id` (the `agent.active_provider` value, e.g. `claude` or `codex`), a `displayName`, a `cliBinaryId` (the argument passed to `check_cli_installed`), the set of endpoint `profiles` the provider supports, a `validate(block)` function returning the provider's client-side validation errors, and an endpoint-editor component. The registry SHALL contain exactly two entries in this change: `claude` and `codex`.
+
+The set of profiles SHALL be declared per provider, NOT assumed universal. `claude` and `codex` each declare `["system", "azure"]`; a future provider MAY declare a different set (e.g. only `["system"]`) and SHALL NOT be forced to expose an azure profile. Each provider's endpoint editor is a concrete component (no generic schema-to-form engine); the registry abstracts only the cross-provider glue (provider selection, config read/write keyed by provider id, CLI status probe by `cliBinaryId`, validation dispatch, and backend validation dispatch).
+
+The in-memory config store SHALL expose provider-keyed accessors `getProviderBlock(id)` and `updateProviderBlock(id, block)` that read and write `agent.providers.<id>` and set `agent.active_provider` to the currently selected provider. The store SHALL NOT hard-code `active_provider` to `claude`. Adding a future provider SHALL require adding a registry entry plus its editor component, with no change to the cross-provider glue.
+
+#### Scenario: Registry exposes claude and codex entries
+
+- **WHEN** the Settings modal initializes its provider registry
+- **THEN** the registry SHALL contain entries for `claude` and `codex`, each with a `cliBinaryId`, declared `profiles`, a `validate` function, and an editor component
+
+#### Scenario: Provider declares its own profiles without an assumed azure slot
+
+- **WHEN** a provider registry entry declares its supported `profiles`
+- **THEN** the declared set SHALL be used verbatim (codex declares `["system", "azure"]`) AND no azure profile SHALL be synthesized for a provider that did not declare one
+
+#### Scenario: Store writes the selected provider block and active_provider
+
+- **WHEN** `updateProviderBlock("codex", block)` is called
+- **THEN** the in-memory config SHALL set `agent.providers.codex` to `block` AND `agent.active_provider` to `codex`, preserving sibling `agent.providers.*` entries
+
+<!-- @trace
+source: codex-settings-ui
+updated: 2026-05-23
+code:
+  - codebus-core/src/agent/dispatch.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
+  - codebus-core/src/config/codex.rs
+  - codebus-core/src/agent/codex_backend.rs
+  - codebus-core/src/verb/fix.rs
+  - codebus-app/src/store/settings.ts
+  - codebus-app/src/components/workspace/ChatTranscript.tsx
+  - codebus-app/src/components/settings/EndpointSection.tsx
+  - codebus-core/src/stream/codex_parser.rs
+  - codebus-core/src/config/endpoint.rs
+  - codebus-core/src/agent/claude_backend.rs
+  - codebus-core/src/vault/init.rs
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - codebus-cli/src/commands/config.rs
+  - codebus-core/src/verb/goal.rs
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
+  - codebus-app/src-tauri/src/ipc/cli_status.rs
+  - codebus-core/src/config/mod.rs
+  - codebus-app/src/components/settings/CodexEndpointSection.tsx
+  - codebus-core/src/verb/error.rs
+  - codebus-app/src-tauri/src/ipc/keyring.rs
+  - codebus-core/src/stream/mod.rs
+  - codebus-core/src/config/claude_code.rs
+  - codebus-app/src/lib/ipc.ts
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-core/src/verb/chat.rs
+  - codebus-app/src/store/chat.ts
+  - codebus-app/src/store/goals.ts
+  - codebus-app/src/components/settings/SetKeyDialog.tsx
+  - codebus-core/src/agent/mod.rs
+  - codebus-core/src/verb/query.rs
+  - codebus-app/src/lib/providers.ts
+  - codebus-app/src/components/settings/SettingsModal.tsx
+tests:
+  - codebus-app/src/components/settings/SettingsModal.codex.test.tsx
+  - codebus-app/src/lib/providers.test.ts
+  - codebus-app/src/store/goals.test.ts
+  - codebus-app/src/lib/codex-validation.test.ts
+  - codebus-app/src/components/settings/EndpointSection.test.tsx
+  - codebus-app/src-tauri/tests/keyring_ipc.rs
+  - codebus-app/src/components/settings/CodexEndpointSection.test.tsx
+  - codebus-app/src/store/chat.test.ts
+  - codebus-cli/tests/parse_error_aborts_all_verbs.rs
 -->

@@ -13,8 +13,7 @@ import {
   type ClaudeCodeBlock,
   type ClaudeCodeValidationError,
   type KeyStatus,
-  type SystemModel,
-  DEFAULT_AZURE_KEYRING_SERVICE,
+  DEFAULT_CLAUDE_AZURE_KEYRING_SERVICE,
   SYSTEM_EFFORTS,
   SYSTEM_MODELS,
   deleteEndpointKey,
@@ -58,6 +57,11 @@ export function EndpointSection({
 }: EndpointSectionProps) {
   const t = useT()
   const hasError = (field: string) => errors.some((e) => e.field === field)
+  // The keyring entry to read/write is the claude azure profile's
+  // `keyring_service` (defaulting to the claude-specific default), so claude
+  // and codex keys never collide.
+  const keyringService =
+    claudeCode.azure?.keyring_service?.trim() || DEFAULT_CLAUDE_AZURE_KEYRING_SERVICE
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null)
   const [keyError, setKeyError] = useState<string | null>(null)
   const [setKeyOpen, setSetKeyOpen] = useState(false)
@@ -91,7 +95,7 @@ export function EndpointSection({
 
   async function refreshKeyStatus() {
     try {
-      const status = await getEndpointKey("azure")
+      const status = await getEndpointKey(keyringService)
       setKeyStatus(status)
       setKeyError(null)
     } catch (err) {
@@ -104,7 +108,7 @@ export function EndpointSection({
     onChange({ ...claudeCode, active: next })
   }
 
-  function setSystemModel(verb: Verb, model: SystemModel) {
+  function setSystemModel(verb: Verb, model: string) {
     onChange({
       ...claudeCode,
       system: {
@@ -148,7 +152,7 @@ export function EndpointSection({
 
   async function handleDeleteKey() {
     try {
-      await deleteEndpointKey("azure")
+      await deleteEndpointKey(keyringService)
       setKeyStatus({ kind: "unset" })
       setKeyError(null)
     } catch (err) {
@@ -200,24 +204,14 @@ export function EndpointSection({
           const effortInvalid = hasError(effortField)
           return (
             <VerbRow key={verb} verb={verb}>
-              <Select
+              <Input
+                data-testid={`system-model-${verb}`}
+                list="claude-system-model-suggestions"
+                className="w-[140px]"
+                placeholder="<model, e.g. opus-4-7>"
                 value={claudeCode.system[verb].model}
-                onValueChange={(v) => setSystemModel(verb, v as SystemModel)}
-              >
-                <SelectTrigger
-                  className="w-[140px]"
-                  data-testid={`system-model-${verb}`}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SYSTEM_MODELS.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={(e) => setSystemModel(verb, e.target.value)}
+              />
               <Select
                 value={claudeCode.system[verb].effort}
                 onValueChange={(v) => setSystemEffort(verb, v)}
@@ -391,8 +385,17 @@ export function EndpointSection({
         )}
       </ProfileBlock>
 
+      {/* Combobox suggestions for system model — free-text input, these are
+         only quick-picks (a new Claude model can be typed directly). */}
+      <datalist id="claude-system-model-suggestions">
+        {SYSTEM_MODELS.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
+
       <SetKeyDialog
         open={setKeyOpen}
+        service={keyringService}
         onClose={() => setSetKeyOpen(false)}
         onSuccess={() => {
           setSetKeyOpen(false)
@@ -511,7 +514,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function freshAzureBlock(): NonNullable<ClaudeCodeBlock["azure"]> {
   return {
     base_url: "",
-    keyring_service: DEFAULT_AZURE_KEYRING_SERVICE,
+    keyring_service: DEFAULT_CLAUDE_AZURE_KEYRING_SERVICE,
     goal: { model: "", effort: "high" },
     query: { model: "", effort: "low" },
     fix: { model: "", effort: "medium" },

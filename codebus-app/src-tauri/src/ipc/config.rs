@@ -12,7 +12,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use codebus_core::config::default_config_path;
-use codebus_core::config::endpoint::{ParseOutcome, parse_claude_code_yaml};
+use codebus_core::config::endpoint::{
+    parse_claude_code_yaml, parse_codex_yaml, read_active_provider,
+};
 
 use super::IpcResult;
 use crate::config::{AppConfig, read_app_config, resolve_quiz_default_length};
@@ -152,13 +154,34 @@ fn validate_claude_code(payload: &GlobalConfig) -> IpcResult<()> {
         .collect::<Vec<_>>()
         .join("\n");
     let wrapped = format!("agent:\n{inner}\n");
-    match parse_claude_code_yaml(&wrapped) {
-        Ok(ParseOutcome::New(_) | ParseOutcome::Missing) => Ok(()),
-        Err(e) => Err(AppError::Invalid {
+    // Always run the claude parser: it validates a claude block AND rejects an
+    // unsupported `active_provider` name (e.g. `gemini`).
+    if let Err(e) = parse_claude_code_yaml(&wrapped) {
+        return Err(AppError::Invalid {
             field: "agent".into(),
             message: e.to_string(),
-        }),
+        });
     }
+    // When codex is the active provider, validate its block via the codex
+    // parser too — the claude parser treats a codex config as `Missing` and
+    // would otherwise let an incomplete codex block through.
+    let is_codex = read_active_provider(&wrapped)
+        .map(|p| p == "codex")
+        .unwrap_or(false);
+    if is_codex {
+        return match parse_codex_yaml(&wrapped) {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => Err(AppError::Invalid {
+                field: "agent".into(),
+                message: "active_provider is `codex` but `agent.providers.codex` is missing".into(),
+            }),
+            Err(e) => Err(AppError::Invalid {
+                field: "agent".into(),
+                message: e.to_string(),
+            }),
+        };
+    }
+    Ok(())
 }
 
 fn global_config_path() -> IpcResult<PathBuf> {
@@ -461,5 +484,65 @@ mod tests {
             err,
             AppError::Invalid { ref field, .. } if field == "app.quiz.pass_threshold"
         ));
+    }
+
+    /// Spec (codex-settings-ui): save validates the codex provider block via
+    /// `parse_codex_yaml` — a full codex config saves cleanly.
+    fn codex_system_payload(verify_model: &str) -> GlobalConfig {
+        json!({
+            "agent": {
+                "active_provider": "codex",
+                "providers": {
+                    "codex": {
+                        "active": "system",
+                        "system": {
+                            "goal":   { "model": "gpt-5.5", "effort": "high" },
+                            "query":  { "model": "gpt-5.5", "effort": "low" },
+                            "fix":    { "model": "gpt-5.5", "effort": "medium" },
+                            "verify": { "model": verify_model, "effort": "high" }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn save_accepts_valid_codex_config() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        save_global_config_at(&path, &codex_system_payload("gpt-5.5"))
+            .expect("valid codex config must save");
+        assert!(path.exists());
+
+        // Observable on-disk result the GUI promises: the codex provider block
+        // is persisted as YAML with active_provider switched to codex.
+        let yaml = std::fs::read_to_string(&path).unwrap();
+        assert!(yaml.contains("active_provider: codex"), "yaml:\n{yaml}");
+        assert!(yaml.contains("gpt-5.5"), "yaml:\n{yaml}");
+
+        // End-to-end: the SAME file, read back through the REAL core provider
+        // loader the CLI uses, resolves to the codex provider with the model
+        // the GUI wrote. This closes the GUI-write -> core-consume loop without
+        // a webview (only the literal render is left for a manual smoke).
+        let provider =
+            codebus_core::agent::load_provider_config(&path).expect("core loads saved config");
+        assert!(
+            matches!(provider, codebus_core::agent::ProviderConfig::Codex(_)),
+            "core must select the codex provider from the GUI-saved config",
+        );
+        let resolved = provider.resolve(codebus_core::config::Verb::Goal);
+        assert_eq!(resolved.model.as_deref(), Some("gpt-5.5"));
+    }
+
+    #[test]
+    fn save_rejects_codex_with_missing_verb_model() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        // verify model empty → active codex system profile incomplete.
+        let err = save_global_config_at(&path, &codex_system_payload(""))
+            .expect_err("incomplete codex profile must reject");
+        assert!(matches!(err, AppError::Invalid { ref field, .. } if field == "agent"));
+        assert!(!path.exists(), "rejected config must not touch disk");
     }
 }

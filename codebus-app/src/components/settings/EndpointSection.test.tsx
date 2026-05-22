@@ -140,22 +140,24 @@ describe("EndpointSection", () => {
     expect(next.system).toEqual(initial.system)
   })
 
-  it("system model dropdowns expose exactly four versioned options per verb", async () => {
-    render(<EndpointSection claudeCode={defaultBlock()} onChange={() => {}} />)
-    // Open the goal verb's dropdown.
-    fireEvent.click(screen.getByTestId("system-model-goal"))
-    await waitFor(() => {
-      expect(screen.getByRole("option", { name: "opus-4-7" })).toBeInTheDocument()
+  it("system model is a combobox: free-text input + the four suggestions in a datalist", () => {
+    const { container } = render(<EndpointSection claudeCode={defaultBlock()} onChange={() => {}} />)
+    const goal = screen.getByTestId("system-model-goal")
+    expect(goal.tagName).toBe("INPUT")
+    expect(goal.getAttribute("list")).toBe("claude-system-model-suggestions")
+    const opts = Array.from(
+      container.querySelectorAll("#claude-system-model-suggestions option"),
+    ).map((o) => o.getAttribute("value"))
+    expect(opts).toEqual(["opus-4-7", "opus-4-6", "sonnet-4-6", "haiku-4-5"])
+  })
+
+  it("system model accepts a typed (new) model — combobox, not a closed set", () => {
+    let captured: ClaudeCodeBlock | null = null
+    render(<EndpointSection claudeCode={defaultBlock()} onChange={(b) => { captured = b }} />)
+    fireEvent.change(screen.getByTestId("system-model-goal"), {
+      target: { value: "opus-4-8" },
     })
-    for (const opt of ["opus-4-7", "opus-4-6", "sonnet-4-6", "haiku-4-5"]) {
-      expect(screen.getByRole("option", { name: opt })).toBeInTheDocument()
-    }
-    // Forbidden unversioned aliases SHALL NOT appear.
-    for (const forbidden of ["opus", "haiku", "sonnet"]) {
-      expect(
-        screen.queryByRole("option", { name: forbidden }),
-      ).not.toBeInTheDocument()
-    }
+    expect((captured as unknown as ClaudeCodeBlock).system.goal.model).toBe("opus-4-8")
   })
 
   // Spec scenario: System effort dropdown lists exactly six options.
@@ -266,12 +268,12 @@ describe("EndpointSection", () => {
     ).toHaveTextContent("fix effort must be one of")
   })
 
-  it("azure keyring_service input pre-fills with codebus-azure when azure block is null", () => {
+  it("azure keyring_service input pre-fills with codebus-claude-azure when azure block is null", () => {
     const block = defaultBlock()
     block.azure = null
     render(<EndpointSection claudeCode={block} onChange={() => {}} />)
     expect(screen.getByTestId("azure-keyring-service")).toHaveValue(
-      "codebus-azure",
+      "codebus-claude-azure",
     )
   })
 
@@ -308,7 +310,7 @@ describe("EndpointSection", () => {
 
     expect(mockedInvoke).toHaveBeenCalledWith(
       "set_endpoint_key",
-      { profile: "azure", key: "sk-modal-test" },
+      { service: "codebus-claude-azure", key: "sk-modal-test" },
     )
     // The key value MUST NOT persist in any visible DOM after confirm.
     expect(document.body.textContent).not.toContain("sk-modal-test")
@@ -332,7 +334,7 @@ describe("EndpointSection", () => {
       expect(screen.getByTestId("azure-key-status")).toHaveTextContent("Unset"),
     )
     expect(mockedInvoke).toHaveBeenCalledWith("delete_endpoint_key", {
-      profile: "azure",
+      service: "codebus-claude-azure",
     })
   })
 
@@ -422,15 +424,11 @@ describe("EndpointSection", () => {
       expect(screen.getByTestId("azure-effort-verify")).toBeInTheDocument()
     })
 
-    it("verify model dropdown lists exactly four versioned options", async () => {
+    it("verify model is a combobox input wired to the shared suggestion datalist", () => {
       render(<EndpointSection claudeCode={defaultBlock()} onChange={() => {}} />)
-      fireEvent.click(screen.getByTestId("system-model-verify"))
-      await waitFor(() => {
-        expect(screen.getByRole("option", { name: "opus-4-6" })).toBeInTheDocument()
-      })
-      for (const opt of ["opus-4-7", "opus-4-6", "haiku-4-5", "sonnet-4-6"]) {
-        expect(screen.getByRole("option", { name: opt })).toBeInTheDocument()
-      }
+      const verify = screen.getByTestId("system-model-verify")
+      expect(verify.tagName).toBe("INPUT")
+      expect(verify.getAttribute("list")).toBe("claude-system-model-suggestions")
     })
 
     it("flags aria-invalid when azure verify deployment is empty", () => {

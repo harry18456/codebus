@@ -23,10 +23,8 @@
 //! 12. Load `log` config and write `RunLog`
 //! 13. Return `FixReport` with status reflecting termination reason
 
-use crate::agent::{ClaudeBackend, EnvOverrides};
-use crate::config::{
-    Verb, build_env_overrides, default_config_path, load_claude_code_config, load_lint_fix_config,
-};
+use crate::agent::{build_backend, load_provider_config};
+use crate::config::{Verb, default_config_path, load_lint_fix_config};
 use crate::git::auto_commit;
 use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
@@ -147,7 +145,7 @@ pub fn run_fix(
     // Step 5: load claude_code + log config (log needed for events sink).
     let cc_cfg = match default_config_path() {
         Some(p) if p.exists() => {
-            load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
+            load_provider_config(&p).map_err(|e| VerbError::ConfigParse {
                 which: "claude_code",
                 source: e,
             })?
@@ -172,9 +170,8 @@ pub fn run_fix(
     // Step 6: resolve fix verb config (for RunLog) + build env overrides, then
     // build the Claude backend (resolves model/effort from Verb::Fix itself).
     let fix_resolved = cc_cfg.resolve(Verb::Fix);
-    let fix_env: EnvOverrides =
-        build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
-    let backend = ClaudeBackend::new(cc_cfg, fix_env);
+    let backend =
+        build_backend(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
     // Fan-out closure: emit each VerbEvent to events sink + caller.
     let mut fan_out = |event: VerbEvent| {
@@ -205,7 +202,7 @@ pub fn run_fix(
         let fan_out = &mut fan_out;
         run_fix_loop(
             paths.root.clone(),
-            &backend,
+            &*backend,
             |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
         )

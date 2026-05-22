@@ -96,6 +96,57 @@ fn write_bundle_if_missing(path: &Path, verb: &str) -> io::Result<BundleOutcome>
     Ok(BundleOutcome::Written)
 }
 
+/// `<base>/.codex/skills/codebus-<verb>/SKILL.md` — the codex-provider mirror
+/// of [`skill_bundle_path`]. Codex registers a project-level `.codex/skills/`
+/// entry's name/description even under the isolation spawn flags, so the same
+/// stub content is reused verbatim.
+pub fn codex_skill_bundle_path(base: &Path, verb: &str) -> PathBuf {
+    base.join(".codex")
+        .join("skills")
+        .join(format!("codebus-{verb}"))
+        .join("SKILL.md")
+}
+
+/// Materialize codex's instruction surface under the vault, all write-if-missing
+/// (existing files preserved): the `.codex/skills/` bundles (identical content
+/// to the `.claude` bundles), `<vault_root>/AGENTS.md` (codex's always-loaded
+/// instruction file, mirroring the vault `CLAUDE.md` content passed as
+/// `agents_md_content`), and the `project_root_markers` marker file so codex
+/// pins its project root to the vault. Returns one `BundleOutcome` per file in
+/// order: the five skill bundles, then `AGENTS.md`, then the marker.
+pub fn write_codex_materialization_if_missing(
+    vault_root: &Path,
+    agents_md_content: &str,
+) -> io::Result<Vec<BundleOutcome>> {
+    let mut outcomes = Vec::with_capacity(VERBS.len() + 2);
+    for verb in VERBS {
+        outcomes.push(write_bundle_if_missing(
+            &codex_skill_bundle_path(vault_root, verb),
+            verb,
+        )?);
+    }
+    outcomes.push(write_plain_file_if_missing(
+        &vault_root.join("AGENTS.md"),
+        agents_md_content,
+    )?);
+    outcomes.push(write_plain_file_if_missing(
+        &vault_root.join(crate::agent::CODEX_VAULT_MARKER),
+        "",
+    )?);
+    Ok(outcomes)
+}
+
+fn write_plain_file_if_missing(path: &Path, content: &str) -> io::Result<BundleOutcome> {
+    if path.exists() {
+        return Ok(BundleOutcome::AlreadyPresent);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, content)?;
+    Ok(BundleOutcome::Written)
+}
+
 fn stub_content(verb: &str) -> String {
     // v3-chat-verb: chat has a distinct SKILL structure (read-only sandbox,
     // multi-turn workflow, promote-suggestion line marker emission rule,
@@ -1211,5 +1262,52 @@ mod tests {
             !body.contains("generation_token_usage:\n  input:"),
             "quiz SKILL must not template agent-authored token usage frontmatter"
         );
+    }
+
+    /// Spec: Codex Instruction Materialization — codex skills, AGENTS.md, and
+    /// the marker are written under the vault.
+    #[test]
+    fn codex_materialization_writes_skills_agents_and_marker() {
+        let tmp = TempDir::new().unwrap();
+        let vault = tmp.path();
+        let outcomes =
+            write_codex_materialization_if_missing(vault, "SCHEMA RULES TEXT").unwrap();
+        // five skill bundles + AGENTS.md + marker
+        assert_eq!(outcomes.len(), 7, "got {outcomes:?}");
+        assert!(outcomes.iter().all(|o| matches!(o, BundleOutcome::Written)));
+        // codex skill bundle content is identical to the `.claude` stub
+        let codex_goal =
+            fs::read_to_string(vault.join(".codex/skills/codebus-goal/SKILL.md")).unwrap();
+        assert_eq!(codex_goal, stub_content("goal"));
+        // AGENTS.md mirrors the passed CLAUDE.md content
+        assert_eq!(
+            fs::read_to_string(vault.join("AGENTS.md")).unwrap(),
+            "SCHEMA RULES TEXT"
+        );
+        // marker present for project_root_markers pinning
+        assert!(vault.join(crate::agent::CODEX_VAULT_MARKER).exists());
+    }
+
+    /// Spec: existing files are preserved (write-if-missing).
+    #[test]
+    fn codex_materialization_preserves_existing_files() {
+        let tmp = TempDir::new().unwrap();
+        let vault = tmp.path();
+        fs::write(vault.join("AGENTS.md"), "USER CUSTOM").unwrap();
+        let outcomes = write_codex_materialization_if_missing(vault, "SCHEMA").unwrap();
+        assert_eq!(
+            fs::read_to_string(vault.join("AGENTS.md")).unwrap(),
+            "USER CUSTOM"
+        );
+        assert!(outcomes.iter().any(|o| matches!(o, BundleOutcome::AlreadyPresent)));
+    }
+
+    /// Spec: claude bundles unchanged — codex materialization is additive.
+    #[test]
+    fn codex_materialization_leaves_claude_path_untouched() {
+        let tmp = TempDir::new().unwrap();
+        let vault = tmp.path();
+        write_codex_materialization_if_missing(vault, "SCHEMA").unwrap();
+        assert!(!vault.join(".claude/skills/codebus-goal/SKILL.md").exists());
     }
 }

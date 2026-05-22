@@ -13,11 +13,15 @@
 pub mod backend;
 pub mod claude_backend;
 pub mod claude_cli;
+pub mod codex_backend;
+pub mod dispatch;
 pub mod env_overrides;
 pub mod spawn_spec;
 
 pub use backend::AgentBackend;
 pub use claude_backend::ClaudeBackend;
+pub use codex_backend::{CODEX_AZURE_KEY_ENV, CODEX_VAULT_MARKER, CodexBackend};
+pub use dispatch::{ProviderConfig, build_backend, load_provider_config, parse_provider_config};
 pub use claude_cli::{InvokeReport, invoke};
 pub use env_overrides::EnvOverrides;
 pub use spawn_spec::{CommandPrefix, Permission, SpawnSpec};

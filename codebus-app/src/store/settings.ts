@@ -4,10 +4,14 @@ import {
   type ActiveProfile,
   type AzureProfile,
   type ClaudeCodeBlock,
+  type CodexAzureProfile,
+  type CodexBlock,
+  type CodexSystemProfile,
   type GlobalConfig,
   type HooksConfig,
   type SystemProfile,
-  DEFAULT_AZURE_KEYRING_SERVICE,
+  DEFAULT_CLAUDE_AZURE_KEYRING_SERVICE,
+  DEFAULT_CODEX_AZURE_KEYRING_SERVICE,
   HOOKS_CONFIG_DEFAULTS,
   SYSTEM_PROFILE_DEFAULTS,
   loadGlobalConfig as loadGlobalConfigIpc,
@@ -37,6 +41,31 @@ interface SettingsState {
    * Marks the store dirty so the Save button enables.
    */
   updateClaudeCode: (block: ClaudeCodeBlock) => void
+  /**
+   * Provider-keyed read of `agent.providers.<id>` (raw block, no default
+   * filling — callers that need defaults use the provider's own reader).
+   */
+  getProviderBlock: (id: string) => unknown
+  /**
+   * Provider-keyed write: set `agent.providers.<id>` to `block` AND
+   * `agent.active_provider` to `id`, preserving sibling provider blocks.
+   * Marks the store dirty. This is the registry-driven replacement for the
+   * claude-only `updateClaudeCode`; `updateClaudeCode` delegates here.
+   */
+  updateProviderBlock: (id: string, block: unknown) => void
+  /**
+   * Get a fully-populated `CodexBlock` from `agent.providers.codex`, filling
+   * defaults for missing fields (empty model strings — codex has no built-in
+   * model defaults; api_version empty; keyring_service default). Mirrors
+   * {@link getClaudeCodeBlock} for the codex provider.
+   */
+  getCodexBlock: () => CodexBlock
+  /**
+   * Set `agent.active_provider` to `id`, preserving all provider blocks and
+   * other config. Used by the Settings provider selector to switch providers
+   * without mutating any endpoint block.
+   */
+  setActiveProvider: (id: string) => void
   /**
    * Quiz summary pass/fail threshold (percent), read from
    * `app.quiz.pass_threshold` — the same key the Settings modal binds.
@@ -96,9 +125,38 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   updateClaudeCode(block) {
-    // Unified schema: the claude provider's endpoint block lives at
-    // `agent.providers.claude`. Preserve any sibling agent keys and force
-    // `active_provider: claude` (the only supported provider today).
+    // Registry-driven: delegate to the provider-keyed writer (claude is just
+    // the provider with id "claude"). Preserved for existing callers/tests.
+    get().updateProviderBlock("claude", block)
+  },
+
+  getProviderBlock(id) {
+    const cfg = get().config as {
+      agent?: { providers?: Record<string, unknown> }
+    }
+    return cfg.agent?.providers?.[id]
+  },
+
+  getCodexBlock() {
+    return readCodexBlock(get().config)
+  },
+
+  setActiveProvider(id) {
+    const cur = get().config
+    const curAgent = (cur.agent ?? {}) as {
+      active_provider?: string
+      providers?: Record<string, unknown>
+    }
+    const next = {
+      ...cur,
+      agent: { ...curAgent, active_provider: id },
+    } as GlobalConfig
+    set({ config: next, dirty: true })
+  },
+
+  updateProviderBlock(id, block) {
+    // The selected provider's endpoint block lives at `agent.providers.<id>`.
+    // Preserve sibling provider blocks and set `active_provider` to `id`.
     const cur = get().config
     const curAgent = (cur.agent ?? {}) as {
       active_provider?: string
@@ -108,8 +166,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       ...cur,
       agent: {
         ...curAgent,
-        active_provider: "claude",
-        providers: { ...(curAgent.providers ?? {}), claude: block },
+        active_provider: id,
+        providers: { ...(curAgent.providers ?? {}), [id]: block },
       },
     } as GlobalConfig
     set({ config: next, dirty: true })
@@ -170,6 +228,44 @@ function readClaudeCodeBlock(config: GlobalConfig | null | undefined): ClaudeCod
   return { active, system, azure }
 }
 
+/**
+ * Read the codex provider's endpoint block from `agent.providers.codex`,
+ * filling defaults. Codex has no built-in model defaults (free-text), so
+ * missing models default to empty strings; the azure profile carries
+ * `api_version` and a default `keyring_service`.
+ */
+function readCodexBlock(config: GlobalConfig | null | undefined): CodexBlock {
+  const raw = (
+    config as { agent?: { providers?: { codex?: unknown } } } | null | undefined
+  )?.agent?.providers?.codex as Partial<CodexBlock> | undefined
+  const active: ActiveProfile = raw?.active === "azure" ? "azure" : "system"
+  const sys = (raw?.system ?? {}) as Partial<CodexSystemProfile>
+  const system: CodexSystemProfile = {
+    goal: sys.goal ?? { model: "", effort: "high" },
+    query: sys.query ?? { model: "", effort: "low" },
+    fix: sys.fix ?? { model: "", effort: "medium" },
+    verify: sys.verify ?? { model: "", effort: "high" },
+  }
+  return { active, system, azure: readCodexAzure(raw?.azure) }
+}
+
+function readCodexAzure(raw: unknown): CodexAzureProfile | null {
+  if (!raw || typeof raw !== "object") return null
+  const r = raw as Partial<CodexAzureProfile>
+  return {
+    base_url: r.base_url ?? "",
+    api_version: r.api_version ?? "",
+    keyring_service:
+      r.keyring_service && r.keyring_service.length > 0
+        ? r.keyring_service
+        : DEFAULT_CODEX_AZURE_KEYRING_SERVICE,
+    goal: r.goal ?? { model: "", effort: "high" },
+    query: r.query ?? { model: "", effort: "low" },
+    fix: r.fix ?? { model: "", effort: "medium" },
+    verify: r.verify ?? { model: "", effort: "high" },
+  }
+}
+
 function mergeSystemProfile(raw: unknown): SystemProfile {
   const r = (raw ?? {}) as Partial<SystemProfile>
   return {
@@ -222,7 +318,7 @@ function readAzureProfile(raw: unknown): AzureProfile | null {
     base_url: r.base_url ?? "",
     keyring_service: r.keyring_service && r.keyring_service.length > 0
       ? r.keyring_service
-      : DEFAULT_AZURE_KEYRING_SERVICE,
+      : DEFAULT_CLAUDE_AZURE_KEYRING_SERVICE,
     goal:   r.goal   ?? { model: "", effort: "high" },
     query:  r.query  ?? { model: "", effort: "low" },
     fix:    r.fix    ?? { model: "", effort: "medium" },

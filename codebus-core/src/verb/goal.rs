@@ -21,10 +21,9 @@
 //! 12. Emit `VerbBanner::Done` and return `GoalReport`
 
 use crate::config::{
-    PiiConfig, PiiScannerKind, Verb, build_env_overrides, default_config_path,
-    load_claude_code_config, load_lint_fix_config, load_pii_config,
+    PiiConfig, PiiScannerKind, Verb, default_config_path, load_lint_fix_config, load_pii_config,
 };
-use crate::agent::ClaudeBackend;
+use crate::agent::{build_backend, load_provider_config};
 use crate::agent::claude_cli::InvokeReport;
 use crate::git::{auto_commit, changed_paths_under, rev_parse_head};
 use crate::verb::content_verify::{
@@ -211,7 +210,7 @@ pub fn run_goal(
     };
     let cc_cfg = match default_config_path() {
         Some(p) if p.exists() => {
-            load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
+            load_provider_config(&p).map_err(|e| VerbError::ConfigParse {
                 which: "claude_code",
                 source: e,
             })?
@@ -299,15 +298,15 @@ pub fn run_goal(
 
     // Step 7: resolve goal verb config + build env overrides.
     let goal_resolved = cc_cfg.resolve(Verb::Goal);
-    let goal_env =
-        build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
     // One backend drives every goal-side spawn (main / fix-loop / content
     // verify + repair). It resolves model/effort per the SpawnSpec's verb —
     // verify-stage-independent-model: the content-verify spawn passes
     // `Verb::Verify` so the backend resolves the dedicated verify sub-block;
-    // main/repair pass `Verb::Goal`, the fix-loop passes `Verb::Fix`. cc_cfg
-    // is cloned so the later resolve(Verb::Fix) for RunLog still has it.
-    let backend = ClaudeBackend::new(cc_cfg.clone(), goal_env);
+    // main/repair pass `Verb::Goal`, the fix-loop passes `Verb::Fix`.
+    // build_backend borrows cc_cfg, so the later resolve(Verb::Fix) for RunLog
+    // still has it.
+    let backend =
+        build_backend(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
     // goal-content-verify D3: pin the vault revision BEFORE the goal
     // agent spawn so the content-verify stage can diff this run's
@@ -328,7 +327,7 @@ pub fn run_goal(
     let invoke_report = {
         let fan_out = &mut fan_out;
         crate::agent::invoke(
-            &backend,
+            &*backend,
             crate::agent::SpawnSpec {
                 verb: Verb::Goal,
                 prompt: slash_command,
@@ -385,7 +384,7 @@ pub fn run_goal(
             let fan_out = &mut fan_out;
             run_fix_loop(
                 paths.root.clone(),
-                &backend,
+                &*backend,
                 |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
                 cancel.clone(),
             )
@@ -465,7 +464,7 @@ pub fn run_goal(
                     // verify sub-block, NOT `Verb::Goal`. Read-only sandbox.
                     let vtext = match run_goal_spawn(
                         &mut **fan_cell.borrow_mut(),
-                        &backend,
+                        &*backend,
                         prompt,
                         &paths.root,
                         Verb::Verify,
@@ -507,7 +506,7 @@ pub fn run_goal(
                         );
                         match run_goal_spawn(
                             &mut **fan_cell.borrow_mut(),
-                            &backend,
+                            &*backend,
                             prompt,
                             &paths.root,
                             Verb::Goal,

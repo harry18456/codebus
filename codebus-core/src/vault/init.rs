@@ -320,6 +320,15 @@ pub fn run_init(
         opts.with_repo_root_skills,
     )
     .map_err(InitError::SkillBundles)?;
+    // Codex provider: materialize the codex instruction surface (AGENTS.md
+    // mirroring CLAUDE.md, `.codex/skills/` bundles, project-root marker)
+    // alongside the claude bundles. Only when codex is the active provider;
+    // write-if-missing; silent (no extra lifecycle event so the declared
+    // event order is unchanged).
+    if codex_provider_active() {
+        crate::skill_bundle::write_codex_materialization_if_missing(&paths.root, NEUTRAL_RULES)
+            .map_err(InitError::SkillBundles)?;
+    }
     let today_utc = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let (nav_written, nav_preserved) =
         nav_stubs::write_nav_stubs_if_missing(&paths.root, &today_utc)
@@ -464,6 +473,18 @@ fn write_schema_if_missing(schema_md: &Path) -> io::Result<bool> {
     }
     fs::write(schema_md, NEUTRAL_RULES)?;
     Ok(true)
+}
+
+/// Returns `true` when `~/.codebus/config.yaml` selects `codex` as the active
+/// provider. A missing/unreadable config or absent `agent` block defaults to
+/// claude (`false`), so claude-only vaults are never polluted with codex
+/// materialization.
+fn codex_provider_active() -> bool {
+    default_config_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|body| crate::config::endpoint::read_active_provider(&body).ok())
+        .map(|provider| provider == "codex")
+        .unwrap_or(false)
 }
 
 fn write_skill_bundles(

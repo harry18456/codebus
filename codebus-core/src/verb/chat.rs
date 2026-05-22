@@ -37,8 +37,8 @@
 //! No auto_commit at any point (chat is read-only; `CHAT_TOOLSET` excludes
 //! `Write`/`Edit` at the binary layer + SKILL.md restates the invariant).
 
-use crate::agent::{ClaudeBackend, Permission, SpawnSpec, invoke};
-use crate::config::{Verb, build_env_overrides, default_config_path, load_claude_code_config};
+use crate::agent::{Permission, SpawnSpec, build_backend, invoke, load_provider_config};
+use crate::config::{Verb, default_config_path};
 use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
 use crate::log::verb_log::{load_verb_log_config, resolve_sink_dir, write_run_log};
@@ -133,7 +133,7 @@ pub fn run_chat_turn(
     // Step 2: load claude_code + log config.
     let cc_cfg = match default_config_path() {
         Some(p) if p.exists() => {
-            load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
+            load_provider_config(&p).map_err(|e| VerbError::ConfigParse {
                 which: "claude_code",
                 source: e,
             })?
@@ -162,9 +162,8 @@ pub fn run_chat_turn(
 
     // Step 4: build env overrides (azure profile keyring fetch), then build
     // the Claude backend (holds config for model resolution + env).
-    let chat_env =
-        build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
-    let backend = ClaudeBackend::new(cc_cfg, chat_env);
+    let backend =
+        build_backend(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
 
     // Fan-out closure: each VerbEvent → events sink + caller's on_event.
     let mut fan_out = |event: VerbEvent| {
@@ -186,7 +185,7 @@ pub fn run_chat_turn(
         let fan_out = &mut fan_out;
         let stream_options = options.session_id.clone();
         invoke(
-            &backend,
+            &*backend,
             SpawnSpec {
                 verb: Verb::Chat,
                 prompt: slash_command,
@@ -250,7 +249,12 @@ pub fn run_chat_turn(
         return Err(VerbError::Cancelled);
     }
 
-    // Success: write per-turn RunLog with mode=chat + session_id.
+    // Outcome reflects the agent child's exit code. A non-zero exit (e.g.
+    // codex `exec resume` rejecting a cross-provider switch) is a FAILED turn
+    // — previously this was hardcoded "succeeded", so a broken resume was
+    // logged as success and the GUI showed an empty response with no error.
+    let exit_code = invoke_report.exit.code();
+    let succeeded = exit_code == Some(0);
     let run_log = RunLog {
         goal: options.text.clone(),
         mode: "chat".into(),
@@ -262,17 +266,21 @@ pub fn run_chat_turn(
         wiki_changed: false,
         lint_error_count: 0,
         lint_warn_count: 0,
-        outcome: "succeeded".into(),
+        outcome: if succeeded { "succeeded" } else { "failed" }.into(),
         session_id: Some(session_id_from_spawn.clone()),
     };
     write_run_log(sink_cfg, &run_log);
+
+    if !succeeded {
+        return Err(VerbError::AgentFailed { exit_code });
+    }
 
     Ok(ChatTurnReport {
         session_id: session_id_from_spawn,
         accumulated_tokens: invoke_report.accumulated_tokens,
         started_at: run_log.started_at,
         finished_at: invoke_report.finished_at,
-        agent_exit_code: invoke_report.exit.code(),
+        agent_exit_code: exit_code,
     })
 }
 

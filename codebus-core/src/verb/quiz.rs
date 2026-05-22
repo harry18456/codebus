@@ -36,8 +36,10 @@
 //! `codebus-cli/tests/quiz_flow.rs` (task 4.2).
 
 use crate::agent::claude_cli::InvokeReport;
-use crate::agent::{ClaudeBackend, CommandPrefix, Permission, SpawnSpec, invoke};
-use crate::config::{Verb, build_env_overrides, default_config_path, load_claude_code_config};
+use crate::agent::{
+    AgentBackend, CommandPrefix, Permission, SpawnSpec, build_backend, invoke, load_provider_config,
+};
+use crate::config::{Verb, default_config_path};
 use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
 use crate::log::sink::accumulate_token_usage;
@@ -314,13 +316,13 @@ fn load_quiz_agent_config() -> Result<
     (
         crate::config::ResolvedVerb,
         crate::config::ResolvedVerb,
-        ClaudeBackend,
+        Box<dyn AgentBackend>,
     ),
     VerbError,
 > {
     let cc_cfg = match default_config_path() {
         Some(p) if p.exists() => {
-            load_claude_code_config(&p).map_err(|e| VerbError::ConfigParse {
+            load_provider_config(&p).map_err(|e| VerbError::ConfigParse {
                 which: "claude_code",
                 source: e,
             })?
@@ -332,8 +334,7 @@ fn load_quiz_agent_config() -> Result<
     // own copy of the config via the SpawnSpec's verb.
     let resolved = cc_cfg.resolve(Verb::Quiz);
     let verify_resolved = cc_cfg.resolve(Verb::Verify);
-    let env = build_env_overrides(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
-    let backend = ClaudeBackend::new(cc_cfg, env);
+    let backend = build_backend(&cc_cfg).map_err(|e| VerbError::KeyringMissing { source: e })?;
     Ok((resolved, verify_resolved, backend))
 }
 
@@ -421,7 +422,7 @@ pub fn run_quiz_plan<F: FnMut(VerbEvent)>(
 
     let (plan_text, plan_report) = run_spawn(
         &mut fan_out,
-        &backend,
+        &*backend,
         format!("/codebus-quiz plan: {}", options.topic),
         &paths.root,
         Verb::Quiz,
@@ -520,7 +521,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
     let goal_text = options.pages.join(",");
     let (gen_text, gen_report) = run_spawn(
         &mut fan_out,
-        &backend,
+        &*backend,
         format!(
             "/codebus-quiz generate: pages=[{}] count={}",
             options.pages.join(","),
@@ -589,7 +590,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
             // NOT `Verb::Quiz`. Read-only, no command allowance.
             let vtext = match run_spawn(
                 &mut **fan_cell.borrow_mut(),
-                &backend,
+                &*backend,
                 verify_prompt,
                 &paths.root,
                 Verb::Verify,
@@ -631,7 +632,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
                 );
                 match run_spawn(
                     &mut **fan_cell.borrow_mut(),
-                    &backend,
+                    &*backend,
                     repair_prompt,
                     &paths.root,
                     Verb::Quiz,

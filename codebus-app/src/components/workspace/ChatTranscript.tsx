@@ -218,6 +218,15 @@ function TurnBlock({ turn, onWikiLinkClick, promotePill }: TurnBlockProps) {
         events={turn.events}
         onWikiLinkClick={onWikiLinkClick}
       />
+      {turn.error && (
+        <div
+          data-testid="chat-turn-error"
+          role="alert"
+          className="rounded border border-error/40 bg-error/10 px-2 py-1 text-[11px] text-error"
+        >
+          {turn.error}
+        </div>
+      )}
       {promotePill}
     </div>
   )

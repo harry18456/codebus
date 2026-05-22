@@ -48,9 +48,13 @@ pub enum VerbError {
         source: KeyringError,
     },
 
-    /// `agent::invoke` returned an `io::Result::Err` — claude binary
-    /// missing from PATH, fork failure, or similar process-level error.
-    #[error("spawn claude: {source}")]
+    /// `agent::invoke` returned an `io::Result::Err` — the agent binary
+    /// (claude / codex) missing from PATH, fork failure, or similar
+    /// process-level error. Provider-neutral since the dispatch layer may
+    /// spawn either backend. (Windows note: an npm `.cmd` shim such as
+    /// `codex.cmd` is not resolved by a bare `Command::new("codex")`; set
+    /// `CODEBUS_CODEX_BIN` / `CODEBUS_CLAUDE_BIN` to the full path.)
+    #[error("spawn agent: {source}")]
     Spawn {
         #[source]
         source: std::io::Error,
@@ -61,6 +65,13 @@ pub enum VerbError {
     /// only surfaces in GUI callers.
     #[error("cancelled by caller")]
     Cancelled,
+
+    /// The agent child launched but exited non-zero (e.g. codex `exec
+    /// resume` rejecting a cross-provider switch). Distinct from `Spawn`
+    /// (which is a launch failure) so callers can surface "the turn failed"
+    /// rather than silently treating a non-zero exit as success.
+    #[error("agent exited with non-zero status{}", .exit_code.map(|c| format!(" ({c})")).unwrap_or_default())]
+    AgentFailed { exit_code: Option<i32> },
 
     /// Catch-all for unrecoverable failures that don't fit the other
     /// variants (e.g., git2 errors during auto_commit, filesystem
@@ -80,6 +91,7 @@ impl VerbError {
             VerbError::KeyringMissing { .. } => 3,
             VerbError::Spawn { .. } => 1,
             VerbError::Cancelled => 0,
+            VerbError::AgentFailed { .. } => 1,
             VerbError::Internal { .. } => 1,
         }
     }
@@ -104,7 +116,7 @@ mod tests {
         let inner = std::io::Error::new(std::io::ErrorKind::NotFound, "claude not found");
         let err = VerbError::Spawn { source: inner };
         let rendered = err.to_string();
-        assert!(rendered.contains("spawn claude"));
+        assert!(rendered.contains("spawn agent"));
         assert!(rendered.contains("claude not found"));
     }
 

@@ -16,10 +16,8 @@ use std::path::Path;
 use super::ConfigLoadError;
 use super::keyring::{KeyringError, read_azure_key};
 use crate::agent::EnvOverrides;
-#[cfg(test)]
-use crate::config::endpoint::SystemModel;
 use crate::config::endpoint::{
-    ActiveProfile, ClaudeCodeConfig, ParseOutcome, parse_claude_code_yaml,
+    ActiveProfile, ClaudeCodeConfig, ParseOutcome, parse_claude_code_yaml, system_model_to_cli_flag,
 };
 
 /// Which verb's settings to resolve.
@@ -51,7 +49,7 @@ pub enum Verb {
 }
 
 /// A verb's resolved settings: `model` is the value to pass to `claude
-/// --model <X>` (already translated through [`SystemModel::to_cli_flag`]
+/// --model <X>` (already translated through [`system_model_to_cli_flag`]
 /// when the system profile is active; verbatim deployment name when the
 /// azure profile is active). `effort` is forwarded to `--effort <Y>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +78,7 @@ impl ClaudeCodeConfig {
                     Verb::Verify => &self.system.verify,
                 };
                 ResolvedVerb {
-                    model: Some(v.model.to_cli_flag().to_string()),
+                    model: Some(system_model_to_cli_flag(&v.model)),
                     effort: Some(v.effort.clone()),
                 }
             }
@@ -460,7 +458,8 @@ mod tests {
         }
     }
 
-    /// `SystemModel` enum string round-trips through full file load.
+    /// A system-profile model alias round-trips verbatim through a full
+    /// file load (model is now a free string, not a closed enum).
     #[test]
     fn arbitrary_system_model_alias_accepted() {
         let tmp = TempDir::new().unwrap();
@@ -469,6 +468,6 @@ mod tests {
             "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-7,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n",
         );
         let cfg = load_claude_code_config(&p).unwrap();
-        assert_eq!(cfg.system.goal.model, SystemModel::Opus4_7);
+        assert_eq!(cfg.system.goal.model, "opus-4-7");
     }
 }

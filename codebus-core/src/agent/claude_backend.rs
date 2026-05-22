@@ -104,7 +104,7 @@ impl AgentBackend for ClaudeBackend {
 mod tests {
     use super::*;
     use crate::config::Verb;
-    use crate::config::endpoint::{ClaudeCodeConfig, SystemModel};
+    use crate::config::endpoint::ClaudeCodeConfig;
 
     fn cmd_args(cmd: &Command) -> Vec<String> {
         cmd.get_args()
@@ -207,8 +207,6 @@ mod tests {
         let args = cmd_args(&cmd);
         assert_eq!(arg_after(&args, "--model"), Some("claude-haiku-4-5"));
         assert_eq!(arg_after(&args, "--effort"), Some("low"));
-        // Sanity: default query model is haiku.
-        let _ = SystemModel::Haiku4_5;
     }
 
     /// Goal spawn produces the full expected argv (Workspace toolset, model

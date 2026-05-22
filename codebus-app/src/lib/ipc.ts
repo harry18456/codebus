@@ -130,9 +130,10 @@ export type EndpointProfile = "azure"
 export type KeyStatus = { kind: "set" } | { kind: "unset" }
 
 /**
- * Closed enum of system-profile model aliases. Mirrors `SystemModel` in
- * `codebus-core/src/config/endpoint.rs` — adding a value here without the
- * matching Rust variant is a compile error on the IPC round-trip.
+ * Suggested system-profile model aliases for the combobox. The system model
+ * is a FREE STRING (codebus-core relaxed `SystemModel` to a string + a
+ * `claude-` prefix translation), so a newly-released Claude model works
+ * without a code change — these are quick-pick hints, not a closed set.
  */
 export const SYSTEM_MODELS = [
   "opus-4-7",
@@ -140,7 +141,6 @@ export const SYSTEM_MODELS = [
   "sonnet-4-6",
   "haiku-4-5",
 ] as const
-export type SystemModel = (typeof SYSTEM_MODELS)[number]
 
 /**
  * Closed enum of valid `effort` values surfaced by the Settings UI
@@ -172,7 +172,8 @@ function isSystemEffort(value: string): value is SystemEffort {
 export type ActiveProfile = "system" | "azure"
 
 export interface SystemVerb {
-  model: SystemModel
+  /** Free string (alias like `opus-4-7` or full `claude-…` id). */
+  model: string
   effort: string
 }
 
@@ -218,6 +219,43 @@ export interface ClaudeCodeBlock {
 }
 
 /**
+ * Codex provider verb settings. Unlike claude's `SystemVerb`, `model` is an
+ * arbitrary string (codex model names are NOT a closed enum) and `effort` is
+ * a free string forwarded as `model_reasoning_effort`.
+ */
+export interface CodexVerb {
+  model: string
+  effort: string
+}
+
+export interface CodexSystemProfile {
+  goal: CodexVerb
+  query: CodexVerb
+  fix: CodexVerb
+  verify: CodexVerb
+}
+
+/**
+ * Codex Azure profile — the Responses-API variant. Carries `api_version`
+ * (claude's azure does not) alongside `base_url` and `keyring_service`.
+ */
+export interface CodexAzureProfile {
+  base_url: string
+  api_version: string
+  keyring_service: string
+  goal: CodexVerb
+  query: CodexVerb
+  fix: CodexVerb
+  verify: CodexVerb
+}
+
+export interface CodexBlock {
+  active: ActiveProfile
+  system: CodexSystemProfile
+  azure: CodexAzureProfile | null
+}
+
+/**
  * `pretooluse-image-block-toggle`: runtime gate for `codebus hook
  * check-read`. When `read_image_block` is true (default), the hook
  * subcommand blocks image / binary file extensions per the existing
@@ -232,8 +270,14 @@ export const HOOKS_CONFIG_DEFAULTS: HooksConfig = {
   read_image_block: true,
 }
 
-/** Default keyring service when the user has not configured one yet. */
-export const DEFAULT_AZURE_KEYRING_SERVICE = "codebus-azure"
+/**
+ * Default azure keyring service per provider, used to pre-fill the editor
+ * when the config has no `keyring_service` yet. Claude and codex default to
+ * DISTINCT names so their keys never collide in the OS keyring; the field
+ * stays editable, so a user wanting a shared key can type `codebus-azure`.
+ */
+export const DEFAULT_CLAUDE_AZURE_KEYRING_SERVICE = "codebus-claude-azure"
+export const DEFAULT_CODEX_AZURE_KEYRING_SERVICE = "codebus-codex-azure"
 
 /** Built-in defaults mirroring `SystemProfile::default()` in Rust. */
 export const SYSTEM_PROFILE_DEFAULTS: SystemProfile = {
@@ -252,8 +296,8 @@ export const SYSTEM_PROFILE_DEFAULTS: SystemProfile = {
  *   (base_url + keyring_service + every verb's deployment model name).
  * - When `active === "system"`, the azure block MAY be partial (cold
  *   storage) so no azure-side validation runs.
- * - System profile inputs are always required because `SystemModel` is
- *   a closed enum (frontend dropdown enforces the values).
+ * - System profile `model` is a free string (not validated here); the
+ *   combobox offers `SYSTEM_MODELS` as suggestions but any value is allowed.
  *
  * The frontend uses this to disable the Save button + render
  * `aria-invalid` on the offending inputs.
@@ -356,37 +400,35 @@ export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
 }
 
 /**
- * Store an API key in the OS keyring for the given endpoint profile.
- * The key value is forwarded only to the Tauri command and SHALL NOT be
- * persisted anywhere in the frontend (no Zustand state, no localStorage,
- * no DOM attribute) beyond the call-site that originated it.
+ * Store an API key in the OS keyring under the given `service` name. The
+ * caller passes the active provider's `azure.keyring_service` (defaulting to
+ * `codebus-claude-azure` / `codebus-codex-azure`) so claude and codex keys
+ * occupy distinct entries. The key value is forwarded only to the Tauri
+ * command and SHALL NOT be persisted anywhere in the frontend beyond the
+ * call-site that originated it.
  */
 export async function setEndpointKey(
-  profile: EndpointProfile,
+  service: string,
   key: string,
 ): Promise<void> {
-  return invokeTyped<void>("set_endpoint_key", { profile, key })
+  return invokeTyped<void>("set_endpoint_key", { service, key })
 }
 
 /**
- * Return whether the keyring entry exists for the given profile. The
- * backend SHALL NOT return the key value — only a discriminated-union
- * status. Verifying the key value requires running the CLI verb.
+ * Return whether a keyring entry exists under `service`. The backend SHALL
+ * NOT return the key value — only a discriminated-union status. Verifying the
+ * key value requires running the CLI verb.
  */
-export async function getEndpointKey(
-  profile: EndpointProfile,
-): Promise<KeyStatus> {
-  return invokeTyped<KeyStatus>("get_endpoint_key", { profile })
+export async function getEndpointKey(service: string): Promise<KeyStatus> {
+  return invokeTyped<KeyStatus>("get_endpoint_key", { service })
 }
 
 /**
- * Remove the keyring entry for the given profile. Idempotent — succeeds
- * whether or not an entry existed.
+ * Remove the keyring entry under `service`. Idempotent — succeeds whether or
+ * not an entry existed.
  */
-export async function deleteEndpointKey(
-  profile: EndpointProfile,
-): Promise<void> {
-  return invokeTyped<void>("delete_endpoint_key", { profile })
+export async function deleteEndpointKey(service: string): Promise<void> {
+  return invokeTyped<void>("delete_endpoint_key", { service })
 }
 
 /**
@@ -404,7 +446,52 @@ export type CliStatus =
  * supported; future Codex / Gemini integrations extend this union AND
  * the Rust `check_cli_installed` match arm.
  */
-export type AgenticProvider = "claude_code"
+export type AgenticProvider = "claude_code" | "codex"
+
+/**
+ * Client-side validation for a `CodexBlock`. Mirrors `parse_codex_yaml`:
+ * when `active === "azure"`, `base_url` / `api_version` / `keyring_service`
+ * and every verb's deployment `model` MUST be non-empty; when
+ * `active === "system"`, every verb's `model` MUST be non-empty. Codex model
+ * strings are arbitrary (no closed-enum check) and `effort` is free-form (no
+ * enum check) — the only rule is non-empty required fields on the active
+ * profile. Empty array = saveable.
+ */
+export function validateCodexBlock(block: CodexBlock): ClaudeCodeValidationError[] {
+  const errors: ClaudeCodeValidationError[] = []
+  const verbs = ["goal", "query", "fix", "verify"] as const
+  if (block.active === "azure") {
+    const az = block.azure
+    if (!az) {
+      errors.push({
+        field: "codex.azure",
+        message: "Azure profile is required when active=azure",
+      })
+      return errors
+    }
+    if (!az.base_url.trim()) {
+      errors.push({ field: "codex.azure.base_url", message: "base_url is required when active=azure" })
+    }
+    if (!az.api_version.trim()) {
+      errors.push({ field: "codex.azure.api_version", message: "api_version is required when active=azure" })
+    }
+    if (!az.keyring_service.trim()) {
+      errors.push({ field: "codex.azure.keyring_service", message: "keyring_service is required when active=azure" })
+    }
+    for (const verb of verbs) {
+      if (!az[verb].model.trim()) {
+        errors.push({ field: `codex.azure.${verb}.model`, message: `${verb} deployment name is required when active=azure` })
+      }
+    }
+  } else {
+    for (const verb of verbs) {
+      if (!block.system[verb].model.trim()) {
+        errors.push({ field: `codex.system.${verb}.model`, message: `${verb} model is required when active=system` })
+      }
+    }
+  }
+  return errors
+}
 
 /**
  * Probe whether the agentic CLI binary for `provider` is installed and

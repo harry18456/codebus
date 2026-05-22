@@ -19,11 +19,13 @@ import { setEndpointKey } from "@/lib/ipc"
  */
 export interface SetKeyDialogProps {
   open: boolean
+  /** Keyring service to store the key under (provider-specific). */
+  service: string
   onClose: () => void
   onSuccess: () => void
 }
 
-export function SetKeyDialog({ open, onClose, onSuccess }: SetKeyDialogProps) {
+export function SetKeyDialog({ open, service, onClose, onSuccess }: SetKeyDialogProps) {
   const [key, setKey] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -45,7 +47,7 @@ export function SetKeyDialog({ open, onClose, onSuccess }: SetKeyDialogProps) {
     setSubmitting(true)
     setError(null)
     try {
-      await setEndpointKey("azure", key)
+      await setEndpointKey(service, key)
       onSuccess()
     } catch (err) {
       setError(formatError(err))

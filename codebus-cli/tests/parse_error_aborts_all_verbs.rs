@@ -1,10 +1,14 @@
 //! Integration tests for spec `cli / Config Parse Failure Aborts Invocation`.
 //!
 //! When `~/.codebus/config.yaml` exists but fails to parse (yaml syntax
-//! error OR schema validation failure such as an invalid `SystemModel`
-//! variant), every codebus subcommand SHALL exit non-zero with stderr
+//! error OR schema validation failure such as a missing required verb
+//! field), every codebus subcommand SHALL exit non-zero with stderr
 //! identifying the section AND the parse-error detail, AND SHALL NOT
 //! perform any side effect that depends on the broken section.
+//!
+//! NOTE: the system-profile `model` is a FREE STRING (codebus-core relaxed
+//! the closed `SystemModel` enum), so an unknown model name is NO LONGER a
+//! schema error. The schema-failure trigger here is a missing required field.
 //!
 //! Side effects we assert do NOT happen:
 //! - `claude` child spawn (we point `CODEBUS_CLAUDE_BIN` at the
@@ -27,9 +31,10 @@ const MOCK_CLAUDE: &str = env!("CARGO_BIN_EXE_mock-claude");
 /// Yaml syntax error (missing colon) — `pii` key has no `:`.
 const BROKEN_YAML_SYNTAX: &str = "pii\n  scanner: regex_basic\n";
 
-/// Schema validation failure — `claude_code.system.goal.model` is not a
-/// recognised `SystemModel` variant.
-const BROKEN_SCHEMA: &str = "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   { model: gpt-4,     effort: high }\n        query:  { model: haiku-4-5,  effort: low }\n        fix:    { model: sonnet-4-6, effort: medium }\n        verify: { model: opus-4-6,   effort: high }\n";
+/// Schema validation failure — `claude_code.system.goal` is missing the
+/// required `model` field (model is a free string now, so an unknown model
+/// name would NOT fail; an absent required field still does).
+const BROKEN_SCHEMA: &str = "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   { effort: high }\n        query:  { model: haiku-4-5,  effort: low }\n        fix:    { model: sonnet-4-6, effort: medium }\n        verify: { model: opus-4-6,   effort: high }\n";
 
 // === Section A: yaml syntax error aborts every verb ===
 
@@ -104,7 +109,7 @@ fn yaml_syntax_error_aborts_fix_before_spawn() {
 // === Section B: schema validation failure aborts every verb ===
 
 #[test]
-fn invalid_system_model_aborts_goal_before_spawn() {
+fn schema_validation_error_aborts_goal_before_spawn() {
     let _g = serial_lock();
     let (home, mock_log) = setup_with_config(BROKEN_SCHEMA);
     let repo = prepare_clean_vault(home.path());
@@ -124,14 +129,14 @@ fn invalid_system_model_aborts_goal_before_spawn() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("gpt-4") || stderr.to_lowercase().contains("variant"),
-        "stderr should mention the invalid variant: {stderr}"
+        stderr.to_lowercase().contains("model") || stderr.to_lowercase().contains("config"),
+        "stderr should mention the missing field / config parse failure: {stderr}"
     );
     assert!(!mock_log.exists());
 }
 
 #[test]
-fn invalid_system_model_aborts_query_before_spawn() {
+fn schema_validation_error_aborts_query_before_spawn() {
     let _g = serial_lock();
     let (home, mock_log) = setup_with_config(BROKEN_SCHEMA);
     let repo = prepare_clean_vault(home.path());

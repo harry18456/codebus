@@ -14,6 +14,7 @@
 //! `default_config_path()` resolves to `<home>/.codebus/config.yaml`.
 
 pub mod claude_code;
+pub mod codex;
 pub mod endpoint;
 pub mod goal;
 pub mod global_starter;
@@ -27,9 +28,12 @@ pub mod quiz;
 pub use claude_code::{
     ResolvedVerb, Verb, build_env_overrides, load_claude_code_config,
 };
+pub use codex::{
+    CodexAzureProfile, CodexConfig, CodexSystemProfile, CodexVerbConfig,
+};
 pub use endpoint::{
-    ActiveProfile, AzureProfile, AzureVerbConfig, ClaudeCodeConfig, SystemModel, SystemProfile,
-    SystemVerbConfig,
+    ActiveProfile, AzureProfile, AzureVerbConfig, ClaudeCodeConfig, SystemProfile,
+    SystemVerbConfig, parse_codex_yaml, system_model_to_cli_flag,
 };
 pub use global_starter::{StarterOutcome, write_starter_config_if_missing};
 pub use hooks::{HooksConfig, load_hooks_config};

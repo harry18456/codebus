@@ -11,6 +11,25 @@ import {
   type TokenUsage,
   type VerbEvent,
 } from "@/lib/ipc"
+import { useSettingsStore } from "@/store/settings"
+
+/**
+ * Identify which provider + profile the current config resolves to, as a
+ * stable `"<provider>:<profile>"` key. A chat session is bound to the
+ * provider it was created under: codex cannot `exec resume` a session across
+ * a provider switch (system=openai ↔ azure=a custom provider), so when this
+ * key changes the next turn must start a FRESH session. Switching always goes
+ * through the Settings modal (which loads + saves the config), so the
+ * settings store's config reflects the active choice here.
+ */
+function currentProviderKey(): string {
+  const cfg = useSettingsStore.getState().config as {
+    agent?: { active_provider?: string; providers?: Record<string, { active?: string }> }
+  } | null
+  const provider = cfg?.agent?.active_provider ?? "claude"
+  const profile = cfg?.agent?.providers?.[provider]?.active ?? "system"
+  return `${provider}:${profile}`
+}
 
 /**
  * One finalized chat turn. Mirrors `useGoalsStore.activeRun.events` per-run,
@@ -24,6 +43,12 @@ export interface ChatTurn {
   events: VerbEvent[]
   startedAt: string
   finishedAt: string
+  /**
+   * Set when the turn ended with a non-success outcome (agent exited
+   * non-zero / panicked). The transcript renders an inline error so a
+   * failed turn is visible instead of showing an empty assistant reply.
+   */
+  error?: string
 }
 
 /**
@@ -59,6 +84,12 @@ export interface PromoteSuggestion {
 interface ChatStore {
   // Session 狀態
   sessionId: string | null
+  /**
+   * Provider/profile key (`currentProviderKey()`) the current session was
+   * started under. `spawnTurn` resets the session when this differs from the
+   * live config so a provider switch begins a fresh conversation.
+   */
+  sessionProviderKey: string | null
   turns: ChatTurn[]
   activeTurn: ChatTurnLive | null
   tokensTotal: TokenUsage
@@ -213,6 +244,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
   return {
     sessionId: null,
+    sessionProviderKey: null,
     turns: [],
     activeTurn: null,
     tokensTotal: { ...DEFAULT_TOKENS },
@@ -228,11 +260,31 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     async spawnTurn(vaultPath, text) {
       const startedAt = new Date().toISOString()
-      const { sessionId } = get()
+      const providerKey = currentProviderKey()
+      let { sessionId } = get()
+      const { sessionProviderKey } = get()
+      // Provider/profile switched since this session started → begin a FRESH
+      // session (drop resume + transcript). codex cannot resume across a
+      // provider switch; we reset for every provider so behavior is
+      // consistent (a model/endpoint change starts a clean conversation).
+      if (
+        sessionId !== null &&
+        sessionProviderKey !== null &&
+        sessionProviderKey !== providerKey
+      ) {
+        set({
+          sessionId: null,
+          turns: [],
+          tokensTotal: { ...DEFAULT_TOKENS },
+          promoteSuggestion: null,
+        })
+        sessionId = null
+      }
       // Optimistic placeholder so the transcript can render the user prompt
       // + a streaming buffer before the IPC resolves; the runId is patched
       // in once the spawn returns.
       set({
+        sessionProviderKey: providerKey,
         activeTurn: {
           vaultPath,
           userText: text,
@@ -274,6 +326,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         lastSessionId: sessionId,
         lastTranscript: turns,
         sessionId: null,
+        sessionProviderKey: null,
         turns: [],
         activeTurn: null,
         tokensTotal: { ...DEFAULT_TOKENS },
@@ -338,6 +391,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       clearUndoGcTimer()
       set({
         sessionId: null,
+        sessionProviderKey: null,
         turns: [],
         activeTurn: null,
         tokensTotal: { ...DEFAULT_TOKENS },
@@ -417,6 +471,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
           events: state.activeTurn.events,
           startedAt: state.activeTurn.startedAt,
           finishedAt: new Date().toISOString(),
+          // Surface a non-success outcome instead of showing an empty reply.
+          // `failed` covers an agent non-zero exit (e.g. a cross-provider
+          // resume rejected by codex) or a panic.
+          error:
+            payload.outcome === "failed"
+              ? "這次對話沒有完成(agent 失敗)。若剛切換 provider,請開新對話再試。"
+              : undefined,
         }
         const nextSessionId =
           payload.session_id ?? state.sessionId

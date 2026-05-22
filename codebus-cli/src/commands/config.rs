@@ -21,7 +21,7 @@ use codebus_core::config::{ClaudeCodeConfig, default_config_path, load_claude_co
 /// profile yet. Production callers SHOULD set `claude_code.azure.keyring_service`
 /// explicitly; this default exists so `codebus config set-key azure`
 /// works on a fresh install before the user has edited config.yaml.
-const DEFAULT_AZURE_KEYRING_SERVICE: &str = "codebus-azure";
+const DEFAULT_AZURE_KEYRING_SERVICE: &str = "codebus-claude-azure";
 
 #[derive(Debug, Args)]
 pub struct ConfigArgs {
@@ -220,18 +220,26 @@ fn is_stdin_terminal() -> bool {
 mod tests {
     use super::*;
 
-    /// Spec: an `azure` profile defined in config with a non-empty
-    /// `keyring_service` SHALL override the default.
+    /// Config absent → resolver returns the claude default service name.
+    /// Hermetic: point `CODEBUS_HOME` at a fresh temp dir with no config so
+    /// the result does not depend on the dev's real `~/.codebus`.
     #[test]
-    fn resolve_keyring_service_uses_config_value_when_present() {
-        // This test exercises only the in-process resolver — it does
-        // NOT need to write to ~/.codebus/. The path through
-        // `read_azure_keyring_service_from_config` reads CODEBUS_HOME
-        // when set; we verify the fallback path here.
-        // Empty config → default.
-        assert_eq!(
-            resolve_keyring_service(Profile::Azure).unwrap_or_else(|_| "ERR".into()),
-            DEFAULT_AZURE_KEYRING_SERVICE
-        );
+    fn resolve_keyring_service_returns_claude_default_when_no_config() {
+        let dir = std::env::temp_dir().join(format!("codebus-cli-cfg-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let prev = std::env::var("CODEBUS_HOME").ok();
+        unsafe {
+            std::env::set_var("CODEBUS_HOME", &dir);
+        }
+        let resolved = resolve_keyring_service(Profile::Azure).unwrap_or_else(|_| "ERR".into());
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("CODEBUS_HOME", v),
+                None => std::env::remove_var("CODEBUS_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(resolved, DEFAULT_AZURE_KEYRING_SERVICE);
+        assert_eq!(DEFAULT_AZURE_KEYRING_SERVICE, "codebus-claude-azure");
     }
 }

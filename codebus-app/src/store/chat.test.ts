@@ -11,9 +11,18 @@ vi.mock("@tauri-apps/api/core", () => ({
 }))
 
 import { listen } from "@tauri-apps/api/event"
+import { invoke } from "@tauri-apps/api/core"
 import { useChatStore } from "./chat"
+import { useSettingsStore } from "./settings"
 
 const listenMock = vi.mocked(listen)
+const invokeMock = vi.mocked(invoke)
+
+function setActiveProviderProfile(provider: string, profile: string): void {
+  useSettingsStore.setState({
+    config: { agent: { active_provider: provider, providers: { [provider]: { active: profile } } } },
+  } as never)
+}
 
 /**
  * Snapshot the initial state once at module load so each test can reset
@@ -25,6 +34,7 @@ const INITIAL_STATE = useChatStore.getState()
 function resetStore(): void {
   useChatStore.setState({
     sessionId: INITIAL_STATE.sessionId,
+    sessionProviderKey: INITIAL_STATE.sessionProviderKey,
     turns: INITIAL_STATE.turns,
     activeTurn: INITIAL_STATE.activeTurn,
     tokensTotal: INITIAL_STATE.tokensTotal,
@@ -176,5 +186,64 @@ describe("useChatStore", () => {
     expect(s.expanded).toBe(true)
     expect(s.width).toBe(28)
     expect(s.height).toBe(36)
+  })
+})
+
+describe("provider/profile switch starts a fresh session", () => {
+  beforeEach(() => {
+    resetStore()
+    invokeMock.mockReset()
+    invokeMock.mockResolvedValue("chat-run-1")
+  })
+
+  it("drops resume + clears transcript when the provider/profile changed", async () => {
+    // Session established under codex/azure.
+    setActiveProviderProfile("codex", "azure")
+    useChatStore.setState({
+      sessionId: "azure-sess",
+      sessionProviderKey: "codex:azure",
+      turns: [{ userText: "earlier", events: [], startedAt: "", finishedAt: "" }],
+    })
+    // User switched to codex/system, then sends a turn.
+    setActiveProviderProfile("codex", "system")
+    await useChatStore.getState().spawnTurn("/v", "hello")
+
+    // Resume id dropped (fresh session) + old transcript cleared.
+    const call = invokeMock.mock.calls.find((c) => c[0] === "spawn_chat_turn")
+    expect((call?.[1] as { sessionId: string | null }).sessionId).toBeNull()
+    expect(useChatStore.getState().turns).toEqual([])
+    expect(useChatStore.getState().sessionProviderKey).toBe("codex:system")
+  })
+
+  it("keeps resuming when the provider/profile is unchanged", async () => {
+    setActiveProviderProfile("codex", "system")
+    useChatStore.setState({ sessionId: "sess-x", sessionProviderKey: "codex:system" })
+    await useChatStore.getState().spawnTurn("/v", "again")
+    const call = invokeMock.mock.calls.find((c) => c[0] === "spawn_chat_turn")
+    expect((call?.[1] as { sessionId: string | null }).sessionId).toBe("sess-x")
+  })
+})
+
+describe("terminal outcome surfaces failures", () => {
+  beforeEach(() => resetStore())
+
+  function activeTurn(runId: string) {
+    useChatStore.setState({
+      activeTurn: { vaultPath: "/v", userText: "hi", runId, events: [], cancelling: false, startedAt: "" },
+    })
+  }
+
+  it("marks the finalized turn with an error when outcome is failed", () => {
+    activeTurn("r1")
+    useChatStore.getState()._onTerminal({ run_id: "r1", session_id: "s1", outcome: "failed" })
+    const turns = useChatStore.getState().turns
+    expect(turns).toHaveLength(1)
+    expect(turns[0].error).toBeTruthy()
+  })
+
+  it("leaves the turn error-free when outcome is succeeded", () => {
+    activeTurn("r2")
+    useChatStore.getState()._onTerminal({ run_id: "r2", session_id: "s2", outcome: "succeeded" })
+    expect(useChatStore.getState().turns[0].error).toBeUndefined()
   })
 })

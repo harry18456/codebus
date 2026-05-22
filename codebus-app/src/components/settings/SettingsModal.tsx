@@ -23,8 +23,11 @@ import {
   type CliStatus,
   checkCliInstalled,
   validateClaudeCodeBlock,
+  validateCodexBlock,
 } from "@/lib/ipc"
+import { PROVIDERS, type ProviderId } from "@/lib/providers"
 import { EndpointSection } from "./EndpointSection"
+import { CodexEndpointSection } from "./CodexEndpointSection"
 
 /**
  * Default value table for the reset-to-default affordance. Pinned to match
@@ -97,23 +100,41 @@ export function SettingsModal({
   const reset = useSettingsStore((s) => s.reset)
   const getClaudeCodeBlock = useSettingsStore((s) => s.getClaudeCodeBlock)
   const updateClaudeCode = useSettingsStore((s) => s.updateClaudeCode)
+  const getCodexBlock = useSettingsStore((s) => s.getCodexBlock)
+  const updateProviderBlock = useSettingsStore((s) => s.updateProviderBlock)
+  const setActiveProvider = useSettingsStore((s) => s.setActiveProvider)
+
+  // The selected provider drives which endpoint editor + CLI probe render.
+  const providerId =
+    ((config as { agent?: { active_provider?: string } } | null)?.agent
+      ?.active_provider as ProviderId) ?? "claude"
+  const provider = PROVIDERS[providerId] ?? PROVIDERS.claude
 
   const [saved, setSaved] = useState(false)
   const [cliStatus, setCliStatus] = useState<CliStatus | "checking" | null>(null)
 
+  // Load config on open / reset on close. MUST NOT depend on the selected
+  // provider — re-running `load()` on a provider switch would reload the
+  // on-disk config and discard the in-memory switch (reverting the selector).
   useEffect(() => {
     if (open) {
       load()
-      setCliStatus("checking")
-      checkCliInstalled("claude_code")
-        .then(setCliStatus)
-        .catch(() => setCliStatus({ kind: "not_installed" }))
     } else {
       reset()
       setSaved(false)
       setCliStatus(null)
     }
   }, [open, load, reset])
+
+  // Probe the selected provider's CLI whenever the provider changes (while
+  // open). Separate from `load()` so switching providers only re-probes.
+  useEffect(() => {
+    if (!open) return
+    setCliStatus("checking")
+    checkCliInstalled(provider.cliBinaryId as never)
+      .then(setCliStatus)
+      .catch(() => setCliStatus({ kind: "not_installed" }))
+  }, [open, provider.cliBinaryId])
 
   const safeConfig = (config ?? {}) as {
     app?: { quiz?: { pass_threshold?: number; default_length?: number } }
@@ -131,8 +152,13 @@ export function SettingsModal({
   const defaultLength =
     safeConfig.quiz?.default_length ?? safeConfig.app?.quiz?.default_length ?? 5
   const claudeCode = getClaudeCodeBlock()
-  const claudeCodeErrors = validateClaudeCodeBlock(claudeCode)
-  const claudeCodeValid = claudeCodeErrors.length === 0
+  const codexBlock = getCodexBlock()
+  // Validate only the active provider's endpoint block; that gates Save.
+  const endpointErrors =
+    providerId === "codex"
+      ? validateCodexBlock(codexBlock)
+      : validateClaudeCodeBlock(claudeCode)
+  const claudeCodeValid = endpointErrors.length === 0
 
   const piiScanner = safeConfig.pii?.scanner ?? "regex_basic"
   const logDir = safeConfig.log?.dir ?? ""
@@ -192,22 +218,30 @@ export function SettingsModal({
           data-testid="settings-form"
           className="grid max-h-[60vh] grid-cols-[168px_1fr] gap-x-4 gap-y-3 overflow-auto p-4 text-xs"
         >
-          {/* 1. AI Provider — read-only */}
+          {/* 1. AI Provider — selector. Switches active_provider, which
+             re-routes the endpoint editor + CLI status row below. */}
           <Field label={t("settings.fields.aiProvider.label")}>
-            <div className="flex items-center gap-2">
-              <span className="text-fg">
-                {t("settings.fields.aiProvider.value")}
-              </span>
-              <span className="font-mono text-[11px] text-fg-tertiary">
-                {t("settings.fields.aiProvider.note")}
-              </span>
-            </div>
+            <Select
+              value={providerId}
+              onValueChange={(v) => setActiveProvider(v)}
+            >
+              <SelectTrigger className="w-[200px]" data-testid="ai-provider-select">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.values(PROVIDERS).map((p) => (
+                  <SelectItem key={p.id} value={p.id} data-testid={`ai-provider-${p.id}`}>
+                    {p.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
 
           {/* 2. CLI status — probes whether `claude --version` works.
              Replaces the v1 OAuth pseudo-status with a real installation
              check; future Codex / Gemini providers add their own rows. */}
-          <Field label="Claude Code CLI">
+          <Field label={`${provider.displayName} CLI`}>
             <div className="flex items-center gap-2">
               <CliStatusBadge status={cliStatus} />
               {cliStatus &&
@@ -217,7 +251,7 @@ export function SettingsModal({
                     className="text-xs text-fg-secondary"
                     data-testid="cli-install-hint"
                   >
-                    Install Claude Code first; then reopen Settings.
+                    Install {provider.displayName} first; then reopen Settings.
                   </span>
                 )}
             </div>
@@ -227,11 +261,19 @@ export function SettingsModal({
              the legacy "Default model per verb" dropdowns; lives in its
              own component because the form has two non-trivial profile
              sub-sections + keyring management. */}
-          <EndpointSection
-            claudeCode={claudeCode}
-            onChange={updateClaudeCode}
-            errors={claudeCodeErrors}
-          />
+          {providerId === "codex" ? (
+            <CodexEndpointSection
+              block={codexBlock}
+              onChange={(next) => updateProviderBlock("codex", next)}
+              errors={endpointErrors}
+            />
+          ) : (
+            <EndpointSection
+              claudeCode={claudeCode}
+              onChange={updateClaudeCode}
+              errors={endpointErrors}
+            />
+          )}
 
 
           {/* 4. PII scanner — dynamic count */}

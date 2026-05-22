@@ -8,7 +8,7 @@ The endpoint profile configuration and scoped environment injection that codebus
 
 ### Requirement: Endpoint Profile Schema
 
-The `~/.codebus/config.yaml` file SHALL accept an `agent` block with two top-level keys: `active_provider` and `providers`. `active_provider` SHALL be a string naming the active provider; within this capability's scope the only supported value SHALL be `claude`. `providers` SHALL be a map keyed by provider name. The `providers.claude` block SHALL contain three keys: `active`, `system`, and `azure`. The `active` key SHALL be a string with exactly one of two values: `system` or `azure` (the active endpoint profile for the claude provider). The `system` block SHALL contain four verb sub-blocks named `goal`, `query`, `fix`, and `verify`; each verb sub-block SHALL contain a `model` field (a `SystemModel` enum value) and an optional `effort` field (an arbitrary string). The `azure` block SHALL contain `base_url` (URL string), `keyring_service` (arbitrary string, default `codebus-azure`), and the same four verb sub-blocks (`goal`, `query`, `fix`, `verify`); in the `azure` block each verb's `model` field SHALL be an arbitrary non-empty string and `effort` SHALL be an optional arbitrary string.
+The `~/.codebus/config.yaml` file SHALL accept an `agent` block with two top-level keys: `active_provider` and `providers`. `active_provider` SHALL be a string naming the active provider; the supported values SHALL be `claude` and `codex` (the `codex` provider's block shape is defined by the `codex-config` capability). An `active_provider` value outside this set SHALL be rejected with `ConfigLoadError::YamlParse`. `providers` SHALL be a map keyed by provider name. The `providers.claude` block SHALL contain three keys: `active`, `system`, and `azure`. The `active` key SHALL be a string with exactly one of two values: `system` or `azure` (the active endpoint profile for the claude provider). The `system` block SHALL contain four verb sub-blocks named `goal`, `query`, `fix`, and `verify`; each verb sub-block SHALL contain a `model` field (a `SystemModel` enum value) and an optional `effort` field (an arbitrary string). The `azure` block SHALL contain `base_url` (URL string), `keyring_service` (arbitrary string, default `codebus-azure`), and the same four verb sub-blocks (`goal`, `query`, `fix`, `verify`); in the `azure` block each verb's `model` field SHALL be an arbitrary non-empty string and `effort` SHALL be an optional arbitrary string.
 
 The endpoint profile referenced by `providers.claude.active` MUST be fully populated for the load to succeed — all four verb sub-blocks (`goal`, `query`, `fix`, `verify`) are required when the profile is active. The non-active endpoint profile MAY be absent or partially populated; codebus SHALL NOT validate fields of the non-active profile. If the `agent` block is absent entirely, the system SHALL fall back to a built-in default equivalent to `active_provider: claude` with `providers.claude.active: system` and verb defaults `goal: opus-4-6` / `query: haiku-4-5` / `fix: sonnet-4-6` / `verify: opus-4-6` and per-verb default `effort` values `high` / `low` / `medium` / `high` respectively.
 
@@ -25,6 +25,16 @@ The `Verb` resolution enum SHALL include a `Verify` variant alongside the existi
 
 - **WHEN** `~/.codebus/config.yaml` contains `agent.active_provider: claude` and a `agent.providers.claude` block with `active: azure` and an `azure` block with `base_url`, `keyring_service`, and all four verbs (`goal`, `query`, `fix`, `verify`) populated
 - **THEN** the config loader SHALL return a config with the azure endpoint profile selected and the parsed verb settings, `base_url`, and `keyring_service`
+
+#### Scenario: Codex active_provider is accepted
+
+- **WHEN** `~/.codebus/config.yaml` contains `agent.active_provider: codex` and a valid `agent.providers.codex` block
+- **THEN** the config loader SHALL NOT reject the load on the basis of the provider name (the codex provider block is validated per the `codex-config` capability)
+
+#### Scenario: Unsupported provider name rejected
+
+- **WHEN** `~/.codebus/config.yaml` contains `agent.active_provider: gemini`
+- **THEN** the config loader SHALL return `ConfigLoadError::YamlParse` identifying the unsupported provider name
 
 #### Scenario: Active azure but azure block missing base_url fails
 
@@ -66,64 +76,55 @@ The `Verb` resolution enum SHALL include a `Verify` variant alongside the existi
 - **WHEN** the azure endpoint profile is active with `azure.verify: { model: claude-opus-deploy, effort: high }`
 - **THEN** `resolve(Verb::Verify)` SHALL return `model: claude-opus-deploy` and `effort: high` (azure deployment names pass through verbatim)
 
-##### Example: schema shape
-
-```yaml
-agent:
-  active_provider: claude
-  providers:
-    claude:
-      active: azure
-      system:
-        goal:   { model: opus-4-6,   effort: high   }
-        query:  { model: haiku-4-5,  effort: low    }
-        fix:    { model: sonnet-4-6, effort: medium }
-        verify: { model: opus-4-6,   effort: high   }
-      azure:
-        base_url: https://example.cognitiveservices.azure.com/anthropic
-        keyring_service: codebus-azure
-        goal:   { model: claude-opus-4-6-2026V2,   effort: high   }
-        query:  { model: claude-haiku-4-5-2026V2,  effort: low    }
-        fix:    { model: claude-sonnet-4-6-2026V2, effort: medium }
-        verify: { model: claude-opus-4-6-2026V2,   effort: high   }
-```
-
 
 <!-- @trace
-source: agent-backend-seam
-updated: 2026-05-21
+source: codex-backend
+updated: 2026-05-23
 code:
-  - codebus-core/src/config/endpoint.rs
-  - codebus-core/src/agent/mod.rs
-  - docs/2026-05-21-multi-provider-design-discussion.md
-  - codebus-core/src/agent/spawn_spec.rs
-  - codebus-core/src/verb/query.rs
-  - codebus-core/src/config/mod.rs
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - codebus-core/src/agent/backend.rs
-  - codebus-core/src/agent/claude_cli.rs
-  - codebus-app/src/store/settings.ts
-  - codebus-core/src/verb/fix.rs
+  - codebus-cli/src/commands/config.rs
   - codebus-core/src/verb/quiz.rs
-  - codebus-core/src/agent/claude_backend.rs
-  - codebus-core/src/config/global_starter.rs
-  - codebus-core/src/verb/goal.rs
-  - codebus-app/src/lib/ipc.ts
-  - codebus-core/src/wiki/fix/mod.rs
-  - codebus-core/src/config/claude_code.rs
+  - codebus-app/src/components/settings/CodexEndpointSection.tsx
+  - codebus-core/src/vault/init.rs
+  - codebus-app/src-tauri/src/ipc/keyring.rs
+  - codebus-app/src/lib/providers.ts
+  - codebus-app/src/store/chat.ts
+  - codebus-core/src/agent/codex_backend.rs
+  - codebus-core/src/config/codex.rs
   - codebus-core/src/verb/chat.rs
-  - docs/v3-roadmap.md
+  - codebus-core/src/stream/mod.rs
+  - codebus-core/src/config/mod.rs
+  - codebus-core/src/skill_bundle/mod.rs
+  - codebus-app/src/components/settings/EndpointSection.tsx
+  - codebus-core/src/stream/codex_parser.rs
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - codebus-app/src/components/workspace/ChatTranscript.tsx
+  - codebus-core/src/verb/error.rs
+  - codebus-core/src/agent/claude_backend.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
+  - codebus-core/src/agent/mod.rs
+  - codebus-core/src/verb/query.rs
+  - codebus-app/src/store/settings.ts
+  - codebus-app/src/components/settings/SettingsModal.tsx
+  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
+  - codebus-app/src/components/settings/SetKeyDialog.tsx
+  - codebus-app/src/lib/ipc.ts
+  - codebus-app/src-tauri/src/ipc/cli_status.rs
+  - codebus-app/src/store/goals.ts
+  - codebus-core/src/verb/fix.rs
+  - codebus-core/src/config/claude_code.rs
+  - codebus-core/src/agent/dispatch.rs
+  - codebus-core/src/verb/goal.rs
+  - codebus-core/src/config/endpoint.rs
 tests:
-  - codebus-core/tests/endpoint_config_load.rs
-  - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/quiz_flow.rs
+  - codebus-app/src/store/chat.test.ts
+  - codebus-app/src/lib/providers.test.ts
+  - codebus-app/src/components/settings/CodexEndpointSection.test.tsx
   - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/azure_key_pre_spawn.rs
+  - codebus-app/src/components/settings/EndpointSection.test.tsx
+  - codebus-app/src/store/goals.test.ts
+  - codebus-app/src/lib/codex-validation.test.ts
+  - codebus-app/src/components/settings/SettingsModal.codex.test.tsx
   - codebus-cli/tests/parse_error_aborts_all_verbs.rs
-  - codebus-cli/tests/config_subcommand.rs
-  - codebus-cli/tests/scoped_env_injection.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-cli/tests/goal_content_verify_cli.rs
 -->
 
 ---

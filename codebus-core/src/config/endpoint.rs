@@ -21,7 +21,8 @@
 //! - The profile referenced by `active` MUST be fully populated.
 //! - The non-active profile MAY be absent or partial (treated as cold
 //!   storage; codebus does not validate it).
-//! - `system` profile `model` values are a closed enum [`SystemModel`];
+//! - `system` profile `model` values are free strings translated to the CLI
+//!   `--model` flag via [`system_model_to_cli_flag`];
 //!   invalid values reject the load.
 //! - `azure` profile `model` values are arbitrary non-empty strings (the
 //!   Azure deployment name) — codebus passes them verbatim to the `--model`
@@ -51,41 +52,29 @@ impl Default for ActiveProfile {
     }
 }
 
-/// System-profile model alias. Codebus translates each variant to the
-/// Claude CLI `--model` flag value through [`SystemModel::to_cli_flag`].
-/// The list is closed — adding a new model variant SHALL be a separate
-/// change so spec + tests are updated together.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub enum SystemModel {
-    #[serde(rename = "opus-4-7")]
-    Opus4_7,
-    #[serde(rename = "opus-4-6")]
-    Opus4_6,
-    #[serde(rename = "haiku-4-5")]
-    Haiku4_5,
-    #[serde(rename = "sonnet-4-6")]
-    Sonnet4_6,
-}
-
-impl SystemModel {
-    /// Return the value to pass to `claude --model <flag>`.
-    pub fn to_cli_flag(self) -> &'static str {
-        match self {
-            SystemModel::Opus4_7 => "claude-opus-4-7",
-            SystemModel::Opus4_6 => "claude-opus-4-6",
-            SystemModel::Haiku4_5 => "claude-haiku-4-5",
-            SystemModel::Sonnet4_6 => "claude-sonnet-4-6",
-        }
+/// Translate a system-profile `model` alias to the Claude CLI `--model` flag
+/// value. The rule is uniform for known aliases (`opus-4-7`, …) AND any
+/// future Claude model: ensure the `claude-` prefix. A value already carrying
+/// the prefix (or a custom full id) passes through verbatim, so a
+/// newly-released Claude model works without a codebus code change. The empty
+/// string maps to an empty flag (the caller decides whether that is valid).
+pub fn system_model_to_cli_flag(model: &str) -> String {
+    let m = model.trim();
+    if m.is_empty() || m.starts_with("claude-") {
+        m.to_string()
+    } else {
+        format!("claude-{m}")
     }
 }
 
-/// One verb's settings under the system profile. `model` is the closed
-/// [`SystemModel`] enum; `effort` is an arbitrary string (the Claude CLI
-/// validates its values itself).
+/// One verb's settings under the system profile. `model` is a free string —
+/// a short alias (`opus-4-7`, translated via [`system_model_to_cli_flag`]) or
+/// a full `claude-…` id — so newly-released Claude models need no code change;
+/// `effort` is an arbitrary string (the Claude CLI validates its values).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SystemVerbConfig {
-    pub model: SystemModel,
+    pub model: String,
     pub effort: String,
 }
 
@@ -107,19 +96,19 @@ impl Default for SystemProfile {
     fn default() -> Self {
         Self {
             goal: SystemVerbConfig {
-                model: SystemModel::Opus4_6,
+                model: "opus-4-6".into(),
                 effort: "high".into(),
             },
             query: SystemVerbConfig {
-                model: SystemModel::Haiku4_5,
+                model: "haiku-4-5".into(),
                 effort: "low".into(),
             },
             fix: SystemVerbConfig {
-                model: SystemModel::Sonnet4_6,
+                model: "sonnet-4-6".into(),
                 effort: "medium".into(),
             },
             verify: SystemVerbConfig {
-                model: SystemModel::Opus4_6,
+                model: "opus-4-6".into(),
                 effort: "high".into(),
             },
         }
@@ -193,6 +182,8 @@ pub(super) struct RawAgent {
 pub(super) struct RawProviders {
     #[serde(default)]
     pub claude: Option<RawClaudeProvider>,
+    #[serde(default)]
+    pub codex: Option<super::codex::RawCodexProvider>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -264,9 +255,10 @@ pub fn parse_claude_code_yaml(yaml: &str) -> Result<ParseOutcome, ConfigLoadErro
 
     if let Some(provider) = agent.active_provider.as_deref()
         && provider != "claude"
+        && provider != "codex"
     {
         return Err(ConfigLoadError::YamlParse(serde_yaml::Error::custom(format!(
-            "agent.active_provider: only `claude` is supported (got `{provider}`)"
+            "agent.active_provider: only `claude` or `codex` is supported (got `{provider}`)"
         ))));
     }
 
@@ -282,6 +274,36 @@ pub fn parse_claude_code_yaml(yaml: &str) -> Result<ParseOutcome, ConfigLoadErro
         system,
         azure,
     }))
+}
+
+/// Parse the `agent.providers.codex` block of `~/.codebus/config.yaml`.
+/// Returns `Ok(Some(config))` when the codex provider block is present and
+/// valid, `Ok(None)` when absent, and `Err` on a structurally invalid or
+/// under-populated active profile. (Provider routing — which provider is
+/// active — is the dispatch layer's concern; this just parses codex's block.)
+/// Read `agent.active_provider` from the config yaml, defaulting to `claude`
+/// when the `agent` block or the key is absent. Used by the dispatch layer to
+/// pick which provider config to load. Does NOT validate the value — the
+/// per-provider parse path rejects unsupported names.
+pub fn read_active_provider(yaml: &str) -> Result<String, ConfigLoadError> {
+    let raw: RawConfigFile = serde_yaml::from_str(yaml).map_err(ConfigLoadError::YamlParse)?;
+    Ok(raw
+        .agent
+        .and_then(|a| a.active_provider)
+        .unwrap_or_else(|| "claude".to_string()))
+}
+
+pub fn parse_codex_yaml(
+    yaml: &str,
+) -> Result<Option<super::codex::CodexConfig>, ConfigLoadError> {
+    let raw: RawConfigFile = serde_yaml::from_str(yaml).map_err(ConfigLoadError::YamlParse)?;
+    let Some(agent) = raw.agent else {
+        return Ok(None);
+    };
+    let Some(codex) = agent.providers.and_then(|p| p.codex) else {
+        return Ok(None);
+    };
+    Ok(Some(super::codex::validate_codex_provider(codex)?))
 }
 
 fn validate_system_profile(
@@ -450,51 +472,38 @@ mod tests {
         format!("agent:\n  active_provider: claude\n  providers:\n    claude:\n{reindented}\n")
     }
 
-    // === SystemModel alias mapping ===
+    // === System Profile Model (free string + alias translation) ===
 
-    /// Spec: System Profile Model Aliases — `to_cli_flag` table.
+    /// Known aliases map to `claude-<alias>` for the CLI `--model` flag.
     #[test]
-    fn system_model_to_cli_flag_table() {
-        assert_eq!(SystemModel::Opus4_7.to_cli_flag(), "claude-opus-4-7");
-        assert_eq!(SystemModel::Opus4_6.to_cli_flag(), "claude-opus-4-6");
-        assert_eq!(SystemModel::Haiku4_5.to_cli_flag(), "claude-haiku-4-5");
-        assert_eq!(SystemModel::Sonnet4_6.to_cli_flag(), "claude-sonnet-4-6");
+    fn system_model_to_cli_flag_known_aliases() {
+        assert_eq!(system_model_to_cli_flag("opus-4-7"), "claude-opus-4-7");
+        assert_eq!(system_model_to_cli_flag("opus-4-6"), "claude-opus-4-6");
+        assert_eq!(system_model_to_cli_flag("haiku-4-5"), "claude-haiku-4-5");
+        assert_eq!(system_model_to_cli_flag("sonnet-4-6"), "claude-sonnet-4-6");
     }
 
-    /// Spec: System Profile Model Aliases — kebab-case literals.
+    /// A future Claude model needs no code change: a new alias gets the
+    /// `claude-` prefix; a full `claude-…` id (or empty) passes through.
     #[test]
-    fn system_model_kebab_case_deserialization() {
-        let v: SystemModel = serde_yaml::from_str("opus-4-6").unwrap();
-        assert_eq!(v, SystemModel::Opus4_6);
-        let v: SystemModel = serde_yaml::from_str("opus-4-7").unwrap();
-        assert_eq!(v, SystemModel::Opus4_7);
-        let v: SystemModel = serde_yaml::from_str("haiku-4-5").unwrap();
-        assert_eq!(v, SystemModel::Haiku4_5);
-        let v: SystemModel = serde_yaml::from_str("sonnet-4-6").unwrap();
-        assert_eq!(v, SystemModel::Sonnet4_6);
+    fn system_model_to_cli_flag_future_and_passthrough() {
+        assert_eq!(system_model_to_cli_flag("opus-4-8"), "claude-opus-4-8");
+        assert_eq!(system_model_to_cli_flag("claude-opus-4-7"), "claude-opus-4-7");
+        assert_eq!(system_model_to_cli_flag("  haiku-4-5  "), "claude-haiku-4-5");
+        assert_eq!(system_model_to_cli_flag(""), "");
     }
 
-    /// Spec: System Profile Model Aliases — UNVERSIONED aliases
-    /// (`haiku`, `sonnet`) are NOT accepted; all model literals SHALL
-    /// carry an explicit version suffix.
+    /// System `model` is now a free string: an arbitrary / newly-released
+    /// alias loads without rejection (the closed-enum gate is gone) and is
+    /// preserved verbatim in the config.
     #[test]
-    fn unversioned_haiku_and_sonnet_rejected() {
-        let err = serde_yaml::from_str::<SystemModel>("haiku").unwrap_err();
-        assert!(format!("{err}").contains("variant"), "got: {err}");
-        let err = serde_yaml::from_str::<SystemModel>("sonnet").unwrap_err();
-        assert!(format!("{err}").contains("variant"), "got: {err}");
-    }
-
-    /// Spec: Endpoint Profile Schema — invalid SystemModel rejected.
-    #[test]
-    fn invalid_system_model_rejected() {
-        let yaml = "claude_code:\n  active: system\n  system:\n    goal: { model: gpt-4, effort: high }\n    query: { model: haiku-4-5, effort: low }\n    fix: { model: sonnet-4-6, effort: medium }\n";
-        let err = parse_claude_code_yaml(&agent_yaml(yaml)).expect_err("gpt-4 must be rejected");
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("variant") || msg.contains("gpt-4"),
-            "got: {msg}"
-        );
+    fn system_model_accepts_arbitrary_string() {
+        let yaml = "claude_code:\n  active: system\n  system:\n    goal:   { model: opus-4-8,   effort: high   }\n    query:  { model: haiku-4-5,  effort: low    }\n    fix:    { model: sonnet-4-6, effort: medium }\n    verify: { model: opus-4-6,   effort: high   }\n";
+        let outcome = parse_claude_code_yaml(&agent_yaml(yaml)).expect("free-string model loads");
+        match outcome {
+            ParseOutcome::New(cfg) => assert_eq!(cfg.system.goal.model, "opus-4-8"),
+            other => panic!("expected New, got {other:?}"),
+        }
     }
 
     // === Active=System happy paths ===
@@ -509,10 +518,10 @@ mod tests {
             other => panic!("expected New, got {other:?}"),
         };
         assert_eq!(cfg.active, ActiveProfile::System);
-        assert_eq!(cfg.system.goal.model, SystemModel::Opus4_6);
+        assert_eq!(cfg.system.goal.model, "opus-4-6");
         assert_eq!(cfg.system.goal.effort, "high");
-        assert_eq!(cfg.system.query.model, SystemModel::Haiku4_5);
-        assert_eq!(cfg.system.fix.model, SystemModel::Sonnet4_6);
+        assert_eq!(cfg.system.query.model, "haiku-4-5");
+        assert_eq!(cfg.system.fix.model, "sonnet-4-6");
         assert!(cfg.azure.is_none());
     }
 
@@ -548,12 +557,24 @@ mod tests {
         assert_eq!(outcome, ParseOutcome::Missing);
     }
 
-    /// `agent.active_provider` other than `claude` is rejected.
+    /// `agent.active_provider` other than `claude`/`codex` is rejected.
+    /// Spec: Endpoint Profile Schema — Unsupported provider name rejected.
     #[test]
     fn unsupported_active_provider_rejected() {
-        let yaml = "agent:\n  active_provider: codex\n  providers:\n    claude:\n      active: system\n";
-        let err = parse_claude_code_yaml(yaml).expect_err("non-claude provider must reject");
+        let yaml = "agent:\n  active_provider: gemini\n  providers:\n    claude:\n      active: system\n";
+        let err = parse_claude_code_yaml(yaml).expect_err("unsupported provider must reject");
         assert!(format!("{err}").contains("active_provider"));
+    }
+
+    /// Spec: Endpoint Profile Schema — Codex active_provider is accepted (not
+    /// rejected on the basis of the provider name). The claude loader returns
+    /// Missing here (no claude block); the dispatch layer routes to the codex
+    /// loader instead.
+    #[test]
+    fn codex_active_provider_not_rejected() {
+        let yaml = "agent:\n  active_provider: codex\n  providers:\n    codex:\n      active: system\n";
+        let outcome = parse_claude_code_yaml(yaml).expect("codex provider must not be rejected");
+        assert_eq!(outcome, ParseOutcome::Missing);
     }
 
     // === Active=Azure happy + reject paths ===
@@ -680,7 +701,7 @@ mod tests {
             other => panic!("expected New, got {other:?}"),
         };
         assert_eq!(cfg.active, ActiveProfile::System);
-        assert_eq!(cfg.system.verify.model, SystemModel::Opus4_6);
+        assert_eq!(cfg.system.verify.model, "opus-4-6");
         assert_eq!(cfg.system.verify.effort, "high");
     }
 
@@ -719,11 +740,11 @@ mod tests {
     fn default_config_uses_v2_verified_models() {
         let cfg = ClaudeCodeConfig::default();
         assert_eq!(cfg.active, ActiveProfile::System);
-        assert_eq!(cfg.system.goal.model, SystemModel::Opus4_6);
+        assert_eq!(cfg.system.goal.model, "opus-4-6");
         assert_eq!(cfg.system.goal.effort, "high");
-        assert_eq!(cfg.system.query.model, SystemModel::Haiku4_5);
+        assert_eq!(cfg.system.query.model, "haiku-4-5");
         assert_eq!(cfg.system.query.effort, "low");
-        assert_eq!(cfg.system.fix.model, SystemModel::Sonnet4_6);
+        assert_eq!(cfg.system.fix.model, "sonnet-4-6");
         assert_eq!(cfg.system.fix.effort, "medium");
         assert!(cfg.azure.is_none());
     }
