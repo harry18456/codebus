@@ -12,6 +12,12 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-22 19:33Z — T6 品質檢查 core (Part 1: pii + git)
+- 狀態: DONE
+- 做了: 深讀 PII redaction 路徑（pii/ + raw_sync.rs）+ git/。找到真實 latent bug F1：mask_matches 註解假設 match 非重疊，但 scan() 從不合併跨 rule 重疊/巢狀 match → 倒序 replace_range 對重疊不安全，可能漏遮 secret 或輸出損壞（custom pattern 框 builtin 最易觸發）。F2：>5MiB 檔靜默排除無 warn。F3：changed_paths_under 把 deleted page 也算 changed。F1 已加進 BACKLOG（輕，interval-merge 約半天）。core 零 TODO/FIXME、安全 floor 設計正確。
+- 產出: docs/2026-05-22-core-quality-review.md（+ BACKLOG F1 列）
+- 下一步: 佇列下一個 TODO 是 T7（codebus-cli 品質檢查）。core 其餘大模組（verb/config/vault/wiki/log/render）列為後續 review 候選。
+
 ## 2026-05-22 19:4xZ — T5 spike goal-subagent-delegation
 - 狀態: DONE
 - 做了: 核對 grounding（GOAL_TOOLSET=Read/Glob/Grep/Write/Edit 無 Task、core 無 Task 引用、無 .claude/agents ship）皆屬實。關鍵阻塞（general-purpose 能否寫檔）需真實 claude run，loop 做不到。新缺口：整套 Task+--tools 機制 claude-only，codex 有內建 spawn_agent 不受 --tools 天花板約束、subagent-sandbox-control 安全驗證不涵蓋 codex → 此條變 provider-specific 兩套機制。建議維持 deferral + 更新原 backlog 補 provider 維度。

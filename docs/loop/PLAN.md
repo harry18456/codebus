@@ -35,7 +35,7 @@
 | T3 | DONE | spike: chat-display-polish（GFM 表格 + `[[wikilink]]`，app+CLI） | [docs/2026-05-22-chat-display-polish-spike.md](../2026-05-22-chat-display-polish-spike.md) | ✅ 核對屬實、app 半天可立即做（重用元件現成）。標註：provider-agnostic、無 PE2 耦合（與 T2 不同）；CLI `[[slug]]` 連結化切給 cli-wikilink-link-target |
 | T4 | DONE | spike: github-repo-setup（CI / release / issue template） | [docs/2026-05-22-github-repo-setup-spike.md](../2026-05-22-github-repo-setup-spike.md) | ✅ 發現 3 drift（npm 非 pnpm、F 未 archive、Linux tauri 系統依賴）。CI+templates 已草擬可立即做；release workflow 卡 F+bundle.active=false |
 | T5 | DONE | spike: goal-subagent-delegation（Task 工具委派） | [docs/2026-05-22-goal-subagent-delegation-spike.md](../2026-05-22-goal-subagent-delegation-spike.md) | ✅ grounding 屬實（GOAL_TOOLSET 含 Write/Edit 無 Task、無 agents dir）。新缺口：機制 claude-only，codex 有內建 spawn_agent 不受 --tools 約束，安全需重驗 |
-| T6 | TODO | 品質檢查: codebus-core | `docs/2026-05-DD-core-quality-review.md` | 逐 module 讀，列 bug / design smell / 缺測試，每條給嚴重度 + backlog 候選 |
+| T6 | DONE | 品質檢查: codebus-core（Part 1：pii + git） | [docs/2026-05-22-core-quality-review.md](../2026-05-22-core-quality-review.md) | ✅ 找到真實 latent bug F1（PII mask 重疊未合併→可能漏遮，已進 BACKLOG）+ F2 大檔靜默排除 + F3 deleted page。其餘大模組列後續候選 |
 | T7 | TODO | 品質檢查: codebus-cli | `docs/2026-05-DD-cli-quality-review.md` | 同上，針對 cli commands |
 | T8 | TODO | 品質檢查: codebus-app（前端） | `docs/2026-05-DD-app-quality-review.md` | 同上，針對 components/hooks/store |
 | T9 | TODO | spec drift 檢查（specs vs code） | `docs/2026-05-DD-spec-drift-audit.md` | 比對 openspec/specs 與實際 code，列出漂移點（純讀，不改 spec） |
