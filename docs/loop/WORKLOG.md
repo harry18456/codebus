@@ -12,6 +12,12 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-22 20:0xZ — T8 品質檢查 app（前端）
+- 狀態: DONE
+- 做了: 安全 lens 掃前端。無 dangerouslySetInnerHTML/any/ts-ignore，chat 連結渲染對 XSS 安全（external 僅 ^https?: + openExternalUrl，其餘惰性），wikilink encodeURIComponent + hasOwnProperty 防原型污染，QuizTab exhaustive-deps 抑制是正當 latch pattern。無真實 bug。實質產出：修正 T3 app 實作假設——transformBodyWikilinks 產 codebus:// href 會被 react-markdown 預設 urlTransform 洗掉、且現有 WIKI_HREF_RE 匹配不到該 scheme，T3 落地需多兩步（已回寫 T3 理解）。次要：EXTERNAL_HREF_RE 偏鬆、一個 i18n TODO。
+- 產出: docs/2026-05-22-app-quality-review.md
+- 下一步: 佇列下一個 TODO 是 T9（spec drift 檢查）。三個 crate 品質檢查（T6/T7/T8）完成：core/cli 各一安全 latent bug、app 乾淨。
+
 ## 2026-05-22 19:43Z — T7 品質檢查 cli
 - 狀態: DONE
 - 做了: 精讀 hook.rs（PreToolUse Bash/Read 閘）。找到高優先安全項 F4：is_allowed_bash_command 用 split_whitespace 只查 argv[0]=codebus + argv[1]=lint/quiz validate，不檢查其後 → shell 串接（codebus lint; rm -rf / 等）通過前綴檢查。command 會丟 sh -c 執行 → 可能 sandbox 逃逸。待驗證 Claude Code 串接是否拆段問 hook；不論如何建議 defense-in-depth 拒 shell 元字元。測試完全沒覆蓋串接案例。Read hook（image block）設計紮實。已進 BACKLOG。
