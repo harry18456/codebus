@@ -12,6 +12,12 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-22 18:43Z — T1 spike settings-chat-model
+- 狀態: DONE
+- 做了: 盤 chat model/effort 解析。發現 backlog 已部分過時：方案 A（read-only hint）在 Claude 已實作（EndpointSection.tsx:240 endpoint-chat-row），只缺 Codex 端（CodexEndpointSection.tsx 無 chat 列）。Verb::Verify 是方案 B 的現成範本（不 fallback 的 per-verb 子塊）。方案 B 因 codex 加入範圍變大（兩 provider 都要加 chat 子塊），給了完整 file-level 清單。
+- 產出: docs/2026-05-22-settings-chat-model-spike.md
+- 下一步: 佇列下一個 TODO 是 T2（app-stream-verbose-detail spike）。
+
 ## 2026-05-22 18:33Z — PE2 設計 provider prompt 策略
 - 狀態: DONE
 - 做了: 依 PE1 設計兩條修法。新確認兩個縮小範圍的事實：(1) CLAUDE.md/AGENTS.md 都由 test-enforced 的 NEUTRAL_RULES 產生 → 不用動，C1 只集中在 skill_bundle stub_content；(2) render 只 match 4 個 variant 且靠 name=="Edit" 觸發編輯渲染 → C2 只擴 codex_parser 即可重用渲染，零跨 crate。建議：C1=skill 機制無關化（輕）、C2=擴 codex parser 認 apply_patch/turn.failed（輕-中）。
