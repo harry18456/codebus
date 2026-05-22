@@ -12,6 +12,12 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-22 19:13Z — T4 spike github-repo-setup
+- 狀態: DONE
+- 做了: 核對 2026-05-14 backlog（過時最多的一條）。發現 3 drift：(1) 套件管理器是 npm 非 pnpm（package-lock.json）；(2) release 依賴的 F(v3-app-polish-ship) 未 archive 且 tauri.conf bundle.active=false → release workflow 無法寫；(3) workspace 含 src-tauri，cargo test --workspace 在 Linux 需 webkit2gtk 系統依賴。草擬了修正後的 CI workflow（core/cli 三平台 + app npm vitest/tsc + tauri-build-check 含 apt deps）+ issue/PR templates，皆可立即落地。release workflow 標 BLOCKED 待 F。
+- 產出: docs/2026-05-22-github-repo-setup-spike.md
+- 下一步: 佇列下一個 TODO 是 T5（goal-subagent-delegation spike）。
+
 ## 2026-05-22 19:03Z — T3 spike chat-display-polish
 - 狀態: DONE
 - 做了: 核對 2026-05-21 backlog。app 端 AssistantMarkdownBlock 缺 remarkGfm（WikiPreview 有、dep 已在）、WIKI_HREF_RE 只路由 markdown link 不處理 [[slug]]、milkdown-wikilink 的 transformBodyWikilinks/WikilinkLink 現成可重用；CLI chat.rs:192 raw println 無 markdown。皆屬實。標註：本條 provider-agnostic、無 PE2 耦合（operate on 正規化 Thought，兩 provider 一致）→ 可獨立先行；CLI [[slug]] 連結化已切給 cli-wikilink-link-target。

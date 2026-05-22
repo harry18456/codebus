@@ -33,7 +33,7 @@
 | T1 | DONE | spike: settings-chat-model（chat verb 的 model/effort 設定） | [docs/2026-05-22-settings-chat-model-spike.md](../2026-05-22-settings-chat-model-spike.md) | ✅ 發現方案 A 在 Claude 已實作、只缺 Codex 端 chat hint 列；方案 B 因 codex 加入範圍變大，有 Verb::Verify 現成範本 |
 | T2 | DONE | spike: app-stream-verbose-detail（app 對齊 CLI verbose） | [docs/2026-05-22-app-stream-verbose-spike.md](../2026-05-22-app-stream-verbose-spike.md) | ✅ 2026-05-21 backlog 設計已收斂、對現碼核對屬實（純前端、6 surface 共用）。新發現：與 PE2-C2 有順序耦合（codex 編輯無 event 可展開） |
 | T3 | DONE | spike: chat-display-polish（GFM 表格 + `[[wikilink]]`，app+CLI） | [docs/2026-05-22-chat-display-polish-spike.md](../2026-05-22-chat-display-polish-spike.md) | ✅ 核對屬實、app 半天可立即做（重用元件現成）。標註：provider-agnostic、無 PE2 耦合（與 T2 不同）；CLI `[[slug]]` 連結化切給 cli-wikilink-link-target |
-| T4 | TODO | spike: github-repo-setup（CI / release / issue template） | `docs/2026-05-DD-github-repo-setup-spike.md` | 草擬 workflow YAML 內容 + release/issue template 方案（寫在 doc 裡，不建 .github/） |
+| T4 | DONE | spike: github-repo-setup（CI / release / issue template） | [docs/2026-05-22-github-repo-setup-spike.md](../2026-05-22-github-repo-setup-spike.md) | ✅ 發現 3 drift（npm 非 pnpm、F 未 archive、Linux tauri 系統依賴）。CI+templates 已草擬可立即做；release workflow 卡 F+bundle.active=false |
 | T5 | TODO | spike: goal-subagent-delegation（Task 工具委派） | `docs/2026-05-DD-goal-subagent-delegation-spike.md` | 盤 goal verb 現有 tool 白名單、開 Task 需動什麼、ground-truth 風險、最小實驗版設計 |
 | T6 | TODO | 品質檢查: codebus-core | `docs/2026-05-DD-core-quality-review.md` | 逐 module 讀，列 bug / design smell / 缺測試，每條給嚴重度 + backlog 候選 |
 | T7 | TODO | 品質檢查: codebus-cli | `docs/2026-05-DD-cli-quality-review.md` | 同上，針對 cli commands |
