@@ -29,7 +29,7 @@
 | # | 狀態 | 任務 | 產出 | 驗收標準 |
 |---|---|---|---|---|
 | PE1 | DONE | ★ 診斷: Codex 輸出不理想屬哪類成因（prompt / parser 保真度 / 模型行為） | [docs/2026-05-22-provider-prompt-diagnosis.md](../2026-05-22-provider-prompt-diagnosis.md) | ✅ 定位為「prompt 指示失準 + parser 保真度」兩類疊加；模型行為差異待 harry 樣本 |
-| PE2 | TODO | ★ 設計: provider-specific prompt 策略（依 PE1） | `docs/2026-05-DD-provider-prompt-design.md` | 列共用 vs 每 provider 模板選項、對 skill/CLAUDE.md/AGENTS.md/parser 的影響、file-level 任務拆解 + 工程量 + 風險。**依賴 PE1 先完成** |
+| PE2 | DONE | ★ 設計: provider-specific prompt 策略（依 PE1） | [docs/2026-05-22-provider-prompt-design.md](../2026-05-22-provider-prompt-design.md) | ✅ C1 skill 機制無關化（輕）+ C2 codex parser 擴充（輕-中，blast radius 僅 codex_parser.rs）。CLAUDE/AGENTS 不用動。卡 ground-truth 樣本 + harry 未決問題 |
 | T1 | TODO | spike: settings-chat-model（chat verb 的 model/effort 設定） | `docs/2026-05-DD-settings-chat-model-spike.md` | 盤出 chat verb 目前 model/effort 在哪解析、方案 A/B 各動哪些檔、task 拆解 + 工程量 |
 | T2 | TODO | spike: app-stream-verbose-detail（app 對齊 CLI verbose） | `docs/2026-05-DD-app-stream-verbose-spike.md` | 比對 CLI verbose 渲染 vs app activity stream 來源、列前端需改的元件 + 資料流 |
 | T3 | TODO | spike: chat-display-polish（GFM 表格 + `[[wikilink]]`，app+CLI） | `docs/2026-05-DD-chat-display-polish-spike.md` | 盤現有 chat 渲染管線（app 與 CLI 兩側）、缺口、proposed 改法 + 風險 |

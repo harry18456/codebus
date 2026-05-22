@@ -12,6 +12,12 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-22 18:33Z — PE2 設計 provider prompt 策略
+- 狀態: DONE
+- 做了: 依 PE1 設計兩條修法。新確認兩個縮小範圍的事實：(1) CLAUDE.md/AGENTS.md 都由 test-enforced 的 NEUTRAL_RULES 產生 → 不用動，C1 只集中在 skill_bundle stub_content；(2) render 只 match 4 個 variant 且靠 name=="Edit" 觸發編輯渲染 → C2 只擴 codex_parser 即可重用渲染，零跨 crate。建議：C1=skill 機制無關化（輕）、C2=擴 codex parser 認 apply_patch/turn.failed（輕-中）。
+- 產出: docs/2026-05-22-provider-prompt-design.md
+- 下一步: 佇列下一個 TODO 是 T1（settings-chat-model spike）。⚠️ C2 實作卡 ground-truth：spike 從未錄到 codex 編輯/失敗的 --json 樣本，需一次真實 codex 跑（留給 harry）。
+
 ## 2026-05-22 HH:MM — PE1 診斷 Codex 輸出成因
 - 狀態: DONE
 - 做了: 讀 agent/stream/skill_bundle 層，比對 claude vs codex 指示材料 + parser 保真度。發現：(1) skill bundle 與 AGENTS.md 對 codex 是 byte-identical 沿用 Claude 內容，寫死了 `--tools`/PreToolUse hook/`mcp_*` 等 codex 沒有的機制（quiz 自我驗證契約最受影響）；(2) codex parser 只映 3 種 event，檔案編輯(apply_patch)不可見、turn.failed 靜默吞掉、工具全塌成 "Shell"、無增量串流。修正了 backlog 初步猜測：「答案被當 thought」兩 provider 一致，非 codex 獨有。
