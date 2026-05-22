@@ -367,14 +367,21 @@ pub(crate) fn list_runs_impl(
 
     // Synthesize interrupted entries for events files that lack a
     // matching RunLog row. Spec: app-workspace § Interrupted Run
-    // Detection. Mode is "goal" (chat / query / fix interrupted
-    // detection is out of v1 scope per the same requirement).
+    // Detection — detection is goal-only. An events file is identified as
+    // a goal run only when it carries a `VerbBanner::Goal` event; non-goal
+    // verbs (chat / query / fix / quiz) never emit that banner. Skipping
+    // unidentified files keeps in-progress non-goal runs (events written
+    // before their terminal RunLog row) out of the Goals list, where they
+    // would otherwise surface as empty-goal `interrupted` rows.
     for slug in &events_slugs {
         if runs_rows_by_slug.contains_key(slug) {
             continue;
         }
         let events_file = log_dir.join(format!("events-{slug}.jsonl"));
-        let goal_text = first_goal_text_in_events(&events_file).unwrap_or_default();
+        let goal_text = match first_goal_text_in_events(&events_file) {
+            Some(text) => text,
+            None => continue,
+        };
         let started_at = unslug_started_at(slug);
         summaries.push(RunLogSummary {
             run_id: slug.clone(),
@@ -898,6 +905,84 @@ mod tests {
         assert!(
             !entries.iter().any(|s| s.outcome == "interrupted"),
             "no interrupted entry should remain once RunLog row exists"
+        );
+    }
+
+    /// Interrupted detection is goal-only: an orphan events file that does
+    /// NOT carry a `VerbBanner::Goal` event (i.e. an in-progress or
+    /// interrupted chat / query / fix / quiz run, whose terminal RunLog row
+    /// has not been written yet) MUST NOT be synthesized into a virtual
+    /// `interrupted` entry — neither under `Goal` nor `All` filtering. This
+    /// is what stops such runs from transiently appearing in the Goals list
+    /// with empty goal text.
+    #[test]
+    fn list_runs_skips_non_goal_orphan_events() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let log_dir = tmp.path().to_path_buf();
+
+        // Non-goal verbs never emit `VerbBanner::Goal`. A `Start` banner
+        // alone (no `Goal` banner) stands in for any such run's events.
+        write_events_jsonl(
+            &log_dir,
+            "2026-05-13T04-00-00Z",
+            &[VerbEvent::Banner(VerbBanner::Start {
+                repo_path: PathBuf::from("/some/repo"),
+            })],
+        );
+
+        for filter in [ModeFilter::Goal, ModeFilter::All] {
+            let entries = list_runs_impl(&log_dir, filter).unwrap();
+            assert!(
+                !entries.iter().any(|s| s.run_id == "2026-05-13T04-00-00Z"),
+                "non-goal orphan events file MUST NOT produce any entry \
+                 (filter={filter:?}); got {entries:?}"
+            );
+        }
+    }
+
+    /// The goal-only judgement is positive for genuine goal runs: an orphan
+    /// events file that DOES carry a `VerbBanner::Goal` event is still
+    /// synthesized into a virtual `interrupted` entry with the goal text
+    /// recovered from that banner. Complements
+    /// `list_runs_skips_non_goal_orphan_events` (the negative case).
+    #[test]
+    fn list_runs_synthesizes_interrupted_only_for_goal_events() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let log_dir = tmp.path().to_path_buf();
+
+        // A goal orphan (with Goal banner) and a non-goal orphan (without)
+        // side by side: only the goal one becomes an interrupted entry.
+        write_events_jsonl(
+            &log_dir,
+            "2026-05-13T05-00-00Z",
+            &[
+                VerbEvent::Banner(VerbBanner::Start {
+                    repo_path: PathBuf::from("/some/repo"),
+                }),
+                VerbEvent::Banner(VerbBanner::Goal {
+                    goal_text: "map the API surface".into(),
+                }),
+            ],
+        );
+        write_events_jsonl(
+            &log_dir,
+            "2026-05-13T06-00-00Z",
+            &[VerbEvent::Banner(VerbBanner::Start {
+                repo_path: PathBuf::from("/some/repo"),
+            })],
+        );
+
+        let entries = list_runs_impl(&log_dir, ModeFilter::Goal).unwrap();
+        let goal_entry = entries
+            .iter()
+            .find(|s| s.run_id == "2026-05-13T05-00-00Z")
+            .expect("goal orphan events file MUST synthesize interrupted entry");
+        assert_eq!(goal_entry.outcome, "interrupted");
+        assert_eq!(goal_entry.mode, "goal");
+        assert_eq!(goal_entry.goal, "map the API surface");
+        assert!(
+            !entries.iter().any(|s| s.run_id == "2026-05-13T06-00-00Z"),
+            "non-goal orphan MUST be skipped even alongside a goal orphan; got {entries:?}"
         );
     }
 

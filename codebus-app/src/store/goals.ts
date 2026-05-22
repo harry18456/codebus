@@ -151,7 +151,29 @@ export const useGoalsStore = create<GoalsState>((set, get) => {
     async refreshRuns(vaultPath) {
       set({ _currentVaultPath: vaultPath })
       const runs = await listRuns(vaultPath, { kind: "goal" })
-      set({ runs })
+      // An in-flight goal has no terminal RunLog row yet, so `list_runs`
+      // synthesizes a virtual `interrupted` row for it (events present,
+      // RunLog absent). Let the optimistic `running` state from `activeRun`
+      // win over that disk-derived row so the in-progress goal keeps its
+      // 🚌 running indicator instead of flipping to ⚠ interrupted.
+      set((state) => {
+        const ar = state.activeRun
+        if (!ar) return { runs }
+        const runningSummary: RunLogSummary = {
+          run_id: ar.runId,
+          mode: "goal",
+          goal: ar.goal,
+          started_at: ar.startedAt,
+          finished_at: "",
+          tokens: { input_tokens: 0, output_tokens: 0 },
+          wiki_changed: false,
+          lint_error_count: 0,
+          lint_warn_count: 0,
+          outcome: "running",
+        }
+        const withoutActive = runs.filter((r) => r.run_id !== ar.runId)
+        return { runs: [runningSummary, ...withoutActive] }
+      })
     },
 
     reset() {

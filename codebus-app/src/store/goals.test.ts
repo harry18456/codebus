@@ -112,4 +112,45 @@ describe("useGoalsStore", () => {
     expect(useGoalsStore.getState().runs).toHaveLength(1)
     expect(useGoalsStore.getState().runs[0].mode).toBe("goal")
   })
+
+  it("refreshRuns keeps an in-flight activeRun shown as running over a disk-derived interrupted row", async () => {
+    // An in-progress goal: activeRun set, but its terminal RunLog row is
+    // not yet on disk, so list_runs synthesizes a virtual `interrupted`
+    // row for the same run_id. refreshRuns MUST NOT let that overwrite the
+    // optimistic running state.
+    useGoalsStore.setState({
+      activeRun: {
+        runId: "2026-05-13T14-56-21Z",
+        goal: "test goal",
+        startedAt: "2026-05-13T14:56:21Z",
+        events: [],
+        cancelling: false,
+      },
+      runs: [],
+    })
+    invokeMock.mockResolvedValueOnce([
+      {
+        run_id: "2026-05-13T14-56-21Z",
+        mode: "goal",
+        goal: "",
+        started_at: "2026-05-13T14:56:21Z",
+        finished_at: "",
+        tokens: { input_tokens: 0, output_tokens: 0 },
+        wiki_changed: false,
+        lint_error_count: 0,
+        lint_warn_count: 0,
+        outcome: "interrupted",
+      },
+    ])
+
+    await useGoalsStore.getState().refreshRuns("/v")
+
+    const row = useGoalsStore
+      .getState()
+      .runs.find((r) => r.run_id === "2026-05-13T14-56-21Z")
+    expect(row).toBeDefined()
+    expect(row?.outcome).toBe("running")
+    expect(row?.goal).toBe("test goal")
+    expect(row?.started_at).toBe("2026-05-13T14:56:21Z")
+  })
 })
