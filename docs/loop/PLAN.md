@@ -28,7 +28,7 @@
 
 | # | 狀態 | 任務 | 產出 | 驗收標準 |
 |---|---|---|---|---|
-| PE1 | TODO | ★ 診斷: Codex 輸出不理想屬哪類成因（prompt / parser 保真度 / 模型行為） | `docs/2026-05-DD-provider-prompt-diagnosis.md` | 盤指示材料通道（per-verb system prompt、CLAUDE.md/AGENTS.md 生成、skill dual-write）+ 比對 claude vs codex stream parser 保真度，定位成因。背景見 `docs/2026-05-22-provider-prompt-engineering-backlog.md` |
+| PE1 | DONE | ★ 診斷: Codex 輸出不理想屬哪類成因（prompt / parser 保真度 / 模型行為） | [docs/2026-05-22-provider-prompt-diagnosis.md](../2026-05-22-provider-prompt-diagnosis.md) | ✅ 定位為「prompt 指示失準 + parser 保真度」兩類疊加；模型行為差異待 harry 樣本 |
 | PE2 | TODO | ★ 設計: provider-specific prompt 策略（依 PE1） | `docs/2026-05-DD-provider-prompt-design.md` | 列共用 vs 每 provider 模板選項、對 skill/CLAUDE.md/AGENTS.md/parser 的影響、file-level 任務拆解 + 工程量 + 風險。**依賴 PE1 先完成** |
 | T1 | TODO | spike: settings-chat-model（chat verb 的 model/effort 設定） | `docs/2026-05-DD-settings-chat-model-spike.md` | 盤出 chat verb 目前 model/effort 在哪解析、方案 A/B 各動哪些檔、task 拆解 + 工程量 |
 | T2 | TODO | spike: app-stream-verbose-detail（app 對齊 CLI verbose） | `docs/2026-05-DD-app-stream-verbose-spike.md` | 比對 CLI verbose 渲染 vs app activity stream 來源、列前端需改的元件 + 資料流 |
