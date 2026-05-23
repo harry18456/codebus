@@ -38,11 +38,11 @@
 | T6 | DONE | 品質檢查: codebus-core（Part 1：pii + git） | [docs/2026-05-22-core-quality-review.md](../2026-05-22-core-quality-review.md) | ✅ 找到真實 latent bug F1（PII mask 重疊未合併→可能漏遮，已進 BACKLOG）+ F2 大檔靜默排除 + F3 deleted page。其餘大模組列後續候選 |
 | T7 | DONE | 品質檢查: codebus-cli | [docs/2026-05-22-cli-quality-review.md](../2026-05-22-cli-quality-review.md) | ✅ 找到高優先安全項 F4（Bash hook 只查前兩 token，shell 串接可能繞過 sandbox，已進 BACKLOG，待驗 Claude Code 串接行為）。Read hook 設計紮實 |
 | T8 | DONE | 品質檢查: codebus-app（前端） | [docs/2026-05-22-app-quality-review.md](../2026-05-22-app-quality-review.md) | ✅ 前端防禦紮實、無真實 bug（markdown/連結無 XSS、TS 紀律好）。實質產出：修正 T3 的 app 實作假設（codebus:// urlTransform + href 分流） |
-| T9 | TODO | spec drift 檢查（specs vs code） | `docs/2026-05-DD-spec-drift-audit.md` | 比對 openspec/specs 與實際 code，列出漂移點（純讀，不改 spec） |
-| T10 | TODO | README / docs 新鮮度稽核 | `docs/2026-05-DD-docs-freshness-audit.md` | README 與實際功能 / 指令對齊，列過時段落 |
-| T11 | TODO | spike: mcp-server（codebus 當 MCP server，query-only） | `docs/2026-05-DD-mcp-server-spike.md` | 盤 query 路徑可重用性、MCP server 介面草案、工程量 |
-| T12 | TODO | spike: rag-index-search（LanceDB） | `docs/2026-05-DD-rag-index-search-spike.md` | 盤 vault 內容來源、index 設計選項、工程量 + 風險 |
-| T13 | TODO | spike: openai-privacy-filter（local 語意層 PII） | `docs/2026-05-DD-openai-privacy-filter-spike.md` | 盤現有 pii module、語意層方案、與既有 regex filter 的關係 |
+| T9 | DONE | spec drift 檢查（specs vs code） | [docs/2026-05-22-spec-drift-audit.md](../2026-05-22-spec-drift-audit.md) | ✅ 3 真 drift (D1 hook allow 範圍、D2 skill bundle 三/五 verb、D5 hook 無 metachar req) + 2 成熟度缺口 (D3/D4 連 F1/PE1) |
+| T10 | DONE | README / docs 新鮮度稽核 | [docs/2026-05-22-docs-freshness-audit.md](../2026-05-22-docs-freshness-audit.md) | ✅ R1 missing `config` in command table、R2 README 對 codex/multi-provider 完全沉默(含 sandbox 描述、CLI 需求)。R3-R5 次要候選 |
+| T11 | DONE | spike: mcp-server（codebus 當 MCP server，query-only） | [docs/2026-05-22-mcp-server-spike.md](../2026-05-22-mcp-server-spike.md) | ✅ backlog 設計合理且 provider-agnostic；仍卡 F + RAG。補充 incremental MVP 路線：現在可動三件唯讀 wiki 工具,不必全卡 F |
+| T12 | DONE | spike: rag-index-search（LanceDB） | [docs/2026-05-22-rag-index-search-spike.md](../2026-05-22-rag-index-search-spike.md) | ✅ backlog 設計完整,無新缺口。補充三點:ONNX runtime 與 T13 共用基礎設施 / 注入路徑要 provider-neutral 避免重製 PE1 失準 / standalone search 先 incremental |
+| T13 | DONE | spike: openai-privacy-filter（local 語意層 PII） | [docs/2026-05-22-openai-privacy-filter-spike.md](../2026-05-22-openai-privacy-filter-spike.md) | ✅ 3 更新:pii-settings-ui 已 archive(同批已失效)、**F1 必須先修**(語意+regex 兩層重疊更頻繁)、ONNX runtime 與 T12 對齊 |
 
 ## 自我再規劃協定（RP）
 

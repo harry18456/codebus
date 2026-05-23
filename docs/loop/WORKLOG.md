@@ -12,6 +12,17 @@ Append-only。每輪一筆，最新在最上面。格式：
 
 ---
 
+## 2026-05-23 00:5xZ — T9-T13 連跑收尾（harry 線上陪跑）
+- 狀態: 5 個 DONE 一輪打完
+- 做了:
+  - **T9 spec drift**: 找到 3 真 drift（D1 lint-feedback-loop summary 沒提 quiz validate / D2 skill-bundles 寫「three」實際 five / D5 hook 無 metachar req）+ 2 成熟度缺口（D3 pii spec 未要求 disjoint→F1 源頭 / D4 skill-bundles 忠實描述失準實作）。
+  - **T10 docs freshness**: R1 README 漏 `codebus config` 子命令、R2 整份 README 對 codex/multi-provider 完全沉默（含 sandbox 描述、CLI 需求）；R3-R5 次要。
+  - **T11 mcp-server**: backlog 設計完整，補 incremental MVP 路線（現在可動三件唯讀 wiki 工具，不必全卡 F）。
+  - **T12 rag-index-search**: backlog 完整，補三點（ONNX runtime 跨 T13 共用、注入路徑要 provider-neutral 避免重製 PE1 失準、先做 standalone search）。
+  - **T13 openai-privacy-filter**: 3 更新（pii-settings-ui 已 archive 同批失效、**F1 必須先修**（語意+regex 重疊更頻繁）、ONNX runtime 與 T12 對齊）。
+- 產出: 5 個 docs/2026-05-22-*.md
+- 下一步: **佇列清空**——所有 13 個 PLAN 任務完成（PE1/PE2 + T1-T13）。若 harry 想繼續，可進「自我再規劃協定（RP）」（解除「只讀」邊界）；或選定實作項起 change。
+
 ## 2026-05-22 20:0xZ — T8 品質檢查 app（前端）
 - 狀態: DONE
 - 做了: 安全 lens 掃前端。無 dangerouslySetInnerHTML/any/ts-ignore，chat 連結渲染對 XSS 安全（external 僅 ^https?: + openExternalUrl，其餘惰性），wikilink encodeURIComponent + hasOwnProperty 防原型污染，QuizTab exhaustive-deps 抑制是正當 latch pattern。無真實 bug。實質產出：修正 T3 app 實作假設——transformBodyWikilinks 產 codebus:// href 會被 react-markdown 預設 urlTransform 洗掉、且現有 WIKI_HREF_RE 匹配不到該 scheme，T3 落地需多兩步（已回寫 T3 理解）。次要：EXTERNAL_HREF_RE 偏鬆、一個 i18n TODO。
