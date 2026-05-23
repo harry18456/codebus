@@ -121,6 +121,7 @@ mod tests {
             pii_matches: 0,
             pii_skipped_files: 0,
             pii_masked_matches: 0,
+            oversized_skipped_files: 0,
         }
     }
 

@@ -380,6 +380,7 @@ fn manifest_source_signal_handles_git_repo() {
         pii_matches: 0,
         pii_skipped_files: 0,
         pii_masked_matches: 0,
+        oversized_skipped_files: 0,
     };
     let signal = compute_source_signal(tmp.path(), &summary);
     assert_eq!(signal.git_head.as_deref(), Some(head_content));
@@ -396,6 +397,7 @@ fn manifest_source_signal_handles_non_git_dir() {
         pii_matches: 0,
         pii_skipped_files: 0,
         pii_masked_matches: 0,
+        oversized_skipped_files: 0,
     };
     let signal = compute_source_signal(tmp.path(), &summary);
     assert!(signal.git_head.is_none());

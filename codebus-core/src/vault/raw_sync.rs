@@ -94,6 +94,14 @@ pub struct SyncSummary {
     /// Total number of `[REDACTED:<pattern>]` substitutions written across
     /// all mirrored files. Always zero when `on_hit != Mask`.
     pub pii_masked_matches: usize,
+    /// core-quality-residuals (F2): Number of files NOT mirrored because
+    /// they exceeded the `MAX_FILE_BYTES` (5 MiB) size limit. Each skip
+    /// also emits one `mirror skip: oversized at ...` line on the warn
+    /// sink (per spec vault §Raw Mirror with PII Scanner). Always
+    /// incremented from the mirror-writer path only; the drift-detection
+    /// `walk_source_for_signal` skips silently without affecting this
+    /// counter (which is exposed only on `SyncSummary`).
+    pub oversized_skipped_files: usize,
 }
 
 /// Walk the source repository under the same rules as [`sync_with_scanner`]
@@ -239,16 +247,36 @@ pub fn sync_with_scanner_into<W: io::Write>(
             Ok(m) => m,
             Err(_) => continue,
         };
+        // Use forward slashes in the warning line so output is consistent
+        // across Windows / Unix even though `Path` separators differ.
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+
         if meta.len() > MAX_FILE_BYTES {
+            // core-quality-residuals (F2): emit one warn line + bump the
+            // summary counter so oversized skips are observable instead of
+            // silent (per spec vault §Raw Mirror with PII Scanner). The
+            // mirror-writer path SHALL surface; the drift-detection
+            // `walk_source_for_signal` continues to skip silently with no
+            // counter side-effect.
+            //
+            // Warn-write failure (e.g. EPIPE / Windows ERROR_NO_DATA when
+            // stderr is a closed pipe under Tauri) SHALL NOT abort the
+            // sync — the SKIP itself is the load-bearing behavior; the
+            // warn line is observability. Swallow the write error so a
+            // closed warn sink degrades gracefully instead of failing
+            // `run_init` for the whole vault.
+            let _ = writeln!(
+                warn_sink,
+                "mirror skip: oversized at {} ({} bytes > 5 MiB limit)",
+                rel_str,
+                meta.len()
+            );
+            summary.oversized_skipped_files += 1;
             continue;
         }
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent)?;
         }
-
-        // Use forward slashes in the warning line so output is consistent
-        // across Windows / Unix even though `Path` separators differ.
-        let rel_str = rel.to_string_lossy().replace('\\', "/");
 
         // Branch on UTF-8 readability:
         //   UTF-8 → scan + on_hit branching (Warn / Skip / Mask)
@@ -562,7 +590,130 @@ mod tests {
         let big = vec![0u8; (MAX_FILE_BYTES + 1) as usize];
         write(&src.path().join("huge.bin"), &big);
         write(&src.path().join("small.txt"), b"ok");
-        sync_with_scanner(src.path(), raw.path(), &null(), OnHit::Warn).unwrap();
+        // core-quality-residuals (F2): the oversized file SHALL be skipped
+        // AND the warn sink SHALL contain exactly one `mirror skip: oversized`
+        // line AND the summary's `oversized_skipped_files` counter SHALL equal
+        // one (per spec vault §Raw Mirror with PII Scanner). Use `run_sync`
+        // helper to capture both the summary and the warn sink content.
+        let (summary, warn) = run_sync(src.path(), raw.path(), &null(), OnHit::Warn);
+        assert!(!raw.path().join("huge.bin").exists());
+        assert!(raw.path().join("small.txt").exists());
+        assert_eq!(
+            summary.oversized_skipped_files, 1,
+            "summary SHALL record one oversized skip; warn sink was: {warn}"
+        );
+        assert!(
+            warn.contains("mirror skip: oversized at huge.bin"),
+            "warn sink SHALL contain a `mirror skip: oversized at huge.bin` line; got: {warn}"
+        );
+        assert!(
+            warn.contains("> 5 MiB limit"),
+            "warn line SHALL include the `> 5 MiB limit` reason; got: {warn}"
+        );
+    }
+
+    /// core-quality-residuals (F2): single oversized file produces a warn line
+    /// containing the byte count AND increments `oversized_skipped_files` by
+    /// exactly one. Mirrors spec vault §Raw Mirror with PII Scanner scenario
+    /// "Mirror skips files exceeding the size limit and emits a stderr warning".
+    #[test]
+    fn oversized_file_warn_line_includes_byte_count_and_increments_counter() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        let oversized_bytes = (MAX_FILE_BYTES + 42) as usize;
+        let big = vec![0u8; oversized_bytes];
+        write(&src.path().join("docs/huge.bin"), &big);
+        let (summary, warn) = run_sync(src.path(), raw.path(), &null(), OnHit::Warn);
+        assert_eq!(summary.oversized_skipped_files, 1);
+        // Warn line SHALL contain the byte count AND identify the rule.
+        assert!(
+            warn.contains(&format!("({oversized_bytes} bytes")),
+            "warn line SHALL include the literal byte count; got: {warn}"
+        );
+        assert!(
+            warn.contains("> 5 MiB limit"),
+            "warn line SHALL include the `> 5 MiB limit` reason; got: {warn}"
+        );
+        // Forward-slash path normalisation (consistent across Windows / Unix).
+        assert!(
+            warn.contains("mirror skip: oversized at docs/huge.bin"),
+            "warn line SHALL contain forward-slash-normalised relative path; got: {warn}"
+        );
+    }
+
+    /// core-quality-residuals (F2): multiple oversized files aggregate the
+    /// counter AND emit one warn line per file; small files are still
+    /// mirrored alongside. Mirrors spec vault scenario "Oversized counter
+    /// aggregates across multiple skipped files".
+    #[test]
+    fn multiple_oversized_files_aggregate_counter_and_warns() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        let big = vec![0u8; (MAX_FILE_BYTES + 1) as usize];
+        write(&src.path().join("a.bin"), &big);
+        write(&src.path().join("b.bin"), &big);
+        write(&src.path().join("small.txt"), b"ok");
+        let (summary, warn) = run_sync(src.path(), raw.path(), &null(), OnHit::Warn);
+        assert_eq!(
+            summary.oversized_skipped_files, 2,
+            "summary SHALL aggregate to 2 oversized skips; warn sink was: {warn}"
+        );
+        // Each oversized file SHALL produce exactly one warn line.
+        let a_count = warn.matches("mirror skip: oversized at a.bin").count();
+        let b_count = warn.matches("mirror skip: oversized at b.bin").count();
+        assert_eq!(a_count, 1, "a.bin SHALL appear in exactly one warn line; got {a_count} in {warn}");
+        assert_eq!(b_count, 1, "b.bin SHALL appear in exactly one warn line; got {b_count} in {warn}");
+        // Small files SHALL still be mirrored alongside the oversized skips.
+        assert!(raw.path().join("small.txt").exists());
+        assert!(!raw.path().join("a.bin").exists());
+        assert!(!raw.path().join("b.bin").exists());
+    }
+
+    /// core-quality-residuals (F2): when the `warn_sink` itself fails to
+    /// accept writes (e.g. EPIPE / Windows ERROR_NO_DATA when stderr is a
+    /// closed pipe under Tauri's GUI process), the sync SHALL still:
+    ///   - skip the oversized file from the mirror (load-bearing behavior)
+    ///   - increment `summary.oversized_skipped_files` (observable to caller)
+    ///   - return `Ok(SyncSummary)` for the whole sync (NOT abort)
+    /// The warn line itself is best-effort observability — losing it on a
+    /// broken sink SHALL NOT bubble up as init failure. Discovered via
+    /// real-binary GUI verification (codebus-app + CDP add_vault path).
+    #[test]
+    fn oversized_skip_survives_failing_warn_sink() {
+        struct AlwaysErrSink;
+        impl io::Write for AlwaysErrSink {
+            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "simulated EPIPE",
+                ))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "simulated EPIPE",
+                ))
+            }
+        }
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        let big = vec![0u8; (MAX_FILE_BYTES + 1) as usize];
+        write(&src.path().join("huge.bin"), &big);
+        write(&src.path().join("small.txt"), b"ok");
+        // Use the failing sink directly — sync_with_scanner_into SHALL still
+        // complete successfully despite warn-write errors.
+        let summary = sync_with_scanner_into(
+            src.path(),
+            raw.path(),
+            &null(),
+            OnHit::Warn,
+            &mut AlwaysErrSink,
+        )
+        .expect("sync SHALL NOT abort when warn sink errors");
+        assert_eq!(
+            summary.oversized_skipped_files, 1,
+            "counter SHALL still increment even when warn write fails"
+        );
         assert!(!raw.path().join("huge.bin").exists());
         assert!(raw.path().join("small.txt").exists());
     }

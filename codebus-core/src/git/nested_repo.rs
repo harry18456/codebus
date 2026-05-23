@@ -78,7 +78,17 @@ pub fn changed_paths_under(
 ) -> io::Result<Vec<String>> {
     let vault_root = vault_root.as_ref();
     let base = base_rev.unwrap_or("HEAD");
-    let diff = capture_git(vault_root, &["diff", "--name-only", base, "--", subdir])?;
+    // core-quality-residuals (F3): `--diff-filter=ACMR` whitelists Added /
+    // Copied / Modified / Renamed. Without this filter `git diff` defaults
+    // include Deleted (D) entries, which then leak to `goal` content-verify
+    // and make the verify spawn try to `Read` files that no longer exist.
+    // Whitelist over `d` blacklist because future git filter types (T/U/X/B)
+    // are equally unwanted for content-verify — explicit ACMR matches the
+    // verb-library §Goal Content Verify spec wording "created or modified".
+    let diff = capture_git(
+        vault_root,
+        &["diff", "--name-only", "--diff-filter=ACMR", base, "--", subdir],
+    )?;
     let others = capture_git(
         vault_root,
         &["ls-files", "--others", "--exclude-standard", "--", subdir],
@@ -182,5 +192,137 @@ mod tests {
         auto_commit(v.path(), "wiki: explore X").unwrap();
         let log = capture_git(v.path(), &["log", "--pretty=format:%s", "-1"]).unwrap();
         assert_eq!(log.trim(), "wiki: explore X");
+    }
+
+    // --- core-quality-residuals (F3): `changed_paths_under` test module.
+    // The function had ZERO test coverage before this change. We backfill
+    // the expected behavior under the verb-library §Goal Content Verify
+    // spec wording: "diffing the vault git repository ... created or
+    // modified pages". Specifically:
+    //   - Added / Modified / Renamed paths SHALL be returned.
+    //   - **Deleted** paths SHALL be excluded (the F3 bug — `git diff`
+    //     defaults include them; without `--diff-filter=ACMR` they leak
+    //     to the verify spawn which then fails to Read them).
+    //   - Untracked new files SHALL be included (the function already
+    //     `ls-files --others` for this — regression guard).
+    //   - Empty diff SHALL return an empty list.
+    //   - Subdir filter SHALL restrict scope (no leakage from outside).
+
+    /// Helper: init a nested repo, write a `wiki/<name>.md` file, commit
+    /// it, return the resulting HEAD sha so callers can pass it as the
+    /// `base_rev` for subsequent `changed_paths_under` calls.
+    fn seed_wiki_commit(vault_root: &Path, name: &str, body: &str) -> String {
+        fs::create_dir_all(vault_root.join("wiki")).unwrap();
+        fs::write(vault_root.join("wiki").join(name), body).unwrap();
+        auto_commit(vault_root, &format!("seed: {name}")).unwrap()
+    }
+
+    #[test]
+    fn changed_paths_under_includes_added_files() {
+        let v = TempDir::new().unwrap();
+        init_nested_repo(v.path()).unwrap();
+        let base = seed_wiki_commit(v.path(), "alpha.md", "alpha");
+        // Add a new committed file after `base`.
+        fs::write(v.path().join("wiki/beta.md"), "beta").unwrap();
+        auto_commit(v.path(), "add beta").unwrap();
+        let changed = changed_paths_under(v.path(), Some(&base), "wiki/").unwrap();
+        assert!(
+            changed.contains(&"wiki/beta.md".to_string()),
+            "added file SHALL appear in changed list; got: {changed:?}"
+        );
+    }
+
+    #[test]
+    fn changed_paths_under_includes_modified_files() {
+        let v = TempDir::new().unwrap();
+        init_nested_repo(v.path()).unwrap();
+        let base = seed_wiki_commit(v.path(), "alpha.md", "original");
+        fs::write(v.path().join("wiki/alpha.md"), "modified").unwrap();
+        auto_commit(v.path(), "modify alpha").unwrap();
+        let changed = changed_paths_under(v.path(), Some(&base), "wiki/").unwrap();
+        assert!(
+            changed.contains(&"wiki/alpha.md".to_string()),
+            "modified file SHALL appear in changed list; got: {changed:?}"
+        );
+    }
+
+    #[test]
+    fn changed_paths_under_includes_renamed_files() {
+        let v = TempDir::new().unwrap();
+        init_nested_repo(v.path()).unwrap();
+        let base = seed_wiki_commit(v.path(), "alpha.md", "alpha");
+        // Use `git mv` so git records the change as a rename (with default
+        // similarity detection the file is small enough to detect).
+        run_git(
+            v.path(),
+            &["mv", "wiki/alpha.md", "wiki/alpha-renamed.md"],
+        )
+        .unwrap();
+        auto_commit(v.path(), "rename alpha").unwrap();
+        let changed = changed_paths_under(v.path(), Some(&base), "wiki/").unwrap();
+        // The new path SHALL appear; under the ACMR filter the rename's
+        // new path is what `git diff --name-only` reports for R.
+        assert!(
+            changed.contains(&"wiki/alpha-renamed.md".to_string()),
+            "renamed file (new path) SHALL appear in changed list; got: {changed:?}"
+        );
+    }
+
+    #[test]
+    fn changed_paths_under_excludes_deleted_files() {
+        let v = TempDir::new().unwrap();
+        init_nested_repo(v.path()).unwrap();
+        let base = seed_wiki_commit(v.path(), "alpha.md", "alpha");
+        // Delete the file AND commit the deletion so it appears in `git
+        // diff <base> HEAD` as a D entry.
+        fs::remove_file(v.path().join("wiki/alpha.md")).unwrap();
+        auto_commit(v.path(), "delete alpha").unwrap();
+        let changed = changed_paths_under(v.path(), Some(&base), "wiki/").unwrap();
+        assert!(
+            !changed.contains(&"wiki/alpha.md".to_string()),
+            "deleted file SHALL NOT appear in changed list (F3 fix); got: {changed:?}"
+        );
+    }
+
+    #[test]
+    fn changed_paths_under_includes_untracked_new_files() {
+        let v = TempDir::new().unwrap();
+        init_nested_repo(v.path()).unwrap();
+        let base = seed_wiki_commit(v.path(), "alpha.md", "alpha");
+        // Write a new file but do NOT commit — should appear via the
+        // `ls-files --others` channel (untracked).
+        fs::write(v.path().join("wiki/draft.md"), "draft").unwrap();
+        let changed = changed_paths_under(v.path(), Some(&base), "wiki/").unwrap();
+        assert!(
+            changed.contains(&"wiki/draft.md".to_string()),
+            "untracked file SHALL appear in changed list; got: {changed:?}"
+        );
+    }
+
+    #[test]
+    fn changed_paths_under_returns_empty_for_no_changes() {
+        let v = TempDir::new().unwrap();
+        init_nested_repo(v.path()).unwrap();
+        let base = seed_wiki_commit(v.path(), "alpha.md", "alpha");
+        let changed = changed_paths_under(v.path(), Some(&base), "wiki/").unwrap();
+        assert!(
+            changed.is_empty(),
+            "no changes since `base` SHALL return empty list; got: {changed:?}"
+        );
+    }
+
+    #[test]
+    fn changed_paths_under_restricts_to_subdir() {
+        let v = TempDir::new().unwrap();
+        init_nested_repo(v.path()).unwrap();
+        let base = seed_wiki_commit(v.path(), "alpha.md", "alpha");
+        // Change a file OUTSIDE the subdir; the call SHALL NOT see it.
+        fs::write(v.path().join("other.md"), "x").unwrap();
+        auto_commit(v.path(), "outside wiki").unwrap();
+        let changed = changed_paths_under(v.path(), Some(&base), "wiki/").unwrap();
+        assert!(
+            !changed.iter().any(|p| p == "other.md"),
+            "subdir filter SHALL exclude paths outside wiki/; got: {changed:?}"
+        );
     }
 }

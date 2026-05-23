@@ -196,6 +196,7 @@ pub fn run_goal(
         pii_matches: 0,
         pii_skipped_files: 0,
         pii_masked_matches: 0,
+        oversized_skipped_files: 0,
     };
     let current_signal = manifest::compute_source_signal(repo, &stub_summary);
     let needs_resync = options.force_resync || detect_drift(&paths.manifest_yaml, &current_signal);
