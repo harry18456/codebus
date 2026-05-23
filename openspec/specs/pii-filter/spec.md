@@ -319,7 +319,7 @@ code:
 ---
 ### Requirement: Mirror Mask Behavior
 
-When the active on-hit policy is `Mask` (or when a file contains any `PiiSeverity::Critical` match regardless of on-hit policy), the system SHALL write a transformed copy of the content to the raw mirror destination in which each `matched_text` substring is replaced by the literal string `[REDACTED:<pattern_name>]`. Replacement SHALL preserve all non-matched bytes and SHALL be performed in descending byte-offset order so earlier replacements do not shift later match offsets. Under explicit `Mask` policy, both Critical and Warn matches SHALL be replaced. Under `Warn` or `Skip` policy where Critical matches force the file into Mask processing, ONLY the Critical matches SHALL be replaced — Warn matches in the same file SHALL pass through unchanged (they take their own policy path: warn-line-only or skip-as-individual-match-but-file-already-mirrored). The warn sink SHALL still receive one line per original match. The system SHALL increment a `pii_masked_matches` counter on the sync summary by exactly one per replaced match.
+When the active on-hit policy is `Mask` (or when a file contains any `PiiSeverity::Critical` match regardless of on-hit policy), the system SHALL write a transformed copy of the content to the raw mirror destination in which each `matched_text` substring is replaced by the literal string `[REDACTED:<pattern_name>]`. Replacement SHALL preserve all non-matched bytes and SHALL be performed in descending byte-offset order so earlier replacements do not shift later match offsets. Overlapping or nested match spans (most plausibly when a custom `patterns_extra` regex frames a region containing an embedded built-in hit) SHALL be merged into the union span before substitution so the descending-replace strategy stays correct and no inner secret can survive between two outer substitutions; the merged span uses the earliest-starting contributing match's `pattern_name` as its `[REDACTED:...]` label, and adjacent (touching but non-overlapping) spans SHALL remain separate. Under explicit `Mask` policy, both Critical and Warn matches SHALL be replaced. Under `Warn` or `Skip` policy where Critical matches force the file into Mask processing, ONLY the Critical matches SHALL be replaced — Warn matches in the same file SHALL pass through unchanged (they take their own policy path: warn-line-only or skip-as-individual-match-but-file-already-mirrored). The warn sink SHALL still receive one line per original match. The system SHALL increment a `pii_masked_matches` counter on the sync summary by exactly one per replaced match.
 
 #### Scenario: Match substring replaced with redaction marker under explicit Mask
 
@@ -341,6 +341,16 @@ When the active on-hit policy is `Mask` (or when a file contains any `PiiSeverit
 
 - **WHEN** the raw-mirror sync runs with on-hit policy `Mask` against a source file whose content contains two matches at byte offsets 10 and 50
 - **THEN** the destination file SHALL contain both replaced markers AND the byte content between offset 0 and the first replacement SHALL be byte-identical to the source
+
+#### Scenario: Overlapping matches merge into a single redaction span
+
+- **WHEN** scanning produces two matches whose byte spans overlap or where one fully contains the other (e.g. a `patterns_extra` custom regex framing an embedded built-in email match) and the file is processed under Mask
+- **THEN** the destination file SHALL contain a single `[REDACTED:<pattern_name>]` token covering the union of the two spans (labelled with the earliest-starting match's `pattern_name`) AND the inner match's `matched_text` SHALL NOT appear anywhere in the destination content
+
+#### Scenario: Adjacent non-overlapping matches keep their own labels
+
+- **WHEN** scanning produces two matches whose byte spans touch but do not overlap (i.e. one's `end` equals the other's `start`)
+- **THEN** the destination file SHALL contain two separate `[REDACTED:<pattern_name>]` tokens — one per matching rule — placed back-to-back with no intervening source bytes
 
 #### Scenario: Non-UTF-8 file falls through to verbatim copy under Mask
 
