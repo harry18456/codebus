@@ -338,6 +338,20 @@ fn translate_error(err: &VerbError) -> ExitCode {
             // race window). Treat as graceful exit.
             ExitCode::SUCCESS
         }
+        VerbError::AgentFailed { exit_code } => {
+            // Active arm: chat is the only verb that emits AgentFailed
+            // (per spec verb-library §Verb Error Enum). Surface the
+            // child's exit code in stderr so the user sees something
+            // distinct from a launch failure (Spawn) or an internal panic
+            // (Internal). The CLI exit code itself is collapsed to 1 via
+            // cli_exit_code() — chat REPL semantics keep "1 = error"
+            // simple for shell consumers.
+            match exit_code {
+                Some(code) => eprintln!("error: chat: agent exited with code {code}"),
+                None => eprintln!("error: chat: agent exited without a recorded exit code"),
+            }
+            ExitCode::from(err.cli_exit_code())
+        }
         VerbError::Internal { message } => {
             eprintln!("error: chat: {message}");
             ExitCode::from(1)

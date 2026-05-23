@@ -135,6 +135,38 @@ mod tests {
     }
 
     #[test]
+    fn agent_failed_display_includes_exit_code() {
+        // Some(n) → Display contains both the literal exit code and the
+        // "non-zero status" phrase (per spec verb-library §Verb Error Enum).
+        let with_code = VerbError::AgentFailed {
+            exit_code: Some(42),
+        };
+        let s = with_code.to_string();
+        assert!(
+            s.contains("42"),
+            "Display SHALL include exit code; got: {s}"
+        );
+        assert!(
+            s.contains("non-zero status"),
+            "Display SHALL include 'non-zero status'; got: {s}"
+        );
+
+        // None → Display SHALL NOT include any parenthesised group after
+        // "non-zero status" (the conditional `unwrap_or_default()` collapses
+        // to empty string). The "non-zero status" phrase SHALL still appear.
+        let without_code = VerbError::AgentFailed { exit_code: None };
+        let s2 = without_code.to_string();
+        assert!(
+            !s2.contains('('),
+            "Display SHALL NOT include '(' when exit_code is None; got: {s2}"
+        );
+        assert!(
+            s2.contains("non-zero status"),
+            "Display SHALL include 'non-zero status' even when exit_code is None; got: {s2}"
+        );
+    }
+
+    #[test]
     fn config_parse_wraps_yaml_error_with_section_label() {
         let yaml_err = serde_yaml::from_str::<serde_yaml::Value>("\t- bad yaml").unwrap_err();
         let err = VerbError::ConfigParse {
@@ -161,6 +193,10 @@ mod tests {
                 1,
             ),
             (VerbError::Cancelled, 0),
+            (
+                VerbError::AgentFailed { exit_code: Some(2) },
+                1,
+            ),
             (
                 VerbError::Internal {
                     message: "x".into(),

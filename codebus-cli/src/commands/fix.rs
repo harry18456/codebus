@@ -107,6 +107,18 @@ fn translate_error(err: &VerbError) -> ExitCode {
             ExitCode::from(1)
         }
         VerbError::Cancelled => ExitCode::from(0),
+        VerbError::AgentFailed { exit_code } => {
+            // Defensive arm: run_fix SHALL NOT emit AgentFailed (per spec
+            // verb-library §Verb Error Enum — one-shot verbs propagate
+            // child exit via Ok(report).agent_exit_code). Generic fallback
+            // is used instead of unreachable!() so a future regression that
+            // emits AgentFailed on this path does NOT panic the binary.
+            match exit_code {
+                Some(code) => eprintln!("error: fix: agent exited with code {code}"),
+                None => eprintln!("error: fix: agent exited without a recorded exit code"),
+            }
+            ExitCode::from(err.cli_exit_code())
+        }
         VerbError::Internal { message } => {
             eprintln!("error: {message}");
             ExitCode::from(1)

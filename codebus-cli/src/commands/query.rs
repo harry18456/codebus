@@ -94,6 +94,18 @@ fn translate_error(verb: &str, err: &VerbError, _render_opts: &RenderOptions) ->
             ExitCode::from(1)
         }
         VerbError::Cancelled => ExitCode::from(0),
+        VerbError::AgentFailed { exit_code } => {
+            // Defensive arm: run_query SHALL NOT emit AgentFailed (per
+            // spec verb-library §Verb Error Enum — one-shot verbs
+            // propagate child exit via Ok(QueryReport).agent_exit_code).
+            // Generic fallback is used instead of unreachable!() so a
+            // future regression does NOT panic the binary.
+            match exit_code {
+                Some(code) => eprintln!("error: {verb}: agent exited with code {code}"),
+                None => eprintln!("error: {verb}: agent exited without a recorded exit code"),
+            }
+            ExitCode::from(err.cli_exit_code())
+        }
         VerbError::Internal { message } => {
             eprintln!("error: {message}");
             ExitCode::from(1)
