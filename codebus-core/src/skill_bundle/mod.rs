@@ -111,9 +111,18 @@ pub fn codex_skill_bundle_path(base: &Path, verb: &str) -> PathBuf {
 /// (existing files preserved): the `.codex/skills/` bundles (identical content
 /// to the `.claude` bundles), `<vault_root>/AGENTS.md` (codex's always-loaded
 /// instruction file, mirroring the vault `CLAUDE.md` content passed as
-/// `agents_md_content`), and the `project_root_markers` marker file so codex
-/// pins its project root to the vault. Returns one `BundleOutcome` per file in
-/// order: the five skill bundles, then `AGENTS.md`, then the marker.
+/// `agents_md_content` AND followed by the codex-specific
+/// [`CODEX_AGENTS_SOFT_CONSTRAINT`] paragraph), and the
+/// `project_root_markers` marker file so codex pins its project root to the
+/// vault. Returns one `BundleOutcome` per file in order: the five skill
+/// bundles, then `AGENTS.md`, then the marker.
+///
+/// agent-hook-hardening: the soft-constraint paragraph is appended to
+/// AGENTS.md because codex's `workspace-write` sandbox permits reading
+/// files outside the workspace (including user-home secrets). The claude
+/// path enforces this via `codebus hook check-read`; the codex path has
+/// no equivalent hook, so the AGENTS.md text asks the agent to self-
+/// limit. See spec `skill-bundles` §Codex Instruction Materialization.
 pub fn write_codex_materialization_if_missing(
     vault_root: &Path,
     agents_md_content: &str,
@@ -125,9 +134,10 @@ pub fn write_codex_materialization_if_missing(
             verb,
         )?);
     }
+    let combined_agents_md = format!("{agents_md_content}\n\n{CODEX_AGENTS_SOFT_CONSTRAINT}");
     outcomes.push(write_plain_file_if_missing(
         &vault_root.join("AGENTS.md"),
-        agents_md_content,
+        &combined_agents_md,
     )?);
     outcomes.push(write_plain_file_if_missing(
         &vault_root.join(crate::agent::CODEX_VAULT_MARKER),
@@ -135,6 +145,23 @@ pub fn write_codex_materialization_if_missing(
     )?);
     Ok(outcomes)
 }
+
+/// agent-hook-hardening: codex AGENTS.md soft-constraint paragraph.
+/// Appended to the materialized AGENTS.md body so the codex agent has
+/// a written self-discipline rule against proactively reading user-home
+/// secret files. The paragraph names the three literal sensitive paths
+/// required by spec `skill-bundles` §Codex Instruction Materialization
+/// AND acknowledges codex's workspace-write sandbox read behavior so
+/// the rule's necessity is self-evident to the agent.
+pub const CODEX_AGENTS_SOFT_CONSTRAINT: &str = "\
+## Codex sandbox vs codebus agent scope
+
+Codex's `workspace-write` sandbox by design permits reading files outside the workspace, \
+including user-home secret files such as `~/.ssh/`, `~/.aws/`, and `~/.gnupg/`. \
+The codebus agent's working scope is the vault — do NOT proactively read user-home \
+sensitive files. The claude provider path enforces this restriction via a Read hook; \
+on the codex path this is a soft constraint relying on agent self-discipline.
+";
 
 fn write_plain_file_if_missing(path: &Path, content: &str) -> io::Result<BundleOutcome> {
     if path.exists() {
@@ -1279,13 +1306,56 @@ mod tests {
         let codex_goal =
             fs::read_to_string(vault.join(".codex/skills/codebus-goal/SKILL.md")).unwrap();
         assert_eq!(codex_goal, stub_content("goal"));
-        // AGENTS.md mirrors the passed CLAUDE.md content
-        assert_eq!(
-            fs::read_to_string(vault.join("AGENTS.md")).unwrap(),
-            "SCHEMA RULES TEXT"
+        // AGENTS.md mirrors the passed CLAUDE.md content AND appends the
+        // codex soft-constraint paragraph (agent-hook-hardening §Codex
+        // Instruction Materialization).
+        let agents_md = fs::read_to_string(vault.join("AGENTS.md")).unwrap();
+        assert!(
+            agents_md.starts_with("SCHEMA RULES TEXT"),
+            "AGENTS.md SHALL begin with the passed CLAUDE.md content; got: {agents_md}"
+        );
+        assert!(
+            agents_md.contains(CODEX_AGENTS_SOFT_CONSTRAINT),
+            "AGENTS.md SHALL contain the codex soft-constraint paragraph; got: {agents_md}"
         );
         // marker present for project_root_markers pinning
         assert!(vault.join(crate::agent::CODEX_VAULT_MARKER).exists());
+    }
+
+    /// agent-hook-hardening §Codex Instruction Materialization scenario
+    /// "AGENTS.md contains sensitive-read soft constraint paragraph":
+    /// the materialized AGENTS.md SHALL contain the three literal home
+    /// paths AND the workspace-write + vault language so the agent has
+    /// a written self-discipline rule.
+    #[test]
+    fn codex_agents_md_contains_sensitive_read_soft_constraint() {
+        let tmp = TempDir::new().unwrap();
+        let vault = tmp.path();
+        write_codex_materialization_if_missing(vault, "VAULT CLAUDE.MD BODY").unwrap();
+        let agents_md = fs::read_to_string(vault.join("AGENTS.md")).unwrap();
+        // (a) three literal sensitive paths
+        assert!(
+            agents_md.contains("~/.ssh/"),
+            "AGENTS.md SHALL name `~/.ssh/`; got: {agents_md}"
+        );
+        assert!(
+            agents_md.contains("~/.aws/"),
+            "AGENTS.md SHALL name `~/.aws/`; got: {agents_md}"
+        );
+        assert!(
+            agents_md.contains("~/.gnupg/"),
+            "AGENTS.md SHALL name `~/.gnupg/`; got: {agents_md}"
+        );
+        // (b) acknowledges codex workspace-write read permission
+        assert!(
+            agents_md.contains("workspace-write"),
+            "AGENTS.md SHALL acknowledge `workspace-write` sandbox; got: {agents_md}"
+        );
+        // (c) scopes the codebus agent to the vault
+        assert!(
+            agents_md.contains("vault"),
+            "AGENTS.md SHALL scope the agent to the vault; got: {agents_md}"
+        );
     }
 
     /// Spec: existing files are preserved (write-if-missing).

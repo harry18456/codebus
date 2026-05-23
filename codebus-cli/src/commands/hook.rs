@@ -17,6 +17,7 @@ use clap::Subcommand;
 use codebus_core::config::{HooksConfig, default_config_path, load_hooks_config};
 use serde::Deserialize;
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
 #[derive(Subcommand, Debug)]
@@ -65,10 +66,30 @@ async fn check_bash() -> ExitCode {
     if is_allowed_bash_command(cmd) {
         // Allow: exit 0 with no decision JSON.
         ExitCode::from(0)
+    } else if let Some(metachar) = find_shell_metacharacter(cmd) {
+        // Metacharacter rejection — surface the specific byte so the
+        // user sees which symbol tripped the gate (per spec block reason
+        // requirement).
+        let display = format_metachar_for_reason(metachar);
+        emit_block(&format!(
+            "hook: command contains forbidden shell metacharacter {display}; received `{cmd}`"
+        ))
     } else {
         emit_block(&format!(
             "hook: only `codebus lint *` or `codebus quiz validate *` is permitted by the codebus agent sandbox; received `{cmd}`"
         ))
+    }
+}
+
+/// Render a rejected metacharacter for inclusion in the block reason
+/// string. Newline AND carriage return are rendered as their escape
+/// sequences (`\n`, `\r`) instead of raw bytes so the JSON reason stays
+/// single-line AND the user can recognise them in tool output.
+fn format_metachar_for_reason(c: char) -> String {
+    match c {
+        '\n' => "`\\n`".to_string(),
+        '\r' => "`\\r`".to_string(),
+        other => format!("`{other}`"),
     }
 }
 
@@ -125,8 +146,39 @@ fn is_codebus_quiz_validate_command(cmd: &str) -> bool {
 /// Combined PreToolUse allow predicate: the codebus-fix agent's
 /// `codebus lint ...` OR the codebus-quiz generate agent's
 /// `codebus quiz validate ...`. Everything else is blocked.
+///
+/// Metacharacter rejection runs BEFORE argv tokenization — any command
+/// string containing a byte from `SHELL_METACHARACTERS` returns false,
+/// even when the leading argv tokens would otherwise satisfy the allow
+/// form. This prevents shell-chaining bypass (e.g.
+/// `codebus lint --foo && rm -rf ~`, `codebus lint $(whoami)`) under
+/// any shell that evaluates the raw command string (bash, Git Bash,
+/// PowerShell). Predicate is byte-level on the raw string — no shell
+/// quote parsing is done, so a metachar inside quotes is also rejected
+/// (per spec lint-feedback-loop §Fix Bash Hook Installation).
 fn is_allowed_bash_command(cmd: &str) -> bool {
+    if find_shell_metacharacter(cmd).is_some() {
+        return false;
+    }
     is_codebus_lint_command(cmd) || is_codebus_quiz_validate_command(cmd)
+}
+
+/// Shell metacharacter rejection set — the union of POSIX shell, Git
+/// Bash, AND PowerShell high-risk symbols that enable command chaining,
+/// command substitution, redirection, subshells, or multi-line eval.
+/// Set is identical across all platforms (per spec lint-feedback-loop
+/// §Fix Bash Hook Installation "Cross-platform" clause).
+const SHELL_METACHARACTERS: &[char] = &[
+    ';', '&', '|', '$', '`', '>', '<', '(', ')', '\n', '\r',
+];
+
+/// Return the first metacharacter from [`SHELL_METACHARACTERS`] found in
+/// `cmd`, or `None` if none present. Used both by
+/// [`is_allowed_bash_command`] (boolean reject) AND by [`check_bash`]
+/// (so the block decision JSON's `reason` field can name the specific
+/// metacharacter that fired).
+fn find_shell_metacharacter(cmd: &str) -> Option<char> {
+    cmd.chars().find(|c| SHELL_METACHARACTERS.contains(c))
 }
 
 fn is_codebus_binary(token: &str) -> bool {
@@ -198,7 +250,11 @@ fn is_image_path(path: &str) -> bool {
 /// empty stdin, and image extensions — because the user has explicitly
 /// turned off the Read gate. When `true`, the function executes the
 /// pre-toggle blocklist + fail-closed contract.
-fn check_read_inner(stdin_body: &str, hooks_cfg: &HooksConfig) -> Option<String> {
+fn check_read_inner(
+    stdin_body: &str,
+    hooks_cfg: &HooksConfig,
+    home: Option<&Path>,
+) -> Option<String> {
     if !hooks_cfg.read_image_block {
         return None;
     }
@@ -219,7 +275,132 @@ fn check_read_inner(stdin_body: &str, hooks_cfg: &HooksConfig) -> Option<String>
             "hook: reading image / binary files is blocked to prevent PII bypass; received `{path}`"
         ));
     }
+    if let Some(reason) = check_sensitive_path(path, home) {
+        return Some(reason);
+    }
     None
+}
+
+/// agent-hook-hardening §PII Image Read Hook Installation sensitive-path
+/// blocklist. Two complementary rules:
+///   (a) basename glob — `*id_rsa*`, `*.pem`, `*.key`. Independent of
+///       home resolution; decides on basename alone so the rule fires
+///       even when a key file lives outside any sensitive directory.
+///   (b) home-relative prefix — `<home>/.ssh/`, `<home>/.aws/`,
+///       `<home>/.gnupg/`, `<home>/.config/gh/`. Needs the running
+///       user's home directory; fails closed (returns block) when home
+///       resolution is unavailable AND the input path required home
+///       comparison (`~`-prefixed or absolute).
+///
+/// All comparisons are ASCII case-insensitive AND path separators are
+/// normalised to forward-slash before prefix matching, so
+/// `C:\Users\harry\.ssh\config` AND `/home/harry/.ssh/config` trigger
+/// the same rule on their respective OS.
+fn check_sensitive_path(path: &str, home: Option<&Path>) -> Option<String> {
+    // (a) basename-glob rule first — does not require home, so basename
+    // hits are caught even on an environment where home resolution would
+    // otherwise force fail-closed.
+    let basename = extract_basename(path);
+    if matches_sensitive_basename_glob(basename) {
+        return Some(format!(
+            "hook: file path basename matches sensitive key glob (e.g. id_rsa / *.pem / *.key); received `{path}`"
+        ));
+    }
+    // (b) home-relative prefix rule — only fires when the input path
+    // could plausibly be home-rooted (`~`-prefixed or absolute).
+    // Relative paths like `wiki/foo.md` are never under a sensitive home
+    // prefix AND SHALL NOT trigger fail-closed when home is unresolved.
+    let needs_home = path_requires_home_resolution(path);
+    if !needs_home {
+        return None;
+    }
+    let home = match home {
+        Some(h) => h,
+        None => {
+            return Some(format!(
+                "hook: home directory unresolvable, cannot evaluate sensitive-path rule; received `{path}`"
+            ));
+        }
+    };
+    if matches_sensitive_home_prefix(path, home) {
+        return Some(format!(
+            "hook: file path under sensitive home directory (e.g. ~/.ssh/, ~/.aws/, ~/.gnupg/, ~/.config/gh/); received `{path}`"
+        ));
+    }
+    None
+}
+
+/// Strip directory portion using `/` or `\` as separators (mirrors the
+/// existing `is_image_path` basename extraction).
+fn extract_basename(path: &str) -> &str {
+    path.rsplit(|c| c == '/' || c == '\\')
+        .next()
+        .unwrap_or(path)
+}
+
+/// Returns true when `basename` (case-insensitive) matches any of the
+/// sensitive key-file glob patterns: `*id_rsa*`, `*.pem`, `*.key`.
+fn matches_sensitive_basename_glob(basename: &str) -> bool {
+    let lower = basename.to_ascii_lowercase();
+    if lower.contains("id_rsa") {
+        return true;
+    }
+    if lower.ends_with(".pem") || lower.ends_with(".key") {
+        return true;
+    }
+    false
+}
+
+/// Returns true when `path` is `~`-prefixed OR is an absolute path
+/// (Unix `/...` or Windows drive-letter `X:/` / `X:\`). Relative paths
+/// AND bare `~` (no separator suffix) return false — relative paths
+/// cannot be home-rooted by construction, AND bare `~` never matches a
+/// sensitive prefix even after expansion (the prefixes all carry a
+/// directory suffix).
+fn path_requires_home_resolution(path: &str) -> bool {
+    if path == "~" {
+        return false;
+    }
+    if path.starts_with("~/") || path.starts_with("~\\") {
+        return true;
+    }
+    if path.starts_with('/') {
+        return true;
+    }
+    // Windows drive-letter absolute path detection — `X:/` or `X:\` where
+    // X is an ASCII alpha character. Drive-only `X:` (no separator) is
+    // ambiguous AND treated as non-absolute (rare edge, unused in practice).
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
+}
+
+/// Returns true when `path` (after expanding a leading `~/` or `~\` to
+/// `home` AND normalising backslashes to forward-slashes) starts with
+/// any of the sensitive home-relative prefixes, compared ASCII
+/// case-insensitively.
+fn matches_sensitive_home_prefix(path: &str, home: &Path) -> bool {
+    // Expand leading `~/` or `~\` to home.
+    let expanded: String = if let Some(rest) = path.strip_prefix("~/") {
+        format!("{}/{rest}", home.display())
+    } else if let Some(rest) = path.strip_prefix("~\\") {
+        format!("{}/{rest}", home.display())
+    } else {
+        path.to_string()
+    };
+    // Normalise separators AND case for comparison.
+    let normalised = expanded.replace('\\', "/").to_ascii_lowercase();
+    let home_str = home.display().to_string().replace('\\', "/").to_ascii_lowercase();
+    let suffixes = [".ssh", ".aws", ".gnupg", ".config/gh"];
+    for suffix in suffixes {
+        let full_prefix = format!("{home_str}/{suffix}/");
+        if normalised.starts_with(&full_prefix) {
+            return true;
+        }
+    }
+    false
 }
 
 async fn check_read() -> ExitCode {
@@ -237,7 +418,12 @@ async fn check_read() -> ExitCode {
         Some(p) => load_hooks_config(&p).unwrap_or_default(),
         None => HooksConfig::default(),
     };
-    match check_read_inner(&buf, &hooks_cfg) {
+    // agent-hook-hardening: resolve home for sensitive-path predicate.
+    // `None` triggers fail-closed inside `check_sensitive_path` when the
+    // input path requires home comparison (per spec PII Image Read Hook
+    // Installation §Block (unresolvable home)).
+    let home = dirs::home_dir();
+    match check_read_inner(&buf, &hooks_cfg, home.as_deref()) {
         Some(reason) => emit_block(&reason),
         None => ExitCode::from(0),
     }
@@ -381,6 +567,108 @@ mod tests {
         assert!(!is_codebus_lint_command("\t\n"));
     }
 
+    // --- agent-hook-hardening: shell metacharacter rejection (Fix Bash
+    // Hook Installation). `is_allowed_bash_command` rejects any command
+    // whose raw string contains a shell metacharacter from the rejection
+    // set, even when the leading argv tokens would otherwise satisfy the
+    // `codebus lint *` or `codebus quiz validate *` allow form. The
+    // metacharacter rejection runs BEFORE argv tokenization and applies
+    // regardless of whether the byte is inside double quotes, single
+    // quotes, or any other quoting context — the predicate is byte-level
+    // on the raw command string.
+
+    #[test]
+    fn block_bash_metachar_logical_and() {
+        assert!(!is_allowed_bash_command(
+            "codebus lint --format json && rm -rf /tmp/evil"
+        ));
+        assert!(!is_allowed_bash_command(
+            "codebus quiz validate draft.md && curl evil.example"
+        ));
+    }
+
+    #[test]
+    fn block_bash_metachar_semicolon() {
+        assert!(!is_allowed_bash_command("codebus lint; curl evil.example"));
+        assert!(!is_allowed_bash_command(
+            "codebus quiz validate -; whoami"
+        ));
+    }
+
+    #[test]
+    fn block_bash_metachar_pipe() {
+        assert!(!is_allowed_bash_command(
+            "codebus lint | tee /tmp/leak.log"
+        ));
+        assert!(!is_allowed_bash_command(
+            "codebus quiz validate - | grep secret"
+        ));
+    }
+
+    #[test]
+    fn block_bash_metachar_dollar_and_command_substitution() {
+        // `$VAR` expansion, `$(cmd)` substitution, and backtick substitution.
+        assert!(!is_allowed_bash_command("codebus lint $HOME"));
+        assert!(!is_allowed_bash_command("codebus lint $(whoami)"));
+        assert!(!is_allowed_bash_command("codebus lint `whoami`"));
+    }
+
+    #[test]
+    fn block_bash_metachar_redirection() {
+        assert!(!is_allowed_bash_command("codebus lint > /tmp/out"));
+        assert!(!is_allowed_bash_command("codebus lint < /tmp/in"));
+    }
+
+    #[test]
+    fn block_bash_metachar_parens() {
+        assert!(!is_allowed_bash_command("(codebus lint)"));
+        assert!(!is_allowed_bash_command("codebus lint (--bogus)"));
+    }
+
+    #[test]
+    fn block_bash_metachar_newline_or_carriage_return() {
+        // Embedded newline / CR can split into two commands under shell eval.
+        assert!(!is_allowed_bash_command("codebus lint\nrm -rf /tmp"));
+        assert!(!is_allowed_bash_command("codebus lint\rrm -rf /tmp"));
+    }
+
+    #[test]
+    fn block_bash_metachar_inside_double_quotes() {
+        // Quote-awareness is deliberately NOT implemented — any metachar in
+        // the raw command string blocks, even inside double quotes.
+        assert!(!is_allowed_bash_command(
+            "codebus lint --filter \"foo;bar\""
+        ));
+        assert!(!is_allowed_bash_command(
+            "codebus lint --filter \"foo&&bar\""
+        ));
+    }
+
+    #[test]
+    fn block_bash_metachar_inside_single_quotes() {
+        assert!(!is_allowed_bash_command(
+            "codebus lint --filter 'foo;bar'"
+        ));
+        assert!(!is_allowed_bash_command(
+            "codebus lint --filter 'foo|bar'"
+        ));
+    }
+
+    #[test]
+    fn allow_bash_command_without_metachar_still_passes() {
+        // Regression guard: the rejection set MUST NOT catch the canonical
+        // forms used by the codebus-fix / codebus-quiz agents.
+        assert!(is_allowed_bash_command("codebus lint"));
+        assert!(is_allowed_bash_command("codebus lint --format json"));
+        assert!(is_allowed_bash_command(
+            "codebus lint --repo /some/safe/path"
+        ));
+        assert!(is_allowed_bash_command("codebus quiz validate -"));
+        assert!(is_allowed_bash_command(
+            "codebus quiz validate draft.md --json"
+        ));
+    }
+
     #[test]
     fn json_escape_handles_quotes_and_backslashes() {
         assert_eq!(json_escape("hi"), "\"hi\"");
@@ -517,7 +805,7 @@ mod tests {
 
     #[test]
     fn check_read_fail_closed_on_empty_stdin() {
-        let reason = check_read_inner("", &HooksConfig::default());
+        let reason = check_read_inner("", &HooksConfig::default(), None);
         assert!(reason.is_some(), "empty stdin must block");
         assert!(
             reason.as_ref().unwrap().contains("empty"),
@@ -529,12 +817,12 @@ mod tests {
     #[test]
     fn check_read_fail_closed_on_whitespace_only_stdin() {
         // Mirror check_bash's `buf.trim().is_empty()` semantics.
-        assert!(check_read_inner("   \n\t  ", &HooksConfig::default()).is_some());
+        assert!(check_read_inner("   \n\t  ", &HooksConfig::default(), None).is_some());
     }
 
     #[test]
     fn check_read_fail_closed_on_malformed_json() {
-        let reason = check_read_inner("{not valid json", &HooksConfig::default());
+        let reason = check_read_inner("{not valid json", &HooksConfig::default(), None);
         assert!(reason.is_some(), "malformed JSON must block");
         assert!(
             reason.as_ref().unwrap().contains("malformed"),
@@ -546,7 +834,7 @@ mod tests {
     #[test]
     fn check_read_fail_closed_on_missing_file_path() {
         let body = r#"{"tool_name":"Read","tool_input":{}}"#;
-        let reason = check_read_inner(body, &HooksConfig::default());
+        let reason = check_read_inner(body, &HooksConfig::default(), None);
         assert!(reason.is_some(), "missing file_path must block");
         assert!(
             reason.as_ref().unwrap().contains("file_path"),
@@ -559,21 +847,21 @@ mod tests {
     fn check_read_fail_closed_on_non_string_file_path() {
         // Numeric file_path — type confusion / fuzzing case.
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":123}}"#;
-        let reason = check_read_inner(body, &HooksConfig::default());
+        let reason = check_read_inner(body, &HooksConfig::default(), None);
         assert!(reason.is_some(), "non-string file_path must block");
     }
 
     #[test]
     fn check_read_fail_closed_on_null_file_path() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":null}}"#;
-        let reason = check_read_inner(body, &HooksConfig::default());
+        let reason = check_read_inner(body, &HooksConfig::default(), None);
         assert!(reason.is_some(), "null file_path must block");
     }
 
     #[test]
     fn check_read_fail_closed_on_empty_string_file_path() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":""}}"#;
-        let reason = check_read_inner(body, &HooksConfig::default());
+        let reason = check_read_inner(body, &HooksConfig::default(), None);
         assert!(reason.is_some(), "empty-string file_path must block");
         assert!(
             reason.as_ref().unwrap().contains("file_path"),
@@ -586,7 +874,7 @@ mod tests {
     fn check_read_fail_closed_on_missing_tool_input() {
         // Whole `tool_input` object missing.
         let body = r#"{"tool_name":"Read"}"#;
-        let reason = check_read_inner(body, &HooksConfig::default());
+        let reason = check_read_inner(body, &HooksConfig::default(), None);
         assert!(reason.is_some(), "missing tool_input must block");
     }
 
@@ -596,7 +884,7 @@ mod tests {
     #[test]
     fn check_read_blocks_image_extension() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
-        let reason = check_read_inner(body, &HooksConfig::default());
+        let reason = check_read_inner(body, &HooksConfig::default(), None);
         assert!(reason.is_some(), "image extension must block");
         let reason_str = reason.unwrap();
         assert!(
@@ -612,21 +900,21 @@ mod tests {
     #[test]
     fn check_read_blocks_image_extension_uppercase() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"assets/logo.JPG"}}"#;
-        assert!(check_read_inner(body, &HooksConfig::default()).is_some());
+        assert!(check_read_inner(body, &HooksConfig::default(), None).is_some());
     }
 
     #[test]
     fn check_read_blocks_windows_path_image() {
         let body =
             r#"{"tool_name":"Read","tool_input":{"file_path":"C:\\repo\\assets\\img.png"}}"#;
-        assert!(check_read_inner(body, &HooksConfig::default()).is_some());
+        assert!(check_read_inner(body, &HooksConfig::default(), None).is_some());
     }
 
     #[test]
     fn check_read_allows_text_extension() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/modules/uv-lib.md"}}"#;
         assert!(
-            check_read_inner(body, &HooksConfig::default()).is_none(),
+            check_read_inner(body, &HooksConfig::default(), None).is_none(),
             "text file must pass through"
         );
     }
@@ -634,20 +922,20 @@ mod tests {
     #[test]
     fn check_read_allows_source_code() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"codebus-core/src/agent/claude_cli.rs"}}"#;
-        assert!(check_read_inner(body, &HooksConfig::default()).is_none());
+        assert!(check_read_inner(body, &HooksConfig::default(), None).is_none());
     }
 
     #[test]
     fn check_read_allows_svg() {
         // SVG is XML, scannable by regex_basic — deliberately NOT blocked.
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagram.svg"}}"#;
-        assert!(check_read_inner(body, &HooksConfig::default()).is_none());
+        assert!(check_read_inner(body, &HooksConfig::default(), None).is_none());
     }
 
     #[test]
     fn check_read_allows_no_extension() {
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"Makefile"}}"#;
-        assert!(check_read_inner(body, &HooksConfig::default()).is_none());
+        assert!(check_read_inner(body, &HooksConfig::default(), None).is_none());
     }
 
     #[test]
@@ -656,7 +944,7 @@ mod tests {
         // contains backslashes (Windows).
         let body =
             r#"{"tool_name":"Read","tool_input":{"file_path":"C:\\repo\\img.png"}}"#;
-        let reason = check_read_inner(body, &HooksConfig::default()).expect("must block");
+        let reason = check_read_inner(body, &HooksConfig::default(), None).expect("must block");
         let payload = format!(
             "{{\"decision\":\"block\",\"reason\":{}}}",
             json_escape(&reason)
@@ -688,7 +976,7 @@ mod tests {
         };
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
         assert!(
-            check_read_inner(body, &cfg).is_none(),
+            check_read_inner(body, &cfg, None).is_none(),
             "read_image_block=false must allow image extensions"
         );
     }
@@ -699,7 +987,7 @@ mod tests {
             read_image_block: false,
         };
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"assets/logo.JPG"}}"#;
-        assert!(check_read_inner(body, &cfg).is_none());
+        assert!(check_read_inner(body, &cfg, None).is_none());
     }
 
     #[test]
@@ -708,7 +996,7 @@ mod tests {
             read_image_block: false,
         };
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"docs/manual.pdf"}}"#;
-        assert!(check_read_inner(body, &cfg).is_none());
+        assert!(check_read_inner(body, &cfg, None).is_none());
     }
 
     #[test]
@@ -719,7 +1007,7 @@ mod tests {
         let cfg = HooksConfig {
             read_image_block: false,
         };
-        assert!(check_read_inner("", &cfg).is_none());
+        assert!(check_read_inner("", &cfg, None).is_none());
     }
 
     #[test]
@@ -727,7 +1015,7 @@ mod tests {
         let cfg = HooksConfig {
             read_image_block: false,
         };
-        assert!(check_read_inner("{not valid json", &cfg).is_none());
+        assert!(check_read_inner("{not valid json", &cfg, None).is_none());
     }
 
     #[test]
@@ -736,7 +1024,7 @@ mod tests {
             read_image_block: false,
         };
         let body = r#"{"tool_name":"Read","tool_input":{}}"#;
-        assert!(check_read_inner(body, &cfg).is_none());
+        assert!(check_read_inner(body, &cfg, None).is_none());
     }
 
     #[test]
@@ -748,7 +1036,7 @@ mod tests {
             read_image_block: true,
         };
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
-        let reason = check_read_inner(body, &cfg);
+        let reason = check_read_inner(body, &cfg, None);
         assert!(reason.is_some());
         assert!(reason.unwrap().contains("flow.png"));
     }
@@ -758,8 +1046,208 @@ mod tests {
         let cfg = HooksConfig {
             read_image_block: true,
         };
-        let reason = check_read_inner("", &cfg);
+        let reason = check_read_inner("", &cfg, None);
         assert!(reason.is_some());
         assert!(reason.as_ref().unwrap().contains("empty"));
+    }
+
+    // --- agent-hook-hardening: sensitive path blocklist (PII Image Read
+    // Hook Installation). Tests inject a fake home (`/tmp/test-home` on
+    // Unix, `C:/Users/poc` on Windows) so the prefix rule is deterministic
+    // regardless of the running user's actual home. The basename-glob
+    // rule needs no home; home-unresolvable tests pass `None` AND assert
+    // fail-closed behavior.
+
+    fn fake_home() -> std::path::PathBuf {
+        if cfg!(target_os = "windows") {
+            std::path::PathBuf::from("C:/Users/poc")
+        } else {
+            std::path::PathBuf::from("/tmp/test-home")
+        }
+    }
+
+    fn body_with_path(path: &str) -> String {
+        // Embed `path` into the standard PreToolUse JSON shape. Backslashes
+        // in Windows paths MUST be JSON-escaped (`\` → `\\`).
+        let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+        format!(
+            "{{\"tool_name\":\"Read\",\"tool_input\":{{\"file_path\":\"{escaped}\"}}}}"
+        )
+    }
+
+    #[test]
+    fn check_read_blocks_ssh_home_prefix() {
+        let home = fake_home();
+        let ssh_path = format!("{}/.ssh/config", home.display());
+        let body = body_with_path(&ssh_path);
+        let reason = check_read_inner(&body, &HooksConfig::default(), Some(&home));
+        assert!(
+            reason.is_some(),
+            "expected block for {ssh_path}; got: {reason:?}"
+        );
+        assert!(
+            reason.as_ref().unwrap().contains("sensitive home directory"),
+            "reason SHALL identify the sensitive-path rule; got: {}",
+            reason.unwrap()
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_aws_home_prefix() {
+        let home = fake_home();
+        let aws_path = format!("{}/.aws/credentials", home.display());
+        let body = body_with_path(&aws_path);
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), Some(&home)).is_some()
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_gnupg_home_prefix() {
+        let home = fake_home();
+        let gnupg_path = format!("{}/.gnupg/pubring.kbx", home.display());
+        let body = body_with_path(&gnupg_path);
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), Some(&home)).is_some()
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_gh_cli_config_home_prefix() {
+        let home = fake_home();
+        let gh_path = format!("{}/.config/gh/hosts.yml", home.display());
+        let body = body_with_path(&gh_path);
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), Some(&home)).is_some()
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_tilde_prefixed_path() {
+        // `~/.ssh/known_hosts` SHALL be expanded against `home` THEN
+        // matched against the sensitive-prefix list.
+        let home = fake_home();
+        let body = body_with_path("~/.ssh/known_hosts");
+        let reason = check_read_inner(&body, &HooksConfig::default(), Some(&home));
+        assert!(
+            reason.is_some(),
+            "tilde-prefixed sensitive path SHALL block; got: {reason:?}"
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_basename_glob_id_rsa_anywhere() {
+        // basename glob `*id_rsa*` SHALL hit regardless of directory.
+        let body = body_with_path("/tmp/random/extra-id_rsa-backup");
+        // No home needed because basename-glob is independent.
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), None).is_some()
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_basename_glob_pem_anywhere() {
+        let body = body_with_path("/tmp/random/server.pem");
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), None).is_some()
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_basename_glob_key_anywhere() {
+        let body = body_with_path("/tmp/random/private.key");
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), None).is_some()
+        );
+    }
+
+    #[test]
+    fn check_read_allows_home_path_outside_sensitive_dirs() {
+        // A path under home but NOT under any sensitive directory SHALL
+        // pass through (no false positive).
+        let home = fake_home();
+        let safe_path = format!("{}/Documents/notes.md", home.display());
+        let body = body_with_path(&safe_path);
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), Some(&home)).is_none(),
+            "home/Documents/* SHALL allow; got block for {safe_path}"
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_case_insensitively() {
+        // The sensitive-prefix match SHALL be case-insensitive (ASCII).
+        let home = fake_home();
+        let upper_path = format!("{}/.SSH/CONFIG", home.display());
+        let body = body_with_path(&upper_path);
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), Some(&home)).is_some()
+        );
+    }
+
+    #[test]
+    fn check_read_fails_closed_when_home_unresolvable_and_path_absolute() {
+        // Path that *could* match a sensitive prefix under a resolvable
+        // home → SHALL fail-closed when home is None.
+        let body = body_with_path("/home/someone/.ssh/config");
+        let reason = check_read_inner(&body, &HooksConfig::default(), None);
+        assert!(
+            reason.is_some(),
+            "absolute path under unresolved home SHALL fail-closed; got: {reason:?}"
+        );
+        assert!(
+            reason.as_ref().unwrap().contains("unresolvable"),
+            "reason SHALL identify the unresolvable-home rule; got: {}",
+            reason.unwrap()
+        );
+    }
+
+    #[test]
+    fn check_read_fails_closed_on_tilde_path_when_home_unresolvable() {
+        let body = body_with_path("~/.aws/credentials");
+        let reason = check_read_inner(&body, &HooksConfig::default(), None);
+        assert!(
+            reason.is_some(),
+            "tilde path under unresolved home SHALL fail-closed; got: {reason:?}"
+        );
+        assert!(reason.as_ref().unwrap().contains("unresolvable"));
+    }
+
+    #[test]
+    fn check_read_basename_glob_still_decides_when_home_unresolvable() {
+        // Even when home is None, the basename-glob rule SHALL fire (the
+        // rule does not require home resolution).
+        let body = body_with_path("/some/random/server.pem");
+        let reason = check_read_inner(&body, &HooksConfig::default(), None);
+        assert!(reason.is_some());
+        assert!(
+            reason.as_ref().unwrap().contains("basename"),
+            "basename-glob rule SHALL fire even with no home; got: {}",
+            reason.unwrap()
+        );
+    }
+
+    #[test]
+    fn check_read_relative_path_does_not_fail_closed_on_unresolved_home() {
+        // A relative path like `wiki/foo.md` does NOT require home
+        // resolution (it cannot be home-rooted) AND SHALL pass through
+        // even when home is None.
+        let body = body_with_path("wiki/concepts/foo.md");
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), None).is_none(),
+            "relative non-sensitive path SHALL allow even with no home"
+        );
+    }
+
+    #[test]
+    fn check_read_blocks_windows_backslash_ssh_path() {
+        // Cross-platform path separator: Windows-style backslash path
+        // under home SHALL trigger the same rule as the forward-slash
+        // form (separators normalised before prefix comparison).
+        let home = std::path::PathBuf::from("C:/Users/poc");
+        let body = body_with_path("C:\\Users\\poc\\.ssh\\config");
+        assert!(
+            check_read_inner(&body, &HooksConfig::default(), Some(&home)).is_some()
+        );
     }
 }
