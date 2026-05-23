@@ -13,7 +13,8 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 
 import { ChatTranscript } from "./ChatTranscript"
 import { useChatStore } from "@/store/chat"
-import type { VerbEvent } from "@/lib/ipc"
+import { useWikiStore } from "@/store/wiki"
+import type { VerbEvent, WikiPageMeta } from "@/lib/ipc"
 
 const EMPTY_TOKENS = { input_tokens: 0, output_tokens: 0 }
 
@@ -27,6 +28,12 @@ function resetStore() {
     lastTranscript: null,
     lastSessionId: null,
   })
+  // Reset wiki store so wikilink resolvable/unresolvable tests start clean.
+  useWikiStore.setState({ pages: {} })
+}
+
+function pageMeta(slug: string, title: string): WikiPageMeta {
+  return { slug, path: `wiki/${slug}.md`, title }
 }
 
 describe("ChatTranscript", () => {
@@ -112,8 +119,13 @@ describe("ChatTranscript", () => {
   // Transcript falls back to standard browser scroll behavior; users scroll
   // manually if they want to follow the live stream.
 
-  it("wiki markdown link click switches Wiki tab, loads page, and collapses chat", () => {
-    // Seed a completed turn whose assistant text contains a wiki-markdown link.
+  it("legacy wiki markdown link click passes slug (not href) and collapses chat", () => {
+    // Seed pages so the wiki slug is resolvable; the legacy markdown link
+    // `[auth.md](wiki/modules/auth.md)` SHALL extract slug "modules/auth"
+    // from the regex capture group and pass that to onWikiLinkClick.
+    useWikiStore.setState({
+      pages: { "modules/auth": pageMeta("modules/auth", "Auth") },
+    })
     useChatStore.setState({
       expanded: true,
       turns: [
@@ -142,12 +154,133 @@ describe("ChatTranscript", () => {
 
     fireEvent.click(wikiLink)
 
-    // Spec: wiki tab is switched + loadPage invoked + widget collapsed.
+    // Spec: callback receives the extracted slug, NOT the raw href.
     expect(onWikiLinkClick).toHaveBeenCalledTimes(1)
-    expect(onWikiLinkClick).toHaveBeenCalledWith("wiki/modules/auth.md")
+    expect(onWikiLinkClick).toHaveBeenCalledWith("modules/auth")
     expect(useChatStore.getState().expanded).toBe(false)
     // Spec: external opener NOT invoked.
     expect(openUrlMock).not.toHaveBeenCalled()
+  })
+
+  it("GFM table markdown renders as <table> with <th> and <td> elements", () => {
+    // Spec: Chat Assistant Message Markdown Rendering... — remark-gfm
+    // plugin SHALL be configured so GFM tables render as HTML tables
+    // instead of leaking through as raw `|---|` text.
+    useChatStore.setState({
+      turns: [
+        {
+          userText: "uv 取代了哪些工具",
+          events: [
+            {
+              kind: "stream",
+              data: {
+                kind: "thought",
+                text:
+                  "| Tool | Replaces |\n" +
+                  "|------|----------|\n" +
+                  "| uv   | pip      |\n" +
+                  "| ruff | flake8   |\n",
+              },
+            },
+          ],
+          startedAt: "2026-05-13T10:00:00Z",
+          finishedAt: "2026-05-13T10:00:05Z",
+        },
+      ],
+    })
+    const { container } = render(<ChatTranscript />)
+    const tables = container.querySelectorAll("table")
+    expect(tables.length).toBeGreaterThanOrEqual(1)
+    const ths = container.querySelectorAll("th")
+    const thTexts = Array.from(ths).map((el) => el.textContent?.trim())
+    expect(thTexts).toContain("Tool")
+    expect(thTexts).toContain("Replaces")
+    const tds = container.querySelectorAll("td")
+    const tdTexts = Array.from(tds).map((el) => el.textContent?.trim())
+    expect(tdTexts).toContain("uv")
+    expect(tdTexts).toContain("pip")
+    // Spec: raw `|---|` SHALL NOT appear in the rendered prose.
+    expect(container.textContent ?? "").not.toContain("|---|")
+  })
+
+  it("[[slug]] wikilink to resolvable page renders as clickable and passes slug", () => {
+    useWikiStore.setState({
+      pages: { "modules/auth": pageMeta("modules/auth", "Authentication") },
+    })
+    useChatStore.setState({
+      expanded: true,
+      turns: [
+        {
+          userText: "auth?",
+          events: [
+            {
+              kind: "stream",
+              data: {
+                kind: "thought",
+                text: "See [[modules/auth]] for details.",
+              },
+            },
+          ],
+          startedAt: "2026-05-13T10:00:00Z",
+          finishedAt: "2026-05-13T10:00:05Z",
+        },
+      ],
+    })
+
+    const onWikiLinkClick = vi.fn()
+    render(<ChatTranscript onWikiLinkClick={onWikiLinkClick} />)
+
+    const wikiLink = screen.getByTestId("chat-wiki-link")
+    // Spec: visible text SHALL be `pages[slug].title` when present.
+    expect(wikiLink).toHaveTextContent("Authentication")
+
+    fireEvent.click(wikiLink)
+
+    // Spec: callback receives slug (the decoded part after codebus://wiki/).
+    expect(onWikiLinkClick).toHaveBeenCalledTimes(1)
+    expect(onWikiLinkClick).toHaveBeenCalledWith("modules/auth")
+    expect(useChatStore.getState().expanded).toBe(false)
+  })
+
+  it("[[slug]] wikilink to nonexistent page renders dimmed with tooltip and is inert", () => {
+    // pages map deliberately empty — slug is unresolvable.
+    useChatStore.setState({
+      expanded: true,
+      turns: [
+        {
+          userText: "missing?",
+          events: [
+            {
+              kind: "stream",
+              data: {
+                kind: "thought",
+                text: "Check [[nonexistent-page]] maybe.",
+              },
+            },
+          ],
+          startedAt: "2026-05-13T10:00:00Z",
+          finishedAt: "2026-05-13T10:00:05Z",
+        },
+      ],
+    })
+
+    const onWikiLinkClick = vi.fn()
+    const { container } = render(<ChatTranscript onWikiLinkClick={onWikiLinkClick} />)
+
+    // Spec: unresolvable wikilink renders as a <span> with title="Page not found".
+    const unresolvable = container.querySelector(
+      '[data-testid="chat-wiki-link-unresolvable"]',
+    )
+    expect(unresolvable).not.toBeNull()
+    expect(unresolvable?.tagName).toBe("SPAN")
+    expect(unresolvable?.getAttribute("title")).toBe("Page not found")
+
+    // Spec: clicking is a no-op (no onWikiLinkClick, no widget transition).
+    if (unresolvable) {
+      fireEvent.click(unresolvable)
+    }
+    expect(onWikiLinkClick).not.toHaveBeenCalled()
+    expect(useChatStore.getState().expanded).toBe(true)
   })
 
   it("external https link opens in browser via Tauri opener plugin without collapsing chat", async () => {

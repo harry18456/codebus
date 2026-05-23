@@ -1,12 +1,15 @@
 import { Fragment, useEffect, useMemo, useState } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 import { isAppError, type VerbEvent } from "@/lib/ipc"
+import { transformBodyWikilinks } from "@/lib/milkdown-wikilink"
 import {
   useChatStore,
   type ChatTurn,
   type ChatTurnLive,
 } from "@/store/chat"
+import { useWikiStore } from "@/store/wiki"
 
 import {
   ActivityStreamItem,
@@ -40,23 +43,39 @@ import {
  * through `ActivityStreamItem`. Promote pill + onboarding hint stay out of
  * scope (other tasks own them).
  *
- * Link routing inside the assistant markdown block:
- * - `href` matches `^wiki\/.+\.md$` → rendered as a `<button>`; click calls
- *   `onWikiLinkClick(href)` (Workspace wires this to setActiveTab("wiki") +
- *   wiki store `loadPage`) and collapses the chat widget via
- *   `useChatStore.toggleExpanded()` (no-op when already collapsed).
- * - `href` matches `^https?:` → rendered as `<a>` with preventDefault click
- *   handler that calls the Tauri opener plugin (`openUrl`) dynamically so
- *   tests can mock the import.
- * - Anything else (e.g., `src/auth/jwt.rs`) → rendered as inert `<span>` with
- *   no `href` and no click handler.
+ * Link routing inside the assistant markdown block (per spec
+ * `Chat Assistant Message Markdown Rendering and Wiki Citation Links`):
+ * - `href` starts with `codebus://wiki/<encoded>` (produced from `[[slug]]`
+ *   via `transformBodyWikilinks`) → decode slug → look up in
+ *   `useWikiStore.pages` → resolvable: `<button>` with `meta.title ?? slug`
+ *   label, click calls `onWikiLinkClick(slug)` AND collapses chat widget;
+ *   unresolvable: dimmed `<span>` with `title="Page not found"`, inert.
+ * - `href` matches `^wiki\/(.+)\.md$` → capture-group is the slug; same
+ *   resolvable / unresolvable flow but the rendered label preserves the
+ *   author-provided link text (the `[label](...)` label) rather than
+ *   substituting the page title.
+ * - `href` matches `^https?:` → `<a>` with preventDefault, calls Tauri
+ *   opener plugin (`openUrl`).
+ * - Anything else (e.g., `src/auth/jwt.rs`) → inert `<span>`, no click.
+ *
+ * Callback contract: `onWikiLinkClick` receives the **slug**, never a raw
+ * href. Workspace's `onSelectPage(slug)` is the production consumer.
  *
  * Plain-text wiki paths NOT wrapped in markdown link syntax are deliberately
  * left as inert prose — react-markdown does not auto-link bare paths.
  */
 
-const WIKI_HREF_RE = /^wiki\/.+\.md$/
+// Legacy wiki-href shape with capture group for the slug between `wiki/` AND
+// the trailing `.md`. `transformBodyWikilinks` produces the modern
+// `codebus://wiki/<encoded>` form (handled separately below); this regex
+// preserves recognition of the older `[label](wiki/<path>.md)` form some
+// agent outputs still emit.
+const WIKI_HREF_RE = /^wiki\/(.+)\.md$/
 const EXTERNAL_HREF_RE = /^https?:/i
+// Synthetic scheme prefix produced by `transformBodyWikilinks`. The
+// renderer's `urlTransform` passes it through unchanged so this prefix
+// reaches the custom `a` override below.
+const CODEBUS_WIKI_SCHEME = "codebus://wiki/"
 
 interface ChatTranscriptProps {
   /**
@@ -72,7 +91,7 @@ interface ChatTranscriptProps {
    * wiki link click still collapses the chat widget but performs no
    * tab/page navigation.
    */
-  onWikiLinkClick?: (href: string) => void
+  onWikiLinkClick?: (slug: string) => void
   /**
    * Wired by `Workspace` to switch to the Goals tab + select the freshly
    * spawned run id after a successful Promote click. Optional so tests that
@@ -203,7 +222,7 @@ export function ChatTranscript({
 
 interface TurnBlockProps {
   turn: ChatTurn
-  onWikiLinkClick?: (href: string) => void
+  onWikiLinkClick?: (slug: string) => void
   promotePill?: React.ReactNode
 }
 
@@ -234,7 +253,7 @@ function TurnBlock({ turn, onWikiLinkClick, promotePill }: TurnBlockProps) {
 
 interface ActiveTurnBlockProps {
   turn: ChatTurnLive
-  onWikiLinkClick?: (href: string) => void
+  onWikiLinkClick?: (slug: string) => void
   promotePill?: React.ReactNode
 }
 
@@ -349,7 +368,7 @@ function UserPrompt({ text }: { text: string }) {
 
 interface AssistantTimelineProps {
   events: readonly VerbEvent[]
-  onWikiLinkClick?: (href: string) => void
+  onWikiLinkClick?: (slug: string) => void
 }
 
 function AssistantTimeline({ events, onWikiLinkClick }: AssistantTimelineProps) {
@@ -395,38 +414,98 @@ async function openExternalUrl(url: string): Promise<void> {
 
 interface AssistantMarkdownBlockProps {
   text: string
-  onWikiLinkClick?: (href: string) => void
+  onWikiLinkClick?: (slug: string) => void
 }
 
 function AssistantMarkdownBlock({
   text,
   onWikiLinkClick,
 }: AssistantMarkdownBlockProps) {
+  // Subscribe to the page index so wikilink resolvable / unresolvable
+  // classification is reactive — when a goal finishes and `useWikiStore`
+  // re-fires `listPages`, formerly-unresolvable links auto-upgrade to
+  // clickable without a chat re-mount.
+  const pages = useWikiStore((s) => s.pages)
+
+  // Pre-process `[[slug]]` into the synthetic `codebus://wiki/<encoded>`
+  // markdown link form so react-markdown sees a normal anchor; the custom
+  // `a` override below routes the synthetic scheme back to a wikilink
+  // click. Uses the same helper WikiPreview uses for consistency.
+  const transformed = useMemo(
+    () => transformBodyWikilinks(text).transformed,
+    [text],
+  )
+
   const components: Components = useMemo(
     () => ({
+      // Minimal table styling so GFM tables render with visible cell
+      // boundaries instead of flowing as undifferentiated text.
+      table: ({ children }) => (
+        <table className="my-2 border-collapse border border-border text-[12px]">
+          {children}
+        </table>
+      ),
+      th: ({ children }) => (
+        <th className="border border-border bg-bg-secondary px-2 py-1 text-left font-medium">
+          {children}
+        </th>
+      ),
+      td: ({ children }) => (
+        <td className="border border-border px-2 py-1 align-top">{children}</td>
+      ),
       a: ({ href, children }) => {
-        if (typeof href === "string" && WIKI_HREF_RE.test(href)) {
-          return (
-            <button
-              type="button"
-              data-testid="chat-wiki-link"
-              className="text-accent underline hover:text-accent-hover focus:outline-none focus:ring-2 focus:ring-accent-ring"
-              onClick={(e) => {
-                e.preventDefault()
-                onWikiLinkClick?.(href)
-                // Collapse the chat widget only when currently expanded so
-                // tests / callers can probe the state transition without a
-                // surprise re-expand.
-                if (useChatStore.getState().expanded) {
-                  useChatStore.getState().toggleExpanded()
-                }
-              }}
-            >
-              {children}
-            </button>
-          )
+        if (typeof href !== "string") {
+          return <span data-testid="chat-inert-link">{children}</span>
         }
-        if (typeof href === "string" && EXTERNAL_HREF_RE.test(href)) {
+
+        // Branch 1: codebus://wiki/<encoded-slug> — produced by
+        // `transformBodyWikilinks` from `[[slug]]` syntax. Look up the
+        // decoded slug in `pages` and render resolvable / unresolvable.
+        if (href.startsWith(CODEBUS_WIKI_SCHEME)) {
+          const encoded = href.slice(CODEBUS_WIKI_SCHEME.length)
+          let slug: string
+          try {
+            slug = decodeURIComponent(encoded)
+          } catch {
+            // Malformed percent-encoding falls through to inert rendering.
+            return <span data-testid="chat-inert-link">{children}</span>
+          }
+          // For `[[slug]]` syntax (the only source of codebus:// hrefs),
+          // the markdown children is just the raw slug — prefer the
+          // page's frontmatter title for natural prose ("Authentication"
+          // beats "modules/auth"). Falls back to slug when title empty.
+          return renderWikiSlug({
+            slug,
+            pages,
+            children,
+            preferTitle: true,
+            onWikiLinkClick,
+          })
+        }
+
+        // Branch 2: legacy `wiki/<path>.md` markdown link form. The capture
+        // group is the slug to look up. Route through the same
+        // resolvable / unresolvable flow as the codebus-scheme branch so
+        // both forms behave identically (and the callback always receives
+        // a slug, never a raw href — see spec Chat Assistant Message
+        // Markdown Rendering and Wiki Citation Links). Unlike the
+        // codebus:// branch, the legacy form's `children` is the
+        // agent-authored link label which carries intent (`[auth.md](...)`)
+        // — preserve it over the page title.
+        const legacyMatch = href.match(WIKI_HREF_RE)
+        if (legacyMatch) {
+          const slug = legacyMatch[1] ?? ""
+          return renderWikiSlug({
+            slug,
+            pages,
+            children,
+            preferTitle: false,
+            onWikiLinkClick,
+          })
+        }
+
+        // Branch 3: external http(s) link — Tauri opener.
+        if (EXTERNAL_HREF_RE.test(href)) {
           return (
             <a
               href={href}
@@ -441,12 +520,12 @@ function AssistantMarkdownBlock({
             </a>
           )
         }
-        // Other path patterns (e.g., `src/auth/jwt.rs`): inert text, no
-        // click handler, no anchor href.
+
+        // Branch 4: other path patterns (e.g., `src/auth/jwt.rs`): inert.
         return <span data-testid="chat-inert-link">{children}</span>
       },
     }),
-    [onWikiLinkClick],
+    [onWikiLinkClick, pages],
   )
 
   return (
@@ -454,7 +533,95 @@ function AssistantMarkdownBlock({
       data-testid="chat-assistant-markdown"
       className="text-[13px] text-fg whitespace-pre-wrap"
     >
-      <ReactMarkdown components={components}>{text}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        // react-markdown's default urlTransform strips schemes outside
+        // its safelist (http/https/mailto). The synthetic
+        // `codebus://wiki/<slug>` produced by `transformBodyWikilinks`
+        // would otherwise be flattened to an empty href; return URLs
+        // unchanged so the custom `a` renderer can route them.
+        urlTransform={(url) => url}
+        components={components}
+      >
+        {transformed}
+      </ReactMarkdown>
     </div>
+  )
+}
+
+interface RenderWikiSlugArgs {
+  slug: string
+  pages: Record<string, { slug: string; path: string; title: string }>
+  children: React.ReactNode
+  /**
+   * When true, prefer `pages[slug].title` over `children` as the visible
+   * label (used for the `codebus://` branch where `children` is just the
+   * raw slug from `transformBodyWikilinks`). When false, preserve
+   * `children` as the visible label (used for the legacy
+   * `[label](wiki/<path>.md)` branch where the label carries author
+   * intent).
+   */
+  preferTitle: boolean
+  onWikiLinkClick?: (slug: string) => void
+}
+
+/**
+ * Shared resolvable / unresolvable wikilink renderer used by both the
+ * `codebus://wiki/<encoded>` branch (modern `[[slug]]` syntax) AND the
+ * legacy `wiki/<path>.md` branch. Centralising the rendering keeps both
+ * input shapes behaving identically — the callback always receives a
+ * slug (per spec Chat Assistant Message Markdown Rendering and Wiki
+ * Citation Links), and unresolvable slugs render as inert dim spans
+ * with a `Page not found` tooltip.
+ */
+function renderWikiSlug({
+  slug,
+  pages,
+  children,
+  preferTitle,
+  onWikiLinkClick,
+}: RenderWikiSlugArgs) {
+  const meta = pages[slug]
+  if (!meta) {
+    return (
+      <span
+        data-testid="chat-wiki-link-unresolvable"
+        title="Page not found"
+        className="cursor-not-allowed text-fg-tertiary opacity-50"
+      >
+        {children}
+      </span>
+    )
+  }
+  // Label selection:
+  //   - `preferTitle=true` (codebus:// branch / `[[slug]]` syntax):
+  //     `meta.title` when non-empty, else slug. Chat prose reads
+  //     naturally ("Authentication" beats "modules/auth").
+  //   - `preferTitle=false` (legacy `[label](wiki/<path>.md)` branch):
+  //     preserve `children` — the agent-authored link label is
+  //     intentional and replacing it would erase author intent.
+  const label = preferTitle
+    ? meta.title.trim() !== ""
+      ? meta.title
+      : slug
+    : children
+  return (
+    <button
+      type="button"
+      data-testid="chat-wiki-link"
+      className="text-accent underline hover:text-accent-hover focus:outline-none focus:ring-2 focus:ring-accent-ring"
+      onClick={(e) => {
+        e.preventDefault()
+        onWikiLinkClick?.(slug)
+        // Collapse the chat widget only when currently expanded so
+        // tests / callers can probe the state transition without a
+        // surprise re-expand.
+        if (useChatStore.getState().expanded) {
+          useChatStore.getState().toggleExpanded()
+        }
+      }}
+    >
+      {label}
+    </button>
   )
 }

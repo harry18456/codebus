@@ -1750,14 +1750,50 @@ tests:
 ---
 ### Requirement: Chat Assistant Message Markdown Rendering and Wiki Citation Links
 
-The Chat Widget SHALL render each assistant message's text content through a Markdown renderer (e.g., `react-markdown`) rather than as plain text. The renderer SHALL produce clickable elements for markdown links of the form `[label](href)` where `href` matches the regex `^wiki\/.+\.md$`; clicking such a link SHALL invoke the Wiki tab page-load pathway (the same one used by `WikiTab` to render a chosen page) with the link's `href` path as the page slug, AND SHALL set the Workspace active tab to `wiki`, AND SHALL transition the Chat Widget to `collapsed`. Links whose `href` starts with `http://` or `https://` SHALL open in the user's default browser via the existing Tauri opener plugin and SHALL NOT transition the widget or change the active tab. Links with other `href` patterns (e.g., source code paths like `src/auth/jwt.rs`) SHALL be rendered as inert text in v1 — no click handler attached.
+The Chat Widget SHALL render each assistant message's text content through a Markdown renderer (`react-markdown`) rather than as plain text. The renderer SHALL be configured with the `remark-gfm` plugin so GitHub-flavored Markdown tables, strikethrough, AND task lists render as their corresponding HTML elements (`<table>` / `<del>` / task-list items) instead of leaking through as raw markdown syntax.
 
-Plain-text mentions of wiki paths within an assistant message (e.g., `"see wiki/modules/auth.md"` without markdown link syntax) SHALL NOT be auto-detected or made clickable in v1; only markdown-link syntax SHALL produce clickable elements.
+Before passing assistant text to `react-markdown`, the renderer SHALL pre-process the text by replacing every `[[slug]]` occurrence with a standard markdown link of the form `[<slug>](codebus://wiki/<percent-encoded-slug>)` (reusing the existing `transformBodyWikilinks` helper shared with the wiki preview surface). The renderer SHALL pass an `urlTransform` to `react-markdown` that returns each URL unchanged so the synthetic `codebus://wiki/...` scheme survives the renderer's default safelist (which would otherwise strip non-http(s)/mailto schemes).
 
-#### Scenario: Wiki markdown link click switches Wiki tab
+The custom `a` element override SHALL classify each rendered link by `href` shape AND route the click accordingly:
 
-- **WHEN** an assistant message contains the markdown text `[auth.md](wiki/modules/auth.md)` AND the user clicks the rendered link
-- **THEN** the Workspace active tab SHALL become `wiki` AND the Wiki tab SHALL invoke its page-load pathway with `wiki/modules/auth.md` (or the equivalent slug `modules/auth`) AND the Chat Widget SHALL transition to `collapsed`
+- **Wikilink (codebus scheme)**: when `href` starts with `codebus://wiki/`, the renderer SHALL extract the slug by stripping that prefix AND percent-decoding the remainder. The renderer SHALL consult `useWikiStore.pages` (the client-side page index loaded at Workspace mount time) to classify the slug:
+  - **Resolvable** (slug exists in `pages`): rendered as a `<button>`-like clickable element whose visible text is `pages[slug].title` when present, otherwise the raw slug. Clicking SHALL invoke `onWikiLinkClick(slug)` (passing the **decoded slug**, NOT the raw href) AND SHALL transition the Chat Widget to `collapsed` via `useChatStore.toggleExpanded()` (the existing collapse helper already short-circuits when already collapsed).
+  - **Unresolvable** (slug missing from `pages`): rendered as a dimmed `<span>` with a `title` tooltip reading "Page not found". Clicking SHALL be a no-op (no `onWikiLinkClick` invocation, no widget transition).
+- **Legacy wiki markdown link**: when `href` matches the regex `^wiki\/(.+)\.md$` (used by older agent outputs that embedded markdown links of the form `[label](wiki/<path>.md)`), the renderer SHALL extract the slug from the capture group (the path between `wiki/` AND the trailing `.md`) AND route through the SAME resolvable / unresolvable flow as the codebus-scheme branch. The capture group's value SHALL be the slug passed to `onWikiLinkClick`; the raw href SHALL NOT be passed.
+- **External link**: when `href` starts with `http://` or `https://`, the renderer SHALL invoke the existing Tauri opener plugin with the URL. The Workspace active tab SHALL NOT change AND the Chat Widget SHALL remain in its current state.
+- **Other**: any other `href` shape (for example source code paths like `src/auth/jwt.rs`) SHALL render as an inert `<span>` with no click handler AND no `<a>` tag carrying a non-empty href.
+
+The `onWikiLinkClick` callback on `ChatTranscript` AND its descendants SHALL accept a **slug string**, NOT a raw href. Callers (notably `Workspace.onSelectPage(slug)`) SHALL receive the post-extraction slug regardless of whether the source markdown used `[[slug]]` syntax or the legacy `[label](wiki/<path>.md)` form. This contract change corrects a prior type-lie where the callback was documented AND typed as receiving an href but the only production consumer (`Workspace.onSelectPage`) treated the argument as a slug AND fed it to `useWikiStore.loadPage(vault, slug)` — leading to a `wiki/wiki/<path>.md.md` lookup miss if the chat had ever actually emitted a clickable wiki markdown link.
+
+Plain-text mentions of wiki paths within an assistant message (for example `"see wiki/modules/auth.md"` without markdown link syntax AND without `[[...]]` syntax) SHALL NOT be auto-detected or made clickable; only markdown link syntax OR `[[slug]]` syntax SHALL produce clickable elements.
+
+#### Scenario: GFM table renders as table element
+
+- **WHEN** an assistant message contains the GFM markdown text below (column separators, header divider, two rows of data)
+
+  ```
+  | Tool | Replaces |
+  |------|----------|
+  | uv   | pip      |
+  | ruff | flake8   |
+  ```
+
+- **THEN** the rendered DOM SHALL contain a `<table>` element with at least one `<th>` element bearing the text `Tool` AND at least one `<td>` element bearing the text `uv` AND SHALL NOT contain raw `|---|` text in the rendered prose
+
+#### Scenario: Wikilink markdown syntax renders as clickable resolvable link
+
+- **WHEN** an assistant message contains the plain text `[[modules/auth]]` AND `useWikiStore.pages["modules/auth"]` exists AND the user clicks the rendered link
+- **THEN** the rendered link's visible text SHALL be `pages["modules/auth"].title` (falling back to `modules/auth` when the title is empty) AND the click SHALL invoke `onWikiLinkClick("modules/auth")` (the decoded slug, NOT a raw href) AND the Chat Widget SHALL transition to `collapsed`
+
+#### Scenario: Wikilink to nonexistent page renders dimmed and is inert
+
+- **WHEN** an assistant message contains `[[nonexistent-page]]` AND `useWikiStore.pages["nonexistent-page"]` does NOT exist AND the user clicks the rendered text
+- **THEN** the rendered element SHALL be a `<span>` (NOT a `<button>` or `<a>` with click handler) AND its `title` attribute SHALL equal "Page not found" AND `onWikiLinkClick` SHALL NOT be invoked AND the Chat Widget SHALL NOT transition
+
+#### Scenario: Legacy wiki markdown link click passes slug not href
+
+- **WHEN** an assistant message contains the markdown text `[auth](wiki/modules/auth.md)` AND `useWikiStore.pages["modules/auth"]` exists AND the user clicks the rendered link
+- **THEN** the Workspace active tab SHALL become `wiki` AND `onWikiLinkClick` SHALL be invoked with the slug `"modules/auth"` (the regex capture group between `wiki/` AND `.md`, NOT the raw href `"wiki/modules/auth.md"`) AND the Chat Widget SHALL transition to `collapsed`
 
 #### Scenario: External https link opens in browser
 
@@ -1769,61 +1805,18 @@ Plain-text mentions of wiki paths within an assistant message (e.g., `"see wiki/
 - **WHEN** an assistant message contains the markdown text `[jwt.rs](src/auth/jwt.rs)` AND the user clicks the rendered text
 - **THEN** no navigation or IPC call SHALL occur AND the rendered element SHALL NOT have an `<a>` tag with a non-empty href OR equivalent click handler
 
-#### Scenario: Plain text wiki mention is not clickable
+#### Scenario: Plain text wiki mention without markdown or wikilink syntax is not clickable
 
-- **WHEN** an assistant message contains the plain text `"see wiki/modules/auth.md for details"` (no markdown link syntax)
+- **WHEN** an assistant message contains the plain text `"see wiki/modules/auth.md for details"` (no markdown link syntax, no `[[...]]` wrapping)
 - **THEN** the rendered text `"wiki/modules/auth.md"` SHALL NOT have a click handler attached AND SHALL render as inert prose
 
-<!-- @trace
-source: v3-app-chat-cmdk
-updated: 2026-05-15
--->
-
 
 <!-- @trace
-source: v3-app-chat-cmdk
-updated: 2026-05-15
+source: chat-display-polish-app
+updated: 2026-05-23
 code:
-  - docs/2026-05-14-github-repo-setup-backlog.md
-  - docs/2026-05-15-codebus-fs-watcher-backlog.md
-  - codebus-app/src/components/workspace/ChatInput.tsx
-  - codebus-app/src/hooks/useChatShortcut.ts
-  - docs/2026-05-14-rag-index-search-backlog.md
-  - codebus-app/src/components/workspace/ChatNewChatButton.tsx
-  - codebus-app/src/components/workspace/ChatUndoToast.tsx
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/2026-05-14-mcp-server-backlog.md
-  - codebus-app/src/components/workspace/ChatTokenDisplay.tsx
-  - codebus-app/src-tauri/src/ipc/chats.rs
-  - docs/2026-05-14-openai-privacy-filter-backlog.md
-  - docs/2026-05-14-mycoder-cli-backlog.md
-  - codebus-app/src/i18n/messages.ts
   - codebus-app/src/components/workspace/ChatTranscript.tsx
-  - docs/2026-05-14-settings-chat-model-backlog.md
-  - docs/2026-05-14-pii-settings-ui-backlog.md
-  - docs/2026-05-14-ui-accessibility-backlog.md
-  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
-  - docs/2026-05-14-app-font-scale-backlog.md
-  - docs/BACKLOG.md
-  - codebus-app/src/store/chat.ts
-  - codebus-app/src/lib/ipc.ts
-  - codebus-app/src-tauri/src/state/active_runs.rs
-  - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-app/src/components/workspace/ChatWidget.tsx
 tests:
-  - codebus-app/src/components/workspace/ChatNewChatButton.test.tsx
-  - codebus-app/src/components/workspace/ChatInput.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-app/src/i18n/chat.test.ts
-  - codebus-app/src/components/workspace/Workspace.test.tsx
-  - codebus-app/src/store/chat.test.ts
-  - codebus-app/src/lib/ipc.test.ts
-  - codebus-app/src/components/workspace/ChatUndoToast.test.tsx
-  - codebus-app/src/hooks/useChatShortcut.test.tsx
-  - codebus-app/src/components/workspace/ChatWidget.test.tsx
-  - codebus-app/src/components/workspace/ChatTokenDisplay.test.tsx
-  - codebus-app/src/components/settings/EndpointSection.test.tsx
   - codebus-app/src/components/workspace/ChatTranscript.test.tsx
 -->
 
