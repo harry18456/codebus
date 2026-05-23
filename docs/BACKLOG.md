@@ -22,6 +22,7 @@
 | 2026-05-22 | Bash hook 只檢查前兩 token，shell 串接可能繞過 sandbox（含 spec 補 metacharacter 拒絕條款 D5） | 安全（sandbox bypass，待驗 Claude Code 串接行為） | 輕（拒 shell 元字元 + 測試 + spec requirement，約半天） | [cli-quality-review F4](2026-05-22-cli-quality-review.md) + [spec-drift D5](2026-05-22-spec-drift-audit.md) |
 | 2026-05-23 | 大於 5 MiB 檔案被靜默排除出 raw mirror（無 warn 行，使用者不知檔不見） | 透明度（silent gap，無安全後果） | 輕（加 oversized_skipped 計數 + 一行 stderr，半天） | [core-quality-review F2](2026-05-22-core-quality-review.md) |
 | 2026-05-23 | `changed_paths_under` 把刪除頁也算 changed（content-verify 對刪除頁會 Read 失敗） | 邊緣正確性 | 輕（加 `--diff-filter=d` + 測試，半天） | [core-quality-review F3](2026-05-22-core-quality-review.md) |
+| 2026-05-23 | Codex 端 hard read 隔離（`workspace-write` 設計上允許讀 workspace 外任意檔，含 `~/.ssh/` `~/.aws/` 等敏感檔；agent-hook-hardening 只給 AGENTS.md soft constraint，hard enforcement 留此條） | 安全（codex path 缺 read enforcement，僅靠 model 自律） | 重（待研究：writable_roots Mac/Linux 實機驗 → Windows ACL/chmod → container 化 / sandbox-of-sandbox） | [bash-hook-and-codex-sandbox-discussion §10](2026-05-23-bash-hook-and-codex-sandbox-discussion.md) |
 
 ## 已 archived 項目
 
