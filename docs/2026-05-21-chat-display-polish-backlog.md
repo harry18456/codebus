@@ -4,7 +4,9 @@
 **Surfaced during:** 實際 chat 對話（問「這個專案的目的是什麼？」AI 回覆含 `[[project-purpose]]` 連結與 markdown 表格，兩者都沒被渲染）
 **Severity:** UX 補強（chat 可讀性 / 一致性）
 **Owner:** harry
-**Status:** open
+**Status:** app side archived（`chat-display-polish-app` @ 2026-05-23 `b40cd41`）；CLI side 併入 [cli-wikilink-link-target](2026-05-21-cli-wikilink-link-target-backlog.md)
+
+> **2026-05-23 update**：CLI 側不再獨立追蹤。原因——user 真正想要的是「`[[slug]]` 在 terminal 點下去開 codebus app」，而 `codebus://` deep-link 協定 + CLI markdown styling + `[[slug]]` 可點性在實作層共用同一條 thought-render 路徑（chat 命令層或共用 helper 任一條動到都會碰到對方），拆兩條只會重工。GFM 表格 / 視覺樣式 / OSC 8 hyperlink 統一在 `cli-wikilink-link-target` 處理。本文件保留作為當時討論脈絡。
 
 ---
 

@@ -1,12 +1,24 @@
 # Backlog: CLI `[[slug]]` 可點連結 + 可設定連結目標（app / obsidian）
 
-**Date:** 2026-05-21
+**Date:** 2026-05-21（2026-05-23 併入 chat-display-polish CLI 側）
 **Surfaced during:** discuss 2026-05-21（「cli 連結導向 obsidian vs app」——查證後確認 v3 已弄丟 v2 的 `[[slug]]`→obsidian 連結能力）
-**Severity:** capability regression（v2 有、v3 弄丟）+ capability enhancement（連回 app）
+**Severity:** capability regression（v2 有、v3 弄丟）+ capability enhancement（連回 app）+ UX 補強（chat markdown render）
 **Owner:** harry
-**Status:** open
+**Status:** open（scope 已含 CLI chat markdown polish，見下方「2026-05-23 scope 擴張」）
 
 ---
+
+## 2026-05-23 scope 擴張：併入 CLI chat markdown polish
+
+原 [chat-display-polish](2026-05-21-chat-display-polish-backlog.md) backlog 的 CLI 側合併進來。原因：user 一開始就想要「`[[slug]]` 在 terminal 點下去打開 codebus app」，而 `codebus://` 協定、CLI markdown styling、`[[slug]]` 可點性在實作層共用同一條 thought-render 路徑——拆兩條會重工。
+
+合併後 scope（新增於下方 Tasks 與 Out of scope）：
+
+- CLI chat assistant 回覆的 markdown 渲染（**GFM 表格** + bold/italic/headers/lists 視覺樣式），對齊 app 端 `chat-display-polish-app`（2026-05-23 `b40cd41`）已完成的視覺品質
+- `chat.rs::println!("{full_text}")` 改走共用 thought-render helper（與 `stream_event.rs` 的 thought 路徑共用一個 renderer，避免兩處各寫一套 markdown 處理）
+- `[[slug]]` 在 chat 回覆內也同樣 linkify（與 thought stream 一致）
+
+工程量影響：原「重」維持「重」——markdown render + helper 抽出約 1 個半天，與協定那塊相比仍是次要成本。
 
 ## 觀察
 
@@ -51,16 +63,17 @@ v3 現況（discuss 實查）：
 1. **deep-link 協定（先）**：註冊 `codebus://` + 喚醒/聚焦 + `codebus://wiki/<slug>` 路由到 wiki 分頁。跨 OS 驗證。**工程量：重。**
 2. **config CLI 區段**：`config/cli.rs` + `link_target: app | obsidian`（預設 `app`）+ forward-compat 容錯 + 載入接線。**工程量：輕。**
 3. **CLI linkify（補回 v2）**：`stream_event.rs`（thought）+ `chat.rs` 把 resolvable `[[slug]]` 用 OSC 8 包成連結；URL 依 `link_target` 組 `codebus://wiki/<slug>` 或 `obsidian://open?...`。需要 slug→（resolvable? / path）解析——v3 無 SlugIndex（只 legacy 有），決定要建索引還是走「一律 linkify、由目標 app 自己處理不存在」的簡化版。**工程量：中。**
-4. 降級：`use_hyperlinks` false / 目標不可用時退純文字（比照 lint 既有降級）。
-5. 測試 + 跨 OS 手動驗收（協定喚醒、兩種 target、降級）。
+4. **CLI chat markdown render（2026-05-23 併入）**：抽共用 thought-render helper，掛 markdown renderer（GFM 表格 + bold/italic/headers/lists ANSI styling）；`chat.rs::println!` 改走此 helper；對齊 app `chat-display-polish-app` 視覺品質。renderer 選型先 brainstorm（自寫最小 vs `termimad`/`pulldown-cmark`）。**工程量：約 1 個半天。**
+5. 降級：`use_hyperlinks` false / 目標不可用時退純文字（比照 lint 既有降級）；無 ANSI 支援的終端 markdown styling 也要降級。
+6. 測試 + 跨 OS 手動驗收（協定喚醒、兩種 target、降級、表格 + `[[slug]]` 視覺）。
 
 工程量總計：**重**（協定那塊吃掉大半）。
 
 ## Out of scope
 
-- App chat / wiki 分頁的 `[[slug]]` 行為（維持站內導航；chat 的渲染缺口見 [chat-display-polish](2026-05-21-chat-display-polish-backlog.md)）。
-- GFM 表格渲染（在 chat-display-polish）。
+- App chat / wiki 分頁的 `[[slug]]` 行為（維持站內導航；app side chat 渲染已於 2026-05-23 `chat-display-polish-app` 完成）。
 - 把 `link_target` 擴成 styling 類 config（明確避開 `options.rs` 的反向決策）。
+- 「完整終端 markdown 渲染器」（語法高亮、巢狀清單深度排版等）；CLI markdown render 範圍限於 GFM 表格 + bold/italic/headers/lists 這些 chat 高頻元素。
 
 ## 何時動 / 優先序
 
