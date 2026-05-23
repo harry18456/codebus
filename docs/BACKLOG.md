@@ -19,7 +19,9 @@
 | 2026-05-21 | Chat assistant 文字顯示優化（GFM 表格 + `[[wikilink]]`，app + CLI 兩邊） | UX 補強 | app 輕（半天）/ CLI 中（約 1 個半天） | [chat-display-polish](2026-05-21-chat-display-polish-backlog.md) |
 | 2026-05-21 | CLI `[[slug]]` 可點連結 + 可設定連結目標（app / obsidian，預設 app） | regression 補回 + capability | 重（codebus:// 協定吃掉大半） | [cli-wikilink-link-target](2026-05-21-cli-wikilink-link-target-backlog.md) |
 | 2026-05-22 | provider-specific prompt engineering（Codex 整合後輸出品質） | 輸出品質 / multi-provider 完成度 | 待研究（loop PE1 診斷 → PE2 設計後定） | [provider-prompt-engineering](2026-05-22-provider-prompt-engineering-backlog.md) |
-| 2026-05-22 | Bash hook 只檢查前兩 token，shell 串接可能繞過 sandbox | 安全（sandbox bypass，待驗 Claude Code 串接行為） | 輕（拒 shell 元字元 + 測試，約半天） | [cli-quality-review F4](2026-05-22-cli-quality-review.md) |
+| 2026-05-22 | Bash hook 只檢查前兩 token，shell 串接可能繞過 sandbox（含 spec 補 metacharacter 拒絕條款 D5） | 安全（sandbox bypass，待驗 Claude Code 串接行為） | 輕（拒 shell 元字元 + 測試 + spec requirement，約半天） | [cli-quality-review F4](2026-05-22-cli-quality-review.md) + [spec-drift D5](2026-05-22-spec-drift-audit.md) |
+| 2026-05-23 | 大於 5 MiB 檔案被靜默排除出 raw mirror（無 warn 行，使用者不知檔不見） | 透明度（silent gap，無安全後果） | 輕（加 oversized_skipped 計數 + 一行 stderr，半天） | [core-quality-review F2](2026-05-22-core-quality-review.md) |
+| 2026-05-23 | `changed_paths_under` 把刪除頁也算 changed（content-verify 對刪除頁會 Read 失敗） | 邊緣正確性 | 輕（加 `--diff-filter=d` + 測試，半天） | [core-quality-review F3](2026-05-22-core-quality-review.md) |
 
 ## 已 archived 項目
 
