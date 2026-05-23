@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The materialization of three Claude Code skill bundles (`codebus-goal`, `codebus-query`, `codebus-fix`) under both `<vault>/.codebus/.claude/skills/` (CLI-spawn-discovery) and `<repo>/.claude/skills/` (user-direct-discovery) — directory layout, SKILL.md frontmatter format, hard-scope and path-translation rule bodies, write-if-missing preservation of user customizations, and per-verb workflow content. Does NOT cover the agent sandbox flags passed at spawn time (those live in `cli`'s per-verb Subcommand Behavior requirements), the PreToolUse Bash hook configuration (lives in `lint-feedback-loop` Fix Bash Hook Installation), or the source-repo `.gitignore` line for the bundle directories (lives in `vault` Source Repo `.gitignore` Mutation).
+The materialization of five Claude Code skill bundles (`codebus-goal`, `codebus-query`, `codebus-fix`, `codebus-chat`, `codebus-quiz`) under both `<vault>/.codebus/.claude/skills/` (CLI-spawn-discovery) and `<repo>/.claude/skills/` (user-direct-discovery), plus the codex provider's parallel materialization under `<vault>/.codebus/.codex/skills/` + `<vault>/.codebus/AGENTS.md` — directory layout, SKILL.md frontmatter format, hard-scope and path-translation rule bodies, write-if-missing preservation of user customizations, and per-verb workflow content. Does NOT cover the agent sandbox flags passed at spawn time (those live in `cli`'s per-verb Subcommand Behavior requirements), the PreToolUse Bash hook configuration (lives in `lint-feedback-loop` Fix Bash Hook Installation), or the source-repo `.gitignore` line for the bundle directories (lives in `vault` Source Repo `.gitignore` Mutation).
 
 ## Requirements
 
