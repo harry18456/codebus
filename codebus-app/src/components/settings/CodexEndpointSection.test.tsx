@@ -104,4 +104,30 @@ describe("CodexEndpointSection", () => {
       screen.getByTestId("codex-azure-api-version").getAttribute("aria-invalid"),
     ).toBe("true")
   })
+
+  // Mirrors EndpointSection's `endpoint-chat-row`: chat reuses query's
+  // model/effort by design (Verb::Chat → query in codex.rs:98), so each
+  // profile section shows a read-only hint reflecting that inheritance.
+  it("renders a read-only chat hint row in each codex profile reflecting query model/effort", () => {
+    const block: CodexBlock = {
+      active: "system",
+      system: systemBlock().system,
+      azure: {
+        base_url: "https://x/openai",
+        api_version: "2025-04-01-preview",
+        keyring_service: "codebus-codex-azure",
+        goal: { model: "azure-deploy-x", effort: "high" },
+        query: { model: "azure-deploy-x", effort: "low" },
+        fix: { model: "azure-deploy-x", effort: "medium" },
+        verify: { model: "azure-deploy-x", effort: "high" },
+      },
+    }
+    render(<CodexEndpointSection block={block} onChange={() => {}} />)
+    const systemRow = screen.getByTestId("codex-endpoint-chat-row")
+    expect(systemRow.textContent ?? "").toContain("gpt-5.5")
+    expect(systemRow.textContent ?? "").toContain("low")
+    const azureRow = screen.getByTestId("codex-azure-endpoint-chat-row")
+    expect(azureRow.textContent ?? "").toContain("azure-deploy-x")
+    expect(azureRow.textContent ?? "").toContain("low")
+  })
 })

@@ -336,25 +336,43 @@ pub fn sync_with_scanner_into<W: io::Write>(
     Ok(summary)
 }
 
-/// Replace each match's `matched_text` substring in `content` with
-/// `[REDACTED:<pattern_name>]`, processing matches in descending byte-offset
-/// order so earlier substitutions do not shift later match offsets.
+/// Replace each match's span in `content` with `[REDACTED:<pattern_name>]`.
 ///
-/// Assumes `matches` are non-overlapping and sorted ascending by byte offset
-/// (scanner contract). Caller MUST NOT call this with empty matches.
+/// Overlapping or nested matches across rules (most plausibly when a custom
+/// `patterns_extra` regex frames a region containing an embedded builtin hit
+/// like email/ipv4/key) are merged into disjoint spans before substitution —
+/// without the merge, the descending `replace_range` strategy would cut into
+/// already-substituted regions and either corrupt the output or leave the
+/// inner secret partly visible. Each merged span uses the earliest-starting
+/// match's `pattern_name` as the `[REDACTED:...]` label; adjacent
+/// non-overlapping matches stay separate.
 fn mask_matches(content: &str, matches: &[crate::pii::provider::PiiMatch]) -> String {
-    let mut out = content.to_string();
-    // Iterate matches in descending order so each replacement does not
-    // invalidate the offsets of yet-to-be-processed matches.
-    for m in matches.iter().rev() {
-        // Defensive bounds check: scanner is supposed to give us byte offsets
-        // into the input slice, but if a buggy scanner emits out-of-range
-        // offsets we'd rather skip the substitution than panic.
-        if m.end > out.len() || m.start > m.end {
+    // Coalesce overlapping/nested intervals. Empty `matches` short-circuits
+    // to verbatim content so callers do not need a special-case branch.
+    let mut sorted: Vec<&crate::pii::provider::PiiMatch> = matches.iter().collect();
+    sorted.sort_by_key(|m| (m.start, m.end));
+    let mut merged: Vec<(usize, usize, String)> = Vec::with_capacity(sorted.len());
+    for m in sorted {
+        if m.end <= m.start || m.end > content.len() {
             continue;
         }
-        let replacement = format!("[REDACTED:{}]", m.pattern_name);
-        out.replace_range(m.start..m.end, &replacement);
+        match merged.last_mut() {
+            // Strict `<` so spans that merely touch (e.g. `[0,5)` then `[5,8)`)
+            // stay separate and keep their own labels — only true overlap merges.
+            Some(last) if m.start < last.1 => {
+                if m.end > last.1 {
+                    last.1 = m.end;
+                }
+            }
+            _ => merged.push((m.start, m.end, m.pattern_name.clone())),
+        }
+    }
+    let mut out = content.to_string();
+    // Iterate merged spans in descending order so each replacement does not
+    // invalidate the offsets of yet-to-be-processed spans.
+    for (start, end, name) in merged.into_iter().rev() {
+        let replacement = format!("[REDACTED:{name}]");
+        out.replace_range(start..end, &replacement);
     }
     out
 }
@@ -362,9 +380,106 @@ fn mask_matches(content: &str, matches: &[crate::pii::provider::PiiMatch]) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pii::provider::{PiiMatch, PiiSeverity};
     use crate::pii::scanners::null_scanner::NullScanner;
     use crate::pii::scanners::regex_basic::RegexBasicScanner;
     use tempfile::TempDir;
+
+    fn pm(name: &str, start: usize, end: usize) -> PiiMatch {
+        PiiMatch {
+            pattern_name: name.to_string(),
+            start,
+            end,
+            matched_text: String::new(),
+            severity: PiiSeverity::Warn,
+        }
+    }
+
+    /// Empty match list returns content verbatim (callers no longer special-case).
+    #[test]
+    fn mask_matches_empty_returns_verbatim() {
+        assert_eq!(mask_matches("hello world", &[]), "hello world");
+    }
+
+    /// Disjoint, non-touching matches each get their own `[REDACTED:...]` token.
+    #[test]
+    fn mask_matches_disjoint_keeps_both_labels() {
+        // "aaa BBB ccc DDD"; mask BBB[4..7] and DDD[12..15] separately.
+        let s = "aaa BBB ccc DDD";
+        let m = vec![pm("alpha", 4, 7), pm("beta", 12, 15)];
+        let out = mask_matches(s, &m);
+        assert_eq!(out, "aaa [REDACTED:alpha] ccc [REDACTED:beta]");
+    }
+
+    /// Adjacent (touching but not overlapping) ranges stay separate — strict
+    /// `<` in the merge predicate prevents collapsing two distinct patterns
+    /// that just happen to abut.
+    #[test]
+    fn mask_matches_adjacent_ranges_stay_separate() {
+        // "aaabbb"; alpha covers [0..3), beta covers [3..6).
+        let s = "aaabbb";
+        let m = vec![pm("alpha", 0, 3), pm("beta", 3, 6)];
+        let out = mask_matches(s, &m);
+        assert_eq!(out, "[REDACTED:alpha][REDACTED:beta]");
+    }
+
+    /// Outer (custom) span fully contains an inner builtin (e.g. email) span —
+    /// the realistic shape of the F1 bug. With the merge, the union is replaced
+    /// once and the inner secret cannot leak.
+    #[test]
+    fn mask_matches_nested_inner_match_is_subsumed() {
+        // "tag=<alice@example.com>"; outer custom covers [4..23), inner email
+        // covers [5..22) (the address itself, no angle brackets).
+        let s = "tag=<alice@example.com>";
+        // sanity-check the offsets so the test fails loudly if string layout shifts.
+        assert_eq!(&s[4..23], "<alice@example.com>");
+        assert_eq!(&s[5..22], "alice@example.com");
+        let m = vec![pm("custom-conn", 4, 23), pm("email", 5, 22)];
+        let out = mask_matches(s, &m);
+        assert_eq!(out, "tag=[REDACTED:custom-conn]");
+        assert!(
+            !out.contains("alice@example.com"),
+            "inner secret must not survive the merge: {out:?}"
+        );
+    }
+
+    /// Two ranges with partial overlap (A end overlaps B start) merge into one
+    /// span; before the F1 fix the descending `replace_range` would corrupt
+    /// the trailing part of A after B's substitution shifted offsets.
+    #[test]
+    fn mask_matches_partial_overlap_merges_to_union() {
+        // "0123456789ABCDE"; alpha covers [2..8), beta covers [6..12).
+        let s = "0123456789ABCDE";
+        let m = vec![pm("alpha", 2, 8), pm("beta", 6, 12)];
+        let out = mask_matches(s, &m);
+        // Merged span [2..12) replaced by alpha's label (earliest start).
+        assert_eq!(out, "01[REDACTED:alpha]CDE");
+    }
+
+    /// Identical span from two patterns (duplicate hit) merges to a single
+    /// token rather than producing nested `[REDACTED:[REDACTED:...]]` after
+    /// the descending overwrite.
+    #[test]
+    fn mask_matches_identical_spans_dedup_to_one() {
+        let s = "left middle right";
+        let m = vec![pm("alpha", 5, 11), pm("beta", 5, 11)];
+        let out = mask_matches(s, &m);
+        assert_eq!(out, "left [REDACTED:alpha] right");
+    }
+
+    /// Out-of-range and degenerate matches are silently skipped (defensive —
+    /// preserves the pre-F1 behavior for buggy scanners).
+    #[test]
+    fn mask_matches_out_of_range_and_degenerate_are_skipped() {
+        let s = "short";
+        let m = vec![
+            pm("oob", 100, 200),
+            pm("zero", 2, 2),
+            pm("ok", 0, 3),
+        ];
+        let out = mask_matches(s, &m);
+        assert_eq!(out, "[REDACTED:ok]rt");
+    }
 
     fn write(p: &Path, content: &[u8]) {
         if let Some(par) = p.parent() {

@@ -11,6 +11,8 @@ import {
   getEndpointKey,
 } from "@/lib/ipc"
 
+import { useT } from "@/i18n/useT"
+
 import { SetKeyDialog } from "./SetKeyDialog"
 
 /**
@@ -51,6 +53,7 @@ export function CodexEndpointSection({
   onChange,
   errors = [],
 }: CodexEndpointSectionProps) {
+  const t = useT()
   const hasError = (field: string) => errors.some((e) => e.field === field)
   // Codex azure key lives under the codex profile's `keyring_service`
   // (default `codebus-codex-azure`) — distinct from claude's entry.
@@ -176,6 +179,20 @@ export function CodexEndpointSection({
             </VerbRow>
           )
         })}
+        <div
+          data-testid="codex-endpoint-chat-row"
+          className="flex items-center gap-2 text-fg-tertiary"
+        >
+          <span className="w-[56px] font-mono text-[11px]">
+            {t("settings.fields.endpointChat.label")}
+          </span>
+          <span className="font-mono text-[11px]">
+            {t("settings.fields.endpointChat.inherits", {
+              model: block.system.query.model,
+              effort: block.system.query.effort,
+            })}
+          </span>
+        </div>
       </ProfileBlock>
 
       <ProfileBlock
@@ -266,6 +283,20 @@ export function CodexEndpointSection({
             </VerbRow>
           )
         })}
+        <div
+          data-testid="codex-azure-endpoint-chat-row"
+          className="flex items-center gap-2 text-fg-tertiary"
+        >
+          <span className="w-[56px] font-mono text-[11px]">
+            {t("settings.fields.endpointChat.label")}
+          </span>
+          <span className="font-mono text-[11px]">
+            {t("settings.fields.endpointChat.inherits", {
+              model: azure.query.model,
+              effort: azure.query.effort,
+            })}
+          </span>
+        </div>
         {errors.length > 0 && (
           <div
             data-testid="codex-endpoint-validation-summary"
