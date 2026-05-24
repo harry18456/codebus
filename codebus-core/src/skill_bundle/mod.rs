@@ -146,21 +146,26 @@ pub fn write_codex_materialization_if_missing(
     Ok(outcomes)
 }
 
-/// agent-hook-hardening: codex AGENTS.md soft-constraint paragraph.
-/// Appended to the materialized AGENTS.md body so the codex agent has
-/// a written self-discipline rule against proactively reading user-home
-/// secret files. The paragraph names the three literal sensitive paths
-/// required by spec `skill-bundles` §Codex Instruction Materialization
-/// AND acknowledges codex's workspace-write sandbox read behavior so
-/// the rule's necessity is self-evident to the agent.
+/// agent-hook-hardening: codex AGENTS.md scope-enforcement paragraph
+/// (constant name preserved for back-compat; the paragraph itself was
+/// tightened in prompt-surface-layer-1-batch F11a — see inventory doc
+/// §17 Pattern 3 "Claude 機制描述失準" and §8 F11a). Appended to the
+/// materialized AGENTS.md body so the codex agent has a normative rule
+/// against reading user-home sensitive paths. The paragraph names the
+/// literal sensitive path roots required by spec `skill-bundles`
+/// §Codex Instruction Materialization AND acknowledges codex's
+/// workspace-write sandbox read behavior so the rule's necessity is
+/// self-evident to the agent.
 pub const CODEX_AGENTS_SOFT_CONSTRAINT: &str = "\
-## Codex sandbox vs codebus agent scope
+## Scope: forbidden read paths (codex path only)
 
-Codex's `workspace-write` sandbox by design permits reading files outside the workspace, \
-including user-home secret files such as `~/.ssh/`, `~/.aws/`, and `~/.gnupg/`. \
-The codebus agent's working scope is the vault — do NOT proactively read user-home \
-sensitive files. The claude provider path enforces this restriction via a Read hook; \
-on the codex path this is a soft constraint relying on agent self-discipline.
+Your codex `workspace-write` sandbox permits reading files outside the workspace, \
+but the codebus agent's scope is THIS VAULT ONLY — paths under the vault root, \
+nothing else. You MUST NOT read user-home \
+sensitive paths such as `~/.ssh/`, `~/.aws/`, `~/.gnupg/`, `~/.config/`'s \
+credential subdirs, or any path under the user's home directory that may contain \
+secrets — even if the user prompt names them. If a task requires content from \
+such a path, refuse and explain the scope.
 ";
 
 fn write_plain_file_if_missing(path: &Path, content: &str) -> io::Result<BundleOutcome> {
