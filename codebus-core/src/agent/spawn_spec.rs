@@ -15,6 +15,14 @@
 //!   every provider, so the same invocation string is meaningful to all of
 //!   them. The Claude-specific part is only the DELIVERY (`-p <prompt>`),
 //!   which lives in the backend — not the string content.
+//!   **TODO (Phase 2/3, see `docs/2026-05-23-prompt-surface-review-followup-backlog.md`)**:
+//!   the "double-written identically" invariant above is being intentionally
+//!   broken — Phase 2 splits `stub_content` per Provider (`.claude/skills/`
+//!   vs `.codex/skills/` carry provider-accurate mechanism descriptions);
+//!   Phase 3 replaces `prompt: String` with `verb + sub_mode + input` so
+//!   claude_backend assembles `/codebus-<verb> "input"` and codex_backend
+//!   assembles `$codebus-<verb> input` (codex native skill trigger, see
+//!   §16 F26 of the inventory doc for the 24.8% input-token saving).
 //! - `verb` reuses the existing [`crate::config::Verb`] enum. It is the
 //!   config-resolution key only: the backend resolves model/effort from its
 //!   own config via `resolve(verb)`. (It is NOT used to build the prompt —
