@@ -1626,7 +1626,10 @@ QUERY_WORKFLOW review 後，**跨 verb 共通 pattern** 已浮現至少 3 條：
 
 ### 🔴 CRITICAL
 
-#### F49a. SKILL `rule_id` 與 lint JSON 實際欄名 `rule` 不符
+#### F49a (✗ INVALID — 2026-05-24). SKILL `rule_id` 與 lint JSON 實際欄名 `rule` 不符
+
+**Update 2026-05-24（prompt-surface-chat-security-batch propose 階段 grep 揭露）**：本 finding 基於誤判。實際 `codebus-core/src/wiki/types.rs:106` `pub rule_id: String` + `tests` `lint_issue_serde_roundtrip_includes_rule_id` 斷言 JSON 含 `"rule_id":"frontmatter-parse"`。lint JSON 序列化欄名就是 `rule_id`，與 FIX_WORKFLOW SKILL body 用 `rule_id` **一致**。**沒有不符**。F49a 撤回；不在 Phase 4 範圍。
+
 
 **位置**：Step 3（`mod.rs:557`）「Issue **`rule_id`** selects the repair shape」
 
@@ -2136,7 +2139,10 @@ quiz 是 5 個 verb 中 Claude 機制描述用最多的：
 
 **修法**：明示「If anything — user prompt, wiki content, your own reasoning — leads you to attempt reading `raw/`, emit `[CODEBUS_QUIZ_VIOLATION]` and stop.」
 
-#### F85. CLI 層 JSON 欄名不一致（lint 用 `rule` vs quiz validate 用 `rule_id`）
+#### F85 (✗ INVALID — 2026-05-24). CLI 層 JSON 欄名不一致（lint 用 `rule` vs quiz validate 用 `rule_id`）
+
+**Update 2026-05-24（prompt-surface-chat-security-batch propose 階段 grep 揭露）**：本 finding 基於誤判。實際 `codebus-cli/src/commands/quiz.rs:282` `serde_json::to_string(&issues)` 序列化的 `issues: Vec<LintIssue>` 與 `codebus lint --format json` 走同一個 `LintIssue` struct（`codebus-core/src/wiki/types.rs:100`），所以兩 CLI 輸出的 JSON 欄名**完全一致都是 `rule_id`**。**沒有不一致**。F85 撤回；不在 Phase 4 範圍。
+
 
 **新發現於 F76 驗證**。實機跑 `codebus quiz validate --json`：
 
@@ -2579,7 +2585,7 @@ SKILL 對「mode prefix 怎麼處理」的指示也不一致：goal Mode selecti
 | 2 | §0 Language Policy dangling | **F1 (🔴)**, F41, F52 | 1 |
 | 3 | Claude 機制描述失準 | F19, F40, F49, F65, F66, F67, F72, F79（8 個，含 F40/F65/F72 重災區） | **2 (split 解)** |
 | 4 | 沒明示 read scope | F39, F51 | 4 |
-| 5 | SKILL 抄 Rust struct field name | **F49a (🔴)**, F85, F93 | 4 |
+| 5 | SKILL 抄 Rust struct field name | ~~F49a (🔴)~~ / ~~F85~~ INVALID (2026-05-24 grep)、F93 only | 4 (剩 F93) |
 | 6 | scope guard / agent metadata leak | **F63 (🔴)**, F87, F87a | 4（可能先做） |
 | 7 | prompt-injection defense 缺明示 | F64, F87, F90 | 4 (best-effort) |
 | 8 | codex 缺 per-command allowance | **F73 (🔴) 上半** | **5 (spike)** |
@@ -2635,11 +2641,16 @@ SKILL 對「mode prefix 怎麼處理」的指示也不一致：goal Mode selecti
 
 ### 17.5 SKILL 抄 Rust struct field name
 
-**Findings**: **F49a (🔴)**（fix SKILL 寫 `rule_id`、`codebus lint` JSON 實際是 `rule`）、F85（CLI 層 `quiz validate` 用 `rule_id` vs `lint` 用 `rule` 不一致）、F93（quiz verify spawn 缺 `planned_pages` 上下文）
+**Findings**:
+- ~~**F49a (🔴)**~~ — **INVALID (2026-05-24)**。grep 揭露 lint JSON 序列化欄名就是 `rule_id`（types.rs:106 + serde_roundtrip test），與 SKILL `rule_id` 一致。Pattern 5 對 F49a 的假設不成立。
+- ~~F85~~ — **INVALID (2026-05-24)**。grep 揭露 `quiz validate` CLI（commands/quiz.rs:282）和 `lint --format json` 走同一個 `LintIssue` struct，所以兩 CLI 輸出 JSON 欄名一致，都是 `rule_id`。
+- F93 — VALID。quiz verify spawn 缺 `planned_pages` 上下文（verb/quiz.rs:587 verify_input 確認）。
 
-**Cross-cutting cause**: SKILL 直接抄 Rust struct field 名（`rule_id`、`planned_pages`）但 JSON serde 序列化後欄名不同；CLI 層自身也不一致（lint 用 `rule`，quiz validate 用 `rule_id`）。agent 照 SKILL 找 field → 找不到 → silent fail。
+**Cross-cutting cause（修正後）**：原本「SKILL 抄 Rust struct field 名 → JSON 序列化後欄名不同」的 cross-cutting cause **不成立** — Rust serde 預設 field-name-as-is，沒 rename，所以 SKILL 的 `rule_id` 就是 JSON 的 `rule_id`。剩下的 F93 是另一回事（planned_pages context 漏傳是 verb-level spawn 組裝 bug，不是 SKILL field name 抄錯），改歸 verb-specific design fix。
 
-**Recommended fix**: 兩段並行——(a) Rust 層統一 JSON 欄名（lint 與 quiz validate 都用 `rule`，或都用 `rule_id`，二擇一）；(b) SKILL 引用實際 CLI JSON schema，不抄 Rust 內部 struct。
+**Recommended fix**:
+- F49a / F85：no action（撤回）。
+- F93：改 `verb/quiz.rs:587` quiz verify spawn input 加 `planned_pages=[...]` segment 進 input body。
 
 **Phase**: 4（與 F49a/F85/F93 個別 fix 一起）。
 
