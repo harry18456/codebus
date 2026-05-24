@@ -25,6 +25,20 @@ pub enum BundleOutcome {
     AlreadyPresent,
 }
 
+/// Which agent provider's SKILL body is being produced (per
+/// prompt-surface-layer-2-skill-split spec `skill-bundles`
+/// "Codex Instruction Materialization" — provider-aware body divergence).
+/// Claude path SKILL bodies reference Claude-specific runtime mechanisms
+/// (PreToolUse hook, --tools flag, Read hook, mcp_* family) and `CLAUDE.md`;
+/// codex path SKILL bodies describe codex sandbox enforcement and reference
+/// `AGENTS.md`. Both paths share frontmatter format and ~95% of body
+/// structure; only mechanism descriptions and a few inline references diverge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Provider {
+    Claude,
+    Codex,
+}
+
 pub const VERBS: &[&str] = &["goal", "query", "fix", "chat", "quiz"];
 
 /// Materialize the skill bundle stubs at the vault-internal location, and
@@ -62,6 +76,7 @@ pub fn write_bundles_if_missing(
         outcomes.push(write_bundle_if_missing(
             &skill_bundle_path(vault_root, verb),
             verb,
+            Provider::Claude,
         )?);
     }
     if write_repo_root {
@@ -69,6 +84,7 @@ pub fn write_bundles_if_missing(
             outcomes.push(write_bundle_if_missing(
                 &skill_bundle_path(repo_root, verb),
                 verb,
+                Provider::Claude,
             )?);
         }
     }
@@ -85,14 +101,18 @@ pub fn skill_bundle_path(base: &Path, verb: &str) -> PathBuf {
         .join("SKILL.md")
 }
 
-fn write_bundle_if_missing(path: &Path, verb: &str) -> io::Result<BundleOutcome> {
+fn write_bundle_if_missing(
+    path: &Path,
+    verb: &str,
+    provider: Provider,
+) -> io::Result<BundleOutcome> {
     if path.exists() {
         return Ok(BundleOutcome::AlreadyPresent);
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, stub_content(verb))?;
+    fs::write(path, stub_content(verb, provider))?;
     Ok(BundleOutcome::Written)
 }
 
@@ -132,6 +152,7 @@ pub fn write_codex_materialization_if_missing(
         outcomes.push(write_bundle_if_missing(
             &codex_skill_bundle_path(vault_root, verb),
             verb,
+            Provider::Codex,
         )?);
     }
     let combined_agents_md = format!("{agents_md_content}\n\n{CODEX_AGENTS_SOFT_CONSTRAINT}");
@@ -179,19 +200,79 @@ fn write_plain_file_if_missing(path: &Path, content: &str) -> io::Result<BundleO
     Ok(BundleOutcome::Written)
 }
 
-fn stub_content(verb: &str) -> String {
+/// Translate the claude-source body bytes into the codex variant per
+/// prompt-surface-layer-2-skill-split spec `skill-bundles` "Codex
+/// Instruction Materialization" provider-aware body divergence rules.
+/// Applied to the FULL final body (shared head + workflow section, or
+/// CHAT_SKILL_CONTENT, or QUIZ_SKILL_CONTENT) — the claude body is the
+/// source of truth, codex is derived. Each replacement here corresponds
+/// to one or more findings in `docs/2026-05-23-prompt-surface-inventory.md`
+/// §8 (F19/F40/F49/F65/F66/F67/F72/F73/F79 etc.).
+fn claude_to_codex_translate(body: String) -> String {
+    // F19/F67/F79: schema doc filename — codex's cwd schema doc is AGENTS.md
+    // (CLAUDE.md does not exist on the codex path; vault init materializes
+    // NEUTRAL_RULES as AGENTS.md when codex is the active provider).
+    let body = body.replace("CLAUDE.md", "AGENTS.md");
+    // F49: FIX_WORKFLOW Step 1 PreToolUse hook description — codex has no
+    // PreToolUse hook; the equivalent is the codex sandbox `-s read-only`
+    // plus a per-command allowance (Phase 5 spike, not yet implemented;
+    // current codex `fix` invocation falls back to broader sandbox).
+    let body = body.replace(
+        "The PreToolUse hook installed by `codebus init` permits `codebus lint *` and blocks any other Bash invocation, so this is the only shell command available — and it is enough.",
+        "The codex sandbox at fix-spawn time is configured to permit only `codebus lint *` for the duration of this workflow (per-command allowance equivalent), so this is the only shell command available — and it is enough.",
+    );
+    // F40: QUERY_WORKFLOW Read-Only Invariant — codex enforces read-only via
+    // sandbox `-s read-only`, not via `--tools` flag (which is claude-only).
+    let body = body.replace(
+        "(`--tools Read,Glob,Grep` was passed when this agent was spawned, so Write and Edit attempts will fail at runtime)",
+        "(the codex sandbox `-s read-only` posture means Write and Edit attempts fail at runtime)",
+    );
+    // F65/F66: CHAT_SKILL_CONTENT Read-Only Invariant — claude mentions
+    // `--tools` flag AND the `mcp_*` family (mcp_ tools are not gated by
+    // `--tools` so prompt-layer exclusion is needed). codex has no mcp_*
+    // tool namespace AND uses sandbox `-s read-only` not `--tools`. The
+    // entire claude paragraph is replaced with a codex-equivalent shorter
+    // paragraph.
+    let body = body.replace(
+        "This workflow is **strictly read-only**. The agent MUST NOT call `Write`, `Edit`, `NotebookEdit`, or any tool whose name begins with `mcp_` (e.g. `mcp_claude_ai_Figma_authenticate`, `mcp_claude_ai_Gmail_authenticate`). The binary-layer toolset is gated at spawn time (`--tools Read,Glob,Grep`) so attempts to call Write / Edit / NotebookEdit fail at runtime regardless; however the `mcp_*` family is NOT covered by the `--tools` flag and is forbidden only by this prompt-layer constraint. Treat this rule as load-bearing even when an `mcp_*` tool appears to be available in the runtime toolset.",
+        "This workflow is **strictly read-only**. The agent MUST NOT call `Write`, `Edit`, or `NotebookEdit`. The codex sandbox is configured as `-s read-only` at spawn time, so attempts to call Write / Edit / NotebookEdit fail at runtime regardless; this SKILL.md restates the invariant for defense-in-depth.",
+    );
+    // F73 (Pattern 9): QUIZ_SKILL_CONTENT Mode B self-validate — claude uses
+    // a Bash heredoc invocation of `codebus quiz validate` gated by the
+    // PreToolUse hook. codex's sandbox `-s` lacks a per-command allowance
+    // level needed to safely run a single shell command inside Mode B
+    // (Phase 5 spike). The codex variant emits a [CODEBUS_QUIZ_NO_VALIDATE]
+    // marker line instead AND skips the validate loop entirely — caller's
+    // post-agent `codebus quiz validate` run handles downstream validation.
+    let body = body.replace(
+        "### Self-validate before emitting (Mode B only)\n\nBefore you emit the final body, verify it deterministically:\n\n1. Validate your draft via the Bash tool using a heredoc fed straight into codebus — the command MUST start with `codebus` (the sandbox hook only permits a Bash command whose first word is `codebus`):\n\n       codebus quiz validate - <<'CBQZ'\n       ## Q1. ...\n       ... your entire draft body ...\n       CBQZ\n\n   `-` means read the body from stdin; the heredoc supplies it. It exits 0 with no findings when the draft is structurally sound and every `[[slug]]` citation resolves; otherwise it lists findings (add `--json` before the heredoc for machine-readable output). Do NOT use `cat ... | codebus quiz validate -` (a pipeline's first word is `cat`, which the sandbox hook blocks) and do NOT try to write the draft to a temp file first (you have no file-writing tool — the heredoc is the only way).\n2. If it reports findings, fix exactly the questions it names, then run it again.\n3. Repeat this validate→fix→re-validate loop **at most 3** times. When that cap is reached, emit your best current body rather than looping further — do not keep iterating past the cap.\n4. `codebus quiz validate` is the sole authority for structural and citation correctness. Act on its findings; do NOT reproduce, restate, or argue its rules here — the rules live in the validator, not in this skill.",
+        "### Self-validate before emitting (Mode B only) — codex path: NOT AVAILABLE\n\nThe codex provider's sandbox `-s` levels (`read-only` / `workspace-write` / `danger-full-access`) lack a per-command allowance that would let this agent run `codebus quiz validate` from inside Mode B safely. Instead of attempting validation here:\n\n1. As the FIRST line of your response, emit `[CODEBUS_QUIZ_NO_VALIDATE] <short reason in 5-15 words naming what would have been validated>`, then a blank line, then your draft starting with `## Q1.`.\n2. Skip the validate / fix / re-validate loop entirely; emit your best draft directly.\n3. The caller (codebus CLI) will run `codebus quiz validate` after this agent terminates and use that result as the authoritative success signal — the agent's responsibility ends at marker + body emission.\n\n(Codex per-command allowance is tracked as a Phase 5 spike in the prompt-surface-review backlog. Until that is resolved, codex quiz Mode B remains best-effort with no in-session structural self-check.)",
+    );
+    // F72: QUIZ_SKILL_CONTENT Read-Only Invariant — claude uses mcp_*
+    // exclusion + `--tools` gating + PreToolUse hook for per-mode language.
+    // codex uses sandbox `-s read-only` for plan: mode and sandbox plus a
+    // per-command allowance for generate: mode (Mode B self-validation
+    // mechanism details are handled separately above / F73).
+    let body = body.replace(
+        "This workflow does NOT modify the vault. The agent MUST NOT call `Write`, `Edit`, `NotebookEdit`, or any tool whose name begins with `mcp_`. The `mcp_*` family is forbidden only by this prompt-layer constraint — treat this rule as load-bearing even when an `mcp_*` tool appears available.\n\n`plan:` mode is gated read-only at spawn (`--tools Read,Glob,Grep`). `generate:` mode additionally has a `Bash` tool that is hard-gated at spawn to exactly one command — `codebus quiz validate ...` — used only for the Mode B self-validation step below. No other `Bash` command will be permitted (the PreToolUse hook blocks it); do not attempt any other shell command.",
+        "This workflow does NOT modify the vault. The agent MUST NOT call `Write`, `Edit`, or `NotebookEdit`.\n\n`plan:` mode runs under codex sandbox `-s read-only`. `generate:` mode runs under codex sandbox with a per-command allowance scoped to `codebus quiz validate ...` for the Mode B self-validation step below; no other Bash command is permitted at runtime.",
+    );
+    body
+}
+
+fn stub_content(verb: &str, provider: Provider) -> String {
     // v3-chat-verb: chat has a distinct SKILL structure (read-only sandbox,
     // multi-turn workflow, promote-suggestion line marker emission rule,
     // MCP prompt-layer exclusion) — return a completely separate body
     // rather than shoe-horning it into the goal/query/fix shell.
     if verb == "chat" {
-        return CHAT_SKILL_CONTENT.to_string();
+        return finalize_for_provider(CHAT_SKILL_CONTENT.to_string(), provider);
     }
     // v3-app-quiz: quiz is also a distinct SKILL structure (two prompt
     // modes, scope/no-match/violation line markers, wiki-only read scope,
     // caller-owned frontmatter) — separate body like chat.
     if verb == "quiz" {
-        return QUIZ_SKILL_CONTENT.to_string();
+        return finalize_for_provider(QUIZ_SKILL_CONTENT.to_string(), provider);
     }
     let description = match verb {
         "goal" => "Trigger codebus goal-ingest workflow on the active codebus vault",
@@ -199,7 +280,16 @@ fn stub_content(verb: &str) -> String {
         "fix" => "Trigger codebus lint-feedback fix loop on the active codebus vault",
         _ => "codebus skill",
     };
-    let workflow = workflow_section(verb);
+    // Compute the claude-source body first; finalize_for_provider handles
+    // the codex translation pass at the end. All consts (CHAT_SKILL_CONTENT
+    // / QUIZ_SKILL_CONTENT / shared head + workflow_section) flow through
+    // one dispatch point. See claude_to_codex_translate for the rules.
+    let workflow = workflow_section(verb, provider);
+    let body = format_shared_head_body(verb, description, &workflow);
+    finalize_for_provider(body, provider)
+}
+
+fn format_shared_head_body(verb: &str, description: &str, workflow: &str) -> String {
     format!(
         "---\n\
          name: codebus-{verb}\n\
@@ -208,7 +298,7 @@ fn stub_content(verb: &str) -> String {
          \n\
          # codebus-{verb}\n\
          \n\
-         Trigger this skill when the user types `/codebus-{verb}` (typically the codebus binary spawns the agentic CLI with cwd at this vault root for you).\n\
+         Activate this skill when the user's request matches the `description` above; the workflow below operates on the codebus vault at the current working directory. The spawning host (codebus CLI / GUI) sets the cwd to the vault root and routes the request here — the SKILL body does not name a specific invocation syntax.\n\
          \n\
          ## Schema rules\n\
          \n\
@@ -230,10 +320,21 @@ fn stub_content(verb: &str) -> String {
     )
 }
 
+/// Final provider-aware translation pass. Claude is the source of truth;
+/// codex flows through claude_to_codex_translate. All bodies (shared head
+/// + workflow, CHAT_SKILL_CONTENT, QUIZ_SKILL_CONTENT) go through here.
+fn finalize_for_provider(body: String, provider: Provider) -> String {
+    match provider {
+        Provider::Claude => body,
+        Provider::Codex => claude_to_codex_translate(body),
+    }
+}
+
 /// `## Workflow` section per verb. Goal carries the 5-step ingest content
 /// (v3-goal); query carries the 4-step read-only lookup content (v3-query);
 /// fix carries the v3-lint atomic-contract repair workflow.
-fn workflow_section(verb: &str) -> String {
+fn workflow_section(verb: &str, provider: Provider) -> String {
+    let _ = provider; // body divergence implemented in subsequent tasks; signature established now
     match verb {
         "goal" => GOAL_WORKFLOW.to_string(),
         "query" => QUERY_WORKFLOW.to_string(),
@@ -269,7 +370,7 @@ When this skill is activated, follow these 5 steps in order:
 
 1. **Explore raw**: use Glob / Read on `raw/code/` to locate sources relevant to the goal. Do not read every file end-to-end — scan entry / module-level structure.
 
-2. **Plan pages**: cross-reference existing pages under `wiki/`. Decide which pages to create vs update. Page placements live under five taxonomy folders: `concepts/`, `entities/`, `modules/`, `processes/`, `synthesis/`; each folder's page-type definition lives in cwd `CLAUDE.md`.
+2. **Plan pages**: cross-reference existing pages under `wiki/`. Decide which pages to create vs update. Page placements use the five taxonomy folders defined in cwd `CLAUDE.md` §2 Wiki Structure — that document is the canonical source for the folder list AND per-type page definitions; do not duplicate the enumeration here.
 
 3. **Write frontmatter + body**: every new page MUST carry frontmatter (taxonomy / sources / etc.) and a body. Frontmatter required fields and format come from `CLAUDE.md`; this SKILL.md does not duplicate them.
 
@@ -312,7 +413,7 @@ const QUERY_WORKFLOW: &str = "## Workflow (per-query lookup)
 
 When this skill is activated, follow these 4 steps in order:
 
-1. **Parse the query**: parse the user's question text. Identify which taxonomy folders under `wiki/` (`concepts/`, `entities/`, `modules/`, `processes/`, `synthesis/`) are most likely relevant given the question's subject.
+1. **Parse the query**: parse the user's question text. Identify which taxonomy folders under `wiki/` are most likely relevant given the question's subject — the folder list and per-type definitions are defined in cwd `CLAUDE.md` §2 Wiki Structure.
 
 2. **Find candidate pages**: use Glob and Read to scan `wiki/` for pages whose frontmatter (title, sources, related) matches the query. Read frontmatter first as a lightweight relevance filter; only read body when the frontmatter signals a match.
 
@@ -358,7 +459,7 @@ description: Trigger codebus multi-turn read-only chat workflow on the active co
 
 # codebus-chat
 
-Trigger this skill when the user types `/codebus-chat` (typically the codebus binary spawns the agentic CLI with cwd at this vault root for you). This is **multi-turn** — each user message extends the same ongoing conversation rather than starting a fresh agent run.
+Activate this skill when the user's request matches the `description` above. The spawning host (codebus CLI / GUI) sets the cwd to the vault root and routes the request here — the SKILL body does not name a specific invocation syntax. This is **multi-turn** — each user message extends the same ongoing conversation rather than starting a fresh agent run.
 
 ## Schema rules
 
@@ -437,7 +538,7 @@ description: Trigger codebus read-only quiz workflow on the active codebus vault
 
 # codebus-quiz
 
-Trigger this skill when the user types `/codebus-quiz` (typically the codebus binary spawns the agentic CLI with cwd at this vault root for you).
+Activate this skill when the user's request matches the `description` above. The spawning host (codebus CLI / GUI) sets the cwd to the vault root and routes the request here — the SKILL body does not name a specific invocation syntax.
 
 ## Schema rules
 
@@ -804,7 +905,7 @@ mod tests {
     /// separate from the deterministic lint rules (no rule restatement).
     #[test]
     fn goal_skill_defines_verify_mode_three_defect_contract() {
-        let body = stub_content("goal");
+        let body = stub_content("goal", Provider::Claude);
 
         assert!(
             body.contains("verify:"),
@@ -845,7 +946,7 @@ mod tests {
     /// scenario: Verify mode does not duplicate lint rules.
     #[test]
     fn goal_verify_mode_grounding_and_lint_separation() {
-        let body = stub_content("goal");
+        let body = stub_content("goal", Provider::Claude);
 
         // explicitly permits reading raw/code/ for the faithfulness check
         assert!(
@@ -871,7 +972,7 @@ mod tests {
         // Spec scenario: codebus-goal workflow body is written in English.
         // Internal surface per CLAUDE.md §0 Language Policy → no CJK
         // Unified Ideographs (U+4E00..U+9FFF) anywhere in the body.
-        let body = stub_content("goal");
+        let body = stub_content("goal", Provider::Claude);
         let cjk: Vec<char> = body
             .chars()
             .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
@@ -889,7 +990,7 @@ mod tests {
         // Spec scenario: codebus-query workflow body is written in English.
         // Internal surface per CLAUDE.md §0 Language Policy → no CJK
         // Unified Ideographs (U+4E00..U+9FFF) anywhere in the body.
-        let body = stub_content("query");
+        let body = stub_content("query", Provider::Claude);
         let cjk: Vec<char> = body
             .chars()
             .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
@@ -908,7 +1009,7 @@ mod tests {
         // Body MUST NOT contain canned answer phrases, MUST reference
         // CLAUDE.md, AND MUST include explicit "do not copy verbatim"
         // directive.
-        let body = stub_content("query");
+        let body = stub_content("query", Provider::Claude);
 
         let forbidden_literals = [
             "Here is the answer",
@@ -943,7 +1044,7 @@ mod tests {
         // `--tools Read,Glob,Grep`, but SKILL.md restates the invariant so
         // a hypothetical future toolset-mechanism change does not silently
         // unlock writes.
-        let body = stub_content("query");
+        let body = stub_content("query", Provider::Claude);
         assert!(
             body.contains("MUST NOT use Write"),
             "query SKILL.md body must explicitly forbid Write/Edit"
@@ -960,7 +1061,7 @@ mod tests {
     /// kept for spec stability; the content is fully rewritten.)
     #[test]
     fn fix_workflow_body_does_not_prescribe_atomic_single_round() {
-        let body = stub_content("fix");
+        let body = stub_content("fix", Provider::Claude);
         let forbidden_literal_phrases = [
             "ONE round of repair",
             "atomic contract",
@@ -980,7 +1081,7 @@ mod tests {
     /// directly with Read/Write/Edit, no path translation.
     #[test]
     fn fix_workflow_instructs_absolute_path_use_from_lint_json() {
-        let body = stub_content("fix");
+        let body = stub_content("fix", Provider::Claude);
         assert!(
             body.contains("absolute filesystem path") || body.contains("absolute path"),
             "fix SKILL.md missing absolute-path instruction"
@@ -1004,7 +1105,7 @@ mod tests {
     /// and the agent itself decides when its in-session work is complete.
     #[test]
     fn fix_workflow_states_cli_is_final_only_verifier() {
-        let body = stub_content("fix");
+        let body = stub_content("fix", Provider::Claude);
         // The workflow MUST have a section explicitly explaining the
         // CLI's authority is post-session lint only.
         assert!(
@@ -1021,7 +1122,7 @@ mod tests {
     #[test]
     fn fix_workflow_body_is_english() {
         // Same internal-surface English-only invariant as goal/query.
-        let body = stub_content("fix");
+        let body = stub_content("fix", Provider::Claude);
         let cjk: Vec<char> = body
             .chars()
             .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
@@ -1041,7 +1142,7 @@ mod tests {
         // phrases the agent could copy verbatim into stdout, MUST
         // reference CLAUDE.md as the language source-of-truth, AND MUST
         // include an explicit "do not copy verbatim" directive.
-        let body = stub_content("goal");
+        let body = stub_content("goal", Provider::Claude);
 
         // Forbidden literal sample phrases that the agent could parrot
         // into the user-facing stdout summary. v3-goal smoke (2026-05-09)
@@ -1079,72 +1180,109 @@ mod tests {
     /// (with trailing space), a Read-Only Invariant section, and the
     /// `name: codebus-chat` frontmatter line. Sourced from the spike v0
     /// draft that passed 4/4 emission scenarios.
-    #[test]
-    fn stub_content_chat_contains_promote_marker_format() {
-        let body = stub_content("chat");
+    fn stub_content_chat_contains_promote_marker_format_impl(provider: Provider) {
+        let body = stub_content("chat", provider);
         assert!(
             body.starts_with("---\n"),
-            "chat SKILL must begin with YAML frontmatter"
+            "chat SKILL must begin with YAML frontmatter (provider={provider:?})"
         );
         assert!(
             body.contains("name: codebus-chat"),
-            "chat SKILL frontmatter must set `name: codebus-chat`"
+            "chat SKILL frontmatter must set `name: codebus-chat` (provider={provider:?})"
         );
         assert!(
             body.contains("[CODEBUS_PROMOTE_SUGGESTION] "),
-            "chat SKILL body must declare the literal marker prefix (with trailing space)"
+            "chat SKILL body must declare the literal marker prefix (provider={provider:?})"
         );
         assert!(
             body.contains("Read-Only Invariant"),
-            "chat SKILL body must include the Read-Only Invariant section header"
+            "chat SKILL body must include the Read-Only Invariant section header (provider={provider:?})"
         );
         // Non-ASCII example reason demonstrates language-agnostic emission.
         assert!(
             body.contains("\u{5E6B}\u{6211}"),
-            "chat SKILL body must contain at least one non-ASCII (Chinese) example for the marker"
+            "chat SKILL body must contain at least one non-ASCII (Chinese) example for the marker (provider={provider:?})"
         );
+    }
+
+    #[test]
+    fn stub_content_chat_contains_promote_marker_format_claude() {
+        stub_content_chat_contains_promote_marker_format_impl(Provider::Claude);
+    }
+
+    #[test]
+    fn stub_content_chat_contains_promote_marker_format_codex() {
+        stub_content_chat_contains_promote_marker_format_impl(Provider::Codex);
     }
 
     /// v3-chat-verb `MCP Tool Prompt Layer Exclusion` requirement:
     /// chat SKILL body must explicitly forbid the `mcp_*` tool family
     /// under the Read-Only Invariant / hard-scope section, because those
     /// tools are NOT gated by `--tools` at the binary layer.
+    fn stub_content_chat_explicitly_forbids_mcp_tools_impl(provider: Provider) {
+        // Task 5.1 / F66 divergence: claude path keeps prompt-layer mcp_*
+        // exclusion (because mcp_ tools are NOT gated by --tools flag);
+        // codex path removes mcp_ section entirely (codex has no mcp_*
+        // tool namespace — the exclusion is moot).
+        let body = stub_content("chat", provider);
+        match provider {
+            Provider::Claude => {
+                assert!(
+                    body.contains("mcp_"),
+                    "claude chat SKILL must mention the `mcp_` tool name prefix"
+                );
+                let mcp_pos = body
+                    .find("mcp_")
+                    .expect("mcp_ already asserted to exist above");
+                let workflow_pos = body
+                    .find("## Workflow")
+                    .expect("chat SKILL must have a Workflow section");
+                assert!(
+                    mcp_pos < workflow_pos,
+                    "MCP exclusion must appear BEFORE the Workflow section (mcp_ at {mcp_pos}, workflow at {workflow_pos})"
+                );
+                assert!(
+                    body.contains("MUST NOT") && body.contains("`mcp_"),
+                    "claude chat SKILL must phrase MCP exclusion as a MUST NOT directive"
+                );
+            }
+            Provider::Codex => {
+                assert!(
+                    !body.contains("mcp_"),
+                    "codex chat SKILL must NOT mention `mcp_` — codex has no mcp_* tool namespace, the exclusion is irrelevant"
+                );
+            }
+        }
+    }
+
     #[test]
-    fn stub_content_chat_explicitly_forbids_mcp_tools() {
-        let body = stub_content("chat");
-        assert!(
-            body.contains("mcp_"),
-            "chat SKILL must mention the `mcp_` tool name prefix"
-        );
-        // The constraint must live alongside the read-only invariant — i.e.
-        // before the workflow / promote-suggestion sections — so an agent
-        // reading top-down sees it as load-bearing.
-        let mcp_pos = body
-            .find("mcp_")
-            .expect("mcp_ already asserted to exist above");
-        let workflow_pos = body
-            .find("## Workflow")
-            .expect("chat SKILL must have a Workflow section");
-        assert!(
-            mcp_pos < workflow_pos,
-            "MCP exclusion must appear BEFORE the Workflow section (found mcp_ at {mcp_pos}, workflow at {workflow_pos})"
-        );
-        // And the prohibition must be phrased as a hard rule.
-        assert!(
-            body.contains("MUST NOT") && body.contains("`mcp_"),
-            "chat SKILL must phrase MCP exclusion as a MUST NOT directive"
-        );
+    fn stub_content_chat_explicitly_forbids_mcp_tools_claude() {
+        stub_content_chat_explicitly_forbids_mcp_tools_impl(Provider::Claude);
+    }
+
+    #[test]
+    fn stub_content_chat_explicitly_forbids_mcp_tools_codex() {
+        stub_content_chat_explicitly_forbids_mcp_tools_impl(Provider::Codex);
     }
 
     /// v3-chat-verb `Chat Verb Toolset` requirement (defense in depth):
     /// chat SKILL body also names `Write` / `Edit` as forbidden at the
     /// prompt layer, even though `--tools Read,Glob,Grep` already gates
     /// them at the binary layer.
+    fn stub_content_chat_explicitly_forbids_write_edit_impl(provider: Provider) {
+        let body = stub_content("chat", provider);
+        assert!(body.contains("`Write`"), "provider={provider:?}");
+        assert!(body.contains("`Edit`"), "provider={provider:?}");
+    }
+
     #[test]
-    fn stub_content_chat_explicitly_forbids_write_edit() {
-        let body = stub_content("chat");
-        assert!(body.contains("`Write`"));
-        assert!(body.contains("`Edit`"));
+    fn stub_content_chat_explicitly_forbids_write_edit_claude() {
+        stub_content_chat_explicitly_forbids_write_edit_impl(Provider::Claude);
+    }
+
+    #[test]
+    fn stub_content_chat_explicitly_forbids_write_edit_codex() {
+        stub_content_chat_explicitly_forbids_write_edit_impl(Provider::Codex);
     }
 
     /// v3-app-quiz task 3.1 — executable "content review against spec"
@@ -1158,7 +1296,7 @@ mod tests {
     /// definitions (no schema double-delivery, roadmap anti-pattern #2).
     #[test]
     fn quiz_skill_defines_bounded_self_validate_loop() {
-        let body = stub_content("quiz");
+        let body = stub_content("quiz", Provider::Claude);
 
         // references the validator command for self-checking
         assert!(
@@ -1193,7 +1331,7 @@ mod tests {
     /// `codebus quiz validate` structural check (no rule restatement).
     #[test]
     fn quiz_skill_defines_verify_mode_five_defect_contract() {
-        let body = stub_content("quiz");
+        let body = stub_content("quiz", Provider::Claude);
 
         assert!(
             body.contains("verify:"),
@@ -1235,65 +1373,346 @@ mod tests {
     }
 
     /// pins a spec/D4 clause so a future edit cannot silently drop it.
-    #[test]
-    fn stub_content_quiz_satisfies_skill_bundle_spec() {
-        let body = stub_content("quiz");
+    fn stub_content_quiz_satisfies_skill_bundle_spec_impl(provider: Provider) {
+        let body = stub_content("quiz", provider);
 
         // frontmatter name/description
-        assert!(body.contains("name: codebus-quiz"));
+        assert!(body.contains("name: codebus-quiz"), "provider={provider:?}");
 
         // wiki-only read scope; raw/log/cwd-escape forbidden
-        assert!(body.contains("`wiki/`"));
-        assert!(body.contains("MUST NOT read `raw/`, `raw/code/`, `log/`"));
+        assert!(body.contains("`wiki/`"), "provider={provider:?}");
+        assert!(body.contains("MUST NOT read `raw/`, `raw/code/`, `log/`"), "provider={provider:?}");
 
         // two prompt modes
-        assert!(body.contains("`plan: <topic>`"));
-        assert!(body.contains("`generate: pages=["));
+        assert!(body.contains("`plan: <topic>`"), "provider={provider:?}");
+        assert!(body.contains("`generate: pages=["), "provider={provider:?}");
 
         // three line markers (literal English)
-        assert!(body.contains("[CODEBUS_QUIZ_SCOPE]"));
-        assert!(body.contains("[CODEBUS_QUIZ_NO_MATCH]"));
-        assert!(body.contains("[CODEBUS_QUIZ_VIOLATION]"));
+        assert!(body.contains("[CODEBUS_QUIZ_SCOPE]"), "provider={provider:?}");
+        assert!(body.contains("[CODEBUS_QUIZ_NO_MATCH]"), "provider={provider:?}");
+        assert!(body.contains("[CODEBUS_QUIZ_VIOLATION]"), "provider={provider:?}");
 
         // quiz-md question structure
-        assert!(body.contains("## Q1."));
-        assert!(body.contains("- A) <choice>"));
-        assert!(body.contains("## Answer: <A|B|C|D>"));
-        assert!(body.contains("## Explanation:"));
-        assert!(body.contains("[[slug]]"));
+        assert!(body.contains("## Q1."), "provider={provider:?}");
+        assert!(body.contains("- A) <choice>"), "provider={provider:?}");
+        assert!(body.contains("## Answer: <A|B|C|D>"), "provider={provider:?}");
+        assert!(body.contains("## Explanation:"), "provider={provider:?}");
+        assert!(body.contains("[[slug]]"), "provider={provider:?}");
 
         // design D4: agent must NOT author frontmatter (caller-owned);
         // no code fence around the body
-        assert!(body.contains("MUST NOT author `quiz_id`"));
-        assert!(body.contains("caller (codebus CLI / GUI) injects all frontmatter"));
-        assert!(body.contains("NO frontmatter, NO code fence"));
+        assert!(body.contains("MUST NOT author `quiz_id`"), "provider={provider:?}");
+        assert!(body.contains("caller (codebus CLI / GUI) injects all frontmatter"), "provider={provider:?}");
+        assert!(body.contains("NO frontmatter, NO code fence"), "provider={provider:?}");
 
         // Language Override: markers always English, content follows page
-        assert!(body.contains("Language Override"));
-        assert!(body.contains("ALWAYS literal English"));
+        assert!(body.contains("Language Override"), "provider={provider:?}");
+        assert!(body.contains("ALWAYS literal English"), "provider={provider:?}");
 
-        // read-only tool gate + mcp prompt-layer exclusion
-        assert!(body.contains("`Write`"));
-        assert!(body.contains("`Edit`"));
-        assert!(body.contains("`NotebookEdit`"));
-        assert!(body.contains("mcp_"));
+        // read-only tool gate
+        assert!(body.contains("`Write`"), "provider={provider:?}");
+        assert!(body.contains("`Edit`"), "provider={provider:?}");
+        assert!(body.contains("`NotebookEdit`"), "provider={provider:?}");
+        // mcp prompt-layer exclusion: claude has mcp_* tool namespace and
+        // needs prompt-layer exclusion (--tools doesn't gate mcp_*); codex
+        // has no mcp_* namespace so the entire mcp section is removed in
+        // the codex variant (per task 5.1/6.1 + F66 divergence).
+        match provider {
+            Provider::Claude => assert!(body.contains("mcp_"), "claude quiz body must mention mcp_*"),
+            Provider::Codex => assert!(!body.contains("mcp_"), "codex quiz body must NOT mention mcp_* (codex has no mcp_* namespace)"),
+        }
+    }
+
+    #[test]
+    fn stub_content_quiz_satisfies_skill_bundle_spec_claude() {
+        stub_content_quiz_satisfies_skill_bundle_spec_impl(Provider::Claude);
+    }
+
+    #[test]
+    fn stub_content_quiz_satisfies_skill_bundle_spec_codex() {
+        stub_content_quiz_satisfies_skill_bundle_spec_impl(Provider::Codex);
     }
 
     /// Spike v0 → production correction: the quiz SKILL must NOT instruct
     /// the agent to emit a `quiz_id:` / `generation_token_usage:`
     /// frontmatter block (design D4 — caller owns frontmatter; spike ❾
     /// found LLM-authored quiz_id unreliable).
-    #[test]
-    fn stub_content_quiz_does_not_instruct_agent_frontmatter() {
-        let body = stub_content("quiz");
+    fn stub_content_quiz_does_not_instruct_agent_frontmatter_impl(provider: Provider) {
+        let body = stub_content("quiz", provider);
         assert!(
             !body.contains("quiz_id: <ISO timestamp"),
-            "quiz SKILL must not template an agent-authored quiz_id frontmatter"
+            "quiz SKILL must not template an agent-authored quiz_id frontmatter (provider={provider:?})"
         );
         assert!(
             !body.contains("generation_token_usage:\n  input:"),
-            "quiz SKILL must not template agent-authored token usage frontmatter"
+            "quiz SKILL must not template agent-authored token usage frontmatter (provider={provider:?})"
         );
+    }
+
+    #[test]
+    fn stub_content_quiz_does_not_instruct_agent_frontmatter_claude() {
+        stub_content_quiz_does_not_instruct_agent_frontmatter_impl(Provider::Claude);
+    }
+
+    #[test]
+    fn stub_content_quiz_does_not_instruct_agent_frontmatter_codex() {
+        stub_content_quiz_does_not_instruct_agent_frontmatter_impl(Provider::Codex);
+    }
+
+    // Task 3.1: Shared head provider divergence (goal / query / fix).
+    // Spec scenario "Trigger language is semantic and provider-agnostic on
+    // both paths" — neither claude nor codex body SHALL contain the literal
+    // `/codebus-<verb>` or `$codebus-<verb>` trigger token.
+    // Spec scenario "Claude SKILL body references Claude-specific
+    // mechanisms; codex body does not" — schema doc filename slice:
+    // claude body references `CLAUDE.md`; codex body references `AGENTS.md`
+    // and NOT `CLAUDE.md`.
+    fn assert_trigger_is_semantic(verb: &str, provider: Provider) {
+        let body = stub_content(verb, provider);
+        let claude_token = format!("/codebus-{verb}");
+        let codex_token = format!("$codebus-{verb}");
+        assert!(
+            !body.contains(&claude_token),
+            "{verb} SKILL body ({provider:?}) must not contain claude trigger literal `{claude_token}` (per spec scenario `Trigger language is semantic`)"
+        );
+        assert!(
+            !body.contains(&codex_token),
+            "{verb} SKILL body ({provider:?}) must not contain codex trigger literal `{codex_token}` (per spec scenario `Trigger language is semantic`)"
+        );
+    }
+
+    fn assert_schema_doc_filename(verb: &str, provider: Provider) {
+        let body = stub_content(verb, provider);
+        match provider {
+            Provider::Claude => {
+                assert!(
+                    body.contains("CLAUDE.md"),
+                    "claude {verb} SKILL body must reference `CLAUDE.md` as the cwd schema doc"
+                );
+            }
+            Provider::Codex => {
+                assert!(
+                    body.contains("AGENTS.md"),
+                    "codex {verb} SKILL body must reference `AGENTS.md` as the cwd schema doc"
+                );
+                assert!(
+                    !body.contains("CLAUDE.md"),
+                    "codex {verb} SKILL body must NOT reference `CLAUDE.md` (codex's cwd schema doc is `AGENTS.md`)"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stub_content_goal_trigger_is_semantic_claude() {
+        assert_trigger_is_semantic("goal", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_goal_trigger_is_semantic_codex() {
+        assert_trigger_is_semantic("goal", Provider::Codex);
+    }
+    #[test]
+    fn stub_content_query_trigger_is_semantic_claude() {
+        assert_trigger_is_semantic("query", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_query_trigger_is_semantic_codex() {
+        assert_trigger_is_semantic("query", Provider::Codex);
+    }
+    #[test]
+    fn stub_content_fix_trigger_is_semantic_claude() {
+        assert_trigger_is_semantic("fix", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_fix_trigger_is_semantic_codex() {
+        assert_trigger_is_semantic("fix", Provider::Codex);
+    }
+    #[test]
+    fn stub_content_chat_trigger_is_semantic_claude() {
+        assert_trigger_is_semantic("chat", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_chat_trigger_is_semantic_codex() {
+        assert_trigger_is_semantic("chat", Provider::Codex);
+    }
+    #[test]
+    fn stub_content_quiz_trigger_is_semantic_claude() {
+        assert_trigger_is_semantic("quiz", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_quiz_trigger_is_semantic_codex() {
+        assert_trigger_is_semantic("quiz", Provider::Codex);
+    }
+
+    #[test]
+    fn stub_content_goal_schema_doc_filename_claude() {
+        assert_schema_doc_filename("goal", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_goal_schema_doc_filename_codex() {
+        assert_schema_doc_filename("goal", Provider::Codex);
+    }
+    #[test]
+    fn stub_content_query_schema_doc_filename_claude() {
+        assert_schema_doc_filename("query", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_query_schema_doc_filename_codex() {
+        assert_schema_doc_filename("query", Provider::Codex);
+    }
+    #[test]
+    fn stub_content_fix_schema_doc_filename_claude() {
+        assert_schema_doc_filename("fix", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_fix_schema_doc_filename_codex() {
+        assert_schema_doc_filename("fix", Provider::Codex);
+    }
+
+    // Task 4.1: FIX_WORKFLOW + QUERY_WORKFLOW claude-mechanism leak fixes.
+    // Spec scenario "Claude SKILL body references Claude-specific
+    // mechanisms; codex body does not" — for fix verb (PreToolUse hook
+    // language) and query verb (--tools flag language).
+    #[test]
+    fn stub_content_fix_claude_contains_pretooluse() {
+        let body = stub_content("fix", Provider::Claude);
+        assert!(
+            body.contains("PreToolUse"),
+            "claude fix SKILL body must describe the PreToolUse hook mechanism (F49 — Step 1 hook gating description is claude-specific)"
+        );
+    }
+
+    #[test]
+    fn stub_content_fix_codex_no_pretooluse() {
+        let body = stub_content("fix", Provider::Codex);
+        assert!(
+            !body.contains("PreToolUse"),
+            "codex fix SKILL body must NOT contain `PreToolUse` literal — codex has no PreToolUse hook (F49)"
+        );
+    }
+
+    #[test]
+    fn stub_content_query_claude_contains_tools_flag() {
+        let body = stub_content("query", Provider::Claude);
+        assert!(
+            body.contains("--tools Read,Glob,Grep"),
+            "claude query SKILL body Read-Only Invariant must describe `--tools Read,Glob,Grep` mechanism (F40)"
+        );
+    }
+
+    #[test]
+    fn stub_content_query_codex_no_tools_flag() {
+        let body = stub_content("query", Provider::Codex);
+        assert!(
+            !body.contains("--tools Read,Glob,Grep"),
+            "codex query SKILL body must NOT contain `--tools Read,Glob,Grep` literal — codex uses sandbox `-s read-only` instead (F40)"
+        );
+    }
+
+    // Task 6.1: QUIZ_SKILL_CONTENT Read-Only Invariant claude-mechanism leak.
+    // F72: claude version describes --tools flag + mcp_* exclusion + PreToolUse
+    // hook; codex version uses sandbox `-s read-only` + per-command allowance.
+    #[test]
+    fn stub_content_quiz_claude_contains_tools_flag() {
+        let body = stub_content("quiz", Provider::Claude);
+        assert!(
+            body.contains("--tools Read,Glob,Grep"),
+            "claude quiz SKILL body must describe `--tools Read,Glob,Grep` mechanism (F72)"
+        );
+    }
+
+    #[test]
+    fn stub_content_quiz_codex_no_tools_flag() {
+        let body = stub_content("quiz", Provider::Codex);
+        assert!(
+            !body.contains("--tools Read,Glob,Grep"),
+            "codex quiz SKILL body must NOT contain `--tools Read,Glob,Grep` literal — codex uses sandbox `-s read-only` (F72)"
+        );
+    }
+
+    // Task 6.2 / F73 Pattern 9: QUIZ Mode B self-validate divergence.
+    // Spec scenario "Codex quiz Mode B emits no-validate marker instead of
+    // running validate" — claude keeps bash heredoc invocation, codex emits
+    // [CODEBUS_QUIZ_NO_VALIDATE] marker and skips the validate loop.
+    #[test]
+    fn stub_content_quiz_claude_mode_b_has_heredoc() {
+        let body = stub_content("quiz", Provider::Claude);
+        assert!(
+            body.contains("<<'CBQZ'"),
+            "claude quiz SKILL body Mode B must contain bash heredoc marker `<<'CBQZ'`"
+        );
+        assert!(
+            body.contains("codebus quiz validate"),
+            "claude quiz SKILL body must invoke `codebus quiz validate` in Mode B self-validate loop"
+        );
+    }
+
+    #[test]
+    fn stub_content_quiz_codex_mode_b_no_validate_marker() {
+        let body = stub_content("quiz", Provider::Codex);
+        assert!(
+            body.contains("[CODEBUS_QUIZ_NO_VALIDATE]"),
+            "codex quiz SKILL body Mode B must contain `[CODEBUS_QUIZ_NO_VALIDATE]` marker (F73 — codex sandbox lacks per-command allowance to run validate in-session)"
+        );
+        assert!(
+            !body.contains("<<'CBQZ'"),
+            "codex quiz SKILL body must NOT contain bash heredoc marker `<<'CBQZ'` (codex on Windows uses PowerShell — heredoc unsupported)"
+        );
+    }
+
+    // Task 7.1: Taxonomy enum dedup — F32 (goal Step 2) + F45 (query Step 1).
+    // Spec scenario "Taxonomy enumeration not duplicated in either provider's
+    // SKILL body" — neither claude nor codex variants of goal/query bodies
+    // SHALL contain the full five-folder enumeration; both reference §2 of
+    // cwd schema doc instead.
+    fn assert_no_taxonomy_enum(verb: &str, provider: Provider) {
+        let body = stub_content(verb, provider);
+        let full_enum = "`concepts/`, `entities/`, `modules/`, `processes/`, `synthesis/`";
+        assert!(
+            !body.contains(full_enum),
+            "{verb} SKILL body ({provider:?}) must NOT contain the full taxonomy enum literal (Pattern 1 Layer 2: SKILL workflows reference §2, do not duplicate the enum)"
+        );
+    }
+
+    fn assert_references_schema_doc_section(verb: &str, provider: Provider) {
+        let body = stub_content(verb, provider);
+        assert!(
+            body.contains("§2") || body.contains("Wiki Structure"),
+            "{verb} SKILL body ({provider:?}) must reference cwd schema doc `§2` or `Wiki Structure` for taxonomy definitions"
+        );
+    }
+
+    #[test]
+    fn stub_content_goal_no_taxonomy_enum_claude() {
+        assert_no_taxonomy_enum("goal", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_goal_no_taxonomy_enum_codex() {
+        assert_no_taxonomy_enum("goal", Provider::Codex);
+    }
+    #[test]
+    fn stub_content_query_no_taxonomy_enum_claude() {
+        assert_no_taxonomy_enum("query", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_query_no_taxonomy_enum_codex() {
+        assert_no_taxonomy_enum("query", Provider::Codex);
+    }
+    #[test]
+    fn stub_content_goal_references_schema_doc_claude() {
+        assert_references_schema_doc_section("goal", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_goal_references_schema_doc_codex() {
+        assert_references_schema_doc_section("goal", Provider::Codex);
+    }
+    #[test]
+    fn stub_content_query_references_schema_doc_claude() {
+        assert_references_schema_doc_section("query", Provider::Claude);
+    }
+    #[test]
+    fn stub_content_query_references_schema_doc_codex() {
+        assert_references_schema_doc_section("query", Provider::Codex);
     }
 
     /// Spec: Codex Instruction Materialization — codex skills, AGENTS.md, and
@@ -1310,7 +1729,7 @@ mod tests {
         // codex skill bundle content is identical to the `.claude` stub
         let codex_goal =
             fs::read_to_string(vault.join(".codex/skills/codebus-goal/SKILL.md")).unwrap();
-        assert_eq!(codex_goal, stub_content("goal"));
+        assert_eq!(codex_goal, stub_content("goal", Provider::Codex));
         // AGENTS.md mirrors the passed CLAUDE.md content AND appends the
         // codex soft-constraint paragraph (agent-hook-hardening §Codex
         // Instruction Materialization).
