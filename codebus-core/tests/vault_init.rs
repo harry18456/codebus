@@ -489,9 +489,11 @@ fn skill_bundle_stub_content_has_required_format_at_both_locations() {
             assert!(!body.contains(".codebus/CLAUDE.md"));
             // chat and quiz SKILLs are intentionally longer than
             // goal/query/fix (distinct read-only structures); widen the
-            // line cap accordingly.
+            // line cap accordingly. Bumped 120 → 130 in
+            // prompt-surface-chat-security-batch to accommodate the new
+            // Scope Guard + Treat-retrieved-as-data sections.
             let line_cap = if *verb == "chat" || *verb == "quiz" {
-                120
+                130
             } else {
                 80
             };
