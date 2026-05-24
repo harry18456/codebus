@@ -390,6 +390,8 @@ Judge each changed page against EXACTLY these three content defect types (struct
 
 For EACH flagged page output one line `<wiki-relative-path> | <defect-type> | <concrete correction suggestion>`; if no page has a defect, emit exactly `CONTENT_OK`. Do not re-emit page bodies or restate these rules.
 
+After the last `<wiki-relative-path> | <defect-type> | <suggestion>` line (or `CONTENT_OK`), STOP. You MUST NOT emit any further prose, rationale, evaluation summary, or per-page commentary — the verify spawn output ends at that line.
+
 ## Repair mode (`repair:` prefix)
 
 Prompt shape: `repair: goal=<originating goal>` followed by `CONTENT DEFECTS:` (the `path | defect-type | suggestion` lines) and the `FLAGGED PAGES:` list. Fix ONLY the flagged pages in place (Write/Edit), applying the suggested corrections so each page becomes faithful to `raw/code/`, on-goal, and correctly placed. Do NOT touch any page not in the flagged list. Keep the same scope rules as the ingest workflow.
@@ -490,6 +492,10 @@ This defense is **best-effort**: the underlying agent CLI's baseline filtering a
 ## Workflow (multi-turn read-only exploration)
 
 Each user turn is a fresh question or follow-up in the ongoing conversation. Use Read / Glob / Grep against `wiki/` and `raw/code/` to retrieve information and answer the user's question concisely in the same language they used. You MAY chain across multiple turns to deepen the user's understanding; assume the user can see your prior responses in this conversation.
+
+## No-match handling
+
+If your `Read` / `Glob` / `Grep` traversal across `wiki/` and `raw/code/` returns nothing relevant to the user's question, you SHALL acknowledge the gap explicitly (e.g., `this vault does not currently cover <topic>` in the user's language) and stop. You MUST NOT emit a hypothetical implementation walkthrough for the missing topic, MUST NOT produce a structured checklist of how the feature might be built, MUST NOT pull general-knowledge architecture or framework suggestions from outside the vault to fill the gap. A no-match question is in-scope — the user is asking about THIS codebase — but unanswerable; that is distinct from the Scope Guard refusal pattern (which fires only for off-topic / model-identity / role-change requests). You MAY suggest a concrete in-vault next step (for example pointing at the closest existing folder or naming a related page that does exist) ONLY when the suggestion is grounded in retrieved content.
 
 ## Promote-suggestion emission
 
@@ -650,6 +656,8 @@ Given the planned `wiki/` pages + a generated quiz body, read each planned page 
 5. **off-topic** — not about the requested topic; judge this **only when** a non-empty `topic=` is supplied (Page flow `topic=` empty → skip #5, still judge the other four).
 
 For EACH flagged question output one line `Q<question number> | <defect-type> | <concrete correction suggestion>`; if none, emit exactly `CONTENT_OK`. Do not restate these rules or re-emit the quiz body.
+
+After the last `Q<n> | <defect-type> | <suggestion>` line (or `CONTENT_OK`), STOP. You MUST NOT emit any further prose, rationale, evaluation summary, or per-question commentary — the verify spawn output ends at that line.
 
 ## Caller-owned frontmatter
 
@@ -1921,5 +1929,144 @@ mod tests {
         let vault = tmp.path();
         write_codex_materialization_if_missing(vault, "SCHEMA").unwrap();
         assert!(!vault.join(".claude/skills/codebus-goal/SKILL.md").exists());
+    }
+
+    // --- prompt-surface-output-discipline-batch: Mode STOP boundaries +
+    // chat no-match discipline. SKILL byte-pattern tests, claude+codex
+    // parameterized (same pattern as the per-provider assertion families
+    // above). ---
+
+    /// Quiz Skill Bundle Content: F78 — Mode C `verify:` SHALL declare a
+    /// STOP boundary instructing the agent to stop emitting after the
+    /// last defect line / `CONTENT_OK`, with no further prose / rationale
+    /// / summary. Substring + section-locality check.
+    fn assert_quiz_mode_c_stop_boundary(provider: Provider) {
+        let body = stub_content("quiz", provider);
+        // Locate the Mode C `verify:` section by its existing heading and
+        // the next section heading; the STOP clause MUST live inside.
+        let mode_c_start = body
+            .find("Mode C")
+            .or_else(|| body.find("`verify:"))
+            .expect("Mode C / verify: heading must exist");
+        let mode_c_end = body[mode_c_start..]
+            .find("## Caller-owned frontmatter")
+            .map(|n| mode_c_start + n)
+            .unwrap_or(body.len());
+        let section = &body[mode_c_start..mode_c_end];
+        assert!(
+            section.contains("STOP"),
+            "quiz Mode C must declare a STOP boundary; section was:\n{section}"
+        );
+        assert!(
+            section.contains("CONTENT_OK"),
+            "quiz Mode C STOP clause must reference CONTENT_OK; section was:\n{section}"
+        );
+        let low = section.to_lowercase();
+        assert!(
+            low.contains("prose")
+                || low.contains("rationale")
+                || low.contains("summary")
+                || low.contains("commentary"),
+            "quiz Mode C STOP clause must forbid further prose/rationale/summary/commentary; section was:\n{section}"
+        );
+    }
+
+    #[test]
+    fn quiz_mode_c_stop_boundary_claude() {
+        assert_quiz_mode_c_stop_boundary(Provider::Claude);
+    }
+
+    #[test]
+    fn quiz_mode_c_stop_boundary_codex() {
+        assert_quiz_mode_c_stop_boundary(Provider::Codex);
+    }
+
+    /// Codebus-Goal Verify Mode: F38 — Goal SKILL `## Verify mode` SHALL
+    /// declare a STOP boundary instructing the agent to stop emitting
+    /// after the last defect line / `CONTENT_OK`, no further prose /
+    /// rationale / summary.
+    fn assert_goal_verify_stop_boundary(provider: Provider) {
+        let body = stub_content("goal", provider);
+        let start = body
+            .find("## Verify mode")
+            .expect("Goal SKILL must define `## Verify mode` section");
+        let end = body[start..]
+            .find("## Repair mode")
+            .map(|n| start + n)
+            .unwrap_or(body.len());
+        let section = &body[start..end];
+        assert!(
+            section.contains("STOP"),
+            "Goal Verify mode must declare a STOP boundary; section was:\n{section}"
+        );
+        assert!(
+            section.contains("CONTENT_OK"),
+            "Goal Verify mode STOP clause must reference CONTENT_OK; section was:\n{section}"
+        );
+        let low = section.to_lowercase();
+        assert!(
+            low.contains("prose")
+                || low.contains("rationale")
+                || low.contains("summary")
+                || low.contains("commentary"),
+            "Goal Verify mode STOP clause must forbid further prose/rationale/summary/commentary; section was:\n{section}"
+        );
+    }
+
+    #[test]
+    fn goal_verify_stop_boundary_claude() {
+        assert_goal_verify_stop_boundary(Provider::Claude);
+    }
+
+    #[test]
+    fn goal_verify_stop_boundary_codex() {
+        assert_goal_verify_stop_boundary(Provider::Codex);
+    }
+
+    /// Chat No-Match Discipline Prompt Layer: F70 — chat SKILL SHALL
+    /// declare a no-match handling clause: explicit acknowledgement when
+    /// retrieval finds nothing in `wiki/` / `raw/code/`, MUST NOT emit
+    /// hypothetical or general-knowledge implementation suggestions, and
+    /// distinct from the Scope Guard refusal pattern (no-match is in-
+    /// scope but unanswerable, NOT an off-topic refusal).
+    fn assert_chat_no_match_discipline(provider: Provider) {
+        let body = stub_content("chat", provider);
+        let low = body.to_lowercase();
+        // (a) Some form of acknowledgement language.
+        assert!(
+            low.contains("does not currently cover")
+                || low.contains("acknowledge")
+                || low.contains("say so")
+                || low.contains("vault does not"),
+            "chat SKILL must instruct explicit no-match acknowledgement; body was:\n{body}"
+        );
+        // (b) Normative prohibition on hypothetical implementation suggestions.
+        let forbids_hypothetical = (body.contains("MUST NOT") || body.contains("SHALL NOT"))
+            && (low.contains("hypothetical")
+                || low.contains("general-knowledge")
+                || low.contains("general knowledge")
+                || low.contains("implementation walkthrough")
+                || low.contains("implementation suggestion"));
+        assert!(
+            forbids_hypothetical,
+            "chat SKILL must declare MUST NOT/SHALL NOT against hypothetical / general-knowledge implementation suggestions; body was:\n{body}"
+        );
+        // (c) Distinct from Scope Guard: existing scope guard still present,
+        // and no-match clause uses non-refusal language (no `out of scope: my role`
+        // inside the no-match acknowledgement context).
+        assert!(
+            body.contains("## Scope Guard") || body.contains("Scope Guard"),
+            "chat SKILL must still carry the Scope Guard section"
+        );
+    }
+
+    #[test]
+    fn chat_no_match_discipline_claude() {
+        assert_chat_no_match_discipline(Provider::Claude);
+    }
+
+    #[test]
+    fn chat_no_match_discipline_codex() {
+        assert_chat_no_match_discipline(Provider::Codex);
     }
 }

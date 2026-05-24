@@ -338,6 +338,19 @@ fn load_quiz_agent_config() -> Result<
     Ok((resolved, verify_resolved, backend))
 }
 
+/// Compose the verify-spawn input payload (spec `quiz` / Quiz Content
+/// Verification and Repair — Verify spawn input includes planned page
+/// list). The verify spawn agent SHALL receive an originating-topic
+/// segment, a `PLANNED PAGES:` block (one vault-relative path per line —
+/// empty body when no pages planned), and a `QUIZ:` block carrying the
+/// generated quiz body. Closes prompt-surface-review F93 (verify agent
+/// previously had to reverse-engineer page coverage from `[[slug]]`
+/// citations, causing missed pages and unparseable verify output).
+fn compose_verify_input(topic: &str, pages: &[String], body: &str) -> String {
+    let pages_block = pages.join("\n");
+    format!("topic={topic}\n\nPLANNED PAGES:\n{pages_block}\n\nQUIZ:\n{body}")
+}
+
 /// Run one spawn, accumulating assistant `text` (Thought) into a single
 /// String while forwarding every stream event through `fan_out`. Emits
 /// `SpawnStart` before and `SpawnEnd` after.
@@ -593,7 +606,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
             // verify-stage-independent-model: bundle=Quiz (invokes
             // /codebus-quiz verify:); resolve_as=Some(Verify) so model/effort
             // come from the dedicated verify config sub-block.
-            let verify_input = format!("topic={topic_arg}\n\nQUIZ:\n{body}");
+            let verify_input = compose_verify_input(&topic_arg, &options.pages, body);
             let vtext = match run_spawn(
                 &mut **fan_cell.borrow_mut(),
                 &*backend,
@@ -1232,6 +1245,63 @@ mod tests {
             p1.parent(),
             p2.parent(),
             "same topic → same slug directory"
+        );
+    }
+
+    // --- F93 (prompt-surface-output-discipline-batch): Quiz Content
+    // Verification and Repair — verify spawn input includes planned page list ---
+
+    #[test]
+    fn verify_input_includes_planned_pages() {
+        let topic = "JWT issuance and verification";
+        let pages = vec![
+            "wiki/processes/jwt-issue-and-verify.md".to_string(),
+            "wiki/modules/auth-module.md".to_string(),
+            "wiki/entities/jwt-payload.md".to_string(),
+        ];
+        let body = "## Q1. stem\n- A) a\n- B) b\n- C) c\n- D) d\n## Answer: A\n## Explanation: see [[jwt-payload]]";
+        let input = compose_verify_input(topic, &pages, body);
+
+        assert!(
+            input.contains(&format!("topic={topic}")),
+            "verify input must carry topic segment; got:\n{input}"
+        );
+        assert!(
+            input.contains("PLANNED PAGES:"),
+            "verify input must carry literal `PLANNED PAGES:` header; got:\n{input}"
+        );
+        for p in &pages {
+            assert!(
+                input.lines().any(|l| l.trim() == p),
+                "verify input must list each planned page on its own line; missing `{p}` in:\n{input}"
+            );
+        }
+        assert!(
+            input.contains("QUIZ:"),
+            "verify input must carry the literal `QUIZ:` header; got:\n{input}"
+        );
+        assert!(
+            input.contains(body),
+            "verify input must include the generated quiz body verbatim; got:\n{input}"
+        );
+    }
+
+    #[test]
+    fn verify_input_empty_pages_segment() {
+        // Spec scenario: verify spawn input includes empty page block when none planned.
+        let input = compose_verify_input("auth", &[], "## Q1. stem ...");
+        assert!(
+            input.contains("PLANNED PAGES:"),
+            "even an empty planned-pages list must keep the `PLANNED PAGES:` header; got:\n{input}"
+        );
+        // No path lines under the empty block; substring lookup must not find a wiki/ path.
+        assert!(
+            !input.lines().any(|l| l.trim().starts_with("wiki/")),
+            "empty-pages input must not list any wiki/ path; got:\n{input}"
+        );
+        assert!(
+            input.contains("QUIZ:"),
+            "QUIZ: header still required; got:\n{input}"
         );
     }
 }

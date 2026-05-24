@@ -64,12 +64,52 @@ pub fn parse_content_defects(text: &str) -> Option<Vec<ContentDefect>> {
         });
     }
     if !defects.is_empty() {
-        Some(defects)
-    } else if saw_ok {
-        Some(Vec::new())
-    } else {
-        None
+        return Some(defects);
     }
+    if saw_ok {
+        return Some(Vec::new());
+    }
+    // Tolerance for the F38/F78 STOP-boundary best-effort prompt contract:
+    // the agent CLI occasionally delivers a brief rationale and the
+    // `CONTENT_OK` marker as separate text content blocks (separate Thought
+    // events) that the verb-side accumulator concatenates without inserting
+    // a newline (the accumulator MUST stay newline-free so quiz generate
+    // bodies split across multiple text chunks reassemble correctly). When
+    // no defect lines were found, accept a stand-alone `CONTENT_OK` token
+    // anywhere in the text — surrounding chars must be non-alphanumeric /
+    // non-underscore so a literal `CONTENT_OK` inside a longer identifier
+    // (e.g., `MY_CONTENT_OK_FLAG`) does not falsely OK an unparseable run.
+    if contains_content_ok_token(text) {
+        return Some(Vec::new());
+    }
+    None
+}
+
+/// Whether `text` contains the literal `CONTENT_OK` marker as a standalone
+/// token (its surrounding chars are not alphanumeric / not `_`). Used by
+/// the tolerant parser fallback above.
+fn contains_content_ok_token(text: &str) -> bool {
+    const MARKER: &str = "CONTENT_OK";
+    let mut search_from = 0;
+    while let Some(rel) = text[search_from..].find(MARKER) {
+        let abs = search_from + rel;
+        let end = abs + MARKER.len();
+        let prev_ok = abs == 0
+            || !text[..abs]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        let next_ok = end == text.len()
+            || !text[end..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        if prev_ok && next_ok {
+            return true;
+        }
+        search_from = end;
+    }
+    false
 }
 
 /// Shared content-review status (design D1), persisted by the quiz verb
@@ -243,6 +283,52 @@ mod tests {
         // CONTENT_OK and no well-formed defect → None (unparseable).
         assert_eq!(parse_content_defects("Q1 | only-two-parts"), None);
         assert_eq!(parse_content_defects("Q1 |  | empty type"), None);
+    }
+
+    // prompt-surface-output-discipline-batch (F38/F78 collateral): the
+    // SKILL Mode C / Verify mode `STOP` boundary is a best-effort prompt
+    // contract; real-LLM observation shows the agent occasionally inlines
+    // a brief rationale BEFORE `CONTENT_OK` AND the agent CLI delivers
+    // them as separate `text` content blocks (each one a Thought event)
+    // that the verb-side accumulator concatenates without an inserted
+    // newline. The accumulator must NOT inject newlines (that would
+    // corrupt other spawns whose body is legitimately split across
+    // multiple text blocks, e.g., quiz generate). Instead the verify
+    // parser tolerantly recognises a `CONTENT_OK` token in the text when
+    // no defect lines were found.
+    #[test]
+    fn parse_tolerates_inline_prose_before_content_ok() {
+        // The exact 2026-05-24 verify spawn output, after Thought-event
+        // concatenation: a narrative sentence followed by CONTENT_OK with
+        // no separator between them.
+        let text = "我正在讀取三個計畫頁面來驗證測驗內容的正確性。CONTENT_OK";
+        assert_eq!(parse_content_defects(text), Some(vec![]));
+    }
+
+    #[test]
+    fn parse_tolerates_content_ok_anywhere_when_no_defects() {
+        // Even when the marker appears on its own logical position but
+        // the accumulator concatenated it with surrounding chunks.
+        assert_eq!(
+            parse_content_defects("  read all 3 pages.  CONTENT_OK  "),
+            Some(vec![])
+        );
+        assert_eq!(
+            parse_content_defects("CONTENT_OK following a thought"),
+            Some(vec![])
+        );
+    }
+
+    #[test]
+    fn parse_defects_take_precedence_over_inline_content_ok_substring() {
+        // If the agent emits a real defect line AND the substring
+        // CONTENT_OK appears elsewhere (rare; SKILL forbids), defect
+        // wins — never silently OK a flagged response.
+        let text = "Q1 | answer-wrong | the marked option does not match — CONTENT_OK pattern broken";
+        let defects = parse_content_defects(text).expect("must parse as defects");
+        assert_eq!(defects.len(), 1);
+        assert_eq!(defects[0].id, "Q1");
+        assert_eq!(defects[0].kind, "answer-wrong");
     }
 
     // --- ContentReview::frontmatter_value (unchanged from quiz) ---

@@ -1374,7 +1374,10 @@ You MAY quote a single short line (< 80 chars) from `raw/` as evidence inside `<
 
 **修法**：拿掉這句，留「link pages with `[[other-page]]` per §5 of `CLAUDE.md`」。
 
-#### F34. Mode prefix `verify:` / `repair:` 與 user goal text collision 風險
+#### F34. Mode prefix `verify:` / `repair:` 與 user goal text collision 風險 — **DEFERRED**
+
+> **Status (2026-05-24, prompt-surface-output-discipline-batch)**: DEFERRED — claude backend 的 `/codebus-goal "<text>"` quote-wrap 已隔絕 user goal text，無實際 collision；codex backend (`$codebus-goal <text>` 不 quote) 未上線（per `project_multi_provider_driver_confirmed.md`），無驗證對象。留 codex backend change 一起修，避免空談 SKILL 加強。
+
 
 **位置**：Mode selection（`mod.rs:259`）。
 
@@ -1410,7 +1413,10 @@ You MAY quote a single short line (< 80 chars) from `raw/` as evidence inside `<
 
 **修法**：（依 Layer 1 F13 「stale 生命週期定義或刪除」結論而定）若保留 stale，補：「When updating an existing page with `stale: true`, skip the append; surface the staleness in your closing summary so the user can decide whether to refresh.」若刪除 stale，此條自動消失。
 
-#### F38. Verify mode 缺 rationale 邊界
+#### F38. Verify mode 缺 rationale 邊界 — **FIXED**
+
+> **Status (2026-05-24, prompt-surface-output-discipline-batch)**: FIXED — `skill_bundle/mod.rs` `GOAL_WORKFLOW` Verify mode 段加 STOP boundary 句（spec `skill-bundles` / Codebus-Goal Verify Mode new scenario「Verify mode declares STOP boundary after defect lines」）+ `verb/content_verify.rs::parse_content_defects` 加 tolerant fallback（standalone `CONTENT_OK` word-boundary detection）以承接 best-effort prompt 違反。Real-LLM 5.3 觀察：agent 仍 emit 一段 prose 後加換行 `CONTENT_OK`，parser 識別正確、`commit 0eb001d` 正常 close、無 unparseable warning。SKILL 強化是 best-effort、parser 兜底是 user-facing 保證。
+
 
 **問題**：對比 quiz mode A「after the marker line you MAY emit one short rationale paragraph (no more than 60 words). No further content.」goal verify 沒類似邊界 → agent 可能在 defect lines 後加大段解釋污染輸出，codebus 解析時無法判斷哪行是 defect 哪行是 prose。
 
@@ -1528,7 +1534,10 @@ Read scope: `wiki/` ONLY. You MUST NOT read `raw/code/` or any other path inside
 4. **Print the answer**: emit the answer to stdout in whatever shape best fits the query — a synthesized paragraph for "how does X work", a bulleted list for "list all X", a short fact + wikilinks for "is there an X". Phrase the answer in the same natural language as the query text per the §0 Language Policy in cwd `CLAUDE.md`.
 ```
 
-#### F44. 沒「找不到答案」機制
+#### F44. 沒「找不到答案」機制 — **INVALID**
+
+> **Status (2026-05-24, prompt-surface-output-discipline-batch)**: INVALID — propose 階段 real-LLM 跑 `codebus query "how does dark mode and theme switching work"` 對 backend-only vault，agent 直接回「抱歉，這個查詢超出了目前 codebase 的範圍」並列實際存在的 file，**沒 fabricate**。Query agent baseline 已 handle no-match，spec 層補 fallback 條款價值低。砍。
+
 
 **位置**：整個 QUERY_WORKFLOW。
 
@@ -2015,7 +2024,10 @@ For each user turn, follow this lookup order:
 
 實際是 codebus binary 用 prompt 送進去；user 不會手打。Multi-turn 部分倒是對的。同 F21 修法（拿掉或改 codex-aware）。
 
-#### F70. 沒「找不到答案」處理（同 F44 query pattern）
+#### F70. 沒「找不到答案」處理（同 F44 query pattern） — **FIXED**
+
+> **Status (2026-05-24, prompt-surface-output-discipline-batch)**: FIXED — chat-verb spec ADD `Chat No-Match Discipline Prompt Layer` requirement + `skill_bundle/mod.rs` `CHAT_SKILL_CONTENT` 新增 `## No-match handling` 段（normative SHALL/MUST 句，明示 vault 不含 topic、`MUST NOT` emit hypothetical implementation walkthrough、與 Scope Guard refusal 區分、限定 grounded suggestion）。Real-LLM 5.2 觀察：chat agent 對「dark mode and theme switching」明示「沒有 dark mode 或 theme switching 相關的程式碼」、提示 vault 實有功能（JWT/db）、**未 emit 任何 frontend state / CSS variables / persistence / provider / system preference detection 等 hypothetical 5 點建議**。注意：本 finding propose 階段曾被 F44/F70 cluster framing，但 real-LLM 揭示 query/chat 行為不同 — query 已 baseline OK（F44 砍）、chat 才有 scope drift（F70 修）。
+
 
 wiki/raw 都查不到時 agent 怎麼回？SKILL 沒指引。可能 hallucinate 或試圖讀 cwd 外（被 hard scope 擋）。
 
@@ -2207,7 +2219,10 @@ The validator outputs in text or `--json` mode:
 
 **修法**：「Bound traversal to at most 1 hop beyond the listed pages.」
 
-#### F78. Mode C 沒明示輸出邊界（同 F38 pattern）
+#### F78. Mode C 沒明示輸出邊界（同 F38 pattern） — **FIXED**
+
+> **Status (2026-05-24, prompt-surface-output-discipline-batch)**: FIXED — `skill_bundle/mod.rs` `QUIZ_SKILL_CONTENT` Mode C 段加 STOP boundary 句（spec `skill-bundles` / Quiz Skill Bundle Content new scenario「Verify mode declares STOP boundary after defect lines」）+ shared `parse_content_defects` tolerant fallback（同 F38）。Real-LLM 5.1 觀察：在 PLANNED PAGES 加進 verify input 後（見 F93），quiz verify spawn agent inline emit 短 narrative 後 inline `CONTENT_OK`（無中間 newline，accumulator concat 後串成單行），parser tolerance 識別 → `content_review: ok`、無 unparseable warning。雙層 fix（SKILL best-effort + parser tolerant）。
+
 
 Mode A 有「(no more than 60 words). No further content.」明確邊界。Mode C 沒對應「STOP after defects」明示。
 
@@ -2217,7 +2232,10 @@ Mode A 有「(no more than 60 words). No further content.」明確邊界。Mode 
 
 「Read `CLAUDE.md` here」對 codex dangling（F67 已實機證實 codex 找不到 CLAUDE.md）。
 
-#### F81. Mode unmatched fallback 未指引
+#### F81. Mode unmatched fallback 未指引 — **DEFERRED**
+
+> **Status (2026-05-24, prompt-surface-output-discipline-batch)**: DEFERRED — binary spawn 永遠注入 sub_mode prefix（per `codebus-core/src/agent/spawn_spec.rs` SpawnSpec assembly：`Some(mode)` → `<verb> <mode>: <input>`），user 無法觸發 no-prefix 路徑。純 defense in depth 改動，沒急。留 polish batch 收。
+
 
 「The user prompt begins with one of three mode keywords. Pick the mode by the prefix」— 但無 prefix 時怎麼辦？SKILL 沒講。對比 goal verb 明示 fallback（「otherwise (no recognized prefix) it is a normal goal」）。
 
@@ -2341,7 +2359,10 @@ quiz 在已知 pattern 的對位：
 
 **修法**：與其他 verb 一致包 `"..."`，或 backend 層處理 escape。
 
-#### F93. quiz verify spawn **缺 planned_pages 上下文**（程式碼確認）
+#### F93. quiz verify spawn **缺 planned_pages 上下文**（程式碼確認） — **FIXED**
+
+> **Status (2026-05-24, prompt-surface-output-discipline-batch)**: FIXED — `verb/quiz.rs` 新增 `compose_verify_input(topic, pages, body)` pure helper，verify spawn input 從 `topic={topic}\n\nQUIZ:\n{body}` 改為 `topic={topic}\n\nPLANNED PAGES:\n<paths>\n\nQUIZ:\n{body}`（spec `quiz` / Quiz Content Verification and Repair new scenarios「Verify spawn input includes planned page list」+ empty-pages edge case）。Apply 階段揭露 collateral bug：accumulator `acc.push_str(text)` 不加 newline + agent 把 narrative 和 `CONTENT_OK` 分成兩個 Thought event → 串成 inline 單行 → parser miss。對策：**不動 accumulator**（quiz generate body 也合法 split 多個 text blocks，加 newline 會破壞它），改 `parse_content_defects` 加 word-boundary `CONTENT_OK` token detection。Real-LLM 5.1 觀察：`content_review: ok`、無 unparseable warning。
+
 
 **位置**：`verb/quiz.rs:587`。
 
