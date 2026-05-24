@@ -464,7 +464,9 @@ mod tests {
     fn test_spec() -> SpawnSpec {
         SpawnSpec {
             verb: Verb::Query,
-            prompt: "/codebus-query \"x\"".into(),
+            resolve_as: None,
+            sub_mode: None,
+            input: "x".into(),
             permission: Permission::ReadOnly,
             command_allowance: None,
             resume_session_id: None,

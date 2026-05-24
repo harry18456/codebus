@@ -1,23 +1,11 @@
-//! Prompt for the fix agent.
+//! (Phase 3 / prompt-surface-layer-3-spawnspec-restructure)
 //!
-//! v3-fix-trust-agent: single-shot model, agent loads `codebus-fix` SKILL.md
-//! when its slash command is `/codebus-fix`. Agent freely runs `codebus lint`
-//! itself (subject to PreToolUse Bash hook) within its session — no
-//! follow-up prompts injected by the CLI.
-
-/// Slash command for the fix-loop spawn. The agent loads SKILL.md by skill
-/// name (`codebus-fix`); SKILL.md tells it to invoke `codebus lint --format
-/// json` itself to obtain the issue list.
-pub fn initial_prompt() -> String {
-    "/codebus-fix".to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn initial_prompt_is_just_slash_command() {
-        assert_eq!(initial_prompt(), "/codebus-fix");
-    }
-}
+//! This module previously held `initial_prompt() -> "/codebus-fix"` —
+//! the pre-composed slash-form prompt that the verb layer passed into
+//! `SpawnSpec.prompt`. Phase 3 removed pre-composition: the backend now
+//! assembles the `/codebus-fix` (claude) or `$codebus-fix` (codex) form
+//! from `SpawnSpec { verb: Verb::Fix, sub_mode: None, input: "" }`.
+//!
+//! The module is kept (empty) so external dependents don't break on a
+//! missing path import; the helper function it once exported is no
+//! longer needed.

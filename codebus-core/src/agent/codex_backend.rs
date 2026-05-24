@@ -22,7 +22,7 @@ use crate::config::endpoint::ActiveProfile;
 use crate::stream::{StreamEvent, parse_codex_stream_line};
 
 use super::backend::AgentBackend;
-use super::spawn_spec::{Permission, SpawnSpec};
+use super::spawn_spec::{Permission, SpawnSpec, verb_bundle_name};
 
 /// Env var carrying the Azure OpenAI API key into the codex child process.
 /// The Azure provider override references it via `env_key` / `env_http_headers`
@@ -122,7 +122,11 @@ impl AgentBackend for CodexBackend {
         // Model + effort come from CLI flags, NOT the (trust-gated) vault
         // `.codex/config.toml`. Effort is passed unquoted — codex falls back
         // to a literal string when the value is not valid TOML.
-        let resolved = self.config.resolve(spec.verb);
+        // Per agent-backend spec `SpawnSpec Provider-Neutral Intent`:
+        // resolve via `config_key()` so cross-flow verify spawns
+        // (verb: Goal/Quiz, resolve_as: Some(Verify)) pick the dedicated
+        // verify config sub-block while still invoking the bundle's slash form.
+        let resolved = self.config.resolve(spec.config_key());
         if let Some(model) = resolved.model.as_deref() {
             cmd.arg("-m").arg(model);
         }
@@ -181,7 +185,19 @@ impl AgentBackend for CodexBackend {
             );
         }
 
-        cmd.arg(&spec.prompt);
+        // Assemble the codex-form invocation from sub_mode + input + verb.
+        // Per spec scenarios "codex backend assembles dollar-prefix invocation
+        // from SpawnSpec fields": Some(mode) → `$codebus-<bundle> <mode>: <input>`;
+        // None → `$codebus-<bundle> <input>` (no quote wrapping — F95 retraction
+        // verified modern LLM tolerance). The `$`-prefix invokes codex's
+        // native skill explicit-invocation mechanism (24.8% input-token
+        // saving vs `/`-prefix description-match path; §16 F26).
+        let bundle = verb_bundle_name(spec.verb);
+        let prompt = match &spec.sub_mode {
+            Some(mode) => format!("$codebus-{bundle} {mode}: {}", spec.input),
+            None => format!("$codebus-{bundle} {}", spec.input),
+        };
+        cmd.arg(prompt);
         // Close stdin: codex exec blocks waiting on stdin when it is an open
         // non-TTY pipe (verified — a background spawn hung 60s+ with no input).
         cmd.stdin(Stdio::null());
@@ -231,7 +247,9 @@ mod tests {
     fn spec(verb: Verb, permission: Permission) -> SpawnSpec {
         SpawnSpec {
             verb,
-            prompt: format!("/codebus-{verb:?} x"),
+            resolve_as: None,
+            sub_mode: None,
+            input: "x".to_string(),
             permission,
             command_allowance: None,
             resume_session_id: None,
@@ -483,5 +501,92 @@ mod tests {
             !cmd_args(&cmd).iter().any(|a| a.contains("sk-azure-test")),
             "azure key must NOT appear in argv"
         );
+    }
+
+    // Phase 3 / prompt-surface-layer-3-spawnspec-restructure: assembly tests.
+    // Spec scenario "codex backend assembles dollar-prefix invocation from
+    // SpawnSpec fields" — $codebus-<bundle> prefix, no quote wrapping.
+
+    fn last_positional(args: &[String]) -> Option<&str> {
+        args.iter().rev().find(|a| !a.starts_with("-")).map(String::as_str)
+    }
+
+    #[test]
+    fn codex_assembly_free_text_chat_no_quote() {
+        let mut s = spec(Verb::Chat, Permission::ReadOnly);
+        s.input = "explain the auth flow".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        // Spec Example: codex assembly for chat verb free-text.
+        let last = last_positional(&args).expect("positional prompt arg");
+        assert_eq!(last, "$codebus-chat explain the auth flow");
+        assert!(!last.contains('"'), "codex free-text must NOT quote-wrap input");
+    }
+
+    #[test]
+    fn codex_assembly_sub_mode_quiz_plan() {
+        let mut s = spec(Verb::Quiz, Permission::ReadOnly);
+        s.sub_mode = Some("plan".to_string());
+        s.input = "auth middleware".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        // Spec Example: codex assembly for quiz verb plan sub-mode.
+        assert_eq!(
+            last_positional(&args).expect("positional prompt arg"),
+            "$codebus-quiz plan: auth middleware"
+        );
+    }
+
+    #[test]
+    fn codex_assembly_verb_name_is_lowercase_bundle() {
+        let mut s = spec(Verb::Goal, Permission::Workspace);
+        s.input = "draft payments overview".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        assert_eq!(
+            last_positional(&args).expect("positional prompt arg"),
+            "$codebus-goal draft payments overview"
+        );
+    }
+
+    #[test]
+    fn codex_assembly_sub_mode_input_with_newlines_preserved() {
+        let mut s = spec(Verb::Goal, Permission::ReadOnly);
+        s.sub_mode = Some("verify".to_string());
+        s.input = "goal=X\n\nCHANGED PAGES:\nwiki/a.md\nwiki/b.md".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        assert_eq!(
+            last_positional(&args).expect("positional prompt arg"),
+            "$codebus-goal verify: goal=X\n\nCHANGED PAGES:\nwiki/a.md\nwiki/b.md"
+        );
+    }
+
+    #[test]
+    fn codex_resolve_as_overrides_model_lookup() {
+        // verify-stage-independent-model: verb=Quiz, resolve_as=Some(Verify).
+        let mut s = spec(Verb::Quiz, Permission::ReadOnly);
+        s.resolve_as = Some(Verb::Verify);
+        s.sub_mode = Some("verify".to_string());
+        s.input = "test".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        // bundle name still "quiz" — the SKILL bundle being invoked
+        assert!(
+            last_positional(&args)
+                .unwrap()
+                .starts_with("$codebus-quiz verify:"),
+            "bundle name is quiz (SKILL bundle), not verify"
+        );
+        // model resolved via Verb::Verify config sub-block — system_config()
+        // sets verify to gpt-5.5/high (vs quiz which falls through to
+        // ResolvedVerb default behavior — different from quiz's config)
+        let model = arg_after(&args, "-m");
+        assert_eq!(model, Some("gpt-5.5"));
+    }
+
+    fn arg_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+        let pos = args.iter().position(|a| a == flag)?;
+        args.get(pos + 1).map(String::as_str)
     }
 }

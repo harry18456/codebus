@@ -26,7 +26,7 @@ use std::process::Command;
 use super::backend::AgentBackend;
 use super::claude_cli::{compose_claude_cmd, sniff_init_session_id};
 use super::env_overrides::EnvOverrides;
-use super::spawn_spec::{Permission, SpawnSpec};
+use super::spawn_spec::{Permission, SpawnSpec, verb_bundle_name};
 
 /// Read-only tool set (no write/edit). Matches the pre-refactor
 /// `CHAT_TOOLSET` / `QUERY_TOOLSET` / `QUIZ_TOOLSET` / `GOAL_VERIFY_TOOLSET`.
@@ -77,11 +77,28 @@ impl AgentBackend for ClaudeBackend {
             .as_ref()
             .map(|p| format!("Bash({} *)", p.joined()));
 
-        let resolved = self.config.resolve(spec.verb);
+        // Per agent-backend spec `SpawnSpec Provider-Neutral Intent`:
+        // resolve model/effort via `config_key()` (which returns `resolve_as`
+        // when set, else `verb`) so cross-flow verify spawns pick the
+        // dedicated `verify` config sub-block while still invoking the
+        // goal/quiz SKILL bundle.
+        let resolved = self.config.resolve(spec.config_key());
+
+        // Assemble the Claude-form invocation from sub_mode + input + verb.
+        // Per spec scenarios "Claude backend assembles slash-prefix invocation
+        // from SpawnSpec fields": Some(mode) → `/codebus-<bundle> <mode>: <input>`
+        // (no quote wrap); None → `/codebus-<bundle> "<input>"` (free-text
+        // quote wrap, preserves the claude-side convention from the pre-Phase-3
+        // verb compose sites).
+        let bundle = verb_bundle_name(spec.verb);
+        let prompt = match &spec.sub_mode {
+            Some(mode) => format!("/codebus-{bundle} {mode}: {}", spec.input),
+            None => format!("/codebus-{bundle} \"{}\"", spec.input),
+        };
 
         compose_claude_cmd(
             &claude_bin,
-            &spec.prompt,
+            &prompt,
             spec.resume_session_id.as_deref(),
             toolset,
             bash_whitelist.as_deref(),
@@ -124,7 +141,9 @@ mod tests {
     fn spec(verb: Verb, permission: Permission, allowance: Option<&[&str]>) -> SpawnSpec {
         SpawnSpec {
             verb,
-            prompt: format!("/codebus-{verb:?} \"x\""),
+            resolve_as: None,
+            sub_mode: None,
+            input: "x".to_string(),
             permission,
             command_allowance: allowance
                 .map(|toks| super::super::spawn_spec::CommandPrefix::new(toks.iter().copied())),
@@ -217,13 +236,89 @@ mod tests {
     fn goal_spawn_full_argv() {
         let cmd = backend().build_command(&spec(Verb::Goal, Permission::Workspace, None));
         let args = cmd_args(&cmd);
-        assert_eq!(arg_after(&args, "-p"), Some("/codebus-Goal \"x\""));
+        assert_eq!(arg_after(&args, "-p"), Some("/codebus-goal \"x\""));
         assert_eq!(arg_after(&args, "--tools"), Some("Read,Glob,Grep,Write,Edit"));
         assert_eq!(arg_after(&args, "--permission-mode"), Some("acceptEdits"));
         assert_eq!(arg_after(&args, "--output-format"), Some("stream-json"));
         assert!(args.iter().any(|a| a == "--verbose"));
         assert_eq!(arg_after(&args, "--model"), Some("claude-opus-4-6"));
         assert_eq!(arg_after(&args, "--effort"), Some("high"));
+    }
+
+    // Phase 3 / prompt-surface-layer-3-spawnspec-restructure: assembly tests.
+    // Spec scenario "Claude backend assembles slash-prefix invocation from
+    // SpawnSpec fields".
+
+    #[test]
+    fn claude_assembly_free_text_chat_quoted() {
+        let mut s = spec(Verb::Chat, Permission::ReadOnly, None);
+        s.input = "explain the auth flow".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        // Spec Example: claude assembly for chat verb free-text.
+        assert_eq!(arg_after(&args, "-p"), Some("/codebus-chat \"explain the auth flow\""));
+    }
+
+    #[test]
+    fn claude_assembly_sub_mode_quiz_plan_no_quote() {
+        let mut s = spec(Verb::Quiz, Permission::ReadOnly, None);
+        s.sub_mode = Some("plan".to_string());
+        s.input = "auth middleware".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        // Spec Example: claude assembly for quiz verb plan sub-mode.
+        assert_eq!(arg_after(&args, "-p"), Some("/codebus-quiz plan: auth middleware"));
+    }
+
+    #[test]
+    fn claude_assembly_verb_name_is_lowercase_bundle() {
+        // Verb::Goal → /codebus-goal, matching the .claude/skills/codebus-goal/
+        // bundle directory; NOT /codebus-Goal (Debug-format).
+        let mut s = spec(Verb::Goal, Permission::Workspace, None);
+        s.input = "draft payments overview".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        assert_eq!(arg_after(&args, "-p"), Some("/codebus-goal \"draft payments overview\""));
+    }
+
+    #[test]
+    fn claude_assembly_sub_mode_input_with_newlines_preserved() {
+        // sub-mode spawns carry structured multiline input (e.g. goal verify
+        // body has CHANGED PAGES:\n... section). Assembly preserves \n.
+        let mut s = spec(Verb::Goal, Permission::ReadOnly, None);
+        s.sub_mode = Some("verify".to_string());
+        s.input = "goal=X\n\nCHANGED PAGES:\nwiki/a.md\nwiki/b.md".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        assert_eq!(
+            arg_after(&args, "-p"),
+            Some("/codebus-goal verify: goal=X\n\nCHANGED PAGES:\nwiki/a.md\nwiki/b.md")
+        );
+    }
+
+    #[test]
+    fn claude_resolve_as_overrides_model_lookup() {
+        // verify-stage-independent-model: verb=Goal but resolve_as=Some(Verify)
+        // → bundle name "goal" (SKILL bundle invocation) AND model resolved
+        // via Verb::Verify config sub-block.
+        let mut s = spec(Verb::Goal, Permission::ReadOnly, None);
+        s.resolve_as = Some(Verb::Verify);
+        s.sub_mode = Some("verify".to_string());
+        s.input = "test".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        // bundle name still "goal" — the SKILL bundle being invoked
+        assert!(
+            arg_after(&args, "-p").unwrap().starts_with("/codebus-goal verify:"),
+            "bundle name is goal (the SKILL bundle), not verify"
+        );
+        // model resolved via Verb::Verify config sub-block. We assert it
+        // matches `ClaudeCodeConfig::default().resolve(Verb::Verify)` so the
+        // test is robust against config defaults shifting AND specifically
+        // verifies the resolve_as override path went through Verify.
+        let expected = ClaudeCodeConfig::default().resolve(Verb::Verify);
+        assert_eq!(arg_after(&args, "--model"), expected.model.as_deref());
+        assert_eq!(arg_after(&args, "--effort"), expected.effort.as_deref());
     }
 
     /// parse_stream_line / extract_session_id wrap the legacy free functions.

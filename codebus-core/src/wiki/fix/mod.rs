@@ -107,8 +107,12 @@ pub fn run_fix_loop(
         });
     }
 
+    // Phase 3 (prompt-surface-layer-3-spawnspec-restructure): fix has no
+    // user input — the agent runs `codebus lint --format json` itself and
+    // operates on that JSON. SpawnSpec.input is empty; backend assembles
+    // `/codebus-fix ""` (claude) or `$codebus-fix ` (codex).
     let invoke_report =
-        invoke_fix_agent(&vault_root, prompt::initial_prompt(), backend, on_event, cancel)
+        invoke_fix_agent(&vault_root, String::new(), backend, on_event, cancel)
             .map_err(FixError::Spawn)?;
 
     let post = lint_wiki(&vault_root);
@@ -128,7 +132,7 @@ pub fn run_fix_loop(
 
 fn invoke_fix_agent(
     vault_root: &std::path::Path,
-    slash_command: String,
+    input: String,
     backend: &dyn AgentBackend,
     on_event: impl FnMut(StreamEvent),
     cancel: Option<Arc<AtomicBool>>,
@@ -137,7 +141,9 @@ fn invoke_fix_agent(
         backend,
         SpawnSpec {
             verb: Verb::Fix,
-            prompt: slash_command,
+            resolve_as: None,
+            sub_mode: None,
+            input,
             // Fix Loop Agent Sandbox: Read,Glob,Grep,Write,Edit + bash limited
             // to `codebus lint` (PreToolUse hook is the actual hard gate).
             permission: Permission::Workspace,
@@ -206,7 +212,9 @@ mod tests {
     fn fix_spawn_spec_has_no_resume_and_workspace_permission() {
         let spec = SpawnSpec {
             verb: Verb::Fix,
-            prompt: "/codebus-fix".into(),
+            resolve_as: None,
+            sub_mode: None,
+            input: String::new(),
             permission: Permission::Workspace,
             command_allowance: Some(CommandPrefix::new(["codebus", "lint"])),
             resume_session_id: None,

@@ -345,15 +345,18 @@ fn load_quiz_agent_config() -> Result<
 fn run_spawn(
     fan_out: &mut dyn FnMut(VerbEvent),
     backend: &dyn crate::agent::AgentBackend,
-    slash_command: String,
+    sub_mode: Option<String>,
+    input: String,
     vault_root: &std::path::Path,
-    spec_verb: Verb,
+    resolve_as: Option<Verb>,
     permission: Permission,
     command_allowance: Option<CommandPrefix>,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<(String, InvokeReport), VerbError> {
-    // Lifecycle phase stays `Verb::Quiz` (UI grouping); `spec_verb` is the
-    // model-resolution key (Verify for the content-verify spawn).
+    // Lifecycle phase stays `Verb::Quiz` (UI grouping). The SKILL bundle is
+    // always Quiz (cross-flow verify spawn still invokes /codebus-quiz verify:);
+    // `resolve_as` is the model-resolution override (Some(Verify) for the
+    // content-verify spawn, None for plan/generate which use Quiz config).
     fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Quiz,
     }));
@@ -364,8 +367,10 @@ fn run_spawn(
         invoke(
             backend,
             SpawnSpec {
-                verb: spec_verb,
-                prompt: slash_command,
+                verb: Verb::Quiz,
+                resolve_as,
+                sub_mode,
+                input,
                 permission,
                 command_allowance,
                 resume_session_id: None,
@@ -423,9 +428,10 @@ pub fn run_quiz_plan<F: FnMut(VerbEvent)>(
     let (plan_text, plan_report) = run_spawn(
         &mut fan_out,
         &*backend,
-        format!("/codebus-quiz plan: {}", options.topic),
+        Some("plan".to_string()),
+        options.topic.clone(),
         &paths.root,
-        Verb::Quiz,
+        None,
         Permission::ReadOnly,
         None,
         cancel.clone(),
@@ -522,13 +528,14 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
     let (gen_text, gen_report) = run_spawn(
         &mut fan_out,
         &*backend,
+        Some("generate".to_string()),
         format!(
-            "/codebus-quiz generate: pages=[{}] count={}",
+            "pages=[{}] count={}",
             options.pages.join(","),
             options.question_count
         ),
         &paths.root,
-        Verb::Quiz,
+        None,
         Permission::ReadOnly,
         Some(CommandPrefix::new(["codebus", "quiz", "validate"])),
         cancel.clone(),
@@ -583,17 +590,17 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         let fan_cell = std::cell::RefCell::new(&mut fan_out);
 
         let verify = |body: &String| -> Result<Option<Vec<ContentDefect>>, VerbError> {
-            let verify_prompt =
-                format!("/codebus-quiz verify: topic={topic_arg}\n\nQUIZ:\n{body}");
-            // verify-stage-independent-model: verify spawn passes
-            // `Verb::Verify` so the backend resolves the verify sub-block,
-            // NOT `Verb::Quiz`. Read-only, no command allowance.
+            // verify-stage-independent-model: bundle=Quiz (invokes
+            // /codebus-quiz verify:); resolve_as=Some(Verify) so model/effort
+            // come from the dedicated verify config sub-block.
+            let verify_input = format!("topic={topic_arg}\n\nQUIZ:\n{body}");
             let vtext = match run_spawn(
                 &mut **fan_cell.borrow_mut(),
                 &*backend,
-                verify_prompt,
+                Some("verify".to_string()),
+                verify_input,
                 &paths.root,
-                Verb::Verify,
+                Some(Verb::Verify),
                 Permission::ReadOnly,
                 None,
                 cancel.clone(),
@@ -622,8 +629,10 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
                     .map(|x| format!("{} | {} | {}", x.id, x.kind, x.suggestion))
                     .collect::<Vec<_>>()
                     .join("\n");
-                let repair_prompt = format!(
-                    "/codebus-quiz generate: pages=[{}] count={}\n\nThe previous quiz had content defects. Revise ONLY the flagged questions, keep all other questions verbatim, and keep exactly {} questions.\n\nPREVIOUS QUIZ:\n{}\n\nCONTENT DEFECTS:\n{}",
+                // Regenerate (retry) spawn: bundle=Quiz, sub_mode=generate,
+                // resolve_as=None (uses Quiz config — generate, not verify).
+                let repair_input = format!(
+                    "pages=[{}] count={}\n\nThe previous quiz had content defects. Revise ONLY the flagged questions, keep all other questions verbatim, and keep exactly {} questions.\n\nPREVIOUS QUIZ:\n{}\n\nCONTENT DEFECTS:\n{}",
                     options.pages.join(","),
                     options.question_count,
                     options.question_count,
@@ -633,9 +642,10 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
                 match run_spawn(
                     &mut **fan_cell.borrow_mut(),
                     &*backend,
-                    repair_prompt,
+                    Some("generate".to_string()),
+                    repair_input,
                     &paths.root,
-                    Verb::Quiz,
+                    None,
                     Permission::ReadOnly,
                     Some(CommandPrefix::new(["codebus", "quiz", "validate"])),
                     cancel.clone(),

@@ -324,14 +324,15 @@ pub fn run_goal(
     fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Goal,
     }));
-    let slash_command = format!("/codebus-goal \"{}\"", options.text);
     let invoke_report = {
         let fan_out = &mut fan_out;
         crate::agent::invoke(
             &*backend,
             crate::agent::SpawnSpec {
                 verb: Verb::Goal,
-                prompt: slash_command,
+                resolve_as: None,
+                sub_mode: None,
+                input: options.text.clone(),
                 permission: crate::agent::Permission::Workspace,
                 command_allowance: None,
                 // goal verb is one-shot (no session resume); chat verb is
@@ -455,20 +456,21 @@ pub fn run_goal(
                 let fan_cell = std::cell::RefCell::new(&mut fan_out);
 
                 let verify = |_: &()| -> Result<Option<Vec<ContentDefect>>, VerbError> {
-                    let prompt = format!(
-                        "/codebus-goal verify: goal={}\n\nCHANGED PAGES:\n{}",
+                    // Verify spawn: bundle=Goal (invokes /codebus-goal verify:),
+                    // resolve_as=Some(Verify) (verify-stage-independent-model:
+                    // model/effort from dedicated verify config sub-block).
+                    let input = format!(
+                        "goal={}\n\nCHANGED PAGES:\n{}",
                         goal_text,
                         pages.join("\n")
                     );
-                    // verify-stage-independent-model: verify spawn passes
-                    // `Verb::Verify` so the backend resolves the dedicated
-                    // verify sub-block, NOT `Verb::Goal`. Read-only sandbox.
                     let vtext = match run_goal_spawn(
                         &mut **fan_cell.borrow_mut(),
                         &*backend,
-                        prompt,
+                        Some("verify".to_string()),
+                        input,
                         &paths.root,
-                        Verb::Verify,
+                        Some(Verb::Verify),
                         crate::agent::Permission::ReadOnly,
                         cancel.clone(),
                     ) {
@@ -501,16 +503,19 @@ pub fn run_goal(
                             .map(|d| d.id.clone())
                             .collect::<Vec<_>>()
                             .join("\n");
-                        let prompt = format!(
-                            "/codebus-goal repair: goal={}\n\nCONTENT DEFECTS:\n{}\n\nFLAGGED PAGES:\n{}",
+                        // Repair spawn: bundle=Goal, resolve_as=None (uses
+                        // Goal config — repair is full edit, not cheap verify).
+                        let input = format!(
+                            "goal={}\n\nCONTENT DEFECTS:\n{}\n\nFLAGGED PAGES:\n{}",
                             goal_text, defect_lines, flagged_pages
                         );
                         match run_goal_spawn(
                             &mut **fan_cell.borrow_mut(),
                             &*backend,
-                            prompt,
+                            Some("repair".to_string()),
+                            input,
                             &paths.root,
-                            Verb::Goal,
+                            None,
                             crate::agent::Permission::Workspace,
                             cancel.clone(),
                         ) {
@@ -631,14 +636,18 @@ pub fn run_goal(
 fn run_goal_spawn(
     fan_out: &mut dyn FnMut(VerbEvent),
     backend: &dyn crate::agent::AgentBackend,
-    slash_command: String,
+    sub_mode: Option<String>,
+    input: String,
     vault_root: &std::path::Path,
-    spec_verb: Verb,
+    resolve_as: Option<Verb>,
     permission: crate::agent::Permission,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<String, VerbError> {
-    // Lifecycle phase stays `Verb::Goal` (UI grouping); `spec_verb` is the
-    // model-resolution key (Verify for content-verify, Goal for repair).
+    // Lifecycle phase stays `Verb::Goal` (UI grouping). The SKILL bundle is
+    // always Goal (cross-flow verify spawns invoke /codebus-goal verify: ...).
+    // `resolve_as` provides the model-resolution override: Some(Verb::Verify)
+    // for content-verify spawn (cheap/expensive split), None for repair
+    // (uses Goal config).
     fan_out(VerbEvent::Lifecycle(VerbLifecycleEvent::SpawnStart {
         verb: Verb::Goal,
     }));
@@ -649,8 +658,10 @@ fn run_goal_spawn(
         crate::agent::invoke(
             backend,
             crate::agent::SpawnSpec {
-                verb: spec_verb,
-                prompt: slash_command,
+                verb: Verb::Goal,
+                resolve_as,
+                sub_mode,
+                input,
                 permission,
                 command_allowance: None,
                 resume_session_id: None,

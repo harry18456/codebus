@@ -1,0 +1,28 @@
+<!--
+Each task description states:
+- the behavior or contract being delivered, and
+- the verification target that proves completion.
+
+Task 1.1 is atomic by necessity — Rust compilation requires SpawnSpec
+struct change + all 11 call site updates + backend assembly in one unit.
+Tasks 2.1 and 3.1 are verification-only after the refactor lands.
+-->
+
+## 1. SpawnSpec shape + backend assembly + verb compose migration（atomic per spec MODIFIED Requirement "SpawnSpec Provider-Neutral Intent"）
+
+- [x] 1.1 落地 spec MODIFIED Requirement "SpawnSpec Provider-Neutral Intent"：原子重構 `SpawnSpec` shape 從 `prompt: String` 改 `sub_mode: Option<String> + input: String`，並把 assembly 責任從 verb 層搬到 backend 層。具體實作（一個 commit 內完成、Rust compile 才會通過）：
+  - **`codebus-core/src/agent/spawn_spec.rs`**：刪 `prompt: String` 欄、加 `pub sub_mode: Option<String>` + `pub input: String` + `pub resolve_as: Option<Verb>` 三個新欄；`verb` 語意改成 SKILL bundle 名（只接受 Goal/Query/Fix/Chat/Quiz；Verify 不再用作 verb，改透過 resolve_as 表達 verify-stage-independent-model）。重寫 module doc（line 1-36 ~30 行區段）反映新契約：SpawnSpec 是 provider-neutral structured intent、backend 負責 assembly、claude 組 `/codebus-<verb>` form、codex 組 `$codebus-<verb>` form、`resolve_as` 為 cross-flow content-verify spawn（goal/quiz invoke 自己的 bundle 但用 Verify config）的 model-resolution override。Phase 0 加的 TODO 段移除（內容轉成正式 module doc）。`spawn_spec_carries_neutral_intent` 單元 test 改 assert new shape (no `prompt` field, presence of `sub_mode` / `input` / `resolve_as` 三新欄)。
+  - **`codebus-core/src/agent/claude_backend.rs`**：`build_command` 內 assembly logic：`let prompt = match &spec.sub_mode { Some(m) => format!("/codebus-{verb} {m}: {input}", ...), None => format!("/codebus-{verb} \"{input}\"", ...) };` 然後 `cmd.arg("-p").arg(prompt)`。其中 `verb` 由 `format!("{:?}", spec.verb)` 或更精準的 enum→string mapper 取得（小寫化以對齊現有 SKILL bundle 命名 `codebus-goal` 而非 `codebus-Goal`；若現況 verb enum Debug 是 `Goal`，需 lowercase 轉換或 explicit match）。test helper `fn spec()` 改傳 sub_mode + input。新增 4 個單元 test：(a) free-text claude assembly 含 `\"...\"` quote 包裝、(b) sub-mode claude assembly 含 `<mode>: ` prefix 無 quote、(c) verb name 對映 SKILL bundle 名（如 `Verb::Goal` → `/codebus-goal`）、(d) input 含特殊字元 (`"`, `\n`) 不破 assembly。
+  - **`codebus-core/src/agent/codex_backend.rs`**：同 claude 但 form 是 `$codebus-<verb> ...`（free-text 無 quote、sub-mode 加 `<mode>: ` prefix）。`cmd.arg(prompt)` (codex 用 positional arg)。test helper 改。新增 4 個對應單元 test。
+  - **`codebus-core/src/agent/claude_cli.rs`**：`fn test_spec()` (line 464) signature update 傳新 fields。
+  - **9 個 verb compose 點 migration**（all in this task — Rust compile atomic）：`verb/chat.rs:161,189` (verb=Chat, sub_mode=None, resolve_as=None) / `verb/goal.rs:327,332` (ingest: verb=Goal, sub_mode=None, resolve_as=None) / `verb/goal.rs:459,651` (verify: verb=Goal, sub_mode=Some("verify"), input=結構化 body, **resolve_as=Some(Verb::Verify)**) / `verb/goal.rs:505,651` (repair: verb=Goal, sub_mode=Some("repair"), input=結構化 body, resolve_as=None — repair 用 Goal config) / `verb/query.rs:119,153` (verb=Query, sub_mode=None, resolve_as=None) / `verb/quiz.rs:426,366` (plan: verb=Quiz, sub_mode=Some("plan"), resolve_as=None) / `verb/quiz.rs:526,366` (generate initial: verb=Quiz, sub_mode=Some("generate"), resolve_as=None) / `verb/quiz.rs:587,366` (verify: verb=Quiz, sub_mode=Some("verify"), **resolve_as=Some(Verb::Verify)**) / `verb/quiz.rs:626,366` (generate retry: verb=Quiz, sub_mode=Some("generate"), resolve_as=None) / `wiki/fix/mod.rs:138` (verb=Fix, sub_mode=None, input=`""` — fix 無 user input, resolve_as=None)。每個 compose 點刪 `format!("/codebus-<verb> ...")` pre-compose line；既有 `spec_verb: Verb` 參數路徑改成傳 verb (bundle) + resolve_as (None/Some(Verify))。`wiki/fix/mod.rs:138` 的 SpawnSpec construction 和 line 207 單元 test 都改。
+  - **backend 用 `spec.resolve_as.unwrap_or(spec.verb)` 作 resolve() 的 key**；用 `spec.verb` 作 bundle name format。
+  - **驗證**：(1) `cargo test --workspace` exit 0 — 既有 70 個 skill_bundle tests + schema_neutrality + vault_init + 所有 verb integration test 全綠 (regression unchanged behavior 因 assembly 產出與既有 pre-composed 字串等價)；(2) 4 個新 claude_backend assembly test + 4 個新 codex_backend assembly test 全綠，斷言新 form 含 `/codebus-<verb>` (claude) 或 `$codebus-<verb>` (codex) literal；(3) `spawn_spec_carries_neutral_intent` test pass 對新 shape。
+
+## 2. Workspace regression
+
+- [x] 2.1 跑 `cargo test --workspace` 全套 regression — 確認 Phase 3 不影響 Phase 1a/2 既有測試（schema_neutrality 4 個、vault_init AGENTS.md 寫入、skill_bundle 70 個 stub_content_*/codex_materialization_*）+ 所有 verb integration test 與 backend test 全綠。**驗證**：`cargo test --workspace` exit 0；測試輸出含 task 1.1 新加的 8 個 backend assembly test name 全部 `... ok`。
+
+## 3. Manual assembly inspection（trust-but-verify）
+
+- [x] 3.1 寫一個一次性 inspection 腳本（用 `cargo run --example` 或臨時加一個 `#[test]` 印 debug output 然後刪）：對 5 個代表性 SpawnSpec（chat free-text / goal ingest free-text / goal verify sub-mode / quiz plan sub-mode / quiz generate sub-mode）跑 claude_backend.build_command 與 codex_backend.build_command，把 `cmd.get_args()` 印出，**手動 inspect** 確認：(a) claude free-text 輸出含 `-p` flag + `/codebus-<verb> "..."` quoted form；(b) claude sub-mode 輸出含 `-p` + `/codebus-<verb> <mode>: ...` no-quote form；(c) codex free-text 輸出 positional arg `$codebus-<verb> ...` no-quote；(d) codex sub-mode 輸出 positional arg `$codebus-<verb> <mode>: ...`；(e) 五個 verb 的 verb name 對映 SKILL bundle directory name（`Verb::Goal` → `codebus-goal`，不是 `codebus-Goal`）。**驗證**：手動 inspect 5 組 argv 全部符合上述 form；對應 spec scenario "Claude backend assembles slash-prefix invocation from SpawnSpec fields" + "codex backend assembles dollar-prefix invocation from SpawnSpec fields" + 4 個 Example 區塊（claude chat free-text、claude quiz plan、codex chat free-text、codex quiz plan）。

@@ -50,7 +50,9 @@ fn invoke_passes_env_overrides_to_command() {
         &backend,
         SpawnSpec {
             verb: Verb::Query,
-            prompt: "/codebus-query \"ping\"".into(),
+            resolve_as: None,
+            sub_mode: None,
+            input: "ping".into(),
             permission: Permission::ReadOnly,
             command_allowance: None,
             resume_session_id: None,
@@ -120,7 +122,9 @@ fn for_system_does_not_inject_env() {
         &backend,
         SpawnSpec {
             verb: Verb::Query,
-            prompt: "/x".into(),
+            resolve_as: None,
+            sub_mode: None,
+            input: "x".into(),
             permission: Permission::ReadOnly,
             command_allowance: None,
             resume_session_id: None,

@@ -158,7 +158,6 @@ pub fn run_chat_turn(
 
     // Step 3: resolve verb config (chat reuses query model/effort by design).
     let chat_resolved = cc_cfg.resolve(Verb::Chat);
-    let slash_command = format!("/codebus-chat \"{}\"", options.text);
 
     // Step 4: build env overrides (azure profile keyring fetch), then build
     // the Claude backend (holds config for model resolution + env).
@@ -188,7 +187,9 @@ pub fn run_chat_turn(
             &*backend,
             SpawnSpec {
                 verb: Verb::Chat,
-                prompt: slash_command,
+                resolve_as: None,
+                sub_mode: None,
+                input: options.text.clone(),
                 permission: Permission::ReadOnly,
                 command_allowance: None,
                 resume_session_id: stream_options,
