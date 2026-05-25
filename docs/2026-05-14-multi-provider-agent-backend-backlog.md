@@ -404,17 +404,21 @@ wire_api = "responses"
 
 **狀態**：被動 — 等版本 bump 觸發、不主動 schedule check。
 
-### F3. codex content-verify spawn 行為對等 claude
+### F3. codex content-verify spawn 行為對等 claude（2026-05-25 spike 後 close）
 
-**Why**：C cluster 修法之後 verify spawn 不再因 batch-file argv error 失敗，但仍有微小行為差異：codex verify 偶爾 emit `[CODEBUS_QUIZ_NO_VALIDATE] codex sandbox cannot run quiz structure validation`（自承無法跑 `codebus quiz validate` 子流程），而 claude 路徑沒這標籤。原因可能是 codex sandbox 不允許 spawn `codebus.exe` 子 subprocess、或 `command_allowance` 機制 codex 端沒有等價物（per `codex-backend` spec：「`SpawnSpec.command_allowance` has no codex equivalent (codex gates command execution by sandbox, not by a per-command allowlist)」）。
+**Why**：C cluster 修法之後 verify spawn 不再因 batch-file argv error 失敗，但仍有微小行為差異：codex quiz 路徑 emit `[CODEBUS_QUIZ_NO_VALIDATE] codex sandbox cannot run quiz structure validation`（標明在 Mode B 跳 in-session self-validate），claude 路徑沒這標籤。
 
-**How to apply**：deferred。codebus 的 quiz validate sub-flow 設計上是 best-effort、`[CODEBUS_QUIZ_NO_VALIDATE]` 也算誠實 surfacing。如果未來想讓 codex 端也能跑 validate，需評估：
+**Spike 結論（2026-05-25，搬 from prompt-surface-review-followup-backlog Phase 5）**：
 
-- (a) codex sandbox 加 `--add-dir` 把 codebus binary 路徑加 writable，或
-- (b) 改 quiz validate 走 inline TOML/regex 不 spawn binary，或
-- (c) 接受差異、把標籤改成正面說明（「codex provider 對 structure validation 採內嵌 schema」）
+實機驗了三組 codex exec 行為（詳細見 `docs/2026-05-23-prompt-surface-review-followup-backlog.md` 尾段「Phase 5 — 2026-05-25 spike 收尾」）：
 
-不單獨開 change — 等下次碰 quiz 相關工作再順手評。
+1. codex 在 `-s workspace-write` 下能直接 spawn `codebus.exe` ✓
+2. codex 沙箱**自動擋** bash heredoc 模式（`rejected: blocked by policy`、不可 user-configurable）
+3. agent 改用「`apply_patch` 寫 tempfile + 純 shell call `codebus quiz validate <file>` + 刪檔」**完整 work** — 乾淨 quiz exit 0、broken wikilink quiz exit 1 + 具體 finding 訊息
+
+**結論**：技術可行但**不採用**。代價：codex Mode B 沙箱要從 `read-only` 放寬到 `workspace-write`、防禦層數從 claude 的 3 層（`--tools` 工具 gate + PreToolUse hook command gate + SKILL body 紀律）降到 codex 的 1 層（只剩 SKILL body 紀律）。收益是 in-session self-correction、純 quality 微優；caller-side post-agent `codebus quiz validate` 仍會跑、correctness 不受影響。Trade-off 不划算。
+
+**狀態**：close — `[CODEBUS_QUIZ_NO_VALIDATE]` 標籤是設計上正確的誠實 surfacing、不是 bug。F73 / Phase 5 正式收尾。如果未來 codex CLI 引入 user-defined per-command allowance（unlikely），可重評。
 
 ### F4. codex grounded behavior 與 claude 的細微 reasoning 差異
 
