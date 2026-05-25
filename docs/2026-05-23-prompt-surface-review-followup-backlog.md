@@ -5,7 +5,7 @@
 **Parent backlog:** [provider-prompt-engineering](2026-05-22-provider-prompt-engineering-backlog.md)（PE1/PE2 已 archive 但這條延續其精神）
 **Severity:** quality / multi-provider 完成度（PE1/PE2 落地）
 **Owner:** harry
-**Status:** open — 等明天繼續
+**Status:** ✅ closed 2026-05-25 — Phase 0-4 全 archive；Phase 5 spike 跑完「技術可行但不採用」、F73 完整 close（詳見尾段「Phase 5 — 2026-05-25 spike 收尾」）
 
 ---
 
