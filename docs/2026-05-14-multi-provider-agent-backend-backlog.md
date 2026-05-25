@@ -370,3 +370,56 @@ wire_api = "responses"
 **優化方向**:`base_url` 收尾改 `/openai/v1`、丟掉 `api-version` 與自訂 `api-key` header、改用 `env_key`。要先實機驗 v1 端點對 harry 的 resource(`2026msf13`)是否可用 + 認證是否吃 `env_key`(Bearer)而非 api-key header。**Entra ID 官方仍不支援。** 來源:learn.microsoft.com/azure/foundry/openai/how-to/codex、developers.openai.com/codex/config-advanced、openai/codex#2024。
 
 **狀態**:純優化(現行舊式可用),非阻塞。等下次碰 codex azure 時一併驗 v1 再切。
+
+## 2026-05-25 — codex 5/5 verb end-to-end 修完後的跨平台 / 版本 follow-up
+
+`codex-skill-trigger-fix` change（2026-05-25 archive、commit `a4a931b` 進 main）把 Windows 上 codex 5/5 verb 修通。修法總結見 `docs/2026-05-25-codex-skill-trigger-diagnose.md`。三 cluster：A — vault init codex materialization gate 解除；B — isolation recipe 補 `-c windows.sandbox=unelevated`；C — 多行 prompt 走 `cmd.arg("-")` + stdin pipe（新增 optional `AgentBackend::stdin_payload` trait method）。
+
+修完後仍有以下 follow-up，**不單獨開 change，整合進本 backlog 追蹤**：
+
+### F1. macOS / Linux sandbox-write 行為驗證
+
+**Why**：`-c windows.sandbox=unelevated` 是 codex `[windows]` table key、Windows-only。codex 在 macOS 走 seatbelt sandbox、Linux 走 Landlock，可能：
+
+- (a) 本來就 work（user config 沒設那個 key 也能寫）→ codebus 不需動
+- (b) 需要對等 override（`[macos] sandbox = ...` 或 `[linux] sandbox = ...`，具體 key 待查 codex doctor / docs）→ codebus 需條件性加 arg
+
+**How to apply**：
+
+1. 等到本機接觸 macOS / Linux 環境（或 GHA matrix）有機會跑 `cargo install codebus + codebus quiz "<topic>"` on those platforms
+2. 重複 2026-05-25 diagnose 的 K-mode bisect：先單 user config 版（不帶 `--ignore-user-config`）看 baseline 是否可寫 → 帶 `--ignore-user-config` 看是否退化 → 若退化，找 platform-specific config key
+3. 結果加進 `codex_backend.rs::build_command`：可以是「Windows pass `windows.sandbox`、macOS pass `macos.sandbox`、Linux pass `linux.sandbox`」的條件 arg，或更可能是「同時 pass 三個 platform-table override 全部，codex 對非當前 platform 的 table 是 no-op」（簡單一點）
+4. 加 spec scenario：`codex-backend` 加跨平台 sandbox enablement requirement
+
+**狀態**：deferred — 本機沒 macOS / Linux 環境、不為了驗 sandbox 開 VM。等真實需要時補。GHA matrix CI 也可承載，但 codebus 還沒有 CI（per memory `feedback_dont_default_polish_ship`，solo dev 不為跨平台齊全 ship）。
+
+### F2. codex 0.134+ schema watch
+
+**Why**：`windows.sandbox` 是 codex 0.133.0 內部 schema、`unelevated` 是當下接受的值之一。codex 後續版本可能改 schema（rename key、加 enum value、移除整段 `[windows]` table、改 sandbox 機制等）。
+
+**How to apply**：
+
+- codex 升上來時跑一次 reproducer（`cd /tmp/exp-vault && codebus quiz "<topic>"`）+ goal write 驗 sandbox。如果 5 verb 還綠 → 無事；如果破了 → 跑一次 diagnose doc 的 K-mode bisect（已寫好步驟）找新 key + 補 spec
+- 不為 hypothetical schema 改動預留 feature-detection 抽象（per memory `feedback_dont_speculative_abstract`）
+
+**狀態**：被動 — 等版本 bump 觸發、不主動 schedule check。
+
+### F3. codex content-verify spawn 行為對等 claude
+
+**Why**：C cluster 修法之後 verify spawn 不再因 batch-file argv error 失敗，但仍有微小行為差異：codex verify 偶爾 emit `[CODEBUS_QUIZ_NO_VALIDATE] codex sandbox cannot run quiz structure validation`（自承無法跑 `codebus quiz validate` 子流程），而 claude 路徑沒這標籤。原因可能是 codex sandbox 不允許 spawn `codebus.exe` 子 subprocess、或 `command_allowance` 機制 codex 端沒有等價物（per `codex-backend` spec：「`SpawnSpec.command_allowance` has no codex equivalent (codex gates command execution by sandbox, not by a per-command allowlist)」）。
+
+**How to apply**：deferred。codebus 的 quiz validate sub-flow 設計上是 best-effort、`[CODEBUS_QUIZ_NO_VALIDATE]` 也算誠實 surfacing。如果未來想讓 codex 端也能跑 validate，需評估：
+
+- (a) codex sandbox 加 `--add-dir` 把 codebus binary 路徑加 writable，或
+- (b) 改 quiz validate 走 inline TOML/regex 不 spawn binary，或
+- (c) 接受差異、把標籤改成正面說明（「codex provider 對 structure validation 採內嵌 schema」）
+
+不單獨開 change — 等下次碰 quiz 相關工作再順手評。
+
+### F4. codex grounded behavior 與 claude 的細微 reasoning 差異
+
+**Why**：5/5 verb 都 work、但 codex 與 claude 的 reasoning 風格、tool-call 順序、wiki page 命名選擇等細節仍不完全等價。codebus 的設計目標是「換 provider 不換語意」，不是「換 provider reasoning 一模一樣」。
+
+**狀態**：per `codex-skill-trigger-fix` design.md Non-Goal「不嘗試讓 codex provider 在所有 verb 上 100% 等價 claude」，不視為 bug、不修。如果未來某個 verb 在 codex 上跑出明顯品質落差，再具體 case-by-case 處理（可能是 prompt engineering、可能是 provider config）。
+
+---
