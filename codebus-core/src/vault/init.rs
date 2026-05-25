@@ -322,13 +322,15 @@ pub fn run_init(
     .map_err(InitError::SkillBundles)?;
     // Codex provider: materialize the codex instruction surface (AGENTS.md
     // mirroring CLAUDE.md, `.codex/skills/` bundles, project-root marker)
-    // alongside the claude bundles. Only when codex is the active provider;
+    // alongside the claude bundles. Unconditional — the user can switch
+    // `agent.active_provider` post-init without re-running init, and a vault
+    // missing `.codex/skills/` leaves codex spawns unable to enter SKILL Mode
+    // (see docs/2026-05-25-codex-skill-trigger-diagnose.md). Claude path is
+    // unaffected because it never reads `.codex/` or `AGENTS.md`.
     // write-if-missing; silent (no extra lifecycle event so the declared
     // event order is unchanged).
-    if codex_provider_active() {
-        crate::skill_bundle::write_codex_materialization_if_missing(&paths.root, NEUTRAL_RULES)
-            .map_err(InitError::SkillBundles)?;
-    }
+    crate::skill_bundle::write_codex_materialization_if_missing(&paths.root, NEUTRAL_RULES)
+        .map_err(InitError::SkillBundles)?;
     let today_utc = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let (nav_written, nav_preserved) =
         nav_stubs::write_nav_stubs_if_missing(&paths.root, &today_utc)
@@ -475,18 +477,6 @@ fn write_schema_if_missing(schema_md: &Path) -> io::Result<bool> {
     Ok(true)
 }
 
-/// Returns `true` when `~/.codebus/config.yaml` selects `codex` as the active
-/// provider. A missing/unreadable config or absent `agent` block defaults to
-/// claude (`false`), so claude-only vaults are never polluted with codex
-/// materialization.
-fn codex_provider_active() -> bool {
-    default_config_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|body| crate::config::endpoint::read_active_provider(&body).ok())
-        .map(|provider| provider == "codex")
-        .unwrap_or(false)
-}
-
 fn write_skill_bundles(
     vault_root: &Path,
     repo_root: &Path,
@@ -618,6 +608,67 @@ mod tests {
         let layout_idx = order.iter().position(|e| *e == "LayoutCreated").unwrap();
         let sync_idx = order.iter().position(|e| *e == "RawSyncDone").unwrap();
         assert!(layout_idx < sync_idx);
+
+        unsafe { std::env::remove_var("CODEBUS_HOME") };
+    }
+
+    /// Spec scenario (skill-bundles "Codex-Side SKILL Mode Invocation Trigger"):
+    /// init MUST materialize the codex provider's instruction surface (`.codex/
+    /// skills/codebus-{verb}/SKILL.md` + `.codebus-vault` marker + `AGENTS.md`)
+    /// regardless of which provider is currently `active_provider` in
+    /// `~/.codebus/config.yaml`. Without this materialization, switching
+    /// `active_provider` from claude → codex on an already-initialized vault
+    /// leaves codex spawns with no SKILL bundle to load, and the agent falls
+    /// back to generic task-reply mode (see
+    /// `docs/2026-05-25-codex-skill-trigger-diagnose.md`).
+    #[test]
+    fn init_always_materializes_codex_bundles_regardless_of_active_provider() {
+        let tmp = TempDir::new().unwrap();
+        let home = TempDir::new().unwrap();
+
+        // CODEBUS_HOME has no config.yaml → active_provider defaults to claude.
+        // This is the precise condition under which the bug reproduces.
+        unsafe { std::env::set_var("CODEBUS_HOME", home.path()) };
+        let opts = InitOptions {
+            no_obsidian_register: true,
+            write_starter_config: false,
+            with_repo_root_skills: false,
+        };
+        let outcome = run_init(tmp.path(), &opts, |_event| {})
+            .expect("init should succeed in tempdir");
+
+        let vault_root = &outcome.paths.root;
+
+        // Codex SKILL bundles for all five verbs SHALL exist.
+        for verb in ["goal", "query", "fix", "chat", "quiz"] {
+            let bundle = vault_root
+                .join(".codex")
+                .join("skills")
+                .join(format!("codebus-{verb}"))
+                .join("SKILL.md");
+            assert!(
+                bundle.exists(),
+                "codex SKILL bundle missing: {} (active_provider defaults to claude; \
+                 materialization must NOT be gated on active_provider)",
+                bundle.display()
+            );
+        }
+
+        // Codex project_root_markers anchor file SHALL exist.
+        let marker = vault_root.join(".codebus-vault");
+        assert!(
+            marker.exists(),
+            "codex project_root_markers anchor missing: {}",
+            marker.display()
+        );
+
+        // AGENTS.md (codex's project-level agent instructions) SHALL exist.
+        let agents_md = vault_root.join("AGENTS.md");
+        assert!(
+            agents_md.exists(),
+            "codex AGENTS.md missing: {}",
+            agents_md.display()
+        );
 
         unsafe { std::env::remove_var("CODEBUS_HOME") };
     }

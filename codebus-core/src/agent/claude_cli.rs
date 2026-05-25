@@ -95,15 +95,31 @@ pub fn invoke(
     cancel: Option<Arc<AtomicBool>>,
 ) -> io::Result<InvokeReport> {
     let mut cmd = backend.build_command(&spec);
+    let stdin_payload = backend.stdin_payload(&spec);
 
     let started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
 
+    let stdin_mode = if stdin_payload.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    };
+
     let mut child = cmd
         .current_dir(vault_root)
-        .stdin(Stdio::null())
+        .stdin(stdin_mode)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+
+    // Feed the optional stdin payload (codex multi-line prompt workaround for
+    // Windows .cmd batch-file argv validation) and immediately close stdin so
+    // the child does not block waiting on more input.
+    if let Some(payload) = stdin_payload {
+        if let Some(mut stdin) = child.stdin.take() {
+            io::Write::write_all(&mut stdin, payload.as_bytes())?;
+        }
+    }
 
     // Hand stderr to a background thread so it streams to the parent's
     // stderr without blocking the main loop. The thread exits when the

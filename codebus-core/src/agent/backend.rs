@@ -3,11 +3,15 @@
 //! concrete agent CLI.
 //!
 //! See `agent-backend` spec `Agent Backend Trait Contract`. The trait has
-//! exactly three methods and exposes NO tool / sandbox / MCP / model / argv
-//! concepts to its caller — those are encapsulated entirely inside the
-//! implementing type (e.g. [`super::claude_backend::ClaudeBackend`]). The
-//! only thing a backend hands back out is the normalized cross-provider
-//! [`StreamEvent`] (plus token usage carried within it).
+//! three required methods plus one optional opt-in method (`stdin_payload`,
+//! default `None`) for backends whose underlying CLI cannot accept the prompt
+//! as a command-line argument (e.g. codex on Windows where the CLI resolves
+//! to a `.cmd` shim and Rust's stdlib rejects multi-line argv since 1.77).
+//! The trait exposes NO tool / sandbox / MCP / model / argv concepts to its
+//! caller — those are encapsulated entirely inside the implementing type
+//! (e.g. [`super::claude_backend::ClaudeBackend`]). The only thing a backend
+//! hands back out is the normalized cross-provider [`StreamEvent`] (plus
+//! token usage carried within it).
 
 use crate::stream::StreamEvent;
 use std::process::Command;
@@ -36,4 +40,19 @@ pub trait AgentBackend: Send + Sync {
     /// identifier (Claude `system`/`init`; another provider's equivalent),
     /// `None` otherwise. The loop polls every line until the first hit.
     fn extract_session_id(&self, line: &str) -> Option<String>;
+
+    /// Optional: the prompt payload to feed via the child's stdin instead of
+    /// as an argv element. Default `None` (prompt is in argv, stdin closed).
+    /// Backends MUST return `Some(prompt)` when their CLI cannot accept
+    /// multi-line prompts as argv on the host platform; on Windows, codex
+    /// resolves to a `.cmd` shim and Rust's stdlib rejects any argv element
+    /// containing `\n` since 1.77 ("batch file arguments are invalid"
+    /// `InvalidInput`), so codex returns `Some(...)` for the verify / repair
+    /// spawns that build multi-line input. When `Some(payload)` is returned,
+    /// the invocation loop pipes stdin, writes the payload, and closes
+    /// stdin; the backend's `build_command` MUST also pass `-` as the prompt
+    /// argument (or omit it) so the CLI reads from stdin.
+    fn stdin_payload(&self, _spec: &SpawnSpec) -> Option<String> {
+        None
+    }
 }

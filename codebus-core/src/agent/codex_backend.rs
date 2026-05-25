@@ -59,6 +59,20 @@ impl CodexBackend {
     }
 }
 
+/// Format the codex SKILL invocation prompt from a `SpawnSpec`. Shared by
+/// `build_command` (decides argv vs `-` placeholder) and `stdin_payload`
+/// (returns the same string for the multi-line stdin write) so the two
+/// paths cannot drift. `Some(mode)` produces `$codebus-<bundle> <mode>:
+/// <input>`; `None` produces `$codebus-<bundle> <input>` (no quote wrap —
+/// F95 retraction verified modern LLM tolerance).
+fn format_codex_prompt(spec: &SpawnSpec) -> String {
+    let bundle = verb_bundle_name(spec.verb);
+    match &spec.sub_mode {
+        Some(mode) => format!("$codebus-{bundle} {mode}: {}", spec.input),
+        None => format!("$codebus-{bundle} {}", spec.input),
+    }
+}
+
 /// Default codex binary name when `CODEBUS_CODEX_BIN` is unset. On Windows the
 /// npm-installed codex is a `codex.cmd` batch shim; `Command::new("codex")`
 /// does NOT resolve it via `PATHEXT` (it errors `program not found`), so we
@@ -87,6 +101,19 @@ impl AgentBackend for CodexBackend {
         // Per-spawn isolation recipe (verified §4(F)): drop user config/MCP,
         // plugins, execpolicy; pin the project root to the vault so the
         // analyzed repo's `.codex/` and `AGENTS.md` are excluded.
+        //
+        // `windows.sandbox=unelevated`: re-enables Windows sandbox capabilities
+        // that `--ignore-user-config` would otherwise strip. Without this
+        // override, codex's sandbox stays in a baseline that refuses both file
+        // writes AND `Shell` subprocess spawns (observed: `windows sandbox:
+        // spawn setup refresh`) even when `-s workspace-write` is also passed.
+        // Codex accepts only `elevated` / `unelevated`; `elevated` requires the
+        // parent process to already be admin and aborts spawn otherwise, while
+        // `unelevated` runs the sandbox as the current user — which is the
+        // codebus case. K-mode bisect + unelevated/elevated comparison is in
+        // docs/2026-05-25-codex-skill-trigger-diagnose.md. On non-Windows
+        // hosts the unknown-platform table is a no-op per codex's TOML
+        // schema tolerance; cross-platform follow-up tracked separately.
         cmd.arg("--json")
             .arg("--ignore-user-config")
             .arg("--disable")
@@ -94,7 +121,9 @@ impl AgentBackend for CodexBackend {
             .arg("--ignore-rules")
             .arg("--skip-git-repo-check")
             .arg("-c")
-            .arg(format!("project_root_markers=['{CODEX_VAULT_MARKER}']"));
+            .arg(format!("project_root_markers=['{CODEX_VAULT_MARKER}']"))
+            .arg("-c")
+            .arg("windows.sandbox=unelevated");
 
         // Session persistence: `chat` is a multi-turn conversation — each turn
         // MUST persist its session rollout so the next turn can `exec resume
@@ -192,16 +221,39 @@ impl AgentBackend for CodexBackend {
         // verified modern LLM tolerance). The `$`-prefix invokes codex's
         // native skill explicit-invocation mechanism (24.8% input-token
         // saving vs `/`-prefix description-match path; §16 F26).
-        let bundle = verb_bundle_name(spec.verb);
-        let prompt = match &spec.sub_mode {
-            Some(mode) => format!("$codebus-{bundle} {mode}: {}", spec.input),
-            None => format!("$codebus-{bundle} {}", spec.input),
-        };
-        cmd.arg(prompt);
-        // Close stdin: codex exec blocks waiting on stdin when it is an open
-        // non-TTY pipe (verified — a background spawn hung 60s+ with no input).
+        //
+        // Argv vs stdin: Rust's stdlib rejects argv elements containing `\n`
+        // when the executable resolves to a Windows `.cmd` / `.bat` shim
+        // (`InvalidInput: batch file arguments are invalid`, hardened since
+        // Rust 1.77). codex's npm install on Windows is a `.cmd` shim. For
+        // multi-line prompts (verify / repair sub_modes packing CHANGED PAGES
+        // / CONTENT DEFECTS blocks separated by `\n`) we pass `-` as the
+        // prompt arg — codex exec reads stdin in that case — and the
+        // invocation loop pipes the formatted prompt via stdin (see
+        // `stdin_payload` below). For single-line prompts we keep the argv
+        // form to preserve the existing visible-argv contract for tests +
+        // observability.
+        let formatted = format_codex_prompt(spec);
+        if formatted.contains('\n') {
+            cmd.arg("-");
+        } else {
+            cmd.arg(formatted);
+        }
+        // Stdin default: closed (codex exec blocks on open non-TTY pipe with
+        // no data). When `stdin_payload` returns `Some(...)` the invocation
+        // loop overrides this to `Stdio::piped()` and writes the formatted
+        // prompt, so the multi-line case still terminates correctly.
         cmd.stdin(Stdio::null());
         cmd
+    }
+
+    fn stdin_payload(&self, spec: &SpawnSpec) -> Option<String> {
+        let formatted = format_codex_prompt(spec);
+        if formatted.contains('\n') {
+            Some(formatted)
+        } else {
+            None
+        }
     }
 
     fn parse_stream_line(&self, line: &str) -> Vec<StreamEvent> {
@@ -307,6 +359,42 @@ mod tests {
         let args = cmd_args(&cmd);
         let pos = args.iter().position(|a| a == "-s").expect("-s present");
         assert_eq!(args.get(pos + 1).map(String::as_str), Some("workspace-write"));
+    }
+
+    /// Spec: Codex Sandbox Write Enablement Override — argv SHALL contain
+    /// `-c windows.sandbox="elevated"` for both Workspace and ReadOnly
+    /// permission spawns. The override re-enables Windows sandbox write
+    /// capability that `--ignore-user-config` would otherwise strip; on non-
+    /// Windows hosts the unknown-platform table is a no-op per codex's TOML
+    /// schema tolerance. See
+    /// docs/2026-05-25-codex-skill-trigger-diagnose.md (Layer (c) + K-mode
+    /// bisect) for the underlying evidence.
+    #[test]
+    fn workspace_argv_includes_windows_sandbox_elevation_override() {
+        let cmd = backend().build_command(&spec(Verb::Goal, Permission::Workspace));
+        let args = cmd_args(&cmd);
+        assert_pair_present(&args, "-c", "windows.sandbox=unelevated");
+    }
+
+    #[test]
+    fn read_only_argv_also_includes_windows_sandbox_elevation_override() {
+        let cmd = backend().build_command(&spec(Verb::Query, Permission::ReadOnly));
+        let args = cmd_args(&cmd);
+        assert_pair_present(&args, "-c", "windows.sandbox=unelevated");
+    }
+
+    fn assert_pair_present(args: &[String], flag: &str, value: &str) {
+        let positions: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter_map(|(i, a)| if a == flag { Some(i) } else { None })
+            .collect();
+        assert!(
+            positions
+                .iter()
+                .any(|p| args.get(p + 1).map(String::as_str) == Some(value)),
+            "expected `{flag} {value}` pair in argv; got {args:?}"
+        );
     }
 
     /// Isolation flags are always present.
@@ -550,15 +638,49 @@ mod tests {
     }
 
     #[test]
-    fn codex_assembly_sub_mode_input_with_newlines_preserved() {
+    fn codex_assembly_sub_mode_input_with_newlines_uses_stdin_placeholder() {
+        // Windows `.cmd` shim + Rust 1.77+ rejects newline-containing argv
+        // (`InvalidInput: batch file arguments are invalid`). For multi-line
+        // prompts (verify / repair sub_modes) the backend passes `-` as the
+        // prompt arg and ships the formatted prompt via stdin_payload.
         let mut s = spec(Verb::Goal, Permission::ReadOnly);
         s.sub_mode = Some("verify".to_string());
         s.input = "goal=X\n\nCHANGED PAGES:\nwiki/a.md\nwiki/b.md".to_string();
         let cmd = backend().build_command(&s);
         let args = cmd_args(&cmd);
         assert_eq!(
-            last_positional(&args).expect("positional prompt arg"),
+            args.last().map(String::as_str),
+            Some("-"),
+            "multi-line prompt MUST go via stdin; argv prompt arg is `-`; got {args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a.contains('\n')),
+            "no argv element may contain `\\n` on Windows .cmd shim path; got {args:?}"
+        );
+        let payload = backend()
+            .stdin_payload(&s)
+            .expect("multi-line prompt SHALL produce stdin_payload");
+        assert_eq!(
+            payload,
             "$codebus-goal verify: goal=X\n\nCHANGED PAGES:\nwiki/a.md\nwiki/b.md"
+        );
+    }
+
+    #[test]
+    fn codex_assembly_single_line_input_stays_in_argv() {
+        // Non-multi-line prompts keep the argv form so the visible-argv
+        // contract for plan-stage / chat-style spawns is unchanged.
+        let mut s = spec(Verb::Goal, Permission::Workspace);
+        s.input = "draft payments overview".to_string();
+        let cmd = backend().build_command(&s);
+        let args = cmd_args(&cmd);
+        assert_eq!(
+            last_positional(&args).expect("positional prompt arg"),
+            "$codebus-goal draft payments overview"
+        );
+        assert!(
+            backend().stdin_payload(&s).is_none(),
+            "single-line prompt SHALL NOT route through stdin"
         );
     }
 

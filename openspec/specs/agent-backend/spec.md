@@ -8,9 +8,9 @@ TBD - created by archiving change 'agent-backend-seam'. Update Purpose after arc
 
 ### Requirement: Agent Backend Trait Contract
 
-The codebus core SHALL define an `AgentBackend` trait that is the sole contract between the provider-agnostic invocation loop and a concrete agent CLI. The trait SHALL declare exactly three methods: `build_command` (maps a `SpawnSpec` to a `std::process::Command`), `parse_stream_line` (maps one raw stdout line to zero or more `StreamEvent`), and `extract_session_id` (maps one raw stdout line to an optional session id). The trait SHALL NOT expose tool, sandbox, MCP, model, or argv concepts to its caller — those SHALL be encapsulated entirely inside the implementing type.
+The codebus core SHALL define an `AgentBackend` trait that is the sole contract between the provider-agnostic invocation loop and a concrete agent CLI. The trait SHALL declare three required methods (`build_command`, `parse_stream_line`, `extract_session_id`) and MAY declare additional optional methods whose default implementations preserve the existing three-method behavior. The currently-permitted optional method is `stdin_payload(&SpawnSpec) -> Option<String>`, with a default `None` body so backends that do not need it can continue to implement only the three required methods. The trait SHALL NOT expose tool, sandbox, MCP, model, or argv concepts to its caller — those SHALL be encapsulated entirely inside the implementing type. Any optional method SHALL be motivated by a concrete cross-backend variation (not speculative future extension) and SHALL have a safe default that preserves the prior contract.
 
-#### Scenario: Trait exposes exactly the three contract methods
+#### Scenario: Trait exposes the required contract methods
 
 - **WHEN** a type implements `AgentBackend`
 - **THEN** it SHALL provide `build_command(&SpawnSpec) -> Command`, `parse_stream_line(&str) -> Vec<StreamEvent>`, and `extract_session_id(&str) -> Option<String>` AND the trait SHALL NOT require any method that takes tool / sandbox / model parameters
@@ -20,42 +20,26 @@ The codebus core SHALL define an `AgentBackend` trait that is the sole contract 
 - **WHEN** `parse_stream_line` is called with a provider stdout line
 - **THEN** it SHALL return `Vec<StreamEvent>` (the normalized cross-provider event type) AND SHALL NOT return any provider-specific event shape
 
+#### Scenario: Optional stdin payload method has a safe default
+
+- **WHEN** a backend implements only the three required methods
+- **THEN** the trait's default `stdin_payload` implementation SHALL return `None`, AND the invocation loop SHALL close the child's stdin as before (no behavior change for backends that do not opt in)
+
+#### Scenario: Backend opt-in routes a multi-line prompt to stdin
+
+- **WHEN** a backend's `stdin_payload(spec)` returns `Some(payload)`
+- **THEN** the invocation loop SHALL open the child's stdin as a pipe, write `payload` to it, and close the pipe before reading stdout — and the backend's own `build_command` SHALL have used `-` (or omitted) as the prompt argv element so the CLI reads from stdin
+
 
 <!-- @trace
-source: agent-backend-seam
-updated: 2026-05-21
+source: codex-skill-trigger-fix
+updated: 2026-05-25
 code:
-  - codebus-core/src/config/endpoint.rs
-  - codebus-core/src/agent/mod.rs
-  - docs/2026-05-21-multi-provider-design-discussion.md
-  - codebus-core/src/agent/spawn_spec.rs
-  - codebus-core/src/verb/query.rs
-  - codebus-core/src/config/mod.rs
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - codebus-core/src/agent/backend.rs
+  - codebus-core/src/vault/init.rs
   - codebus-core/src/agent/claude_cli.rs
-  - codebus-app/src/store/settings.ts
-  - codebus-core/src/verb/fix.rs
-  - codebus-core/src/verb/quiz.rs
-  - codebus-core/src/agent/claude_backend.rs
-  - codebus-core/src/config/global_starter.rs
-  - codebus-core/src/verb/goal.rs
-  - codebus-app/src/lib/ipc.ts
-  - codebus-core/src/wiki/fix/mod.rs
-  - codebus-core/src/config/claude_code.rs
-  - codebus-core/src/verb/chat.rs
-  - docs/v3-roadmap.md
-tests:
-  - codebus-core/tests/endpoint_config_load.rs
-  - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/quiz_flow.rs
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-cli/tests/azure_key_pre_spawn.rs
-  - codebus-cli/tests/parse_error_aborts_all_verbs.rs
-  - codebus-cli/tests/config_subcommand.rs
-  - codebus-cli/tests/scoped_env_injection.rs
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-cli/tests/goal_content_verify_cli.rs
+  - docs/2026-05-25-codex-skill-trigger-diagnose.md
+  - codebus-core/src/agent/backend.rs
+  - codebus-core/src/agent/codex_backend.rs
 -->
 
 ---
