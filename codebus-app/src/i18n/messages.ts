@@ -141,6 +141,8 @@ const en = {
   "workspace.tab.goals": "Goals",
   "workspace.tab.wiki": "Wiki",
   "workspace.tab.quiz": "Quiz",
+  "workspace.sidebar.vaultPathHint":
+    "{path}\n\nClick to open in file explorer",
 
   // ---- Workspace · Quiz ----
   "workspace.quiz.confirmDescription":
@@ -227,8 +229,11 @@ const en = {
   "chat.button.dismiss": "Dismiss",
   "chat.toast.startedNewChat": "Started a new chat.",
   "chat.toast.undo": "Undo",
+  "chat.undoToast.heading": "🆕 New chat started",
+  "chat.undoToast.countdown": "({n}s to undo)",
   "chat.error.anotherGoalRunning":
-    "Another goal is running — wait for it to finish.",
+    "Another goal is running. Wait for it to finish.",
+  "chat.error.promoteFailed": "Promote failed. Try again.",
   "chat.token.tooltip.cacheRead": "Cache read",
   "chat.token.tooltip.cacheCreate": "Cache create",
   "chat.token.tooltip.input": "Input",
@@ -244,6 +249,121 @@ const en = {
   "errors.configParse": "Config parse error: {message}",
   "errors.internal": "{message}",
   "errors.generic": "Something went wrong",
+
+  // ---- Settings · Endpoint sections (Cat A sweep) ----
+  "settings.endpoint.claude.heading": "Claude Code endpoint settings",
+  "settings.endpoint.codex.heading": "OpenAI Codex endpoint settings",
+  "settings.endpoint.activeProfileAria": "Active endpoint profile",
+  "settings.endpoint.activeProfileAriaCodex": "Active codex endpoint profile",
+  "settings.endpoint.profile.system": "System",
+  "settings.endpoint.profile.azure": "Azure",
+  "settings.endpoint.profile.systemTitle": "System Profile",
+  "settings.endpoint.profile.azureTitle": "Azure Profile",
+  "settings.endpoint.profile.inactiveLabel": "(inactive)",
+  "settings.endpoint.field.apiKey": "API key",
+  "settings.endpoint.field.effort": "effort",
+  "settings.endpoint.placeholder.claudeModel": "<model, e.g. opus-4-7>",
+  "settings.endpoint.placeholder.codexModel": "<model, e.g. gpt-5.5>",
+  "settings.endpoint.placeholder.deploymentName": "<deployment name>",
+  "settings.endpoint.placeholder.azureBaseUrlClaude":
+    "https://<resource>.cognitiveservices.azure.com/anthropic",
+  "settings.endpoint.placeholder.azureBaseUrlCodex":
+    "https://<resource>.cognitiveservices.azure.com/openai",
+  "settings.endpoint.placeholder.apiVersion": "2025-04-01-preview",
+  "settings.endpoint.placeholder.codexEffort": "effort",
+  "settings.endpoint.keyStatus.set": "Set",
+  "settings.endpoint.keyStatus.unset": "Unset",
+  "settings.endpoint.keyStatus.unknown": "—",
+  "settings.endpoint.keySetNew": "Set new…",
+  "settings.endpoint.keyDelete": "Delete",
+  "settings.endpoint.validationSummaryHeading":
+    "Endpoint configuration is incomplete:",
+  "settings.endpoint.saveButtonIncompleteTitle":
+    "Endpoint configuration is incomplete — fix highlighted fields",
+
+  // ---- Settings · jargon allow-list (Cat D) ----
+  // The Cat D allow-list (i18n Bundle Coverage Policy): config YAML key
+  // names, verb identifiers, and codex effort enum values stay English in
+  // BOTH locales — held here for centralization, not translation.
+  "settings.endpoint.field.baseUrl": "base_url",
+  "settings.endpoint.field.apiVersion": "api_version",
+  "settings.endpoint.field.keyringService": "keyring_service",
+  "settings.endpoint.verb.goal": "goal",
+  "settings.endpoint.verb.query": "query",
+  "settings.endpoint.verb.fix": "fix",
+  "settings.endpoint.verb.verify": "verify",
+  "settings.endpoint.codex.effort.low": "low",
+  "settings.endpoint.codex.effort.medium": "medium",
+  "settings.endpoint.codex.effort.high": "high",
+  "settings.endpoint.codex.effort.xhigh": "xhigh",
+
+  // ---- Settings · SetKeyDialog (Cat A sweep) ----
+  "settings.setKeyDialog.title": "Set Azure API key",
+  "settings.setKeyDialog.inputLabel":
+    "Paste the API key — it will be stored in your OS keyring and never written to ~/.codebus/config.yaml.",
+  "settings.setKeyDialog.errorEmpty": "API key cannot be empty",
+
+  // ---- Settings · CLI install status (residual sweep) ----
+  "settings.cliStatus.checking": "Checking…",
+  "settings.cliStatus.installed": "Installed · {version}",
+  "settings.cliStatus.notInstalled": "Not installed",
+  "settings.fields.pii.scannerNone": "none",
+
+  // ---- Workspace · QuizAnswering (Cat B sweep) ----
+  "workspace.quiz.answering.questionCounter": "Question {n} of {total}",
+  "workspace.quiz.answering.parseEmpty":
+    "Quiz could not be parsed — no well-formed questions.",
+  "workspace.quiz.answering.summaryHeading": "Quiz complete",
+  "workspace.quiz.answering.scoreLine":
+    "Score: {correct} / {total} ({percent}%)",
+  "workspace.quiz.answering.outcomePassed": "Passed (threshold {n}%)",
+  "workspace.quiz.answering.outcomeFailed": "Failed (threshold {n}%)",
+  "workspace.quiz.answering.verdictCorrect": "Correct",
+  "workspace.quiz.answering.verdictIncorrect": "Incorrect",
+  "workspace.quiz.answering.submitButton": "Submit",
+  "workspace.quiz.answering.nextButton": "Next",
+  "workspace.quiz.answering.finishButton": "Finish",
+
+  // ---- Workspace · QuizReview (Cat B sweep) ----
+  "workspace.quiz.review.backToHistory": "← Back to history",
+  "workspace.quiz.review.redoButton": "Redo this attempt",
+  "workspace.quiz.review.viewLogButton": "View generation log",
+  "workspace.quiz.review.viewLogClose": "Close",
+  "workspace.quiz.review.summaryLine":
+    "{correct} / {total} ({percent}%) — {outcome}",
+  "workspace.quiz.review.yourAnswerLine":
+    "Your answer: {selected} · Correct answer: {correct}",
+  "workspace.quiz.review.generationLogTitle": "Generation log",
+
+  // ---- Workspace · QuizTab (Cat B sweep) ----
+  "workspace.quiz.tab.heading": "Quiz history",
+  "workspace.quiz.tab.newButton": "+ New quiz",
+  "workspace.quiz.tab.emptyHint":
+    "No quizzes yet — start one with + New quiz",
+  "workspace.quiz.tab.startButton": "Start",
+  "workspace.quiz.tab.topicPlaceholder": "What do you want to be quizzed on?",
+  "workspace.quiz.tab.backToHistoryShort": "← History",
+  "workspace.quiz.tab.backToHistoryFull": "← Back to history",
+  "workspace.quiz.tab.planningStatus": "Planning quiz scope…",
+  "workspace.quiz.tab.generatingStatus": "Generating questions…",
+  "workspace.quiz.tab.noMatchPrefix": "No matching wiki pages: {reason}",
+  "workspace.quiz.tab.errorPrefix": "Quiz failed: {message}",
+  "workspace.quiz.tab.backButton": "Back",
+  "workspace.quiz.generationLogLoadError":
+    "Could not load generation log: {error}",
+
+  // ---- Workspace · WikiPreview action (residual sweep) ----
+  "workspace.wiki.quizMeOnThis": "Quiz me on this",
+
+  // ---- Workspace · Run detail loading state (residual sweep) ----
+  "workspace.runDetail.loading": "Loading…",
+
+  // ---- a11y (Cat C sweep) — shared accessibility keys ----
+  "a11y.dialogClose": "Close",
+  "chat.widget.aria.resizeChat": "Resize chat widget",
+  "chat.widget.aria.minimizeChat": "Minimize chat",
+  "chat.widget.title.dragToResize": "Drag to resize",
+  "chat.widget.title.minimizeShortcut": "Minimize (Cmd+K)",
 
   // ---- Activity stream · internal sentinel markers ----
   // QGEN1: translations for `[CODEBUS_*]` thought-block sentinel
@@ -380,6 +500,7 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.tab.goals": "Goals",
   "workspace.tab.wiki": "Wiki",
   "workspace.tab.quiz": "Quiz",
+  "workspace.sidebar.vaultPathHint": "{path}\n\n點一下用檔案總管開啟",
 
   // ---- Workspace · Quiz ----
   "workspace.quiz.confirmDescription":
@@ -467,7 +588,10 @@ const zh: Record<keyof typeof en, string> = {
   "chat.button.dismiss": "忽略",
   "chat.toast.startedNewChat": "已開始新對話。",
   "chat.toast.undo": "復原",
+  "chat.undoToast.heading": "🆕 已開始新對話",
+  "chat.undoToast.countdown": "（{n} 秒可復原）",
   "chat.error.anotherGoalRunning": "目前有其他 goal 在執行，等它結束。",
+  "chat.error.promoteFailed": "Promote 失敗，請再試一次。",
   "chat.token.tooltip.cacheRead": "快取讀取",
   "chat.token.tooltip.cacheCreate": "快取建立",
   "chat.token.tooltip.input": "輸入",
@@ -483,6 +607,116 @@ const zh: Record<keyof typeof en, string> = {
   "errors.configParse": "Config 解析錯誤：{message}",
   "errors.internal": "{message}",
   "errors.generic": "發生未預期的錯誤",
+
+  // ---- Settings · Endpoint sections (Cat A sweep) ----
+  "settings.endpoint.claude.heading": "Claude Code 端點設定",
+  "settings.endpoint.codex.heading": "OpenAI Codex 端點設定",
+  "settings.endpoint.activeProfileAria": "目前使用的端點 profile",
+  "settings.endpoint.activeProfileAriaCodex": "目前使用的 codex 端點 profile",
+  "settings.endpoint.profile.system": "系統",
+  "settings.endpoint.profile.azure": "Azure",
+  "settings.endpoint.profile.systemTitle": "系統 Profile",
+  "settings.endpoint.profile.azureTitle": "Azure Profile",
+  "settings.endpoint.profile.inactiveLabel": "（未啟用）",
+  "settings.endpoint.field.apiKey": "API 金鑰",
+  "settings.endpoint.field.effort": "effort",
+  "settings.endpoint.placeholder.claudeModel": "<model，例：opus-4-7>",
+  "settings.endpoint.placeholder.codexModel": "<model，例：gpt-5.5>",
+  "settings.endpoint.placeholder.deploymentName": "<deployment 名稱>",
+  "settings.endpoint.placeholder.azureBaseUrlClaude":
+    "https://<resource>.cognitiveservices.azure.com/anthropic",
+  "settings.endpoint.placeholder.azureBaseUrlCodex":
+    "https://<resource>.cognitiveservices.azure.com/openai",
+  "settings.endpoint.placeholder.apiVersion": "2025-04-01-preview",
+  "settings.endpoint.placeholder.codexEffort": "effort",
+  "settings.endpoint.keyStatus.set": "已設定",
+  "settings.endpoint.keyStatus.unset": "未設定",
+  "settings.endpoint.keyStatus.unknown": "—",
+  "settings.endpoint.keySetNew": "設定新值…",
+  "settings.endpoint.keyDelete": "刪除",
+  "settings.endpoint.validationSummaryHeading": "端點設定不完整：",
+  "settings.endpoint.saveButtonIncompleteTitle":
+    "端點設定不完整 — 請修正標紅的欄位",
+
+  // ---- Settings · jargon allow-list (Cat D) — same as en ----
+  "settings.endpoint.field.baseUrl": "base_url",
+  "settings.endpoint.field.apiVersion": "api_version",
+  "settings.endpoint.field.keyringService": "keyring_service",
+  "settings.endpoint.verb.goal": "goal",
+  "settings.endpoint.verb.query": "query",
+  "settings.endpoint.verb.fix": "fix",
+  "settings.endpoint.verb.verify": "verify",
+  "settings.endpoint.codex.effort.low": "low",
+  "settings.endpoint.codex.effort.medium": "medium",
+  "settings.endpoint.codex.effort.high": "high",
+  "settings.endpoint.codex.effort.xhigh": "xhigh",
+
+  // ---- Settings · SetKeyDialog (Cat A sweep) ----
+  "settings.setKeyDialog.title": "設定 Azure API 金鑰",
+  "settings.setKeyDialog.inputLabel":
+    "貼上 API 金鑰 — 會存進作業系統 keyring，不會寫入 ~/.codebus/config.yaml。",
+  "settings.setKeyDialog.errorEmpty": "API 金鑰不能空白",
+
+  // ---- Settings · CLI install status (residual sweep) ----
+  "settings.cliStatus.checking": "檢查中…",
+  "settings.cliStatus.installed": "已安裝 · {version}",
+  "settings.cliStatus.notInstalled": "未安裝",
+  "settings.fields.pii.scannerNone": "none",
+
+  // ---- Workspace · QuizAnswering (Cat B sweep) ----
+  "workspace.quiz.answering.questionCounter": "第 {n} 題 / 共 {total} 題",
+  "workspace.quiz.answering.parseEmpty":
+    "Quiz 無法解析 — 沒有合格題目。",
+  "workspace.quiz.answering.summaryHeading": "Quiz 完成",
+  "workspace.quiz.answering.scoreLine":
+    "得分：{correct} / {total}（{percent}%）",
+  "workspace.quiz.answering.outcomePassed": "通過（門檻 {n}%）",
+  "workspace.quiz.answering.outcomeFailed": "未通過（門檻 {n}%）",
+  "workspace.quiz.answering.verdictCorrect": "答對",
+  "workspace.quiz.answering.verdictIncorrect": "答錯",
+  "workspace.quiz.answering.submitButton": "送出",
+  "workspace.quiz.answering.nextButton": "下一題",
+  "workspace.quiz.answering.finishButton": "完成",
+
+  // ---- Workspace · QuizReview (Cat B sweep) ----
+  "workspace.quiz.review.backToHistory": "← 回到歷史",
+  "workspace.quiz.review.redoButton": "重做此份",
+  "workspace.quiz.review.viewLogButton": "看過程",
+  "workspace.quiz.review.viewLogClose": "關閉",
+  "workspace.quiz.review.summaryLine":
+    "{correct} / {total}（{percent}%）— {outcome}",
+  "workspace.quiz.review.yourAnswerLine":
+    "你的答案：{selected} · 正確答案：{correct}",
+  "workspace.quiz.review.generationLogTitle": "生成記錄",
+
+  // ---- Workspace · QuizTab (Cat B sweep) ----
+  "workspace.quiz.tab.heading": "Quiz 歷史",
+  "workspace.quiz.tab.newButton": "+ 新增 Quiz",
+  "workspace.quiz.tab.emptyHint":
+    "目前還沒 quiz — 用 + 新增 Quiz 開始",
+  "workspace.quiz.tab.startButton": "開始",
+  "workspace.quiz.tab.topicPlaceholder": "想被測什麼？",
+  "workspace.quiz.tab.backToHistoryShort": "← 歷史",
+  "workspace.quiz.tab.backToHistoryFull": "← 回到歷史",
+  "workspace.quiz.tab.planningStatus": "規劃 quiz 範圍中…",
+  "workspace.quiz.tab.generatingStatus": "生成題目中…",
+  "workspace.quiz.tab.noMatchPrefix": "沒有符合的 wiki 頁面：{reason}",
+  "workspace.quiz.tab.errorPrefix": "Quiz 失敗：{message}",
+  "workspace.quiz.tab.backButton": "返回",
+  "workspace.quiz.generationLogLoadError": "無法載入生成記錄：{error}",
+
+  // ---- Workspace · WikiPreview action (residual sweep) ----
+  "workspace.wiki.quizMeOnThis": "考我這頁",
+
+  // ---- Workspace · Run detail loading state (residual sweep) ----
+  "workspace.runDetail.loading": "載入中…",
+
+  // ---- a11y (Cat C sweep) — shared accessibility keys ----
+  "a11y.dialogClose": "關閉",
+  "chat.widget.aria.resizeChat": "調整聊天視窗大小",
+  "chat.widget.aria.minimizeChat": "縮小聊天視窗",
+  "chat.widget.title.dragToResize": "拖曳以調整大小",
+  "chat.widget.title.minimizeShortcut": "縮小（Cmd+K）",
 
   // ---- Activity stream · internal sentinel markers ----
   "activity.marker.codebusQuizNoValidate":

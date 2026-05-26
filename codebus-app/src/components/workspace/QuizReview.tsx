@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog"
 import { isPassing, parseQuiz, type ChoiceKey } from "@/lib/quiz-parse"
 import type { QuizProgress, WikiPageMeta } from "@/lib/ipc"
+import { useT } from "@/i18n/useT"
 import { QuizGenerationLog } from "./QuizGenerationLog"
 import { ExplanationText } from "./ExplanationText"
 
@@ -54,6 +55,7 @@ export function QuizReview({
   pages,
   onOpenWikiPage,
 }: QuizReviewProps) {
+  const t = useT()
   const questions = useMemo(() => parseQuiz(quizMd), [quizMd])
   const [logOpen, setLogOpen] = useState(false)
 
@@ -68,14 +70,14 @@ export function QuizReview({
     >
       <div className="flex items-center gap-2">
         <Button data-testid="quiz-attempt-back" onClick={onBack}>
-          ← Back to history
+          {t("workspace.quiz.review.backToHistory")}
         </Button>
         <Button
           variant="primary"
           data-testid="quiz-redo-this"
           onClick={onRedo}
         >
-          重做此份
+          {t("workspace.quiz.review.redoButton")}
         </Button>
         {eventsLog && (
           <Button
@@ -83,7 +85,7 @@ export function QuizReview({
             data-testid="quiz-view-log"
             onClick={() => setLogOpen(true)}
           >
-            看過程
+            {t("workspace.quiz.review.viewLogButton")}
           </Button>
         )}
       </div>
@@ -93,9 +95,14 @@ export function QuizReview({
           data-testid="quiz-review-summary"
           className={pass ? "text-green-500" : "text-red-500"}
         >
-          {correctCount} / {total} (
-          {Math.round((correctCount / total) * 100)}%) —{" "}
-          {pass ? "Passed" : "Failed"} (threshold {passThreshold}%)
+          {t("workspace.quiz.review.summaryLine", {
+            correct: correctCount,
+            total,
+            percent: Math.round((correctCount / total) * 100),
+            outcome: pass
+              ? t("workspace.quiz.answering.outcomePassed", { n: passThreshold })
+              : t("workspace.quiz.answering.outcomeFailed", { n: passThreshold }),
+          })}
         </p>
       )}
 
@@ -112,7 +119,10 @@ export function QuizReview({
               className="flex flex-col gap-2 rounded border border-border p-3"
             >
               <p className="text-body text-fg-secondary">
-                Question {qNum} of {total}
+                {t("workspace.quiz.answering.questionCounter", {
+                  n: qNum,
+                  total,
+                })}
               </p>
               <h3 className="text-body-lg text-fg-primary">{q.stem}</h3>
               <ul className="flex flex-col gap-1">
@@ -138,7 +148,10 @@ export function QuizReview({
                   isCorrect ? "text-green-500 text-body" : "text-red-500 text-body"
                 }
               >
-                Your answer: {userChoice ?? "—"} · Correct answer: {q.answer}
+                {t("workspace.quiz.review.yourAnswerLine", {
+                  selected: userChoice ?? "—",
+                  correct: q.answer,
+                })}
               </p>
               <p className="text-body-lg text-fg-secondary">
                 <ExplanationText
@@ -156,14 +169,16 @@ export function QuizReview({
         <Dialog open={logOpen} onOpenChange={(o) => setLogOpen(o)}>
           <DialogContent data-testid="quiz-view-log-modal">
             <DialogHeader>
-              <DialogTitle>Generation log</DialogTitle>
+              <DialogTitle>
+                {t("workspace.quiz.review.generationLogTitle")}
+              </DialogTitle>
             </DialogHeader>
             <div className="max-h-[60vh] overflow-auto">
               <QuizGenerationLog vaultPath={vaultPath} eventsLog={eventsLog} />
             </div>
             <DialogClose asChild>
               <Button variant="secondary" data-testid="quiz-view-log-close">
-                關閉
+                {t("workspace.quiz.review.viewLogClose")}
               </Button>
             </DialogClose>
           </DialogContent>

@@ -2,6 +2,7 @@ import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import type { RunDetail } from "@/lib/ipc"
+import { useT } from "@/i18n/useT"
 
 import { NewGoalModal } from "./NewGoalModal"
 
@@ -32,6 +33,7 @@ export function RunDetailCancelled({
   onBack,
   onRetrySpawned,
 }: RunDetailCancelledProps) {
+  const t = useT()
   const [retryOpen, setRetryOpen] = useState(false)
   const summary = detail.summary
   const partial = partialTimeline(detail)
@@ -48,7 +50,7 @@ export function RunDetailCancelled({
           data-testid="run-detail-back"
           className="text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
-          ← back
+          {t("workspace.runDetail.backLink")}
         </button>
         <span
           data-tauri-drag-region
@@ -61,14 +63,14 @@ export function RunDetailCancelled({
           data-testid="cancelled-badge"
           className="rounded-full bg-warning/20 px-2 py-0.5 text-meta text-warning"
         >
-          ⏹ Cancelled
+          {t("workspace.runDetail.cancelledBadge")}
         </span>
       </header>
       <div
         data-testid="cancelled-warning"
         className="m-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-meta text-warning"
       >
-        Wiki has uncommitted changes — not auto-committed. Review in terminal if needed.
+        {t("workspace.runDetail.cancelledWarning")}
       </div>
       <PartialTimeline timeline={partial} />
       <footer className="flex justify-end border-t border-border px-3 py-2">
@@ -76,7 +78,7 @@ export function RunDetailCancelled({
           data-testid="retry-button"
           onClick={() => setRetryOpen(true)}
         >
-          Retry with same goal
+          {t("workspace.runDetail.retryButton")}
         </Button>
       </footer>
       <NewGoalModal
@@ -103,6 +105,7 @@ export function RunDetailInterrupted({
   onBack,
   onRetrySpawned,
 }: RunDetailInterruptedProps) {
+  const t = useT()
   const [retryOpen, setRetryOpen] = useState(false)
   const summary = detail.summary
   const partial = partialTimeline(detail)
@@ -119,7 +122,7 @@ export function RunDetailInterrupted({
           data-testid="run-detail-back"
           className="text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
-          ← back
+          {t("workspace.runDetail.backLink")}
         </button>
         <span
           data-tauri-drag-region
@@ -132,14 +135,14 @@ export function RunDetailInterrupted({
           data-testid="interrupted-badge"
           className="rounded-full bg-warning/20 px-2 py-0.5 text-meta text-warning"
         >
-          ⚠ Interrupted
+          {t("workspace.runDetail.interruptedBadge")}
         </span>
       </header>
       <div
         data-testid="interrupted-warning"
         className="m-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-meta text-warning"
       >
-        App was closed before this goal finished. Wiki state may be partial — review in terminal if needed.
+        {t("workspace.runDetail.interruptedWarning")}
       </div>
       <PartialTimeline timeline={partial} />
       <footer className="flex justify-end border-t border-border px-3 py-2">
@@ -147,7 +150,7 @@ export function RunDetailInterrupted({
           data-testid="retry-button"
           onClick={() => setRetryOpen(true)}
         >
-          Retry with same goal
+          {t("workspace.runDetail.retryButton")}
         </Button>
       </footer>
       <NewGoalModal
@@ -183,10 +186,11 @@ function partialTimeline(detail: RunDetail): Timeline {
 }
 
 function PartialTimeline({ timeline }: { timeline: Timeline }) {
+  const t = useT()
   return (
     <div className="px-3 pb-3 text-meta text-fg-secondary">
       <h3 className="mb-1 text-meta font-semibold uppercase tracking-wide text-fg-tertiary">
-        Partial timeline
+        {t("workspace.runDetail.partialTimelineLabel")}
       </h3>
       <p>
         reading {timeline.reading} · writing {timeline.writing} · other {timeline.other}

@@ -16,6 +16,7 @@ import { useVaultWatcherStatusStore } from "@/store/vault-watcher-status"
 import { useWikiStore } from "@/store/wiki"
 import { useChatShortcut } from "@/hooks/useChatShortcut"
 import { useWatcherEvent } from "@/hooks/useWatcherEvent"
+import { useT } from "@/i18n/useT"
 import {
   invoke as tauriInvoke,
 } from "@tauri-apps/api/core"
@@ -46,6 +47,7 @@ type TabId = "goals" | "wiki" | "quiz"
  * Unmount: clear both stores so a fresh vault open starts clean.
  */
 export function Workspace({ vault }: WorkspaceProps) {
+  const t = useT()
   const back = useRouteStore((s) => s.back)
   const loadVaults = useVaultsStore((s) => s.loadVaults)
   const refreshRuns = useGoalsStore((s) => s.refreshRuns)
@@ -247,7 +249,7 @@ export function Workspace({ vault }: WorkspaceProps) {
           data-testid="workspace-back"
           className="text-left text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
-          ← Back to Lobby
+          {t("workspace.backToLobby")}
         </button>
         <div className="mt-2 border-t border-border pt-2">
           <div
@@ -260,7 +262,7 @@ export function Workspace({ vault }: WorkspaceProps) {
             type="button"
             data-testid="workspace-vault-path"
             onClick={() => void openVaultInFiles(vault.path)}
-            title={`${vault.path}\n\nClick to open in file explorer`}
+            title={t("workspace.sidebar.vaultPathHint", { path: vault.path })}
             className="block w-full truncate text-left font-mono text-meta text-fg-tertiary hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent-ring"
           >
             {vault.path}
@@ -269,31 +271,31 @@ export function Workspace({ vault }: WorkspaceProps) {
         <nav className="mt-4 flex flex-col gap-1">
           <TabButton
             id="goals"
-            label="Goals"
+            label={t("workspace.tab.goals")}
             activeTab={activeTab}
-            onSelect={(t) => {
-              setActiveTab(t)
+            onSelect={(next) => {
+              setActiveTab(next)
               setSelectedRunId(null)
               setSelectedDetail(null)
             }}
           />
           <TabButton
             id="wiki"
-            label="Wiki"
+            label={t("workspace.tab.wiki")}
             activeTab={activeTab}
-            onSelect={(t) => setActiveTab(t)}
+            onSelect={(next) => setActiveTab(next)}
           />
           <TabButton
             id="quiz"
-            label="Quiz"
+            label={t("workspace.tab.quiz")}
             activeTab={activeTab}
-            onSelect={(t) => {
+            onSelect={(next) => {
               if (activeTab === "quiz") {
                 // Already on Quiz — re-selecting acts as "home": bump
                 // the signal so QuizTab returns to quiz history (D2).
                 setQuizHomeSignal((n) => n + 1)
               } else {
-                setActiveTab(t)
+                setActiveTab(next)
               }
             }}
           />
@@ -422,6 +424,7 @@ function GoalsArea({
   onBack,
   onSelectPage,
 }: GoalsAreaProps) {
+  const t = useT()
   if (selectedRunId === null) {
     return (
       <GoalsTab
@@ -438,7 +441,7 @@ function GoalsArea({
   if (!selectedDetail) {
     return (
       <div className="flex h-full items-center justify-center text-fg-tertiary">
-        Loading…
+        {t("workspace.runDetail.loading")}
       </div>
     )
   }

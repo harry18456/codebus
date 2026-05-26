@@ -299,7 +299,7 @@ export function SettingsModal({
                       count: piiPatternCount,
                     })}
                   </SelectItem>
-                  <SelectItem value="none">none</SelectItem>
+                  <SelectItem value="none">{t("settings.fields.pii.scannerNone")}</SelectItem>
                 </SelectContent>
               </Select>
               <ResetButton
@@ -703,6 +703,7 @@ function CliStatusBadge({
 }: {
   status: CliStatus | "checking" | null
 }) {
+  const t = useT()
   if (status === null) {
     return null
   }
@@ -713,7 +714,7 @@ function CliStatusBadge({
         data-state="checking"
         className="rounded-full border border-border bg-bg px-2 py-px font-mono text-micro text-fg-tertiary"
       >
-        Checking…
+        {t("settings.cliStatus.checking")}
       </span>
     )
   }
@@ -724,7 +725,7 @@ function CliStatusBadge({
         data-state="installed"
         className="rounded-full border border-success/40 bg-success/10 px-2 py-px font-mono text-micro text-success"
       >
-        Installed · {status.version}
+        {t("settings.cliStatus.installed", { version: status.version })}
       </span>
     )
   }
@@ -734,7 +735,7 @@ function CliStatusBadge({
       data-state="not_installed"
       className="rounded-full border border-error/40 bg-error/10 px-2 py-px font-mono text-micro text-error"
     >
-      Not installed
+      {t("settings.cliStatus.notInstalled")}
     </span>
   )
 }

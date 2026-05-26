@@ -4,6 +4,7 @@ import { Folder } from "lucide-react"
 import { cn } from "@/lib/cn"
 import { useWikiStore } from "@/store/wiki"
 import { useWatcherEvent } from "@/hooks/useWatcherEvent"
+import { useT } from "@/i18n/useT"
 
 import { WatcherStatusBanner } from "./WatcherStatusBanner"
 import { WikiPreview } from "./WikiPreview"
@@ -26,6 +27,7 @@ interface WikiTabProps {
  *   `No wiki pages yet — run a goal to start documenting`.
  */
 export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
+  const t = useT()
   const pages = useWikiStore((s) => s.pages)
   const currentPath = useWikiStore((s) => s.currentPath)
   const body = useWikiStore((s) => s.body)
@@ -57,7 +59,7 @@ export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
           data-testid="wiki-empty"
           className="text-body text-fg-secondary"
         >
-          No wiki pages yet — run a goal to start documenting
+          {t("workspace.wiki.empty")}
         </p>
       </div>
     )
@@ -76,7 +78,7 @@ export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
         <button
           type="button"
           data-testid="wiki-tree-toggle"
-          aria-label="Toggle Pages tree"
+          aria-label={t("workspace.wiki.toggleTreeAria")}
           aria-pressed={treeOpen}
           onClick={() => setTreeOpen((v) => !v)}
           className={cn(

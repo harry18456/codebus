@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { setEndpointKey } from "@/lib/ipc"
+import { useT } from "@/i18n/useT"
 
 /**
  * Modal for entering the Azure API key. The key value is held only in
@@ -26,6 +27,7 @@ export interface SetKeyDialogProps {
 }
 
 export function SetKeyDialog({ open, service, onClose, onSuccess }: SetKeyDialogProps) {
+  const t = useT()
   const [key, setKey] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -41,7 +43,7 @@ export function SetKeyDialog({ open, service, onClose, onSuccess }: SetKeyDialog
 
   async function handleConfirm() {
     if (key.length === 0) {
-      setError("API key cannot be empty")
+      setError(t("settings.setKeyDialog.errorEmpty"))
       return
     }
     setSubmitting(true)
@@ -60,12 +62,11 @@ export function SetKeyDialog({ open, service, onClose, onSuccess }: SetKeyDialog
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent data-testid="set-key-dialog">
         <DialogHeader>
-          <DialogTitle>Set Azure API key</DialogTitle>
+          <DialogTitle>{t("settings.setKeyDialog.title")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-2 p-2">
           <label className="text-xs text-fg-secondary" htmlFor="set-key-input">
-            Paste the API key — it will be stored in your OS keyring and never
-            written to <code>~/.codebus/config.yaml</code>.
+            {t("settings.setKeyDialog.inputLabel")}
           </label>
           <Input
             id="set-key-input"
@@ -92,7 +93,7 @@ export function SetKeyDialog({ open, service, onClose, onSuccess }: SetKeyDialog
             data-testid="set-key-cancel"
             onClick={onClose}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             type="button"
@@ -100,7 +101,7 @@ export function SetKeyDialog({ open, service, onClose, onSuccess }: SetKeyDialog
             disabled={submitting}
             onClick={() => void handleConfirm()}
           >
-            {submitting ? "Saving…" : "Confirm"}
+            {submitting ? t("common.saving") : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

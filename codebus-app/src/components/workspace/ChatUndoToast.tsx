@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
 import { useChatStore } from "@/store/chat"
+import { useT } from "@/i18n/useT"
 
 /**
  * 5-second undo affordance for the `+ New chat` reset trigger.
@@ -28,6 +29,7 @@ import { useChatStore } from "@/store/chat"
  * polish pass (`chat.toast.startedNewChat` / `chat.toast.undo`).
  */
 export function ChatUndoToast() {
+  const t = useT()
   const lastTranscript = useChatStore((s) => s.lastTranscript)
   const lastSessionId = useChatStore((s) => s.lastSessionId)
   const undoNewSession = useChatStore((s) => s.undoNewSession)
@@ -59,12 +61,12 @@ export function ChatUndoToast() {
       className="flex flex-none items-center justify-between gap-2 border-b border-accent/40 bg-accent/10 px-3 py-2 text-xs text-fg"
     >
       <span className="flex items-center gap-2">
-        <span className="font-medium">🆕 New chat started</span>
+        <span className="font-medium">{t("chat.undoToast.heading")}</span>
         <span
           data-testid="chat-undo-countdown"
           className="font-mono text-meta text-fg-tertiary"
         >
-          ({remaining}s to undo)
+          {t("chat.undoToast.countdown", { n: remaining })}
         </span>
       </span>
       <button
@@ -72,7 +74,7 @@ export function ChatUndoToast() {
         onClick={() => undoNewSession()}
         className="shrink-0 rounded-md border border-accent/60 bg-bg-raised px-3 py-1 text-xs font-medium text-accent hover:bg-accent/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
       >
-        Undo
+        {t("chat.toast.undo")}
       </button>
     </div>
   )

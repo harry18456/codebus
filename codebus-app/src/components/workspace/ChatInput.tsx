@@ -1,6 +1,8 @@
 import { useState, type KeyboardEvent } from "react"
 
 import { useChatStore } from "@/store/chat"
+import { useT } from "@/i18n/useT"
+import { useLocale } from "@/hooks/useLocale"
 
 /**
  * ChatInput renders the textarea + Send/Stop action for the workspace chat
@@ -14,14 +16,14 @@ import { useChatStore } from "@/store/chat"
  * - When `activeTurn` is non-null (a turn is streaming): the textarea is
  *   disabled and the Send button is replaced by a ⏹ Stop button that calls
  *   `useChatStore.cancelActiveTurn()`.
- *
- * Strings are intentionally hardcoded English — i18n wiring lands in task 7.2.
  */
 export interface ChatInputProps {
   vaultPath: string
 }
 
 export function ChatInput({ vaultPath }: ChatInputProps) {
+  const t = useT()
+  const locale = useLocale()
   const [text, setText] = useState("")
   const activeTurn = useChatStore((s) => s.activeTurn)
   const spawnTurn = useChatStore((s) => s.spawnTurn)
@@ -54,7 +56,11 @@ export function ChatInput({ vaultPath }: ChatInputProps) {
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         disabled={isActive}
-        placeholder="Type your message..."
+        placeholder={
+          locale === "zh"
+            ? t("chat.placeholder.tw")
+            : t("chat.placeholder.en")
+        }
         rows={2}
         className="flex-1 resize-none rounded-md border border-border bg-bg px-2 py-1 text-xs text-fg placeholder:text-fg-tertiary focus:outline-none focus:ring-2 focus:ring-accent-ring disabled:cursor-not-allowed disabled:opacity-60"
       />
@@ -65,7 +71,7 @@ export function ChatInput({ vaultPath }: ChatInputProps) {
           onClick={() => void cancelActiveTurn()}
           className="shrink-0 rounded-md border border-error/40 bg-error/10 px-3 py-1 text-xs text-error hover:bg-error/20 focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
-          ⏹ Stop
+          {t("chat.button.stop")}
         </button>
       ) : (
         <button
@@ -75,7 +81,7 @@ export function ChatInput({ vaultPath }: ChatInputProps) {
           disabled={!text.trim()}
           className="shrink-0 rounded-md border border-accent/40 bg-accent/20 px-3 py-1 text-xs text-accent hover:bg-accent/30 focus:outline-none focus:ring-2 focus:ring-accent-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Send
+          {t("chat.button.send")}
         </button>
       )}
     </div>

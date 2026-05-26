@@ -208,7 +208,7 @@ export function WikiPreview({
                 <span
                   data-wikilink={slug}
                   data-state="unresolvable"
-                  title="Page not found"
+                  title={t("workspace.wiki.pageNotFound")}
                   className="cursor-not-allowed text-fg-tertiary opacity-50"
                 >
                   {slug}
@@ -302,7 +302,7 @@ export function WikiPreview({
                 data-testid="quiz-me-on-this"
                 onClick={() => onQuizMeOnThis?.(currentPath)}
               >
-                Quiz me on this
+                {t("workspace.wiki.quizMeOnThis")}
               </Button>
             )}
             {obsidianVaultId !== null && (

@@ -19,6 +19,7 @@ import {
   type ChoiceKey,
 } from "@/lib/quiz-parse"
 import type { QuizAnswer, QuizProgress, WikiPageMeta } from "@/lib/ipc"
+import { useT } from "@/i18n/useT"
 import { ExplanationText } from "./ExplanationText"
 
 const CHOICE_KEYS: ChoiceKey[] = ["A", "B", "C", "D"]
@@ -85,6 +86,7 @@ export function QuizAnswering({
   initialProgress,
   onPersist,
 }: QuizAnsweringProps) {
+  const t = useT()
   const questions = useMemo(() => parseQuiz(quizMd), [quizMd])
   const seededAnswers = useMemo<QuizAnswer[]>(
     () => initialProgress?.answers ?? [],
@@ -118,7 +120,7 @@ export function QuizAnswering({
   if (questions.length === 0) {
     return (
       <div data-testid="quiz-answering-empty" className="p-6 text-fg-secondary">
-        Quiz could not be parsed — no well-formed questions.
+        {t("workspace.quiz.answering.parseEmpty")}
       </div>
     )
   }
@@ -129,17 +131,22 @@ export function QuizAnswering({
     return (
       <div data-testid="quiz-summary" className="flex flex-col gap-3 p-6">
         <h3 className="text-body-lg font-medium text-fg-primary">
-          Quiz complete
+          {t("workspace.quiz.answering.summaryHeading")}
         </h3>
         <p data-testid="quiz-score" className="text-body-lg">
-          Score: {correctCount} / {total} (
-          {Math.round((correctCount / total) * 100)}%)
+          {t("workspace.quiz.answering.scoreLine", {
+            correct: correctCount,
+            total,
+            percent: Math.round((correctCount / total) * 100),
+          })}
         </p>
         <p
           data-testid="quiz-outcome"
           className={pass ? "text-green-500" : "text-red-500"}
         >
-          {pass ? "Passed" : "Failed"} (threshold {passThreshold}%)
+          {pass
+            ? t("workspace.quiz.answering.outcomePassed", { n: passThreshold })
+            : t("workspace.quiz.answering.outcomeFailed", { n: passThreshold })}
         </p>
       </div>
     )
@@ -202,7 +209,10 @@ export function QuizAnswering({
   return (
     <div data-testid="quiz-answering" className="flex flex-col gap-4 p-6">
       <p className="text-body text-fg-secondary">
-        Question {idx + 1} of {questions.length}
+        {t("workspace.quiz.answering.questionCounter", {
+          n: idx + 1,
+          total: questions.length,
+        })}
       </p>
       <h3 data-testid="quiz-stem" className="text-body-lg text-fg-primary">
         {q.stem}
@@ -239,7 +249,7 @@ export function QuizAnswering({
             onClick={onSubmit}
             disabled={selected == null}
           >
-            Submit
+            {t("workspace.quiz.answering.submitButton")}
           </Button>
         </div>
       )}
@@ -250,7 +260,9 @@ export function QuizAnswering({
             data-testid="quiz-verdict"
             className={isCorrect ? "text-green-500" : "text-red-500"}
           >
-            {isCorrect ? "Correct" : "Incorrect"}
+            {isCorrect
+              ? t("workspace.quiz.answering.verdictCorrect")
+              : t("workspace.quiz.answering.verdictIncorrect")}
           </p>
           <p data-testid="quiz-explanation" className="text-body-lg">
             <ExplanationText
@@ -261,7 +273,9 @@ export function QuizAnswering({
           </p>
           <div>
             <Button data-testid="quiz-next" onClick={onNext}>
-              {idx + 1 >= questions.length ? "Finish" : "Next"}
+              {idx + 1 >= questions.length
+                ? t("workspace.quiz.answering.finishButton")
+                : t("workspace.quiz.answering.nextButton")}
             </Button>
           </div>
         </div>

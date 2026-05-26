@@ -136,20 +136,33 @@ export function CodexEndpointSection({
       className="col-span-2 flex flex-col gap-3 rounded border border-border bg-bg-secondary/40 p-3"
     >
       <header className="flex items-center justify-between">
-        <span className="font-medium text-fg">OpenAI Codex endpoint settings</span>
+        <span className="font-medium text-fg">
+          {t("settings.endpoint.codex.heading")}
+        </span>
         <fieldset
           role="radiogroup"
-          aria-label="Active codex endpoint profile"
+          aria-label={t("settings.endpoint.activeProfileAriaCodex")}
           data-testid="codex-active-profile-radio"
           className="flex items-center gap-3"
         >
-          <ProfileRadio label="System" value="system" checked={systemActive} onSelect={setActive} />
-          <ProfileRadio label="Azure" value="azure" checked={azureActive} onSelect={setActive} />
+          <ProfileRadio
+            label={t("settings.endpoint.profile.system")}
+            value="system"
+            checked={systemActive}
+            onSelect={setActive}
+          />
+          <ProfileRadio
+            label={t("settings.endpoint.profile.azure")}
+            value="azure"
+            checked={azureActive}
+            onSelect={setActive}
+          />
         </fieldset>
       </header>
 
       <ProfileBlock
-        title="System Profile"
+        title={t("settings.endpoint.profile.systemTitle")}
+        inactiveLabel={t("settings.endpoint.profile.inactiveLabel")}
         testId="codex-system-profile"
         active={systemActive}
         expanded={systemExpanded}
@@ -158,13 +171,13 @@ export function CodexEndpointSection({
         {VERBS.map((verb) => {
           const modelInvalid = hasError(`codex.system.${verb}.model`)
           return (
-            <VerbRow key={verb} verb={verb}>
+            <VerbRow key={verb} verb={verb} label={t(`settings.endpoint.verb.${verb}`)}>
               <Input
                 data-testid={`codex-system-model-${verb}`}
                 list={MODEL_LIST_ID}
                 className={`w-[160px] ${modelInvalid ? "border-error focus-visible:ring-error" : ""}`}
                 aria-invalid={modelInvalid || undefined}
-                placeholder="<model, e.g. gpt-5.5>"
+                placeholder={t("settings.endpoint.placeholder.codexModel")}
                 value={block.system[verb].model}
                 onChange={(e) => setSystemVerb(verb, { model: e.target.value })}
               />
@@ -172,7 +185,7 @@ export function CodexEndpointSection({
                 data-testid={`codex-system-effort-${verb}`}
                 list={EFFORT_LIST_ID}
                 className="w-[100px]"
-                placeholder="effort"
+                placeholder={t("settings.endpoint.placeholder.codexEffort")}
                 value={block.system[verb].effort}
                 onChange={(e) => setSystemVerb(verb, { effort: e.target.value })}
               />
@@ -196,33 +209,34 @@ export function CodexEndpointSection({
       </ProfileBlock>
 
       <ProfileBlock
-        title="Azure Profile"
+        title={t("settings.endpoint.profile.azureTitle")}
+        inactiveLabel={t("settings.endpoint.profile.inactiveLabel")}
         testId="codex-azure-profile"
         active={azureActive}
         expanded={azureExpanded}
         onToggleExpand={() => setAzureExpanded((v) => !v)}
       >
-        <Field label="base_url">
+        <Field label={t("settings.endpoint.field.baseUrl")}>
           <Input
             data-testid="codex-azure-base-url"
             className={`w-full ${hasError("codex.azure.base_url") ? "border-error focus-visible:ring-error" : ""}`}
             aria-invalid={hasError("codex.azure.base_url") || undefined}
             value={azure.base_url}
-            placeholder="https://<resource>.cognitiveservices.azure.com/openai"
+            placeholder={t("settings.endpoint.placeholder.azureBaseUrlCodex")}
             onChange={(e) => setAzureField("base_url", e.target.value.trim())}
           />
         </Field>
-        <Field label="api_version">
+        <Field label={t("settings.endpoint.field.apiVersion")}>
           <Input
             data-testid="codex-azure-api-version"
             className={`w-full ${hasError("codex.azure.api_version") ? "border-error focus-visible:ring-error" : ""}`}
             aria-invalid={hasError("codex.azure.api_version") || undefined}
             value={azure.api_version}
-            placeholder="2025-04-01-preview"
+            placeholder={t("settings.endpoint.placeholder.apiVersion")}
             onChange={(e) => setAzureField("api_version", e.target.value.trim())}
           />
         </Field>
-        <Field label="keyring_service">
+        <Field label={t("settings.endpoint.field.keyringService")}>
           <Input
             data-testid="codex-azure-keyring-service"
             className={`w-full ${hasError("codex.azure.keyring_service") ? "border-error focus-visible:ring-error" : ""}`}
@@ -231,16 +245,20 @@ export function CodexEndpointSection({
             onChange={(e) => setAzureField("keyring_service", e.target.value)}
           />
         </Field>
-        <Field label="API key">
+        <Field label={t("settings.endpoint.field.apiKey")}>
           <div className="flex items-center gap-2">
             <span
               data-testid="codex-azure-key-status"
               className="rounded-full border border-border bg-bg px-2 py-px font-mono text-micro text-fg-secondary"
             >
-              {keyStatus?.kind === "set" ? "Set" : keyStatus?.kind === "unset" ? "Unset" : "—"}
+              {keyStatus?.kind === "set"
+                ? t("settings.endpoint.keyStatus.set")
+                : keyStatus?.kind === "unset"
+                  ? t("settings.endpoint.keyStatus.unset")
+                  : t("settings.endpoint.keyStatus.unknown")}
             </span>
             <Button type="button" size="sm" variant="secondary" data-testid="codex-azure-key-set" onClick={() => setSetKeyOpen(true)}>
-              Set new…
+              {t("settings.endpoint.keySetNew")}
             </Button>
             <Button
               type="button"
@@ -250,7 +268,7 @@ export function CodexEndpointSection({
               disabled={keyStatus?.kind !== "set"}
               onClick={() => void handleDeleteKey()}
             >
-              Delete
+              {t("settings.endpoint.keyDelete")}
             </Button>
             {keyError && (
               <span className="text-xs text-error" data-testid="codex-azure-key-error">
@@ -262,13 +280,13 @@ export function CodexEndpointSection({
         {VERBS.map((verb) => {
           const modelInvalid = hasError(`codex.azure.${verb}.model`)
           return (
-            <VerbRow key={verb} verb={verb}>
+            <VerbRow key={verb} verb={verb} label={t(`settings.endpoint.verb.${verb}`)}>
               <Input
                 data-testid={`codex-azure-deployment-${verb}`}
                 list={MODEL_LIST_ID}
                 className={`w-[200px] ${modelInvalid ? "border-error focus-visible:ring-error" : ""}`}
                 aria-invalid={modelInvalid || undefined}
-                placeholder="<deployment name>"
+                placeholder={t("settings.endpoint.placeholder.deploymentName")}
                 value={azure[verb].model}
                 onChange={(e) => setAzureVerb(verb, { model: e.target.value })}
               />
@@ -276,7 +294,7 @@ export function CodexEndpointSection({
                 data-testid={`codex-azure-effort-${verb}`}
                 list={EFFORT_LIST_ID}
                 className="w-[100px]"
-                placeholder="effort"
+                placeholder={t("settings.endpoint.placeholder.codexEffort")}
                 value={azure[verb].effort}
                 onChange={(e) => setAzureVerb(verb, { effort: e.target.value })}
               />
@@ -303,7 +321,9 @@ export function CodexEndpointSection({
             role="alert"
             className="rounded border border-error/40 bg-error/10 px-2 py-1 text-meta text-error"
           >
-            <div className="font-medium">Endpoint configuration is incomplete:</div>
+            <div className="font-medium">
+              {t("settings.endpoint.validationSummaryHeading")}
+            </div>
             <ul className="ml-3 list-disc">
               {errors.map((e) => (
                 <li key={e.field}>{e.message}</li>
@@ -368,6 +388,7 @@ function ProfileRadio({
 
 function ProfileBlock({
   title,
+  inactiveLabel,
   testId,
   active,
   expanded,
@@ -375,6 +396,7 @@ function ProfileBlock({
   children,
 }: {
   title: string
+  inactiveLabel: string
   testId: string
   active: boolean
   expanded: boolean
@@ -402,7 +424,7 @@ function ProfileBlock({
           <span>{title}</span>
           {active ? null : (
             <span className="ml-1 font-mono text-micro text-fg-tertiary" data-testid={`${testId}-inactive-label`}>
-              (inactive)
+              {inactiveLabel}
             </span>
           )}
         </button>
@@ -414,10 +436,20 @@ function ProfileBlock({
   )
 }
 
-function VerbRow({ verb, children }: { verb: Verb; children: React.ReactNode }) {
+function VerbRow({
+  verb,
+  label,
+  children,
+}: {
+  verb: Verb
+  label: string
+  children: React.ReactNode
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-[56px] font-mono text-meta text-fg-tertiary">{verb}</span>
+    <div className="flex items-center gap-2" data-verb={verb}>
+      <span className="w-[56px] font-mono text-meta text-fg-tertiary">
+        {label}
+      </span>
       {children}
     </div>
   )

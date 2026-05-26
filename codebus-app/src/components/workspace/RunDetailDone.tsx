@@ -64,7 +64,7 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
           data-testid="run-detail-back"
           className="text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
-          ← back
+          {t("workspace.runDetail.backLink")}
         </button>
         <span
           data-tauri-drag-region
@@ -77,7 +77,7 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
           data-testid="done-badge"
           className="rounded-full bg-success/20 px-2 py-0.5 text-meta text-success"
         >
-          ✓ Done
+          {t("workspace.runDetail.doneBadge")}
         </span>
       </header>
       <div className="border-b border-border px-3 py-1.5 text-meta text-fg-tertiary">
@@ -86,11 +86,11 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
       <div className="flex-1 overflow-auto p-3">
         <section>
           <h3 className="mb-2 text-meta font-semibold uppercase tracking-wide text-fg-tertiary">
-            Covered pages
+            {t("workspace.runDetail.coveredPagesLabel")}
           </h3>
           {totalCoveredPages === 0 ? (
             <p className="text-meta text-fg-tertiary">
-              No wiki pages changed
+              {t("workspace.runDetail.coveredPagesEmpty")}
             </p>
           ) : (
             <div className="flex flex-col gap-3">
@@ -131,7 +131,7 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
         </section>
         <section className="mt-4">
           <h3 className="mb-2 text-meta font-semibold uppercase tracking-wide text-fg-tertiary">
-            Lint
+            {t("workspace.runDetail.lintLabel")}
           </h3>
           <p className="text-meta text-fg-secondary">
             {summary.lint_error_count} errors · {summary.lint_warn_count} warnings

@@ -170,21 +170,23 @@ export function EndpointSection({
       className="col-span-2 flex flex-col gap-3 rounded border border-border bg-bg-secondary/40 p-3"
     >
       <header className="flex items-center justify-between">
-        <span className="font-medium text-fg">Claude Code endpoint settings</span>
+        <span className="font-medium text-fg">
+          {t("settings.endpoint.claude.heading")}
+        </span>
         <fieldset
           role="radiogroup"
-          aria-label="Active endpoint profile"
+          aria-label={t("settings.endpoint.activeProfileAria")}
           data-testid="active-profile-radio"
           className="flex items-center gap-3"
         >
           <ProfileRadio
-            label="System"
+            label={t("settings.endpoint.profile.system")}
             value="system"
             checked={systemActive}
             onSelect={setActive}
           />
           <ProfileRadio
-            label="Azure"
+            label={t("settings.endpoint.profile.azure")}
             value="azure"
             checked={azureActive}
             onSelect={setActive}
@@ -193,7 +195,8 @@ export function EndpointSection({
       </header>
 
       <ProfileBlock
-        title="System Profile"
+        title={t("settings.endpoint.profile.systemTitle")}
+        inactiveLabel={t("settings.endpoint.profile.inactiveLabel")}
         testId="system-profile"
         active={systemActive}
         expanded={systemExpanded}
@@ -203,12 +206,12 @@ export function EndpointSection({
           const effortField = `claude_code.system.${verb}.effort`
           const effortInvalid = hasError(effortField)
           return (
-            <VerbRow key={verb} verb={verb}>
+            <VerbRow key={verb} verb={verb} label={t(`settings.endpoint.verb.${verb}`)}>
               <Input
                 data-testid={`system-model-${verb}`}
                 list="claude-system-model-suggestions"
                 className="w-[140px]"
-                placeholder="<model, e.g. opus-4-7>"
+                placeholder={t("settings.endpoint.placeholder.claudeModel")}
                 value={claudeCode.system[verb].model}
                 onChange={(e) => setSystemModel(verb, e.target.value)}
               />
@@ -253,13 +256,14 @@ export function EndpointSection({
       </ProfileBlock>
 
       <ProfileBlock
-        title="Azure Profile"
+        title={t("settings.endpoint.profile.azureTitle")}
+        inactiveLabel={t("settings.endpoint.profile.inactiveLabel")}
         testId="azure-profile"
         active={azureActive}
         expanded={azureExpanded}
         onToggleExpand={() => setAzureExpanded((v) => !v)}
       >
-        <Field label="base_url">
+        <Field label={t("settings.endpoint.field.baseUrl")}>
           <Input
             data-testid="azure-base-url"
             className={`w-full ${
@@ -269,11 +273,11 @@ export function EndpointSection({
             }`}
             aria-invalid={hasError("claude_code.azure.base_url") || undefined}
             value={azure.base_url}
-            placeholder="https://<resource>.cognitiveservices.azure.com/anthropic"
+            placeholder={t("settings.endpoint.placeholder.azureBaseUrlClaude")}
             onChange={(e) => setAzureField("base_url", e.target.value)}
           />
         </Field>
-        <Field label="keyring_service">
+        <Field label={t("settings.endpoint.field.keyringService")}>
           <Input
             data-testid="azure-keyring-service"
             className={`w-full ${
@@ -288,17 +292,17 @@ export function EndpointSection({
             onChange={(e) => setAzureField("keyring_service", e.target.value)}
           />
         </Field>
-        <Field label="API key">
+        <Field label={t("settings.endpoint.field.apiKey")}>
           <div className="flex items-center gap-2">
             <span
               data-testid="azure-key-status"
               className="rounded-full border border-border bg-bg px-2 py-px font-mono text-micro text-fg-secondary"
             >
               {keyStatus?.kind === "set"
-                ? "Set"
+                ? t("settings.endpoint.keyStatus.set")
                 : keyStatus?.kind === "unset"
-                  ? "Unset"
-                  : "—"}
+                  ? t("settings.endpoint.keyStatus.unset")
+                  : t("settings.endpoint.keyStatus.unknown")}
             </span>
             <Button
               type="button"
@@ -307,7 +311,7 @@ export function EndpointSection({
               data-testid="azure-key-set"
               onClick={() => setSetKeyOpen(true)}
             >
-              Set new…
+              {t("settings.endpoint.keySetNew")}
             </Button>
             <Button
               type="button"
@@ -317,7 +321,7 @@ export function EndpointSection({
               disabled={keyStatus?.kind !== "set"}
               onClick={() => void handleDeleteKey()}
             >
-              Delete
+              {t("settings.endpoint.keyDelete")}
             </Button>
             {keyError && (
               <span className="text-xs text-error" data-testid="azure-key-error">
@@ -332,14 +336,14 @@ export function EndpointSection({
           const modelInvalid = hasError(modelField)
           const effortInvalid = hasError(effortField)
           return (
-            <VerbRow key={verb} verb={verb}>
+            <VerbRow key={verb} verb={verb} label={t(`settings.endpoint.verb.${verb}`)}>
               <Input
                 data-testid={`azure-deployment-${verb}`}
                 className={`w-[200px] ${
                   modelInvalid ? "border-error focus-visible:ring-error" : ""
                 }`}
                 aria-invalid={modelInvalid || undefined}
-                placeholder="<deployment name>"
+                placeholder={t("settings.endpoint.placeholder.deploymentName")}
                 value={azure[verb].model}
                 onChange={(e) => setAzureVerb(verb, { model: e.target.value })}
               />
@@ -374,7 +378,7 @@ export function EndpointSection({
             className="rounded border border-error/40 bg-error/10 px-2 py-1 text-meta text-error"
           >
             <div className="font-medium">
-              Endpoint configuration is incomplete:
+              {t("settings.endpoint.validationSummaryHeading")}
             </div>
             <ul className="ml-3 list-disc">
               {errors.map((e) => (
@@ -435,6 +439,7 @@ function ProfileRadio({
 
 function ProfileBlock({
   title,
+  inactiveLabel,
   testId,
   active,
   expanded,
@@ -442,6 +447,7 @@ function ProfileBlock({
   children,
 }: {
   title: string
+  inactiveLabel: string
   testId: string
   active: boolean
   expanded: boolean
@@ -474,7 +480,7 @@ function ProfileBlock({
               className="ml-1 font-mono text-micro text-fg-tertiary"
               data-testid={`${testId}-inactive-label`}
             >
-              (inactive)
+              {inactiveLabel}
             </span>
           )}
         </button>
@@ -489,11 +495,19 @@ function ProfileBlock({
   )
 }
 
-function VerbRow({ verb, children }: { verb: Verb; children: React.ReactNode }) {
+function VerbRow({
+  verb,
+  label,
+  children,
+}: {
+  verb: Verb
+  label: string
+  children: React.ReactNode
+}) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" data-verb={verb}>
       <span className="w-[56px] font-mono text-meta text-fg-tertiary">
-        {verb}
+        {label}
       </span>
       {children}
     </div>

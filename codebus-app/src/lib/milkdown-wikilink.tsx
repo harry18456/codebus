@@ -1,5 +1,6 @@
 import type { WikiPageMeta } from "@/lib/ipc"
 import { cn } from "@/lib/cn"
+import { useT } from "@/i18n/useT"
 
 /**
  * v1 wikilink renderer.
@@ -30,6 +31,7 @@ export interface WikilinkLinkProps {
 }
 
 export function WikilinkLink({ slug, pages, onResolve }: WikilinkLinkProps) {
+  const t = useT()
   const resolvable = Object.prototype.hasOwnProperty.call(pages, slug)
   if (resolvable) {
     return (
@@ -54,7 +56,7 @@ export function WikilinkLink({ slug, pages, onResolve }: WikilinkLinkProps) {
     <span
       data-testid={`wikilink-${slug}`}
       data-state="unresolvable"
-      title="Page not found"
+      title={t("workspace.wiki.pageNotFound")}
       className="cursor-not-allowed text-fg-tertiary opacity-50"
     >
       [[{slug}]]

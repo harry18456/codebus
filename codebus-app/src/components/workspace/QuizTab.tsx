@@ -518,7 +518,7 @@ export function QuizTab({
         className="flex items-center justify-between border-b border-border p-3 pr-[160px]"
       >
         <h2 className="text-body-lg font-medium text-fg-primary">
-          Quiz history
+          {t("workspace.quiz.tab.heading")}
         </h2>
         {(phase === "history" || phase === "idle") && (
           <Button
@@ -526,7 +526,7 @@ export function QuizTab({
             data-testid="new-quiz"
             onClick={() => setPhase("idle")}
           >
-            + New quiz
+            {t("workspace.quiz.tab.newButton")}
           </Button>
         )}
       </div>
@@ -540,7 +540,7 @@ export function QuizTab({
         >
           {attempts.length === 0 ? (
             <p className="text-body-lg text-fg-secondary">
-              No quizzes yet — start one with + New quiz
+              {t("workspace.quiz.tab.emptyHint")}
             </p>
           ) : (
             groupBySlug(attempts).map(([slug, rows]) => (
@@ -596,13 +596,13 @@ export function QuizTab({
               data-testid="quiz-back-to-history"
               onClick={() => setPhase("history")}
             >
-              ← History
+              {t("workspace.quiz.tab.backToHistoryShort")}
             </Button>
           </div>
           <input
             data-testid="quiz-topic-input"
             className="rounded border border-border bg-bg-secondary px-3 py-2 text-body-lg"
-            placeholder="What do you want to be quizzed on?"
+            placeholder={t("workspace.quiz.tab.topicPlaceholder")}
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
           />
@@ -612,7 +612,7 @@ export function QuizTab({
               onClick={onStart}
               disabled={!topic.trim()}
             >
-              Start
+              {t("workspace.quiz.tab.startButton")}
             </Button>
           </div>
         </div>
@@ -631,7 +631,7 @@ export function QuizTab({
                 setPhase("history")
               }}
             >
-              ← Back to history
+              {t("workspace.quiz.tab.backToHistoryFull")}
             </Button>
             {attemptMeta?.events_log && (
               <Button
@@ -639,7 +639,7 @@ export function QuizTab({
                 data-testid="quiz-view-log"
                 onClick={() => setLogOpen(true)}
               >
-                看過程
+                {t("workspace.quiz.review.viewLogButton")}
               </Button>
             )}
           </div>
@@ -653,7 +653,9 @@ export function QuizTab({
             >
               <DialogContent data-testid="quiz-view-log-modal">
                 <DialogHeader>
-                  <DialogTitle>Generation log</DialogTitle>
+                  <DialogTitle>
+                    {t("workspace.quiz.review.generationLogTitle")}
+                  </DialogTitle>
                 </DialogHeader>
                 <div className="max-h-[60vh] overflow-auto">
                   <QuizGenerationLog
@@ -666,7 +668,7 @@ export function QuizTab({
                     variant="secondary"
                     data-testid="quiz-view-log-close"
                   >
-                    關閉
+                    {t("workspace.quiz.review.viewLogClose")}
                   </Button>
                 </DialogClose>
               </DialogContent>
@@ -696,7 +698,7 @@ export function QuizTab({
       {phase === "planning" && (
         <div data-testid="quiz-planning" className="flex flex-col gap-2">
           <p className="text-body-lg text-fg-secondary">
-            Planning quiz scope…
+            {t("workspace.quiz.tab.planningStatus")}
           </p>
           <QuizLiveStream events={liveEvents} />
         </div>
@@ -731,7 +733,7 @@ export function QuizTab({
       {phase === "generating" && (
         <div data-testid="quiz-generating" className="flex flex-col gap-2">
           <p className="text-body-lg text-fg-secondary">
-            Generating questions…
+            {t("workspace.quiz.tab.generatingStatus")}
           </p>
           <QuizLiveStream events={liveEvents} />
         </div>
@@ -754,7 +756,7 @@ export function QuizTab({
               data-testid="quiz-back-to-history"
               onClick={() => setPhase("history")}
             >
-              ← History
+              {t("workspace.quiz.tab.backToHistoryShort")}
             </Button>
           </div>
           <QuizAnswering
@@ -771,11 +773,11 @@ export function QuizTab({
       {phase === "no_match" && (
         <div data-testid="quiz-no-match" className="flex flex-col gap-3">
           <p className="text-body-lg text-fg-primary">
-            No matching wiki pages: {reason}
+            {t("workspace.quiz.tab.noMatchPrefix", { reason })}
           </p>
           <div>
             <Button data-testid="quiz-back" onClick={reset}>
-              Back
+              {t("workspace.quiz.tab.backButton")}
             </Button>
           </div>
         </div>
@@ -783,10 +785,12 @@ export function QuizTab({
 
       {phase === "error" && (
         <div data-testid="quiz-error" className="flex flex-col gap-3">
-          <p className="text-body-lg text-fg-primary">Quiz failed: {errorMsg}</p>
+          <p className="text-body-lg text-fg-primary">
+            {t("workspace.quiz.tab.errorPrefix", { message: errorMsg })}
+          </p>
           <div>
             <Button data-testid="quiz-back" onClick={reset}>
-              Back
+              {t("workspace.quiz.tab.backButton")}
             </Button>
           </div>
         </div>

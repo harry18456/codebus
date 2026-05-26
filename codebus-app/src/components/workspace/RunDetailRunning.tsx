@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import type { VerbEvent } from "@/lib/ipc"
 import { useGoalsStore } from "@/store/goals"
+import { useT } from "@/i18n/useT"
 
 import { ActivityStreamItem, ThoughtItem, foldTimeline } from "./ActivityStreamItem"
 
@@ -23,6 +24,7 @@ interface RunDetailRunningProps {
  * into a single trailing block), and the ⏹ Cancel button.
  */
 export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
+  const t = useT()
   const activeRun = useGoalsStore((s) => s.activeRun)
   const cancelGoal = useGoalsStore((s) => s.cancelGoal)
   const [now, setNow] = useState(() => Date.now())
@@ -64,7 +66,7 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
           data-testid="run-detail-back"
           className="text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
-          ← back
+          {t("workspace.runDetail.backLink")}
         </button>
         <span
           data-tauri-drag-region
@@ -77,7 +79,7 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
           data-testid="running-badge"
           className="rounded-full bg-accent/20 px-2 py-0.5 text-meta text-accent"
         >
-          ⏺ Running
+          {t("workspace.runDetail.runningBadge")}
         </span>
       </header>
       <div
@@ -105,7 +107,9 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
           disabled={activeRun.cancelling}
           onClick={() => void cancelGoal(activeRun.runId)}
         >
-          {activeRun.cancelling ? "Cancelling…" : "⏹ Cancel"}
+          {activeRun.cancelling
+            ? t("workspace.runDetail.cancellingButton")
+            : t("workspace.runDetail.cancelButton")}
         </Button>
       </footer>
     </div>

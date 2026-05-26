@@ -3,6 +3,7 @@ import { useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointe
 // need to carry computed rem values (bottom offset + width/height).
 
 import { useChatStore } from "@/store/chat"
+import { useT } from "@/i18n/useT"
 
 import { ChatInput } from "./ChatInput"
 import { ChatNewChatButton } from "./ChatNewChatButton"
@@ -91,6 +92,7 @@ export function ChatWidget({
   onPromoteSuccess,
   onWikiLinkClick,
 }: ChatWidgetProps = {}) {
+  const t = useT()
   const expanded = useChatStore((s) => s.expanded)
   const width = useChatStore((s) => s.width)
   const height = useChatStore((s) => s.height)
@@ -120,7 +122,7 @@ export function ChatWidget({
         type="button"
         data-testid="chat-widget"
         data-state="collapsed"
-        aria-label="Open chat"
+        aria-label={t("chat.widget.aria.openChat")}
         onClick={toggleExpanded}
         className="fixed z-50 flex h-12 w-12 items-center justify-center rounded-full border border-border bg-bg-raised text-2xl text-fg shadow-lg transition-colors hover:bg-bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
         style={{
@@ -169,6 +171,7 @@ function ExpandedPanel({
   onPromoteSuccess,
   onWikiLinkClick,
 }: ExpandedPanelProps) {
+  const t = useT()
   const toggleExpanded = useChatStore((s) => s.toggleExpanded)
 
   // PointerDown captures starting client coords + the widget's starting
@@ -249,8 +252,8 @@ function ExpandedPanel({
       <div
         data-testid="chat-widget-resize-handle"
         role="separator"
-        aria-label="Resize chat widget"
-        title="Drag to resize"
+        aria-label={t("chat.widget.aria.resizeChat")}
+        title={t("chat.widget.title.dragToResize")}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -283,8 +286,8 @@ function ExpandedPanel({
         <button
           type="button"
           data-testid="chat-widget-minimize"
-          aria-label="Minimize chat"
-          title="Minimize (Cmd+K)"
+          aria-label={t("chat.widget.aria.minimizeChat")}
+          title={t("chat.widget.title.minimizeShortcut")}
           onClick={toggleExpanded}
           className="ml-1 flex h-6 w-6 items-center justify-center rounded-md text-fg-secondary hover:bg-bg-hover hover:text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
         >

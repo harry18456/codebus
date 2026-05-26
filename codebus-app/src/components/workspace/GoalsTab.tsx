@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import type { RunLogSummary } from "@/lib/ipc"
 import { useGoalsStore } from "@/store/goals"
 import { useWatcherEvent } from "@/hooks/useWatcherEvent"
+import { useT } from "@/i18n/useT"
 
 import { NewGoalModal } from "./NewGoalModal"
 import { RunListItem } from "./RunListItem"
@@ -36,6 +37,7 @@ export function GoalsTab({
   onSelectRun,
   onSpawnedRun,
 }: GoalsTabProps) {
+  const t = useT()
   const runs = useGoalsStore((s) => s.runs)
   const refreshRuns = useGoalsStore((s) => s.refreshRuns)
   const [modalOpen, setModalOpen] = useState(false)
@@ -92,7 +94,7 @@ export function GoalsTab({
           className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center"
         >
           <p className="text-body text-fg-secondary">
-            Click + New goal to ask codebus to ingest something into the wiki
+            {t("workspace.goals.emptyHint")}
           </p>
           <div className="flex flex-col gap-1">
             {GOAL_EXAMPLES.map((ex, i) => (

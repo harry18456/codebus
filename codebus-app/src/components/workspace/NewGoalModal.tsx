@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { useT } from "@/i18n/useT"
 import { useGoalsStore } from "@/store/goals"
 
 interface NewGoalModalProps {
@@ -37,6 +38,7 @@ export function NewGoalModal({
   onClose,
   onSpawned,
 }: NewGoalModalProps) {
+  const t = useT()
   const activeRun = useGoalsStore((s) => s.activeRun)
   const spawnGoal = useGoalsStore((s) => s.spawnGoal)
   const [text, setText] = useState(initialText)
@@ -85,13 +87,13 @@ export function NewGoalModal({
         }}
       >
         <DialogHeader>
-          <DialogTitle>New goal</DialogTitle>
+          <DialogTitle>{t("workspace.newGoalModal.title")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-2 p-4">
           <textarea
             ref={textareaRef}
             data-testid="new-goal-textarea"
-            placeholder="What should codebus document?"
+            placeholder={t("workspace.newGoalModal.placeholder")}
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={5}
@@ -102,7 +104,7 @@ export function NewGoalModal({
               data-testid="new-goal-blocked-hint"
               className="text-meta text-fg-tertiary"
             >
-              Wait for current run to finish or cancel it before starting a new one.
+              {t("workspace.newGoalModal.blockedHint")}
             </p>
           )}
         </div>
@@ -112,14 +114,14 @@ export function NewGoalModal({
             data-testid="new-goal-cancel"
             onClick={onClose}
           >
-            Cancel
+            {t("workspace.newGoalModal.cancel")}
           </Button>
           <Button
             data-testid="new-goal-run"
             disabled={runDisabled}
             onClick={() => void handleRun()}
           >
-            Run
+            {t("workspace.newGoalModal.run")}
           </Button>
         </DialogFooter>
       </DialogContent>

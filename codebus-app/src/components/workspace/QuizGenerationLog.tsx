@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from "react"
 
 import { readQuizEvents, type EventEnvelope, type VerbEvent } from "@/lib/ipc"
+import { useT } from "@/i18n/useT"
 
 import { ActivityStreamItem, ThoughtItem, foldTimeline } from "./ActivityStreamItem"
 
@@ -25,6 +26,7 @@ export function QuizGenerationLog({
   vaultPath,
   eventsLog,
 }: QuizGenerationLogProps) {
+  const t = useT()
   const [events, setEvents] = useState<EventEnvelope[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -54,7 +56,7 @@ export function QuizGenerationLog({
         data-testid="quiz-generation-log-error"
         className="p-4 text-body text-red-500"
       >
-        Could not load generation log: {error}
+        {t("workspace.quiz.generationLogLoadError", { error })}
       </div>
     )
   }

@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm"
 
 import { isAppError, type VerbEvent } from "@/lib/ipc"
 import { transformBodyWikilinks } from "@/lib/milkdown-wikilink"
+import { tStatic, useT } from "@/i18n/useT"
 import {
   useChatStore,
   type ChatTurn,
@@ -106,6 +107,7 @@ export function ChatTranscript({
   onWikiLinkClick,
   onPromoteSuccess,
 }: ChatTranscriptProps = {}) {
+  const t = useT()
   const turns = useChatStore((s) => s.turns)
   const activeTurn = useChatStore((s) => s.activeTurn)
   const promoteSuggestion = useChatStore((s) => s.promoteSuggestion)
@@ -147,8 +149,8 @@ export function ChatTranscript({
       // and keep the pill in the DOM so the user can retry.
       const message =
         isAppError(err) && err.kind === "invalid" && err.field === "active_runs"
-          ? "Another goal is running. Wait for it to finish."
-          : "Promote failed. Try again."
+          ? t("chat.error.anotherGoalRunning")
+          : t("chat.error.promoteFailed")
       setPromoteError(message)
     }
   }
@@ -296,17 +298,26 @@ function ActiveTurnBlock({
  * after vault re-open, etc.), not just the very first time per vault.
  */
 function ChatOnboardingHint() {
+  const t = useT()
+  // `chat.onboarding.hintEn` carries the literal `[Promote to goal]`
+  // token; split on it so the affordance keeps its mono styling without
+  // duplicating copy across bundle and JSX.
+  const hint = t("chat.onboarding.hintEn")
+  const TOKEN = "[Promote to goal]"
+  const parts = hint.split(TOKEN)
   return (
     <div
       data-testid="chat-onboarding-hint"
       className="rounded-md border border-border bg-bg-elevated p-3 text-meta text-muted-fg"
     >
-      {/* TODO(task 7.2): replace with t("chat.onboarding.hint") once locale */}
-      {/* messages land; the en/tw substrings are spec-mandated either way. */}
-      Ask anything about this vault. AI will suggest{" "}
-      <span className="font-mono">[Promote to goal]</span> when a discussion is
-      worth documenting — or you can ask AI to promote it yourself in plain
-      language.
+      {parts.map((chunk, i) => (
+        <Fragment key={i}>
+          {chunk}
+          {i < parts.length - 1 && (
+            <span className="font-mono">{TOKEN}</span>
+          )}
+        </Fragment>
+      ))}
     </div>
   )
 }
@@ -586,7 +597,7 @@ function renderWikiSlug({
     return (
       <span
         data-testid="chat-wiki-link-unresolvable"
-        title="Page not found"
+        title={tStatic("workspace.wiki.pageNotFound")}
         className="cursor-not-allowed text-fg-tertiary opacity-50"
       >
         {children}

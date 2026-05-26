@@ -174,6 +174,65 @@ Review 進度：
    - 「Endpoint configuration is incomplete:」→ 「端點設定不完整：」（`端點` 翻中文；jargon 限 `base_url` / `api_version` key names 本身）
    - aria-label 抽 **shared i18n key per concept**——例如 3 處 `title="Page not found"` 統一 `a11y.pageNotFound` 一個 key、不要三個分別 key
 
+### Followup change · `i18n-sweep-phase-3a-followup`（待開）
+
+Phase 3A `i18n-sweep-cat-a-b-c-d` archive 後留的 trail。
+**不在 Phase 3A scope**——boundary 在第 32 處 lock（守 exhaustive sweep + commit to ship 平衡）。
+
+#### Scope
+
+**A. Phase 3A archived 後 residual 8 處 hard-code（第 33-40 處、CDP smoke 抓到）**：
+
+| # | 檔案:行 | Hard-code | Bundle key 狀態 |
+|---|---|---|---|
+| 33 | `GoalsTab.tsx:88` | `+ New goal`（multi-line JSX）| `workspace.goals.newGoalButton` 已存在、缺 wiring |
+| 34 | `RunListItem.tsx:48` | `${diffMin}m ago` template literal | `common.minutesAgo` 已存在、缺 wiring |
+| 35 | `RunListItem.tsx:50` | `${diffHr}h ago` template literal | `common.hoursAgo` 已存在、缺 wiring |
+| 36 | `RunListItem.tsx:52` | `${diffDay}d ago` template literal | `common.daysAgo` 已存在、缺 wiring |
+| 37 | `quiz-parse.ts:151-152` | pass/fail verdict in `quizBadge` | 需新 key（`.ts` 檔、Phase 3A sweep 範圍只含 `.tsx`）|
+| 38 | `RunDetailDone.tsx:137` | `{n} errors · {n} warnings` lint count units | 需新 key |
+| 39 | `RunDetailDone.tsx:84` | `{durationSec}s · {totalTokens} tokens` header units | 需新 key |
+| 40 | `ChatNewChatButton.tsx:25` | `+ New chat`（multi-line JSX）| `chat.button.newChat` 已存在、缺 wiring |
+
+**B. `ActivityStreamItem.tsx` `bannerLabel` 函式 8 處中文 hard-code**：
+
+- 反向問題（zh 環境 OK / en 環境會中英混雜——en bundle 缺翻譯）
+- 8 處：🚌 來囉來囉~ CodeBus 駛入... / 🎯 任務目標 / 🤔 思考 / 🔧 工具 / 🛡 PII / 🔍 lint / 🚏 commit / 🎉 完成
+- 改 `bannerLabel` 函式走 i18n key、emoji 保留在 i18n value 內
+
+**C. Pattern 5 + 6 加進 spec Verification（grep procedure 擴充）**：
+
+```bash
+# Pattern 5 · template literal interpolation with Latin context
+grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.tsx" \
+  | grep -v ".test." \
+  | grep -v 't("'
+
+# Pattern 6 · .ts files outside components/ (utility / lib code)
+# Re-run patterns 1-5 with --include="*.ts" --include="*.tsx" and --no-include filter on tests
+```
+
+→ 加進 i18n Bundle Coverage Policy spec 的「Pattern limitations addressed」 section。
+
+#### 已確認 keep（不收）
+
+- `NewVaultFlow.tsx:106` `<span>delete</span>`——user type 字面 keyword 才能 re-init、屬 identifier、翻成「刪除」會破壞行為
+- Cat D 6 條 identifier（tab labels / verb names / codex effort / PII enum / YAML keys / tool names）
+
+#### 觸發時機
+
+- **不要在 Phase 3A archive 後立刻動**——先走 Phase 3B（status three-state token + StatusPill）這是 spec 主線、Phase 4+ layout 改造依賴
+- Phase 3B 完後可開、跟 Phase 4 並行（不互衝）
+
+#### 預期工作量
+
+- ~30-40 分鐘 wire 8 處 residual
+- ~30 分鐘改 `bannerLabel` 函式 + en/zh bundle 加 8 條 key
+- ~10 分鐘加 Pattern 5/6 進 spec Verification
+- + en locale 真實 smoke（`LANG=en` restart app，跑 Settings / Quiz / Chat / Wiki 看 placeholder substitution + 翻譯 wording 對不對）
+
+總計 < 1.5 hr。
+
 ---
 
 ## 04 · Lobby

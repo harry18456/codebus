@@ -14,6 +14,7 @@
 import { Fragment, type ReactNode } from "react"
 
 import type { WikiPageMeta } from "@/lib/ipc"
+import { tStatic } from "@/i18n/useT"
 
 interface ExplanationTextProps {
   text: string
@@ -65,7 +66,7 @@ export function ExplanationText({
           data-testid={`wikilink-${slug}`}
           data-wikilink={slug}
           data-state="unresolvable"
-          title="Page not found"
+          title={tStatic("workspace.wiki.pageNotFound")}
           className="cursor-not-allowed text-fg-tertiary opacity-50"
         >
           {slug}
