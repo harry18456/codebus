@@ -37,7 +37,7 @@ export function Toast() {
     <div
       role="alert"
       data-testid="toast-error"
-      className="fixed top-14 right-4 z-[55] flex max-w-[420px] items-start gap-2 rounded-md border border-error/40 bg-bg-raised px-3 py-2 text-[12px] text-fg shadow-lg"
+      className="fixed top-14 right-4 z-[55] flex max-w-[420px] items-start gap-2 rounded-md border border-error/40 bg-bg-raised px-3 py-2 text-meta text-fg shadow-lg"
     >
       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-error" />
       <div className="flex-1 break-words">{t(error.key, error.vars)}</div>

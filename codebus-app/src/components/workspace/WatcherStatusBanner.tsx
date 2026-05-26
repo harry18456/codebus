@@ -21,7 +21,7 @@ export function WatcherStatusBanner({ vaultPath }: WatcherStatusBannerProps) {
     <div
       data-testid="watcher-status-banner"
       role="alert"
-      className="border-b border-warn/40 bg-warn/10 px-3 py-1 text-[11px] text-warn"
+      className="border-b border-warn/40 bg-warn/10 px-3 py-1 text-meta text-warn"
     >
       Auto-refresh disabled: {reason}
     </div>

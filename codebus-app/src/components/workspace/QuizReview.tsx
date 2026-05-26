@@ -111,10 +111,10 @@ export function QuizReview({
               data-testid="quiz-review-question"
               className="flex flex-col gap-2 rounded border border-border p-3"
             >
-              <p className="text-[13px] text-fg-secondary">
+              <p className="text-body text-fg-secondary">
                 Question {qNum} of {total}
               </p>
-              <h3 className="text-[15px] text-fg-primary">{q.stem}</h3>
+              <h3 className="text-body-lg text-fg-primary">{q.stem}</h3>
               <ul className="flex flex-col gap-1">
                 {CHOICE_KEYS.map((k) => {
                   const isAnswer = k === q.answer
@@ -123,7 +123,7 @@ export function QuizReview({
                     <li
                       key={k}
                       className={[
-                        "rounded px-2 py-1 text-[14px]",
+                        "rounded px-2 py-1 text-body-lg",
                         isAnswer ? "bg-green-500/15" : "",
                         isPicked && !isAnswer ? "bg-red-500/15" : "",
                       ].join(" ")}
@@ -135,12 +135,12 @@ export function QuizReview({
               </ul>
               <p
                 className={
-                  isCorrect ? "text-green-500 text-[13px]" : "text-red-500 text-[13px]"
+                  isCorrect ? "text-green-500 text-body" : "text-red-500 text-body"
                 }
               >
                 Your answer: {userChoice ?? "—"} · Correct answer: {q.answer}
               </p>
-              <p className="text-[14px] text-fg-secondary">
+              <p className="text-body-lg text-fg-secondary">
                 <ExplanationText
                   text={q.explanation}
                   pages={pages ?? {}}

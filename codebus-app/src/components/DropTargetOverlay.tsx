@@ -18,13 +18,14 @@ export function DropTargetOverlay() {
     >
       <div className="absolute inset-6 rounded-xl border-2 border-dashed border-accent" />
       <div className="relative flex flex-col items-center gap-3 px-6">
+        {/* large glyph, intentionally outside type scale */}
         <div className="text-[64px] leading-none" aria-hidden="true">
           🚌
         </div>
-        <h2 className="text-[20px] font-semibold tracking-tight text-accent">
+        <h2 className="text-h-row font-semibold tracking-tight text-accent">
           {t("dropTarget.title")}
         </h2>
-        <p className="max-w-[420px] text-center text-[12px] text-fg-secondary">
+        <p className="max-w-[420px] text-center text-meta text-fg-secondary">
           {t("dropTarget.subtitle")}
         </p>
       </div>

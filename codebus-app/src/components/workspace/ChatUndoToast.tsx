@@ -62,7 +62,7 @@ export function ChatUndoToast() {
         <span className="font-medium">🆕 New chat started</span>
         <span
           data-testid="chat-undo-countdown"
-          className="font-mono text-[11px] text-fg-tertiary"
+          className="font-mono text-meta text-fg-tertiary"
         >
           ({remaining}s to undo)
         </span>

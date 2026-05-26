@@ -241,7 +241,7 @@ function TurnBlock({ turn, onWikiLinkClick, promotePill }: TurnBlockProps) {
         <div
           data-testid="chat-turn-error"
           role="alert"
-          className="rounded border border-error/40 bg-error/10 px-2 py-1 text-[11px] text-error"
+          className="rounded border border-error/40 bg-error/10 px-2 py-1 text-meta text-error"
         >
           {turn.error}
         </div>
@@ -299,7 +299,7 @@ function ChatOnboardingHint() {
   return (
     <div
       data-testid="chat-onboarding-hint"
-      className="rounded-md border border-border bg-bg-elevated p-3 text-[12px] text-muted-fg"
+      className="rounded-md border border-border bg-bg-elevated p-3 text-meta text-muted-fg"
     >
       {/* TODO(task 7.2): replace with t("chat.onboarding.hint") once locale */}
       {/* messages land; the en/tw substrings are spec-mandated either way. */}
@@ -330,7 +330,7 @@ function PromotePill({ reason, onPromote, onDismiss, error }: PromotePillProps) 
   return (
     <div
       data-testid="promote-pill"
-      className="mt-1 flex flex-wrap items-center gap-2 text-[12px]"
+      className="mt-1 flex flex-wrap items-center gap-2 text-meta"
     >
       <button
         type="button"
@@ -359,7 +359,7 @@ function UserPrompt({ text }: { text: string }) {
   return (
     <div
       data-testid="chat-turn-user"
-      className="self-end max-w-[85%] rounded-md bg-accent/10 px-3 py-1.5 text-[13px] text-fg whitespace-pre-wrap"
+      className="self-end max-w-[85%] rounded-md bg-accent/10 px-3 py-1.5 text-body text-fg whitespace-pre-wrap"
     >
       {text}
     </div>
@@ -441,7 +441,7 @@ function AssistantMarkdownBlock({
       // Minimal table styling so GFM tables render with visible cell
       // boundaries instead of flowing as undifferentiated text.
       table: ({ children }) => (
-        <table className="my-2 border-collapse border border-border text-[12px]">
+        <table className="my-2 border-collapse border border-border text-meta">
           {children}
         </table>
       ),
@@ -531,7 +531,7 @@ function AssistantMarkdownBlock({
   return (
     <div
       data-testid="chat-assistant-markdown"
-      className="text-[13px] text-fg whitespace-pre-wrap"
+      className="text-body text-fg whitespace-pre-wrap"
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}

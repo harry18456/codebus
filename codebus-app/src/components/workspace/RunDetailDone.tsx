@@ -62,34 +62,34 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
           type="button"
           onClick={onBack}
           data-testid="run-detail-back"
-          className="text-[12px] text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
+          className="text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
           ← back
         </button>
         <span
           data-tauri-drag-region
-          className="flex-1 truncate text-[13px]"
+          className="flex-1 truncate text-body"
         >
           {summary.goal}
         </span>
         <span
           data-tauri-drag-region
           data-testid="done-badge"
-          className="rounded-full bg-success/20 px-2 py-0.5 text-[11px] text-success"
+          className="rounded-full bg-success/20 px-2 py-0.5 text-meta text-success"
         >
           ✓ Done
         </span>
       </header>
-      <div className="border-b border-border px-3 py-1.5 text-[11px] text-fg-tertiary">
+      <div className="border-b border-border px-3 py-1.5 text-meta text-fg-tertiary">
         {durationSec}s · {totalTokens} tokens
       </div>
       <div className="flex-1 overflow-auto p-3">
         <section>
-          <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-fg-tertiary">
+          <h3 className="mb-2 text-meta font-semibold uppercase tracking-wide text-fg-tertiary">
             Covered pages
           </h3>
           {totalCoveredPages === 0 ? (
-            <p className="text-[12px] text-fg-tertiary">
+            <p className="text-meta text-fg-tertiary">
               No wiki pages changed
             </p>
           ) : (
@@ -98,12 +98,12 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
                 <div key={`covered-${phase.verb}`}>
                   <h4
                     data-testid={`covered-phase-${phase.verb}`}
-                    className="mb-1 text-[11px] text-fg-tertiary"
+                    className="mb-1 text-meta text-fg-tertiary"
                   >
                     {phaseLabel(t, phase.verb)}
                   </h4>
                   {phase.coveredPages.length === 0 ? (
-                    <p className="ml-3 text-[11px] text-fg-tertiary">
+                    <p className="ml-3 text-meta text-fg-tertiary">
                       {t("workspace.runDetail.coveredPagesPhaseEmpty")}
                     </p>
                   ) : (
@@ -116,7 +116,7 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
                             data-slug={slug}
                             onClick={() => onSelectPage(slug)}
                             style={{ color: "#7c8cff" }}
-                            className="text-left text-[12px] hover:underline focus:outline-none focus:ring-2 focus:ring-accent-ring"
+                            className="text-left text-meta hover:underline focus:outline-none focus:ring-2 focus:ring-accent-ring"
                           >
                             {pages[slug]?.title ?? slug}
                           </button>
@@ -130,19 +130,19 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
           )}
         </section>
         <section className="mt-4">
-          <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-fg-tertiary">
+          <h3 className="mb-2 text-meta font-semibold uppercase tracking-wide text-fg-tertiary">
             Lint
           </h3>
-          <p className="text-[12px] text-fg-secondary">
+          <p className="text-meta text-fg-secondary">
             {summary.lint_error_count} errors · {summary.lint_warn_count} warnings
           </p>
         </section>
         <section className="mt-4">
-          <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-fg-tertiary">
+          <h3 className="mb-2 text-meta font-semibold uppercase tracking-wide text-fg-tertiary">
             {t("workspace.runDetail.activitySummaryLabel")}
           </h3>
           {totalToolUses === 0 && phases.length === 0 ? (
-            <p className="text-[12px] text-fg-tertiary">—</p>
+            <p className="text-meta text-fg-tertiary">—</p>
           ) : (
             <div
               data-testid="activity-summary"
@@ -152,16 +152,16 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
                 <div key={`activity-${phase.verb}`}>
                   <h4
                     data-testid={`activity-phase-${phase.verb}`}
-                    className="mb-1 text-[11px] text-fg-tertiary"
+                    className="mb-1 text-meta text-fg-tertiary"
                   >
                     {phaseLabel(t, phase.verb)}
                   </h4>
                   {phase.toolCounts.length === 0 ? (
-                    <p className="ml-3 text-[11px] text-fg-tertiary">
+                    <p className="ml-3 text-meta text-fg-tertiary">
                       {t("workspace.runDetail.phaseEmptyHint")}
                     </p>
                   ) : (
-                    <ul className="ml-3 flex flex-col gap-0.5 text-[12px] text-fg-secondary">
+                    <ul className="ml-3 flex flex-col gap-0.5 text-meta text-fg-secondary">
                       {phase.toolCounts.map(({ tool, count }) => (
                         <li
                           key={`${phase.verb}-${tool}`}
@@ -184,7 +184,7 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
             data-testid="run-details-toggle"
             aria-expanded={detailsOpen}
             onClick={() => setDetailsOpen((v) => !v)}
-            className="mb-2 text-left text-[12px] font-semibold uppercase tracking-wide text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
+            className="mb-2 text-left text-meta font-semibold uppercase tracking-wide text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
           >
             <span className="text-accent">
               {detailsOpen

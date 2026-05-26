@@ -100,7 +100,7 @@ export function NewGoalModal({
           {blockedByActiveRun && (
             <p
               data-testid="new-goal-blocked-hint"
-              className="text-[12px] text-fg-tertiary"
+              className="text-meta text-fg-tertiary"
             >
               Wait for current run to finish or cancel it before starting a new one.
             </p>

@@ -48,11 +48,11 @@ export function VaultCard({
     >
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-sm font-semibold">{vault.display_name}</div>
-        <div className="font-mono text-[11px] text-fg-tertiary truncate max-w-[60%]">
+        <div className="font-mono text-meta text-fg-tertiary truncate max-w-[60%]">
           {vault.path}
         </div>
       </div>
-      <div className="flex items-center gap-2 text-[11px] text-fg-secondary">
+      <div className="flex items-center gap-2 text-meta text-fg-secondary">
         <span>{t("vaultCard.lastOpened")}</span>
         <span className="font-mono">
           {formatLastOpened(vault.last_opened, t)}
@@ -60,7 +60,7 @@ export function VaultCard({
         {vault.is_missing && (
           <span
             data-testid="missing-badge"
-            className="ml-2 rounded-sm border border-error/40 bg-error/10 px-1.5 py-px font-mono text-[10px] text-error"
+            className="ml-2 rounded-sm border border-error/40 bg-error/10 px-1.5 py-px font-mono text-micro text-error"
           >
             {t("vaultCard.missingBadge")}
           </span>

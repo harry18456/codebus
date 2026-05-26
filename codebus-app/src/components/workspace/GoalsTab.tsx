@@ -91,7 +91,7 @@ export function GoalsTab({
           data-testid="goals-empty"
           className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center"
         >
-          <p className="text-[13px] text-fg-secondary">
+          <p className="text-body text-fg-secondary">
             Click + New goal to ask codebus to ingest something into the wiki
           </p>
           <div className="flex flex-col gap-1">
@@ -101,7 +101,7 @@ export function GoalsTab({
                 type="button"
                 data-testid={`goals-empty-prefill-${i}`}
                 onClick={() => openModalWith(ex)}
-                className="rounded-sm text-left text-[12px] text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
+                className="rounded-sm text-left text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
               >
                 “{ex}”
               </button>

@@ -53,7 +53,7 @@ export function DetectionDialog({
           <DialogTitle>{t("detection.title")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 p-4">
-          <p className="font-mono text-[11px] text-fg-tertiary truncate">
+          <p className="font-mono text-meta text-fg-tertiary truncate">
             {path}
           </p>
           <label className="flex items-start gap-3 cursor-pointer">

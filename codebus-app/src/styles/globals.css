@@ -36,6 +36,40 @@ button:disabled,
   cursor: not-allowed;
 }
 
+/* SectionLabel — shared visual primitive (design-system capability).
+ * Spec: openspec/specs/design-system/spec.md · Requirement "SectionLabel component"
+ * Tokens: amber bar uses --color-accent; text colors use --color-fg-secondary/tertiary */
+.section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-meta);
+  font-weight: 600;
+  color: var(--color-fg-secondary);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.section-label::before {
+  content: "";
+  width: 2px;
+  height: 12px;
+  background: var(--color-accent);
+  border-radius: 1px;
+  flex: 0 0 auto;
+}
+.section-label--caps {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--text-micro);
+  color: var(--color-fg-tertiary);
+}
+.section-label__count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--color-fg-tertiary);
+}
+
 @keyframes codebus-bus-roll {
   0%, 100% {
     transform: translateX(-26px) rotate(-2deg);

@@ -46,27 +46,27 @@ export function RunDetailCancelled({
           type="button"
           onClick={onBack}
           data-testid="run-detail-back"
-          className="text-[12px] text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
+          className="text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
           ← back
         </button>
         <span
           data-tauri-drag-region
-          className="flex-1 truncate text-[13px]"
+          className="flex-1 truncate text-body"
         >
           {summary.goal}
         </span>
         <span
           data-tauri-drag-region
           data-testid="cancelled-badge"
-          className="rounded-full bg-warning/20 px-2 py-0.5 text-[11px] text-warning"
+          className="rounded-full bg-warning/20 px-2 py-0.5 text-meta text-warning"
         >
           ⏹ Cancelled
         </span>
       </header>
       <div
         data-testid="cancelled-warning"
-        className="m-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[12px] text-warning"
+        className="m-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-meta text-warning"
       >
         Wiki has uncommitted changes — not auto-committed. Review in terminal if needed.
       </div>
@@ -117,27 +117,27 @@ export function RunDetailInterrupted({
           type="button"
           onClick={onBack}
           data-testid="run-detail-back"
-          className="text-[12px] text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
+          className="text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
           ← back
         </button>
         <span
           data-tauri-drag-region
-          className="flex-1 truncate text-[13px]"
+          className="flex-1 truncate text-body"
         >
           {summary.goal}
         </span>
         <span
           data-tauri-drag-region
           data-testid="interrupted-badge"
-          className="rounded-full bg-warning/20 px-2 py-0.5 text-[11px] text-warning"
+          className="rounded-full bg-warning/20 px-2 py-0.5 text-meta text-warning"
         >
           ⚠ Interrupted
         </span>
       </header>
       <div
         data-testid="interrupted-warning"
-        className="m-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[12px] text-warning"
+        className="m-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-meta text-warning"
       >
         App was closed before this goal finished. Wiki state may be partial — review in terminal if needed.
       </div>
@@ -184,8 +184,8 @@ function partialTimeline(detail: RunDetail): Timeline {
 
 function PartialTimeline({ timeline }: { timeline: Timeline }) {
   return (
-    <div className="px-3 pb-3 text-[12px] text-fg-secondary">
-      <h3 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-fg-tertiary">
+    <div className="px-3 pb-3 text-meta text-fg-secondary">
+      <h3 className="mb-1 text-meta font-semibold uppercase tracking-wide text-fg-tertiary">
         Partial timeline
       </h3>
       <p>

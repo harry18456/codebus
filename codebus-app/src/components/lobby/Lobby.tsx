@@ -82,7 +82,7 @@ function Topbar({ empty, onNewVault }: { empty: boolean; onNewVault: () => void 
             aria-keyshortcuts="Mod+N"
           >
             {t("lobby.topbar.newVaultButton")}
-            <kbd className="ml-2 hidden font-mono text-[10px] text-accent-fg/70 sm:inline">
+            <kbd className="ml-2 hidden font-mono text-micro text-accent-fg/70 sm:inline">
               {t("lobby.topbar.newVaultShortcutHint")}
             </kbd>
           </Button>
@@ -106,10 +106,10 @@ function PopulatedList({ vaults, onOpen, onRemove, onRevealInFiles }: PopulatedL
   return (
     <div className="flex w-full max-w-[640px] flex-col gap-3">
       <div className="flex items-baseline justify-between">
-        <div className="text-fg-tertiary text-[10px] font-semibold uppercase tracking-[0.12em]">
+        <div className="text-fg-tertiary text-micro font-semibold uppercase tracking-[0.12em]">
           {t("lobby.populated.sectionLabel")}
         </div>
-        <div className="font-mono text-[11px] text-fg-tertiary">
+        <div className="font-mono text-meta text-fg-tertiary">
           {vaults.length}
         </div>
       </div>
@@ -124,7 +124,7 @@ function PopulatedList({ vaults, onOpen, onRemove, onRevealInFiles }: PopulatedL
           />
         ))}
       </div>
-      <p className="mt-2 border-t border-dashed border-border pt-2 text-[11px] text-fg-tertiary text-center">
+      <p className="mt-2 border-t border-dashed border-border pt-2 text-meta text-fg-tertiary text-center">
         {t("lobby.populated.dragTip")}
       </p>
     </div>

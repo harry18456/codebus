@@ -517,7 +517,7 @@ export function QuizTab({
         data-tauri-drag-region
         className="flex items-center justify-between border-b border-border p-3 pr-[160px]"
       >
-        <h2 className="text-[15px] font-medium text-fg-primary">
+        <h2 className="text-body-lg font-medium text-fg-primary">
           Quiz history
         </h2>
         {(phase === "history" || phase === "idle") && (
@@ -539,7 +539,7 @@ export function QuizTab({
           className="flex flex-1 flex-col overflow-auto"
         >
           {attempts.length === 0 ? (
-            <p className="text-[14px] text-fg-secondary">
+            <p className="text-body-lg text-fg-secondary">
               No quizzes yet — start one with + New quiz
             </p>
           ) : (
@@ -557,7 +557,7 @@ export function QuizTab({
                     Displays User-Authored Topic. */}
                 <p
                   data-testid="quiz-history-group-title"
-                  className="text-[13px] font-medium text-fg-primary"
+                  className="text-body font-medium text-fg-primary"
                 >
                   {rows[0]?.topic ?? rows[0]?.target_page ?? slug}
                 </p>
@@ -565,7 +565,7 @@ export function QuizTab({
                   <div
                     key={a.path}
                     data-testid="quiz-attempt-row"
-                    className="flex items-center gap-2 py-1 text-[13px]"
+                    className="flex items-center gap-2 py-1 text-body"
                   >
                     <button
                       type="button"
@@ -601,7 +601,7 @@ export function QuizTab({
           </div>
           <input
             data-testid="quiz-topic-input"
-            className="rounded border border-border bg-bg-secondary px-3 py-2 text-[14px]"
+            className="rounded border border-border bg-bg-secondary px-3 py-2 text-body-lg"
             placeholder="What do you want to be quizzed on?"
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
@@ -643,7 +643,7 @@ export function QuizTab({
               </Button>
             )}
           </div>
-          <pre className="flex-1 overflow-auto rounded bg-bg-secondary p-3 text-[12px]">
+          <pre className="flex-1 overflow-auto rounded bg-bg-secondary p-3 text-meta">
             {attemptMd}
           </pre>
           {attemptMeta?.events_log && (
@@ -695,7 +695,7 @@ export function QuizTab({
 
       {phase === "planning" && (
         <div data-testid="quiz-planning" className="flex flex-col gap-2">
-          <p className="text-[14px] text-fg-secondary">
+          <p className="text-body-lg text-fg-secondary">
             Planning quiz scope…
           </p>
           <QuizLiveStream events={liveEvents} />
@@ -706,11 +706,11 @@ export function QuizTab({
         <div data-testid="quiz-confirm" className="flex flex-col gap-3">
           <p
             data-testid="quiz-confirm-desc"
-            className="text-[14px] text-fg-primary"
+            className="text-body-lg text-fg-primary"
           >
             {t("workspace.quiz.confirmDescription")}
           </p>
-          <ul className="text-[13px] text-fg-secondary">
+          <ul className="text-body text-fg-secondary">
             {pages.map((p) => (
               <li key={p} data-testid="quiz-scope-page">
                 {p}
@@ -730,7 +730,7 @@ export function QuizTab({
 
       {phase === "generating" && (
         <div data-testid="quiz-generating" className="flex flex-col gap-2">
-          <p className="text-[14px] text-fg-secondary">
+          <p className="text-body-lg text-fg-secondary">
             Generating questions…
           </p>
           <QuizLiveStream events={liveEvents} />
@@ -770,7 +770,7 @@ export function QuizTab({
 
       {phase === "no_match" && (
         <div data-testid="quiz-no-match" className="flex flex-col gap-3">
-          <p className="text-[14px] text-fg-primary">
+          <p className="text-body-lg text-fg-primary">
             No matching wiki pages: {reason}
           </p>
           <div>
@@ -783,7 +783,7 @@ export function QuizTab({
 
       {phase === "error" && (
         <div data-testid="quiz-error" className="flex flex-col gap-3">
-          <p className="text-[14px] text-fg-primary">Quiz failed: {errorMsg}</p>
+          <p className="text-body-lg text-fg-primary">Quiz failed: {errorMsg}</p>
           <div>
             <Button data-testid="quiz-back" onClick={reset}>
               Back

@@ -245,7 +245,7 @@ export function Workspace({ vault }: WorkspaceProps) {
           type="button"
           onClick={handleBack}
           data-testid="workspace-back"
-          className="text-left text-[12px] text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
+          className="text-left text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
           ← Back to Lobby
         </button>
@@ -261,7 +261,7 @@ export function Workspace({ vault }: WorkspaceProps) {
             data-testid="workspace-vault-path"
             onClick={() => void openVaultInFiles(vault.path)}
             title={`${vault.path}\n\nClick to open in file explorer`}
-            className="block w-full truncate text-left font-mono text-[11px] text-fg-tertiary hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent-ring"
+            className="block w-full truncate text-left font-mono text-meta text-fg-tertiary hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent-ring"
           >
             {vault.path}
           </button>
@@ -383,7 +383,7 @@ function TabButton({ id, label, activeTab, onSelect }: TabButtonProps) {
       data-active={active}
       onClick={() => onSelect(id)}
       className={cn(
-        "rounded-sm px-2 py-1 text-left text-[12px]",
+        "rounded-sm px-2 py-1 text-left text-meta",
         active
           ? "bg-accent/20 text-accent"
           : "text-fg-secondary hover:bg-bg-hover hover:text-fg",

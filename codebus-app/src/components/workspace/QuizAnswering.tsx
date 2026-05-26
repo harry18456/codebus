@@ -128,10 +128,10 @@ export function QuizAnswering({
     const pass = isPassing(correctCount, total, passThreshold)
     return (
       <div data-testid="quiz-summary" className="flex flex-col gap-3 p-6">
-        <h3 className="text-[15px] font-medium text-fg-primary">
+        <h3 className="text-body-lg font-medium text-fg-primary">
           Quiz complete
         </h3>
-        <p data-testid="quiz-score" className="text-[14px]">
+        <p data-testid="quiz-score" className="text-body-lg">
           Score: {correctCount} / {total} (
           {Math.round((correctCount / total) * 100)}%)
         </p>
@@ -201,10 +201,10 @@ export function QuizAnswering({
 
   return (
     <div data-testid="quiz-answering" className="flex flex-col gap-4 p-6">
-      <p className="text-[13px] text-fg-secondary">
+      <p className="text-body text-fg-secondary">
         Question {idx + 1} of {questions.length}
       </p>
-      <h3 data-testid="quiz-stem" className="text-[15px] text-fg-primary">
+      <h3 data-testid="quiz-stem" className="text-body-lg text-fg-primary">
         {q.stem}
       </h3>
       <ul className="flex flex-col gap-2">
@@ -219,7 +219,7 @@ export function QuizAnswering({
                 disabled={revealed}
                 onClick={() => setSelected(k)}
                 className={[
-                  "w-full rounded border px-3 py-2 text-left text-[14px]",
+                  "w-full rounded border px-3 py-2 text-left text-body-lg",
                   isPicked ? "border-accent" : "border-border",
                   revealed && isAnswer ? "bg-green-500/15" : "",
                   revealed && isPicked && !isAnswer ? "bg-red-500/15" : "",
@@ -252,7 +252,7 @@ export function QuizAnswering({
           >
             {isCorrect ? "Correct" : "Incorrect"}
           </p>
-          <p data-testid="quiz-explanation" className="text-[14px]">
+          <p data-testid="quiz-explanation" className="text-body-lg">
             <ExplanationText
               text={q.explanation}
               pages={pages ?? {}}

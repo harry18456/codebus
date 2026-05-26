@@ -183,10 +183,10 @@ export function CodexEndpointSection({
           data-testid="codex-endpoint-chat-row"
           className="flex items-center gap-2 text-fg-tertiary"
         >
-          <span className="w-[56px] font-mono text-[11px]">
+          <span className="w-[56px] font-mono text-meta">
             {t("settings.fields.endpointChat.label")}
           </span>
-          <span className="font-mono text-[11px]">
+          <span className="font-mono text-meta">
             {t("settings.fields.endpointChat.inherits", {
               model: block.system.query.model,
               effort: block.system.query.effort,
@@ -235,7 +235,7 @@ export function CodexEndpointSection({
           <div className="flex items-center gap-2">
             <span
               data-testid="codex-azure-key-status"
-              className="rounded-full border border-border bg-bg px-2 py-px font-mono text-[10px] text-fg-secondary"
+              className="rounded-full border border-border bg-bg px-2 py-px font-mono text-micro text-fg-secondary"
             >
               {keyStatus?.kind === "set" ? "Set" : keyStatus?.kind === "unset" ? "Unset" : "—"}
             </span>
@@ -287,10 +287,10 @@ export function CodexEndpointSection({
           data-testid="codex-azure-endpoint-chat-row"
           className="flex items-center gap-2 text-fg-tertiary"
         >
-          <span className="w-[56px] font-mono text-[11px]">
+          <span className="w-[56px] font-mono text-meta">
             {t("settings.fields.endpointChat.label")}
           </span>
-          <span className="font-mono text-[11px]">
+          <span className="font-mono text-meta">
             {t("settings.fields.endpointChat.inherits", {
               model: azure.query.model,
               effort: azure.query.effort,
@@ -301,7 +301,7 @@ export function CodexEndpointSection({
           <div
             data-testid="codex-endpoint-validation-summary"
             role="alert"
-            className="rounded border border-error/40 bg-error/10 px-2 py-1 text-[11px] text-error"
+            className="rounded border border-error/40 bg-error/10 px-2 py-1 text-meta text-error"
           >
             <div className="font-medium">Endpoint configuration is incomplete:</div>
             <ul className="ml-3 list-disc">
@@ -396,12 +396,12 @@ function ProfileBlock({
           aria-expanded={expanded}
           className="flex items-center gap-1 font-medium text-fg-secondary hover:text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
         >
-          <span aria-hidden="true" className="font-mono text-[10px]">
+          <span aria-hidden="true" className="font-mono text-micro">
             {expanded ? "▾" : "▸"}
           </span>
           <span>{title}</span>
           {active ? null : (
-            <span className="ml-1 font-mono text-[10px] text-fg-tertiary" data-testid={`${testId}-inactive-label`}>
+            <span className="ml-1 font-mono text-micro text-fg-tertiary" data-testid={`${testId}-inactive-label`}>
               (inactive)
             </span>
           )}
@@ -417,7 +417,7 @@ function ProfileBlock({
 function VerbRow({ verb, children }: { verb: Verb; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-[56px] font-mono text-[11px] text-fg-tertiary">{verb}</span>
+      <span className="w-[56px] font-mono text-meta text-fg-tertiary">{verb}</span>
       {children}
     </div>
   )
@@ -426,7 +426,7 @@ function VerbRow({ verb, children }: { verb: Verb; children: React.ReactNode }) 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-[120px] font-mono text-[11px] text-fg-tertiary">{label}</span>
+      <span className="w-[120px] font-mono text-meta text-fg-tertiary">{label}</span>
       <div className="flex-1">{children}</div>
     </div>
   )

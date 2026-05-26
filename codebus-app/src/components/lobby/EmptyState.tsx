@@ -15,13 +15,14 @@ export function EmptyState({ onBoard, localeOverride }: EmptyStateProps) {
       data-testid="lobby-empty"
       className="flex w-full max-w-[440px] flex-col items-center gap-5 px-6"
     >
+      {/* large glyph, intentionally outside type scale */}
       <div className="text-[56px]" aria-hidden="true">
         🚌
       </div>
-      <h1 className="text-[24px] font-semibold tracking-tight">
+      <h1 className="text-h-empty font-semibold tracking-tight">
         {t("lobby.empty.title")}
       </h1>
-      <p className="text-[13px] text-fg-secondary text-center">
+      <p className="text-body text-fg-secondary text-center">
         {t("lobby.empty.subtitle")}
       </p>
       <Button
@@ -33,7 +34,7 @@ export function EmptyState({ onBoard, localeOverride }: EmptyStateProps) {
         {t("lobby.empty.cta")}
       </Button>
       <div className="mt-4 w-full rounded-lg border border-border bg-bg-raised p-[14px_18px]">
-        <div className="text-fg-tertiary text-[10px] font-semibold uppercase tracking-[0.12em]">
+        <div className="text-fg-tertiary text-micro font-semibold uppercase tracking-[0.12em]">
           {t("lobby.empty.quickstartLabel")}
         </div>
         <ol className="mt-2 space-y-2 text-xs text-fg">

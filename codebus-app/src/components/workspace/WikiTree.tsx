@@ -48,7 +48,7 @@ export function WikiTree({
           <div key={folder} className="mb-2">
             <h4
               data-testid={`wiki-tree-group-${folder}`}
-              className="px-1 text-[10px] font-semibold uppercase tracking-wide text-fg-tertiary"
+              className="px-1 text-micro font-semibold uppercase tracking-wide text-fg-tertiary"
             >
               {folder}
             </h4>
@@ -60,7 +60,7 @@ export function WikiTree({
                     data-testid={`wiki-tree-row-${page.slug}`}
                     onClick={() => onSelectSlug(page.slug)}
                     className={cn(
-                      "w-full rounded-sm px-1 py-0.5 text-left text-[12px]",
+                      "w-full rounded-sm px-1 py-0.5 text-left text-meta",
                       page.slug === currentSlug
                         ? "bg-accent/20 text-accent"
                         : "text-fg-secondary hover:text-fg",

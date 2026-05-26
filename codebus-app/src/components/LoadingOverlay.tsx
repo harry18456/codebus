@@ -18,6 +18,7 @@ export function LoadingOverlay() {
         data-tauri-drag-region
         className="flex flex-col items-center gap-4 px-6"
       >
+        {/* large glyph, intentionally outside type scale */}
         <div
           className="text-[72px] leading-none"
           aria-hidden="true"
@@ -28,10 +29,10 @@ export function LoadingOverlay() {
         >
           🚌
         </div>
-        <h2 className="text-[18px] font-semibold tracking-tight">
+        <h2 className="text-h-row font-semibold tracking-tight">
           {t("loading.title")}
         </h2>
-        <p className="max-w-[420px] text-center text-[12px] text-fg-secondary">
+        <p className="max-w-[420px] text-center text-meta text-fg-secondary">
           {t("loading.subtitle")}
         </p>
       </div>

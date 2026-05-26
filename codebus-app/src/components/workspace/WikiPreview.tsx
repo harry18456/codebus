@@ -135,7 +135,7 @@ export function WikiPreview({
       className="h-full w-full overflow-auto"
     >
       <div
-        className="mx-auto max-w-[720px] px-10 py-10 text-[15px] leading-[1.7] text-fg"
+        className="mx-auto max-w-[720px] px-10 py-10 text-body-lg leading-[1.7] text-fg"
         style={{
           fontFamily:
             '-apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Helvetica Neue", Arial, "Noto Sans TC", sans-serif',
@@ -238,19 +238,19 @@ export function WikiPreview({
             const { inline, children, className } = props
             if (inline) {
               return (
-                <code className="rounded border border-border bg-bg-sunken px-1 py-0.5 font-mono text-[12px] text-fg">
+                <code className="rounded border border-border bg-bg-sunken px-1 py-0.5 font-mono text-meta text-fg">
                   {children}
                 </code>
               )
             }
             return (
-              <code className={`font-mono text-[12px] ${className ?? ""}`}>
+              <code className={`font-mono text-meta ${className ?? ""}`}>
                 {children}
               </code>
             )
           },
           pre: ({ children }: { children?: ReactNode }) => (
-            <pre className="my-3 overflow-auto rounded-md border border-border bg-bg-sunken p-3 text-[12px] leading-relaxed">
+            <pre className="my-3 overflow-auto rounded-md border border-border bg-bg-sunken p-3 text-meta leading-relaxed">
               {children}
             </pre>
           ),
@@ -262,7 +262,7 @@ export function WikiPreview({
           hr: () => <hr className="my-6 border-border" />,
           table: ({ children }) => (
             <div className="my-3 overflow-auto">
-              <table className="w-full border-collapse text-[12px]">
+              <table className="w-full border-collapse text-meta">
                 {children}
               </table>
             </div>

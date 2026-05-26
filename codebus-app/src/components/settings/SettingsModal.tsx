@@ -317,7 +317,7 @@ export function SettingsModal({
             </div>
             <div
               data-testid="pii-pattern-count-display"
-              className="text-[11px] text-fg-tertiary"
+              className="text-meta text-fg-tertiary"
             >
               {t("settings.fields.pii.display", { count: piiPatternCount })}
             </div>
@@ -353,7 +353,7 @@ export function SettingsModal({
             </div>
             <div
               data-testid="pii-on-hit-critical-note"
-              className="text-[11px] text-fg-tertiary"
+              className="text-meta text-fg-tertiary"
             >
               {t("settings.fields.piiOnHit.criticalNote")}
             </div>
@@ -378,7 +378,7 @@ export function SettingsModal({
                           next[i] = e.target.value
                           setPatternsExtra(next)
                         }}
-                        className={`w-[260px] rounded-md border bg-bg-raised px-2 py-1 font-mono text-[11px] ${
+                        className={`w-[260px] rounded-md border bg-bg-raised px-2 py-1 font-mono text-meta ${
                           invalid
                             ? "border-error focus-visible:ring-error"
                             : "border-border"
@@ -401,7 +401,7 @@ export function SettingsModal({
                     {invalid && (
                       <span
                         data-testid={`pii-patterns-error-${i}`}
-                        className="text-[11px] text-error"
+                        className="text-meta text-error"
                       >
                         {t("settings.fields.piiPatterns.invalid")}
                       </span>
@@ -459,7 +459,7 @@ export function SettingsModal({
             </label>
             <div
               data-testid="quiz-content-verify-cost"
-              className="text-[11px] text-fg-tertiary"
+              className="text-meta text-fg-tertiary"
             >
               {t("settings.fields.quizContentVerify.cost")}
             </div>
@@ -483,7 +483,7 @@ export function SettingsModal({
             </label>
             <div
               data-testid="goal-content-verify-cost"
-              className="text-[11px] text-fg-tertiary"
+              className="text-meta text-fg-tertiary"
             >
               {t("settings.fields.goalContentVerify.cost")}
             </div>
@@ -507,7 +507,7 @@ export function SettingsModal({
             </label>
             <div
               data-testid="read-image-block-warning"
-              className="text-[11px] text-fg-tertiary"
+              className="text-meta text-fg-tertiary"
             >
               {t("settings.fields.readImageBlock.warning")}
             </div>
@@ -518,7 +518,7 @@ export function SettingsModal({
             <div className="flex items-center gap-2">
               <span
                 data-testid="log-sink-path"
-                className="rounded-md border border-border bg-bg-raised px-2 py-1 font-mono text-[11px] text-fg-secondary"
+                className="rounded-md border border-border bg-bg-raised px-2 py-1 font-mono text-meta text-fg-secondary"
               >
                 {logDir || t("settings.fields.logSink.perVaultDefault")}
               </span>
@@ -659,7 +659,7 @@ export function SettingsModal({
         {error && (
           <div
             data-testid="settings-error"
-            className="mx-4 mb-2 rounded-sm border border-error/40 bg-error/10 px-2 py-1 text-[11px] text-error"
+            className="mx-4 mb-2 rounded-sm border border-error/40 bg-error/10 px-2 py-1 text-meta text-error"
           >
             {t(error.key, error.vars)}
           </div>
@@ -667,13 +667,13 @@ export function SettingsModal({
         {saved && (
           <div
             data-testid="settings-toast"
-            className="mx-4 mb-2 rounded-sm border border-success/40 bg-success/10 px-2 py-1 text-[11px] text-success"
+            className="mx-4 mb-2 rounded-sm border border-success/40 bg-success/10 px-2 py-1 text-meta text-success"
           >
             {t("settings.toast.saved")}
           </div>
         )}
         <DialogFooter>
-          <span className="mr-auto font-mono text-[11px] text-fg-tertiary">
+          <span className="mr-auto font-mono text-meta text-fg-tertiary">
             {t("settings.footer.note")}
           </span>
           <Button variant="ghost" onClick={onClose} data-testid="settings-cancel">
@@ -711,7 +711,7 @@ function CliStatusBadge({
       <span
         data-testid="cli-status"
         data-state="checking"
-        className="rounded-full border border-border bg-bg px-2 py-px font-mono text-[10px] text-fg-tertiary"
+        className="rounded-full border border-border bg-bg px-2 py-px font-mono text-micro text-fg-tertiary"
       >
         Checking…
       </span>
@@ -722,7 +722,7 @@ function CliStatusBadge({
       <span
         data-testid="cli-status"
         data-state="installed"
-        className="rounded-full border border-success/40 bg-success/10 px-2 py-px font-mono text-[10px] text-success"
+        className="rounded-full border border-success/40 bg-success/10 px-2 py-px font-mono text-micro text-success"
       >
         Installed · {status.version}
       </span>
@@ -732,7 +732,7 @@ function CliStatusBadge({
     <span
       data-testid="cli-status"
       data-state="not_installed"
-      className="rounded-full border border-error/40 bg-error/10 px-2 py-px font-mono text-[10px] text-error"
+      className="rounded-full border border-error/40 bg-error/10 px-2 py-px font-mono text-micro text-error"
     >
       Not installed
     </span>
@@ -752,12 +752,12 @@ function Field({
 }) {
   return (
     <>
-      <div className="text-fg-secondary text-[11px]">
+      <div className="text-fg-secondary text-meta">
         <div>{label}</div>
         {subLabel && (
           <div
             data-testid={testId ? `${testId}-sublabel` : undefined}
-            className="font-mono text-[10px] text-fg-tertiary"
+            className="font-mono text-micro text-fg-tertiary"
           >
             {subLabel}
           </div>

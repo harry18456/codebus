@@ -72,16 +72,16 @@ export function RunListItem({ run, onClick }: RunListItemProps) {
       <span
         aria-hidden="true"
         className={cn(
-          "text-[14px]",
+          "text-body-lg",
           run.outcome === "running" && "animate-pulse",
         )}
       >
         {outcomeIcon(run.outcome)}
       </span>
-      <span className="flex-1 truncate text-[13px]">
+      <span className="flex-1 truncate text-body">
         {truncate(run.goal || "(no goal text)")}
       </span>
-      <span className="text-[11px] text-fg-tertiary">
+      <span className="text-meta text-fg-tertiary">
         {relativeTimestamp(run.started_at)}
       </span>
     </button>

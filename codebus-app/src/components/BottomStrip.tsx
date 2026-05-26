@@ -25,7 +25,7 @@ export function BottomStrip({ version, onOpenSettings }: BottomStripProps) {
       </button>
       <span
         data-testid="version-label"
-        className="font-mono text-[11px] text-fg-tertiary"
+        className="font-mono text-meta text-fg-tertiary"
       >
         {version}
       </span>

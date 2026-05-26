@@ -62,27 +62,27 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
           type="button"
           onClick={onBack}
           data-testid="run-detail-back"
-          className="text-[12px] text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
+          className="text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
         >
           ← back
         </button>
         <span
           data-tauri-drag-region
-          className="flex-1 truncate text-[13px]"
+          className="flex-1 truncate text-body"
         >
           {activeRun.goal}
         </span>
         <span
           data-tauri-drag-region
           data-testid="running-badge"
-          className="rounded-full bg-accent/20 px-2 py-0.5 text-[11px] text-accent"
+          className="rounded-full bg-accent/20 px-2 py-0.5 text-meta text-accent"
         >
           ⏺ Running
         </span>
       </header>
       <div
         data-testid="run-detail-metadata"
-        className="border-b border-border px-3 py-1.5 text-[11px] text-fg-tertiary"
+        className="border-b border-border px-3 py-1.5 text-meta text-fg-tertiary"
       >
         {elapsedSec}s elapsed · {accumulatedTokens} tokens
       </div>

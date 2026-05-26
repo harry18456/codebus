@@ -52,7 +52,7 @@ export function QuizGenerationLog({
     return (
       <div
         data-testid="quiz-generation-log-error"
-        className="p-4 text-[13px] text-red-500"
+        className="p-4 text-body text-red-500"
       >
         Could not load generation log: {error}
       </div>

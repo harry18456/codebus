@@ -38,7 +38,7 @@ export function ActivityStreamItem({ event }: ActivityStreamItemProps) {
           <div
             data-testid="stream-tool-use"
             data-tool={name}
-            className="font-mono text-[12px] text-fg"
+            className="font-mono text-meta text-fg"
           >
             ✍️ {path || name}
           </div>
@@ -49,7 +49,7 @@ export function ActivityStreamItem({ event }: ActivityStreamItemProps) {
         <div
           data-testid="stream-tool-use"
           data-tool={name}
-          className="font-mono text-[12px] text-fg"
+          className="font-mono text-meta text-fg"
         >
           🛠️ {name}
           {summary && (
@@ -64,7 +64,7 @@ export function ActivityStreamItem({ event }: ActivityStreamItemProps) {
     return (
       <div
         data-testid="stream-banner"
-        className="text-[12px] italic text-fg-tertiary"
+        className="text-meta italic text-fg-tertiary"
       >
         {bannerLabel(event.data)}
       </div>
@@ -107,7 +107,7 @@ export function ThoughtItem({ text }: ThoughtItemProps) {
   return (
     <div
       data-testid="thought-item"
-      className="font-mono text-[12px] text-fg-secondary"
+      className="font-mono text-meta text-fg-secondary"
     >
       <div>
         <span aria-hidden="true">🤔</span> {firstLine}
@@ -116,7 +116,7 @@ export function ThoughtItem({ text }: ThoughtItemProps) {
             type="button"
             data-testid="thought-expand"
             onClick={() => setOpen(true)}
-            className="ml-2 text-[11px] text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent-ring"
+            className="ml-2 text-meta text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent-ring"
           >
             ({moreCount} more line{moreCount > 1 ? "s" : ""} ▼)
           </button>
@@ -134,7 +134,7 @@ export function ThoughtItem({ text }: ThoughtItemProps) {
             type="button"
             data-testid="thought-collapse"
             onClick={() => setOpen(false)}
-            className="ml-5 text-[11px] text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent-ring"
+            className="ml-5 text-meta text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent-ring"
           >
             ▲ collapse
           </button>

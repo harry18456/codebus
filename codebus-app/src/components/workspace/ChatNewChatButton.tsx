@@ -20,7 +20,7 @@ export function ChatNewChatButton() {
       type="button"
       data-testid="chat-new-chat-button"
       onClick={() => newSession()}
-      className="mr-auto rounded-md border border-border px-2 py-0.5 text-[11px] text-fg-secondary hover:bg-bg-hover hover:text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
+      className="mr-auto rounded-md border border-border px-2 py-0.5 text-meta text-fg-secondary hover:bg-bg-hover hover:text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
     >
       + New chat
     </button>

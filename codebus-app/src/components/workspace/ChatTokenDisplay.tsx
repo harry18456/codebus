@@ -40,7 +40,7 @@ export function ChatTokenDisplay() {
       data-testid="chat-token-display"
       title={title}
       tabIndex={0}
-      className="cursor-help select-none font-mono text-[11px] text-fg-tertiary hover:text-fg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
+      className="cursor-help select-none font-mono text-meta text-fg-tertiary hover:text-fg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
     >
       {formatted}
     </span>

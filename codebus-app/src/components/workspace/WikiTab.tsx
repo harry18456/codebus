@@ -55,7 +55,7 @@ export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
       >
         <p
           data-testid="wiki-empty"
-          className="text-[13px] text-fg-secondary"
+          className="text-body text-fg-secondary"
         >
           No wiki pages yet — run a goal to start documenting
         </p>
@@ -89,7 +89,7 @@ export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
         </button>
         <span
           data-testid="wiki-current-title"
-          className="truncate text-[13px]"
+          className="truncate text-body"
         >
           {currentTitle}
         </span>
