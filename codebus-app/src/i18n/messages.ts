@@ -244,6 +244,14 @@ const en = {
   "errors.configParse": "Config parse error: {message}",
   "errors.internal": "{message}",
   "errors.generic": "Something went wrong",
+
+  // ---- Activity stream · internal sentinel markers ----
+  // QGEN1: translations for `[CODEBUS_*]` thought-block sentinel
+  // markers. Keys mirror the marker name in camelCase
+  // (CODEBUS_QUIZ_NO_VALIDATE → codebusQuizNoValidate). New markers
+  // append here; ThoughtItem auto-suppresses unknown markers.
+  "activity.marker.codebusQuizNoValidate":
+    "codex sandbox cannot run quiz structure validation; skipping this step.",
 } as const
 
 const zh: Record<keyof typeof en, string> = {
@@ -475,6 +483,10 @@ const zh: Record<keyof typeof en, string> = {
   "errors.configParse": "Config 解析錯誤：{message}",
   "errors.internal": "{message}",
   "errors.generic": "發生未預期的錯誤",
+
+  // ---- Activity stream · internal sentinel markers ----
+  "activity.marker.codebusQuizNoValidate":
+    "codex 沙箱無法跑 quiz 結構驗證，跳過此步",
 }
 
 export const messages = { en, zh } as const

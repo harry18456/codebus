@@ -1,5 +1,7 @@
 import { useState } from "react"
 import type { VerbBanner, VerbEvent } from "@/lib/ipc"
+import { useT, type TFunction } from "@/i18n/useT"
+import type { MessageKey } from "@/i18n/messages"
 
 /**
  * Render one element of the Activity stream.
@@ -83,7 +85,21 @@ interface ThoughtItemProps {
 
 export function ThoughtItem({ text }: ThoughtItemProps) {
   const [open, setOpen] = useState(false)
-  const lines = text.split("\n")
+  const t = useT()
+
+  // QGEN1: `[CODEBUS_*]` sentinel markers at the start of a thought
+  // block are an agent ↔ codebus-core wire protocol and MUST NOT be
+  // rendered raw. Known markers map to a user-facing translation;
+  // unknown markers are suppressed (return null) — failing closed is
+  // safer than leaking a stray `[CODEBUS_…]` substring. Markers
+  // appearing mid-block (e.g. an agent quoting its own protocol) are
+  // intentionally NOT filtered. Spec: app-workspace § Activity Stream
+  // Internal Sentinel Marker Filter.
+  const markerResult = classifyLeadingMarker(text, t)
+  if (markerResult.kind === "suppress") return null
+  const renderedText =
+    markerResult.kind === "translated" ? markerResult.text : text
+  const lines = renderedText.split("\n")
   const firstLine = lines[0] ?? ""
   const restLines = lines.slice(1)
   const moreCount = restLines.length
@@ -167,12 +183,101 @@ export function foldTimeline(events: readonly VerbEvent[]): TimelineItem[] {
   return items
 }
 
+/**
+ * Registry of `[CODEBUS_*]` sentinel markers that have a user-facing
+ * translation. The key is the marker name stripped of `CODEBUS_`
+ * (e.g. `[CODEBUS_QUIZ_NO_VALIDATE]` → registry key `QUIZ_NO_VALIDATE`);
+ * the value is the i18n message key. Markers not listed here are
+ * suppressed by `classifyLeadingMarker`.
+ *
+ * Adding a new marker: register the translation in
+ * `src/i18n/messages.ts` (both `en` and `zh` bundles), then add the
+ * mapping here.
+ */
+const MARKER_I18N_KEYS: Record<string, MessageKey> = {
+  QUIZ_NO_VALIDATE: "activity.marker.codebusQuizNoValidate",
+}
+
+type MarkerResult =
+  | { kind: "translated"; text: string }
+  | { kind: "suppress" }
+  | { kind: "passthrough" }
+
+/**
+ * Classify whether `text` begins with a `[CODEBUS_*]` sentinel marker
+ * and, if so, whether it has a registered translation. Pure /
+ * side-effect-free. The leading-whitespace tolerance matches the spec
+ * (`^\s*\[CODEBUS_...]`); a mid-block marker returns `passthrough`.
+ */
+export function classifyLeadingMarker(
+  text: string,
+  t: TFunction,
+): MarkerResult {
+  const m = text.match(/^\s*\[CODEBUS_([A-Z0-9_]+)\]\s*(.*)$/s)
+  if (!m) return { kind: "passthrough" }
+  const markerName = m[1]
+  const key = MARKER_I18N_KEYS[markerName]
+  if (key) return { kind: "translated", text: t(key) }
+  return { kind: "suppress" }
+}
+
 /** Pretty-print `input.file_path` for Write/Edit events. */
 function writeEditPath(input: unknown): string {
   if (input === null || typeof input !== "object") return ""
   const fp = (input as Record<string, unknown>).file_path
   if (typeof fp !== "string") return ""
   return fp.replace(/\\/g, "/")
+}
+
+/**
+ * Strip a Codex-style shell wrapper (`powershell.exe -Command "..."`,
+ * `/bin/sh -c "..."`, `bash -c '...'`) and return the inner
+ * user-authored command, with one layer of matching outer quotes
+ * removed. Returns the raw input unchanged when no wrapper is
+ * recognized. Pure / side-effect-free.
+ *
+ * Spec: app-workspace § Activity Stream Shell Command Wrapper
+ * Extraction. The truncation cap in `summarizeToolInput` is applied
+ * AFTER this helper, so the 80-char display budget counts inner
+ * characters, not wrapper boilerplate.
+ *
+ * The two regexes are anchored at start-of-string and contain no
+ * nested quantifiers, so they cannot catastrophically backtrack on
+ * adversarial input.
+ */
+export function extractInnerCommand(raw: string): string {
+  const trimmed = raw.trimStart()
+  // PowerShell wrapper: matches either a quoted absolute path ending
+  // in powershell.exe ("…\powershell.exe") or a bare powershell.exe
+  // (optionally with a non-space path prefix). Then zero or more
+  // leading switch flags (e.g. `-NoProfile`, `-NoLogo`,
+  // `-NonInteractive` — observed in real Codex sandbox invocations).
+  // Then `-Command` and the inner command up to end-of-string.
+  // `(?:\s+-\w+)*` is bounded (each iteration consumes ≥2 chars and
+  // makes progress) so it cannot catastrophically backtrack.
+  // `s` flag (dotAll): inner command MAY contain newlines (PowerShell
+  // here-strings: `-Command "@'\n...\n'@"`), so `.+` must span them.
+  const ps = trimmed.match(
+    /^(?:"[^"]*powershell\.exe"|[^\s"]*powershell\.exe)(?:\s+-\w+)*\s+-Command\s+(.+)$/is,
+  )
+  if (ps) return stripOuterQuotes(ps[1].trimEnd())
+  // POSIX sh / bash -c wrapper: optional absolute path prefix, then
+  // `sh` or `bash`, then `-c`, then the inner command (also `s`-flagged
+  // for multi-line heredoc-style payloads).
+  const sh = trimmed.match(/^(?:\/[\w./-]+\/)?(?:bash|sh)\s+-c\s+(.+)$/is)
+  if (sh) return stripOuterQuotes(sh[1].trimEnd())
+  return raw
+}
+
+/** Strip exactly one layer of matching outer `"…"` or `'…'`. */
+function stripOuterQuotes(s: string): string {
+  if (s.length < 2) return s
+  const first = s[0]
+  const last = s[s.length - 1]
+  if ((first === '"' || first === "'") && first === last) {
+    return s.slice(1, -1)
+  }
+  return s
 }
 
 /** Generic tool-input summarizer for non-Write/Edit tools. */
@@ -185,9 +290,11 @@ function summarizeToolInput(input: unknown): string {
   }
   if (typeof obj.pattern === "string") return `"${obj.pattern}"`
   if (typeof obj.command === "string") {
-    return obj.command.length > 80
-      ? `${obj.command.slice(0, 79)}…`
-      : obj.command
+    // X1: strip Codex shell wrapper before applying the 80-char cap,
+    // so the visible budget is spent on the user-authored inner
+    // command, not on `powershell.exe -Command "…"` boilerplate.
+    const inner = extractInnerCommand(obj.command)
+    return inner.length > 80 ? `${inner.slice(0, 79)}…` : inner
   }
   return ""
 }

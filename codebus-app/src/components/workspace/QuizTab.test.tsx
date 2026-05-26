@@ -894,6 +894,81 @@ describe("QuizTab", () => {
     expect(screen.queryByTestId("quiz-view-log")).not.toBeInTheDocument()
   })
 
+  // --- critical-bugs-ql1-x1-qgen1 task 1.1: Quiz History Row Title
+  // Displays User-Authored Topic. Spec: quiz § Quiz History Row Title
+  // Displays User-Authored Topic. The history group's visually-dominant
+  // title MUST be the user-authored topic (or target_page for Page
+  // flow), not the hash-derived slug from the filesystem layout.
+
+  function mockHistoryWithAttempts(rows: unknown[]) {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_quiz_attempts") return Promise.resolve(rows)
+      if (cmd === "read_quiz_attempt") return Promise.resolve(FIVE_Q_MD)
+      if (cmd === "read_quiz_progress")
+        return Promise.resolve({
+          schema_version: 1,
+          answers: [],
+          status: "not_started",
+          started_at: null,
+          completed_at: null,
+        })
+      return Promise.resolve(null)
+    })
+  }
+
+  it("QL1: Goal-flow row title shows user topic, not the hash slug", async () => {
+    mockHistoryWithAttempts([
+      {
+        slug: "topic-a7fb67fc",
+        quiz_id: "2026-05-25T16-53-17Z",
+        trigger: "ai_planned",
+        topic: "專案目的",
+        target_page: null,
+        events_log: null,
+        path: "/v/.codebus/quiz/topic-a7fb67fc/2026-05-25T16-53-17Z.md",
+      },
+    ])
+    render(<QuizTab vaultPath="/v" />)
+    const groupTitle = await screen.findByTestId("quiz-history-group-title")
+    expect(groupTitle).toHaveTextContent("專案目的")
+    expect(groupTitle).not.toHaveTextContent("topic-a7fb67fc")
+  })
+
+  it("QL1: Page-flow row title shows target_page when topic is absent", async () => {
+    mockHistoryWithAttempts([
+      {
+        slug: "desktop-workspace",
+        quiz_id: "2026-05-25T17-10-04Z",
+        trigger: "wiki_preview",
+        topic: null,
+        target_page: "桌面工作台",
+        events_log: null,
+        path: "/v/.codebus/quiz/desktop-workspace/2026-05-25T17-10-04Z.md",
+      },
+    ])
+    render(<QuizTab vaultPath="/v" />)
+    const groupTitle = await screen.findByTestId("quiz-history-group-title")
+    expect(groupTitle).toHaveTextContent("桌面工作台")
+  })
+
+  it("QL1: legacy attempt without topic or target_page falls back to slug (not empty)", async () => {
+    mockHistoryWithAttempts([
+      {
+        slug: "legacy-slug-x",
+        quiz_id: "2026-05-25T18-00-00Z",
+        trigger: "ai_planned",
+        topic: null,
+        target_page: null,
+        events_log: null,
+        path: "/v/.codebus/quiz/legacy-slug-x/2026-05-25T18-00-00Z.md",
+      },
+    ])
+    render(<QuizTab vaultPath="/v" />)
+    const groupTitle = await screen.findByTestId("quiz-history-group-title")
+    expect(groupTitle).toHaveTextContent("legacy-slug-x")
+    expect(groupTitle.textContent?.length ?? 0).toBeGreaterThan(0)
+  })
+
   // ---- Watcher integration (codebus-fs-watcher) ----
 
   it("quiz-changed event refreshes the history list", async () => {

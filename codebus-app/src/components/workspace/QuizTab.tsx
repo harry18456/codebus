@@ -549,8 +549,17 @@ export function QuizTab({
                 data-testid="quiz-history-group"
                 className="mb-3"
               >
-                <p className="text-[13px] font-medium text-fg-primary">
-                  {slug}
+                {/* QL1: group title shows the user-authored topic (Goal
+                    flow) or target_page (Page flow); falls back to the
+                    hash-derived slug only when neither is present so a
+                    legacy attempt without frontmatter remains
+                    identifiable. Spec: quiz § Quiz History Row Title
+                    Displays User-Authored Topic. */}
+                <p
+                  data-testid="quiz-history-group-title"
+                  className="text-[13px] font-medium text-fg-primary"
+                >
+                  {rows[0]?.topic ?? rows[0]?.target_page ?? slug}
                 </p>
                 {rows.map((a) => (
                   <div
