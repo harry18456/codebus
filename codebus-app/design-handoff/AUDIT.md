@@ -261,38 +261,53 @@ grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.ts
 
 總計 < 1.5 hr。
 
-### Followup change · `ipc-validation-error-localization`（待開、2026-05-26 發現）
+### Followup change · `phase-3a-blind-spots-cleanup`（待開、2026-05-26 發現）
 
-`i18n-sweep-phase-3a-followup` 跑 Pattern 5 sweep 時抓到、scope 屬性不同必須拆出去的 5 處：
+`i18n-sweep-phase-3a-followup` 跑 Pattern 5 sweep + apply 階段抓到、屬性不同必須拆出去的 phase 3A 兩類 blind spot 一次清乾淨。
 
-#### Scope
+#### Scope A · `ipc.ts` validation 5 處（Pattern 5 sweep 結果）
 
 | # | 檔案:行 | Hard-code | 性質 |
 |---|---|---|---|
-| 1 | `src/lib/ipc.ts:339` | validation 錯誤訊息（zh）| 流經 form error 顯示 |
-| 2 | `src/lib/ipc.ts:351` | 同上 | 同上 |
-| 3 | `src/lib/ipc.ts:360` | 同上 | 同上 |
-| 4 | `src/lib/ipc.ts:483` | 同上 | 同上 |
-| 5 | `src/lib/ipc.ts:489` | 同上 | 同上 |
+| A1 | `src/lib/ipc.ts:339` | validation 錯誤訊息（zh）| 流經 form error 顯示 |
+| A2 | `src/lib/ipc.ts:351` | 同上 | 同上 |
+| A3 | `src/lib/ipc.ts:360` | 同上 | 同上 |
+| A4 | `src/lib/ipc.ts:483` | 同上 | 同上 |
+| A5 | `src/lib/ipc.ts:489` | 同上 | 同上 |
+
+#### Scope B · `SettingsModal.tsx` Pattern 1a blind spot（apply 時抓到）
+
+| # | 檔案:行 | Hard-code | 性質 |
+|---|---|---|---|
+| B1 | `src/components/settings/SettingsModal.tsx:258` | `Install {provider.displayName} first; then reopen Settings.` | JSX text 被 `{}` 切兩半、Latin 在 interpolation 後 |
+
+#### Scope C · Pattern 1a 補進 spec sweep procedure
+
+- 既有 Pattern 1 grep 抓 JSX 連續 Latin、但對 `Install {x} first;` 這種「Latin 被 interpolation 切斷」結構失效
+- 新增 Pattern 1a：grep JSX text node 含 `{` + 後接 Latin 句尾（`first` / `; then` etc.）
+- 加進 `app-shell` spec 的 i18n Bundle Coverage Policy 的 Verification scenarios
 
 #### 為什麼不併入 `i18n-sweep-phase-3a-followup`
 
-- **文件層不同**：`ipc.ts` 是 IPC bridge layer、不是 UI component；Pattern 6 grep procedure 本來就指出「.ts 檔需獨立思考」
-- **5 處 ≠ 1 處**：5 個 site = pattern 問題、不是 strings 問題；可能整層要走 `errors.ts` `LocalizedError` 模式（前端 catch 後再翻），不該在 ipc.ts 直接塞 `t()` call
-- **架構決策待定**：codebus 既有 `LocalizedError` pattern（前 i18n session memory 記過）、validation 錯誤該流經這個 seam；現在 5 處 raw zh 字串可能是 leak-through、修法要先看清架構再動
+- **Scope A 文件層不同**：`ipc.ts` 是 IPC bridge layer、不是 UI component；Pattern 6 grep procedure 本來就指出「.ts 檔需獨立思考」
+- **Scope A 是架構問題**：5 個 site = pattern 問題、不是 strings 問題；可能整層要走 `errors.ts` `LocalizedError` 模式（前端 catch 後再翻），不該在 ipc.ts 直接塞 `t()` call
+- **Scope B 是 sweep procedure 結構性 gap**：Pattern 1a 在 phase 3A 沒被發現，補進 spec 才能避免未來新增類似結構的 site 又漏掉
+- A + B 同屬「phase 3A sweep blind spot」、合在一個 cleanup change 處理（archive notes 已標「下次 followup」單數意圖）
 
 #### 觸發時機
 
-- `i18n-sweep-phase-3a-followup` archive 後可開
-- 跟 Phase 4 / Phase 5 不衝突（純 `src/lib/*` 層、不動 component）
+- `i18n-sweep-phase-3a-followup` archive 後可開（✅ 已 archive 2026-05-26）
+- 跟 Phase 4 / Phase 5 不衝突（純 `src/lib/*` + `SettingsModal.tsx` 局部、不動 layout）
 
 #### 預期工作量
 
-- 評估要不要走 `LocalizedError` pattern（看 `errors.ts` 現況、看 5 處 error 是否同性質）：~15 min
-- wire 5 處（直接 `t()` 或經 LocalizedError）：~20-30 min
-- en bundle 對應翻譯 + smoke：~10 min
+- 評估 Scope A 要不要走 `LocalizedError` pattern（看 `errors.ts` 現況、看 5 處 error 是否同性質）：~15 min
+- wire Scope A 5 處（直接 `t()` 或經 LocalizedError）：~20-30 min
+- wire Scope B 1 處 + 新增 `settings.providerCli.installHint` key：~10 min
+- Pattern 1a 進 spec Verification + grep procedure：~10 min
+- en bundle 對應翻譯 + en-locale smoke：~10-15 min
 
-總計 30-60 min（看架構選擇）。
+總計 60-80 min（看 Scope A 架構選擇）。
 
 ---
 
