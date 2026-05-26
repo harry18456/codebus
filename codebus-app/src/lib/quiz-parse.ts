@@ -22,6 +22,8 @@
  * Parsing is tolerant of blank lines and surrounding whitespace.
  */
 
+import type { TFunction } from "@/i18n/useT"
+
 export type ChoiceKey = "A" | "B" | "C" | "D"
 
 export interface QuizQuestion {
@@ -143,12 +145,13 @@ export function quizBadge(
   correct: number,
   total: number,
   passThresholdPercent: number,
+  t: TFunction,
 ): string {
   if (status === "not_started") return `0/${total}`
   if (status === "in_progress") return `${answered}/${total}`
   const score = total === 0 ? 0 : Math.round((correct / total) * 100)
   const verdict = isPassing(correct, total, passThresholdPercent)
-    ? "pass"
-    : "fail"
+    ? t("quiz.badge.pass")
+    : t("quiz.badge.fail")
   return `${answered}/${total} · ${score}% · ${verdict}`
 }

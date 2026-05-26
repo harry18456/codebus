@@ -174,7 +174,35 @@ Review 進度：
    - 「Endpoint configuration is incomplete:」→ 「端點設定不完整：」（`端點` 翻中文；jargon 限 `base_url` / `api_version` key names 本身）
    - aria-label 抽 **shared i18n key per concept**——例如 3 處 `title="Page not found"` 統一 `a11y.pageNotFound` 一個 key、不要三個分別 key
 
-### Followup change · `i18n-sweep-phase-3a-followup`（待開）
+### Followup change · `i18n-sweep-phase-3a-followup` ✓ **archived 2026-05-26**
+
+> Spectra change: `openspec/changes/i18n-sweep-phase-3a-followup`（archive
+> 後路徑變 `openspec/changes/archive/<date>-i18n-sweep-phase-3a-followup/`）
+>
+> Apply 結果：
+> - Cat A 8 處 residual 全部 wire（4 處用既有 key、4 處新增 key）
+> - Cat B `bannerLabel` 10 cases 全改 i18n（user 確認從 8 處擴到 10 cases；
+>   原本列「🤔 思考 / 🔧 工具」實際不在 `bannerLabel`、改為改寫整個函式 + en bundle 補齊 10 條 banner key）
+> - Cat C Pattern 5 / Pattern 6 寫進 `app-shell` spec 的 i18n Bundle
+>   Coverage Policy（新增 `Scenario: Emoji-prefixed label stored as one
+>   bundle value` 與 `Scenario: 6-pattern sweep finds no policy violations`，
+>   配套 grep command table）
+> - Pattern 5 sweep 額外抓到 3 類非原 scope 違規，user cherry-pick：
+>   - ✅ 吃：`SettingsModal.tsx:244` `${provider.displayName} CLI`
+>     → 新 key `settings.providerCli.fieldLabel`
+>   - ✅ 吃：`ChatTokenDisplay.tsx:62/64/65` `${k}k ↑` token indicator
+>     → 新 key `chat.tokens.indicator`
+>   - ❌ 拆下次 followup：`ipc.ts` 5 處 validation `message:`（架構決策，
+>     需走 errors.ts LocalizedError seam）
+> - 真實 en-locale CDP smoke 跑過 Lobby / Goals / Quiz / Chat / RunDetail
+>   Done / Settings，截圖與 report 存在
+>   `codebus-app/scripts/.i18n-followup-smoke/`
+> - 已 deferred 待下次 followup：上述 ipc.ts validation 5 處 + Phase 3A
+>   blind spot `SettingsModal.tsx:254` `Install {provider.displayName}
+>   first; then reopen Settings.`（Pattern 1a 對 `${}` 後置 Latin 失效的
+>   結構性 gap）
+
+#### 原始 scope（保留供 history reference）
 
 Phase 3A `i18n-sweep-cat-a-b-c-d` archive 後留的 trail。
 **不在 Phase 3A scope**——boundary 在第 32 處 lock（守 exhaustive sweep + commit to ship 平衡）。

@@ -29,6 +29,7 @@ interface ActivityStreamItemProps {
 }
 
 export function ActivityStreamItem({ event }: ActivityStreamItemProps) {
+  const t = useT()
   if (event.kind === "stream") {
     if (event.data.kind === "tool_use") {
       const name = event.data.name
@@ -66,7 +67,7 @@ export function ActivityStreamItem({ event }: ActivityStreamItemProps) {
         data-testid="stream-banner"
         className="text-meta italic text-fg-tertiary"
       >
-        {bannerLabel(event.data)}
+        {bannerLabel(event.data, t)}
       </div>
     )
   }
@@ -299,28 +300,45 @@ function summarizeToolInput(input: unknown): string {
   return ""
 }
 
-function bannerLabel(banner: VerbBanner): string {
+function bannerLabel(banner: VerbBanner, t: TFunction): string {
   switch (banner.kind) {
     case "start":
-      return `🚌 來囉來囉~ CodeBus 駛入 ${normalizePath(banner.repo_path)}...`
+      return t("workspace.activity.banner.start", {
+        path: normalizePath(banner.repo_path),
+      })
     case "goal":
-      return `🎯 任務目標：${banner.goal_text}`
+      return t("workspace.activity.banner.goal", {
+        goalText: banner.goal_text,
+      })
     case "sync_start":
-      return "🔄 同步 source → raw/code..."
+      return t("workspace.activity.banner.syncStart")
     case "sync_done":
-      return `✓ 同步完成 (${banner.files} 檔, ${banner.mib.toFixed(1)} MiB, ${banner.elapsed_ms} ms)`
+      return t("workspace.activity.banner.syncDone", {
+        files: banner.files,
+        mib: banner.mib.toFixed(1),
+        elapsedMs: banner.elapsed_ms,
+      })
     case "pii_summary":
-      return `🛡 PII：${banner.scanner}, scanned ${banner.scanned}, hits ${banner.hits}, action ${banner.action}`
+      return t("workspace.activity.banner.piiSummary", {
+        scanner: banner.scanner,
+        scanned: banner.scanned,
+        hits: banner.hits,
+        action: banner.action,
+      })
     case "lint_start":
-      return "🔍 lint 中..."
+      return t("workspace.activity.banner.lintStart")
     case "lint_done":
-      return `✓ lint 完成 (${banner.errors} errors, ${banner.warns} warns, ${banner.elapsed_ms} ms)`
+      return t("workspace.activity.banner.lintDone", {
+        errors: banner.errors,
+        warns: banner.warns,
+        elapsedMs: banner.elapsed_ms,
+      })
     case "commit_done":
-      return `🚏 commit ${banner.sha7}`
+      return t("workspace.activity.banner.commitDone", { sha7: banner.sha7 })
     case "done":
-      return "🎉 完成"
+      return t("workspace.activity.banner.done")
     case "hint":
-      return "💡 提示"
+      return t("workspace.activity.banner.hint")
   }
 }
 

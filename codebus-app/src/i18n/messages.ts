@@ -210,6 +210,8 @@ const en = {
     "App was closed before this goal finished. Wiki state may be partial — review in terminal if needed.",
   "workspace.runDetail.partialTimelineLabel": "Partial timeline",
   "workspace.runDetail.retryButton": "Retry with same goal",
+  "workspace.run.headerSummary": "{durationSec}s · {totalTokens} tokens",
+  "workspace.run.lintSummary": "{errors} errors · {warnings} warnings",
 
   // ---- Workspace · Wiki ----
   "workspace.wiki.empty":
@@ -378,6 +380,39 @@ const en = {
   // append here; ThoughtItem auto-suppresses unknown markers.
   "activity.marker.codebusQuizNoValidate":
     "codex sandbox cannot run quiz structure validation; skipping this step.",
+
+  // ---- Workspace · ActivityStream banner labels ----
+  // Emoji is part of the label's semantic meaning; the entire string is
+  // stored as one bundle value per the i18n Bundle Coverage Policy
+  // emoji-prefixed scenario (do NOT split emoji + text into two keys).
+  "workspace.activity.banner.start":
+    "🚌 Here comes the CodeBus, rolling into {path}...",
+  "workspace.activity.banner.goal": "🎯 Goal target: {goalText}",
+  "workspace.activity.banner.syncStart": "🔄 Syncing source → raw/code...",
+  "workspace.activity.banner.syncDone":
+    "✓ Sync done ({files} files, {mib} MiB, {elapsedMs} ms)",
+  "workspace.activity.banner.piiSummary":
+    "🛡 PII: {scanner}, scanned {scanned}, hits {hits}, action {action}",
+  "workspace.activity.banner.lintStart": "🔍 Linting...",
+  "workspace.activity.banner.lintDone":
+    "✓ Lint done ({errors} errors, {warns} warnings, {elapsedMs} ms)",
+  "workspace.activity.banner.commitDone": "🚏 Commit {sha7}",
+  "workspace.activity.banner.done": "🎉 Complete",
+  "workspace.activity.banner.hint": "💡 Hint",
+
+  // ---- Quiz badge verdict (used by lib/quiz-parse.ts) ----
+  "quiz.badge.pass": "pass",
+  "quiz.badge.fail": "fail",
+
+  // ---- Settings provider CLI field label ----
+  // "CLI" is jargon (universal) — en/zh values identical.
+  "settings.providerCli.fieldLabel": "{name} CLI",
+
+  // ---- Chat token usage header indicator ----
+  // "↑" arrow + numeric value composite. Value (digits or `Nk` string) is
+  // pre-formatted in JS to keep the i18n template stable across the three
+  // numeric branches.
+  "chat.tokens.indicator": "{value} ↑",
 } as const
 
 const zh: Record<keyof typeof en, string> = {
@@ -574,6 +609,8 @@ const zh: Record<keyof typeof en, string> = {
     "App 被關閉，goal 沒完成。Wiki 可能停在中間狀態 — 需要時請到 terminal 檢查。",
   "workspace.runDetail.partialTimelineLabel": "部分時間軸",
   "workspace.runDetail.retryButton": "用相同 goal 再跑一次",
+  "workspace.run.headerSummary": "{durationSec} 秒 · {totalTokens} tokens",
+  "workspace.run.lintSummary": "{errors} 個錯誤 · {warnings} 個警告",
 
   // ---- Workspace · Wiki ----
   "workspace.wiki.empty":
@@ -733,6 +770,32 @@ const zh: Record<keyof typeof en, string> = {
   // ---- Activity stream · internal sentinel markers ----
   "activity.marker.codebusQuizNoValidate":
     "codex 沙箱無法跑 quiz 結構驗證，跳過此步",
+
+  // ---- Workspace · ActivityStream banner labels ----
+  "workspace.activity.banner.start":
+    "🚌 來囉來囉~ CodeBus 駛入 {path}...",
+  "workspace.activity.banner.goal": "🎯 任務目標：{goalText}",
+  "workspace.activity.banner.syncStart": "🔄 同步 source → raw/code...",
+  "workspace.activity.banner.syncDone":
+    "✓ 同步完成 ({files} 檔, {mib} MiB, {elapsedMs} ms)",
+  "workspace.activity.banner.piiSummary":
+    "🛡 PII：{scanner}, scanned {scanned}, hits {hits}, action {action}",
+  "workspace.activity.banner.lintStart": "🔍 lint 中...",
+  "workspace.activity.banner.lintDone":
+    "✓ lint 完成 ({errors} errors, {warns} warns, {elapsedMs} ms)",
+  "workspace.activity.banner.commitDone": "🚏 commit {sha7}",
+  "workspace.activity.banner.done": "🎉 完成",
+  "workspace.activity.banner.hint": "💡 提示",
+
+  // ---- Quiz badge verdict ----
+  "quiz.badge.pass": "通過",
+  "quiz.badge.fail": "未通過",
+
+  // ---- Settings provider CLI field label ----
+  "settings.providerCli.fieldLabel": "{name} CLI",
+
+  // ---- Chat token usage header indicator ----
+  "chat.tokens.indicator": "{value} ↑",
 }
 
 export const messages = { en, zh } as const

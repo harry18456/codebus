@@ -85,7 +85,7 @@ export function GoalsTab({
           data-testid="new-goal-button"
           onClick={() => openModalWith()}
         >
-          + New goal
+          {t("workspace.goals.newGoalButton")}
         </Button>
       </div>
       {goalRuns.length === 0 ? (

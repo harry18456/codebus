@@ -9,10 +9,16 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }))
+vi.mock("@/hooks/useLocale", () => ({
+  useLocale: vi.fn(() => "en"),
+}))
 
+import { useLocale } from "@/hooks/useLocale"
 import { useChatStore } from "@/store/chat"
 
 import { ChatNewChatButton } from "./ChatNewChatButton"
+
+const mockedUseLocale = vi.mocked(useLocale)
 
 const INITIAL_STATE = useChatStore.getState()
 
@@ -41,14 +47,26 @@ describe("ChatNewChatButton", () => {
     resetStore()
   })
 
-  it("renders a '+ New chat' button with stable testid", () => {
+  it("renders the new-chat button with stable testid", () => {
     render(<ChatNewChatButton />)
     const btn = screen.getByTestId("chat-new-chat-button")
     expect(btn).toBeInTheDocument()
     expect(btn.tagName.toLowerCase()).toBe("button")
-    // Hard-coded copy per task spec (i18n lands in task 7.2).
-    expect(btn.textContent).toContain("+ New chat")
   })
+
+  it.each([
+    ["en", "+ New chat"],
+    ["zh", "+ 新對話"],
+  ])(
+    "ChatNewChatButton_label_in_%s_locale",
+    (locale, expected) => {
+      mockedUseLocale.mockReturnValue(locale as "en" | "zh")
+      render(<ChatNewChatButton />)
+      expect(screen.getByTestId("chat-new-chat-button")).toHaveTextContent(
+        expected,
+      )
+    },
+  )
 
   it("triggers useChatStore.newSession when clicked, stashing current session into undo buffer", () => {
     // Seed an in-progress session so newSession has something to snapshot.

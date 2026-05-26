@@ -78,7 +78,7 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
         </span>
       </header>
       <div className="border-b border-border px-3 py-1.5 text-meta text-fg-tertiary">
-        {durationSec}s · {totalTokens} tokens
+        {t("workspace.run.headerSummary", { durationSec, totalTokens })}
       </div>
       <div className="flex-1 overflow-auto p-3">
         <section>
@@ -131,7 +131,10 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
             {t("workspace.runDetail.lintLabel")}
           </h3>
           <p className="text-meta text-fg-secondary">
-            {summary.lint_error_count} errors · {summary.lint_warn_count} warnings
+            {t("workspace.run.lintSummary", {
+              errors: summary.lint_error_count,
+              warnings: summary.lint_warn_count,
+            })}
           </p>
         </section>
         <section className="mt-4">

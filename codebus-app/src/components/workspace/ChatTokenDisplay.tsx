@@ -1,4 +1,5 @@
 import { useChatStore } from "@/store/chat"
+import { useT, type TFunction } from "@/i18n/useT"
 
 /**
  * Chat-widget header token-usage indicator. Renders the session-cumulative
@@ -23,7 +24,8 @@ import { useChatStore } from "@/store/chat"
 export function ChatTokenDisplay() {
   const tokens = useChatStore((s) => s.tokensTotal)
   const total = tokens.input_tokens + tokens.output_tokens
-  const formatted = formatTokens(total)
+  const t = useT()
+  const formatted = formatTokens(total, t)
   const cacheRead = tokens.cache_read_tokens ?? 0
   const cacheCreate = tokens.cache_write_tokens ?? 0
   // Native `title` is single-string; we join with newlines so the browser
@@ -58,9 +60,10 @@ export function ChatTokenDisplay() {
  *   - `< 10k` → one decimal place (`3.4k ↑`).
  *   - `≥ 10k` → rounded integer (`36k ↑`).
  */
-function formatTokens(n: number): string {
-  if (n < 1000) return `${n} ↑`
+function formatTokens(n: number, t: TFunction): string {
+  if (n < 1000) return t("chat.tokens.indicator", { value: String(n) })
   const k = n / 1000
-  if (k < 10) return `${k.toFixed(1)}k ↑`
-  return `${Math.round(k)}k ↑`
+  if (k < 10)
+    return t("chat.tokens.indicator", { value: `${k.toFixed(1)}k` })
+  return t("chat.tokens.indicator", { value: `${Math.round(k)}k` })
 }

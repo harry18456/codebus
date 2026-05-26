@@ -5,13 +5,18 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }))
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }))
+vi.mock("@/hooks/useLocale", () => ({
+  useLocale: vi.fn(() => "en"),
+}))
 
 import { listen } from "@tauri-apps/api/event"
 import type { RunLogSummary } from "@/lib/ipc"
+import { useLocale } from "@/hooks/useLocale"
 import { GoalsTab } from "./GoalsTab"
 import { useGoalsStore } from "@/store/goals"
 
 const mockedListen = vi.mocked(listen)
+const mockedUseLocale = vi.mocked(useLocale)
 
 function makeRun(id: string, startedAt: string): RunLogSummary {
   return {
@@ -113,4 +118,17 @@ describe("GoalsTab", () => {
     capturedCallback?.({ payload: null })
     await waitFor(() => expect(refreshRunsSpy).toHaveBeenCalledWith("/v"))
   })
+
+  it.each([
+    ["en", "+ New goal"],
+    ["zh", "+ 新增 Goal"],
+  ])(
+    "GoalsTab_new_goal_button_label_in_%s_locale",
+    (locale, expected) => {
+      mockedUseLocale.mockReturnValue(locale as "en" | "zh")
+      useGoalsStore.setState({ runs: [], activeRun: null })
+      render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
+      expect(screen.getByTestId("new-goal-button")).toHaveTextContent(expected)
+    },
+  )
 })

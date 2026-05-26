@@ -245,3 +245,109 @@ describe("ThoughtItem · QGEN1 Internal Sentinel Marker Filter", () => {
     })
   })
 })
+
+describe("ActivityStreamItem · bannerLabel i18n (10 cases × en + zh)", () => {
+  // Each case asserts both en + zh wording per the i18n Bundle Coverage
+  // Policy emoji-prefixed scenario: the emoji + text live in one bundle
+  // value so the rendered string contains both the emoji and the locale's
+  // text in one pass.
+  const bannerEvents: Array<{
+    label: string
+    event: VerbEvent
+    en: string
+    zh: string
+  }> = [
+    {
+      label: "start",
+      event: { kind: "banner", data: { kind: "start", repo_path: "C:\\repos\\x" } },
+      en: "🚌 Here comes the CodeBus, rolling into C:/repos/x...",
+      zh: "🚌 來囉來囉~ CodeBus 駛入 C:/repos/x...",
+    },
+    {
+      label: "goal",
+      event: { kind: "banner", data: { kind: "goal", goal_text: "describe X" } },
+      en: "🎯 Goal target: describe X",
+      zh: "🎯 任務目標：describe X",
+    },
+    {
+      label: "sync_start",
+      event: { kind: "banner", data: { kind: "sync_start" } },
+      en: "🔄 Syncing source → raw/code...",
+      zh: "🔄 同步 source → raw/code...",
+    },
+    {
+      label: "sync_done",
+      event: {
+        kind: "banner",
+        data: { kind: "sync_done", files: 12, mib: 0.5, elapsed_ms: 480 },
+      },
+      en: "✓ Sync done (12 files, 0.5 MiB, 480 ms)",
+      zh: "✓ 同步完成 (12 檔, 0.5 MiB, 480 ms)",
+    },
+    {
+      label: "pii_summary",
+      event: {
+        kind: "banner",
+        data: {
+          kind: "pii_summary",
+          scanner: "regex",
+          scanned: 9,
+          hits: 0,
+          action: "warn",
+        },
+      },
+      en: "🛡 PII: regex, scanned 9, hits 0, action warn",
+      zh: "🛡 PII：regex, scanned 9, hits 0, action warn",
+    },
+    {
+      label: "lint_start",
+      event: { kind: "banner", data: { kind: "lint_start" } },
+      en: "🔍 Linting...",
+      zh: "🔍 lint 中...",
+    },
+    {
+      label: "lint_done",
+      event: {
+        kind: "banner",
+        data: { kind: "lint_done", errors: 0, warns: 2, elapsed_ms: 350 },
+      },
+      en: "✓ Lint done (0 errors, 2 warnings, 350 ms)",
+      zh: "✓ lint 完成 (0 errors, 2 warns, 350 ms)",
+    },
+    {
+      label: "commit_done",
+      event: { kind: "banner", data: { kind: "commit_done", sha7: "abc1234" } },
+      en: "🚏 Commit abc1234",
+      zh: "🚏 commit abc1234",
+    },
+    {
+      label: "done",
+      event: { kind: "banner", data: { kind: "done", wiki_path: "/v/.codebus/wiki" } },
+      en: "🎉 Complete",
+      zh: "🎉 完成",
+    },
+    {
+      label: "hint",
+      event: { kind: "banner", data: { kind: "hint", wiki_path: "/v/.codebus/wiki" } },
+      en: "💡 Hint",
+      zh: "💡 提示",
+    },
+  ]
+
+  for (const { label, event, en, zh } of bannerEvents) {
+    it(`ActivityStreamItem_banner_${label}_en`, () => {
+      withLocale("en-US", () => {
+        render(<ActivityStreamItem event={event} />)
+        const row = screen.getByTestId("stream-banner")
+        expect(row.textContent).toBe(en)
+      })
+    })
+    it(`ActivityStreamItem_banner_${label}_zh`, () => {
+      withLocale("zh-TW", () => {
+        render(<ActivityStreamItem event={event} />)
+        const row = screen.getByTestId("stream-banner")
+        expect(row.textContent).toBe(zh)
+      })
+    })
+  }
+})

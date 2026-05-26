@@ -241,7 +241,11 @@ export function SettingsModal({
           {/* 2. CLI status — probes whether `claude --version` works.
              Replaces the v1 OAuth pseudo-status with a real installation
              check; future Codex / Gemini providers add their own rows. */}
-          <Field label={`${provider.displayName} CLI`}>
+          <Field
+            label={t("settings.providerCli.fieldLabel", {
+              name: provider.displayName,
+            })}
+          >
             <div className="flex items-center gap-2">
               <CliStatusBadge status={cliStatus} />
               {cliStatus &&

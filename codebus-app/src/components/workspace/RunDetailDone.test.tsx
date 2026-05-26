@@ -5,10 +5,16 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }))
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }))
+vi.mock("@/hooks/useLocale", () => ({
+  useLocale: vi.fn(() => "en"),
+}))
 
 import type { RunDetail } from "@/lib/ipc"
+import { useLocale } from "@/hooks/useLocale"
 import { useWikiStore } from "@/store/wiki"
 import { RunDetailDone } from "./RunDetailDone"
+
+const mockedUseLocale = vi.mocked(useLocale)
 
 function makeDetail(over: Partial<RunDetail> = {}): RunDetail {
   return {
@@ -246,6 +252,61 @@ describe("RunDetailDone", () => {
     expect(thoughtItems.length).toBe(1)
     expect(thoughtItems[0].textContent).toContain("🤔")
     expect(thoughtItems[0].textContent).toContain("hmm...")
+  })
+
+  // --- i18n header + lint summary (Pattern 5 follow-up) ---
+  describe("header + lint summary i18n", () => {
+    afterEach(() => {
+      mockedUseLocale.mockReturnValue("en")
+    })
+
+    it.each([
+      { locale: "en", errors: 0, warnings: 0, expected: "0 errors · 0 warnings" },
+      { locale: "en", errors: 1, warnings: 0, expected: "1 errors · 0 warnings" },
+      { locale: "en", errors: 2, warnings: 3, expected: "2 errors · 3 warnings" },
+      { locale: "zh", errors: 0, warnings: 0, expected: "0 個錯誤 · 0 個警告" },
+      { locale: "zh", errors: 1, warnings: 0, expected: "1 個錯誤 · 0 個警告" },
+      { locale: "zh", errors: 2, warnings: 3, expected: "2 個錯誤 · 3 個警告" },
+    ])(
+      "RunDetailDone_lint_summary_locale=$locale_errors=$errors_warnings=$warnings",
+      ({ locale, errors, warnings, expected }) => {
+        mockedUseLocale.mockReturnValue(locale as "en" | "zh")
+        render(
+          <RunDetailDone
+            detail={makeDetail({
+              summary: {
+                ...makeDetail().summary,
+                lint_error_count: errors,
+                lint_warn_count: warnings,
+              },
+            })}
+            onBack={() => {}}
+            onSelectPage={() => {}}
+          />,
+        )
+        // Lint section paragraph is the only one carrying both counts.
+        expect(screen.getByText(expected)).toBeInTheDocument()
+      },
+    )
+
+    it.each([
+      { locale: "en", expected: "150s · 150 tokens" },
+      { locale: "zh", expected: "150 秒 · 150 tokens" },
+    ])(
+      "RunDetailDone_header_summary_locale=$locale",
+      ({ locale, expected }) => {
+        mockedUseLocale.mockReturnValue(locale as "en" | "zh")
+        // 150s = 2:30 (matches the makeDetail fixture: 10:00 → 10:02:30)
+        render(
+          <RunDetailDone
+            detail={makeDetail()}
+            onBack={() => {}}
+            onSelectPage={() => {}}
+          />,
+        )
+        expect(screen.getByText(expected)).toBeInTheDocument()
+      },
+    )
   })
 })
 

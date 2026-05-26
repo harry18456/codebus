@@ -337,6 +337,7 @@ export function QuizTab({
                   correct,
                   total,
                   passThreshold,
+                  t,
                 ),
               ] as const
             } catch {
@@ -352,7 +353,7 @@ export function QuizTab({
     return () => {
       alive = false
     }
-  }, [phase, vaultPath, passThreshold, historyRefreshKey])
+  }, [phase, vaultPath, passThreshold, historyRefreshKey, t])
 
   function clearListener() {
     if (unlistenRef.current) {
