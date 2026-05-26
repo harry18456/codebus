@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core"
 
+import type { MessageKey } from "@/i18n/messages"
+
 /** Vault entry returned by `list_vaults` / `add_vault`. */
 export interface VaultEntry {
   path: string
@@ -335,7 +337,13 @@ export const SYSTEM_PROFILE_DEFAULTS: SystemProfile = {
  */
 export interface ClaudeCodeValidationError {
   field: string
-  message: string
+  // LocalizedError-shaped contract (mirrors `LocalizedError` in
+  // `src/i18n/errors.ts`): consumers SHALL render via `t(e.key, e.vars)` so
+  // the active locale and Settings → Language override resolve at display
+  // time. Plain `string` messages are intentionally forbidden here — see
+  // app-shell spec i18n Bundle Coverage Policy LocalizedError NOTE.
+  key: MessageKey
+  vars?: Record<string, string | number>
 }
 
 export function validateClaudeCodeBlock(
@@ -347,27 +355,28 @@ export function validateClaudeCodeBlock(
     if (!az) {
       errors.push({
         field: "claude_code.azure",
-        message: "Azure profile is required when active=azure",
+        key: "settings.endpoint.validation.azureProfileRequired",
       })
       return errors
     }
     if (!az.base_url.trim()) {
       errors.push({
         field: "claude_code.azure.base_url",
-        message: "base_url is required when active=azure",
+        key: "settings.endpoint.validation.baseUrlRequired",
       })
     }
     if (!az.keyring_service.trim()) {
       errors.push({
         field: "claude_code.azure.keyring_service",
-        message: "keyring_service is required when active=azure",
+        key: "settings.endpoint.validation.keyringServiceRequired",
       })
     }
     for (const verb of ["goal", "query", "fix", "verify"] as const) {
       if (!az[verb].model.trim()) {
         errors.push({
           field: `claude_code.azure.${verb}.model`,
-          message: `${verb} deployment name is required when active=azure`,
+          key: "settings.endpoint.validation.deploymentNameRequired",
+          vars: { verb },
         })
       }
     }
@@ -375,11 +384,13 @@ export function validateClaudeCodeBlock(
   // Effort enum check applies to BOTH profiles regardless of `active`
   // so cold-storage values cannot silently carry a legacy / non-enum
   // value through Save (spec `Settings UI Endpoint Section`).
+  const effortAllowed = SYSTEM_EFFORTS.join(" / ")
   for (const verb of ["goal", "query", "fix", "verify"] as const) {
     if (!isSystemEffort(block.system[verb].effort)) {
       errors.push({
         field: `claude_code.system.${verb}.effort`,
-        message: `${verb} effort must be one of ${SYSTEM_EFFORTS.join(" / ")}`,
+        key: "settings.endpoint.validation.effortInvalid",
+        vars: { verb, allowed: effortAllowed },
       })
     }
   }
@@ -388,7 +399,8 @@ export function validateClaudeCodeBlock(
       if (!isSystemEffort(block.azure[verb].effort)) {
         errors.push({
           field: `claude_code.azure.${verb}.effort`,
-          message: `${verb} effort must be one of ${SYSTEM_EFFORTS.join(" / ")}`,
+          key: "settings.endpoint.validation.effortInvalid",
+          vars: { verb, allowed: effortAllowed },
         })
       }
     }
@@ -496,28 +508,45 @@ export function validateCodexBlock(block: CodexBlock): ClaudeCodeValidationError
     if (!az) {
       errors.push({
         field: "codex.azure",
-        message: "Azure profile is required when active=azure",
+        key: "settings.endpoint.validation.azureProfileRequired",
       })
       return errors
     }
     if (!az.base_url.trim()) {
-      errors.push({ field: "codex.azure.base_url", message: "base_url is required when active=azure" })
+      errors.push({
+        field: "codex.azure.base_url",
+        key: "settings.endpoint.validation.baseUrlRequired",
+      })
     }
     if (!az.api_version.trim()) {
-      errors.push({ field: "codex.azure.api_version", message: "api_version is required when active=azure" })
+      errors.push({
+        field: "codex.azure.api_version",
+        key: "settings.endpoint.validation.apiVersionRequired",
+      })
     }
     if (!az.keyring_service.trim()) {
-      errors.push({ field: "codex.azure.keyring_service", message: "keyring_service is required when active=azure" })
+      errors.push({
+        field: "codex.azure.keyring_service",
+        key: "settings.endpoint.validation.keyringServiceRequired",
+      })
     }
     for (const verb of verbs) {
       if (!az[verb].model.trim()) {
-        errors.push({ field: `codex.azure.${verb}.model`, message: `${verb} deployment name is required when active=azure` })
+        errors.push({
+          field: `codex.azure.${verb}.model`,
+          key: "settings.endpoint.validation.deploymentNameRequired",
+          vars: { verb },
+        })
       }
     }
   } else {
     for (const verb of verbs) {
       if (!block.system[verb].model.trim()) {
-        errors.push({ field: `codex.system.${verb}.model`, message: `${verb} model is required when active=system` })
+        errors.push({
+          field: `codex.system.${verb}.model`,
+          key: "settings.endpoint.validation.systemModelRequired",
+          vars: { verb },
+        })
       }
     }
   }

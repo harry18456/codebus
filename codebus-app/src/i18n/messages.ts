@@ -288,6 +288,20 @@ const en = {
     "Endpoint configuration is incomplete:",
   "settings.endpoint.saveButtonIncompleteTitle":
     "Endpoint configuration is incomplete — fix highlighted fields",
+  "settings.endpoint.validation.azureProfileRequired":
+    "Azure profile is required when active=azure",
+  "settings.endpoint.validation.baseUrlRequired":
+    "base_url is required when active=azure",
+  "settings.endpoint.validation.apiVersionRequired":
+    "api_version is required when active=azure",
+  "settings.endpoint.validation.keyringServiceRequired":
+    "keyring_service is required when active=azure",
+  "settings.endpoint.validation.deploymentNameRequired":
+    "{verb} deployment name is required when active=azure",
+  "settings.endpoint.validation.effortInvalid":
+    "{verb} effort must be one of {allowed}",
+  "settings.endpoint.validation.systemModelRequired":
+    "{verb} model is required when active=system",
 
   // ---- Settings · jargon allow-list (Cat D) ----
   // The Cat D allow-list (i18n Bundle Coverage Policy): config YAML key
@@ -698,6 +712,20 @@ const zh: Record<keyof typeof en, string> = {
   "settings.endpoint.validationSummaryHeading": "端點設定不完整：",
   "settings.endpoint.saveButtonIncompleteTitle":
     "端點設定不完整 — 請修正標紅的欄位",
+  "settings.endpoint.validation.azureProfileRequired":
+    "當 active=azure 時必須填 Azure profile",
+  "settings.endpoint.validation.baseUrlRequired":
+    "當 active=azure 時 base_url 為必填",
+  "settings.endpoint.validation.apiVersionRequired":
+    "當 active=azure 時 api_version 為必填",
+  "settings.endpoint.validation.keyringServiceRequired":
+    "當 active=azure 時 keyring_service 為必填",
+  "settings.endpoint.validation.deploymentNameRequired":
+    "當 active=azure 時 {verb} 的 deployment 名稱為必填",
+  "settings.endpoint.validation.effortInvalid":
+    "{verb} 的 effort 必須是 {allowed} 之一",
+  "settings.endpoint.validation.systemModelRequired":
+    "當 active=system 時 {verb} 的 model 為必填",
 
   // ---- Settings · jargon allow-list (Cat D) — same as en ----
   "settings.endpoint.field.baseUrl": "base_url",

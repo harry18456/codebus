@@ -261,19 +261,30 @@ grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.ts
 
 總計 < 1.5 hr。
 
-### Followup change · `phase-3a-blind-spots-cleanup`（待開、2026-05-26 發現）
+### Followup change · `phase-3a-blind-spots-cleanup`（✅ archived 2026-05-27）
 
 `i18n-sweep-phase-3a-followup` 跑 Pattern 5 sweep + apply 階段抓到、屬性不同必須拆出去的 phase 3A 兩類 blind spot 一次清乾淨。
 
-#### Scope A · `ipc.ts` validation 5 處（Pattern 5 sweep 結果）
+#### Scope A · `ipc.ts` validation 12 處（apply task 1.1 校準後實際 count）
 
-| # | 檔案:行 | Hard-code | 性質 |
-|---|---|---|---|
-| A1 | `src/lib/ipc.ts:339` | validation 錯誤訊息（zh）| 流經 form error 顯示 |
-| A2 | `src/lib/ipc.ts:351` | 同上 | 同上 |
-| A3 | `src/lib/ipc.ts:360` | 同上 | 同上 |
-| A4 | `src/lib/ipc.ts:483` | 同上 | 同上 |
-| A5 | `src/lib/ipc.ts:489` | 同上 | 同上 |
+apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation message（非 propose 寫的 5 處）。原 trailer 給的行號（339/351/360/483/489）疑為舊版檔案、不指向訊息行。校準後：
+
+| # | 行 | Function | active | Message wording |
+|---|---|---|---|---|
+| C1 | 350 | validateClaudeCodeBlock | azure | `Azure profile is required when active=azure` |
+| C2 | 357 | validateClaudeCodeBlock | azure | `base_url is required when active=azure` |
+| C3 | 363 | validateClaudeCodeBlock | azure | `keyring_service is required when active=azure` |
+| C4 | 370 | validateClaudeCodeBlock | azure | `${verb} deployment name is required when active=azure` |
+| C5 | 382 | validateClaudeCodeBlock | system | `${verb} effort must be one of ${SYSTEM_EFFORTS...}` |
+| C6 | 391 | validateClaudeCodeBlock | azure | 同 C5 |
+| X1 | 499 | validateCodexBlock | azure | 同 C1 |
+| X2 | 504 | validateCodexBlock | azure | 同 C2 |
+| X3 | 507 | validateCodexBlock | azure | `api_version is required when active=azure` |
+| X4 | 510 | validateCodexBlock | azure | 同 C3 |
+| X5 | 514 | validateCodexBlock | azure | 同 C4 |
+| X6 | 520 | validateCodexBlock | system | `${verb} model is required when active=system` |
+
+收尾全 12 處走路線 2（LocalizedError seam）：`ClaudeCodeValidationError` shape 改為 `{field, key: MessageKey, vars?}`、collapse 為 7 unique i18n keys（`settings.endpoint.validation.*`）。`CodexEndpointSection.tsx` consumer 一併 wire。Spec delta 加 Pattern 1c (interpolation-split JSX) + LocalizedError architectural-guard NOTE 段（架構層守 .ts plain-string user-facing error、grep 守不住）。4/7 keys 真實 CDP smoke 端到端通過 EN+ZH、其餘 3/7 因 UI form self-defense 只能 unit test 蓋章（詳見 `codebus-app/scripts/.blind-spots-smoke/SMOKE-REPORT.md`）。
 
 #### ~~Scope B · `SettingsModal.tsx` Pattern 1a blind spot（apply 時抓到）~~ → 已被 `settings-language-switcher` 順手吃掉（archived 2026-05-26）
 

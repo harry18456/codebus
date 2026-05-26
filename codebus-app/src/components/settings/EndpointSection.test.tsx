@@ -189,7 +189,8 @@ describe("EndpointSection", () => {
         errors={[
           {
             field: "claude_code.system.goal.effort",
-            message: "goal effort must be one of high / low / medium",
+            key: "settings.endpoint.validation.effortInvalid",
+            vars: { verb: "goal", allowed: "high / low / medium" },
           },
         ]}
       />,
@@ -253,7 +254,8 @@ describe("EndpointSection", () => {
         errors={[
           {
             field: "claude_code.azure.fix.effort",
-            message: "fix effort must be one of high / low / medium",
+            key: "settings.endpoint.validation.effortInvalid",
+            vars: { verb: "fix", allowed: "high / low / medium" },
           },
         ]}
       />,
@@ -346,11 +348,12 @@ describe("EndpointSection", () => {
         errors={[
           {
             field: "claude_code.azure.base_url",
-            message: "base_url is required when active=azure",
+            key: "settings.endpoint.validation.baseUrlRequired",
           },
           {
             field: "claude_code.azure.goal.model",
-            message: "goal deployment name is required when active=azure",
+            key: "settings.endpoint.validation.deploymentNameRequired",
+            vars: { verb: "goal" },
           },
         ]}
       />,
@@ -449,7 +452,8 @@ describe("EndpointSection", () => {
           errors={[
             {
               field: "claude_code.azure.verify.model",
-              message: "verify deployment name is required when active=azure",
+              key: "settings.endpoint.validation.deploymentNameRequired",
+              vars: { verb: "verify" },
             },
           ]}
         />,

@@ -97,7 +97,12 @@ describe("CodexEndpointSection", () => {
       <CodexEndpointSection
         block={block}
         onChange={() => {}}
-        errors={[{ field: "codex.azure.api_version", message: "required" }]}
+        errors={[
+          {
+            field: "codex.azure.api_version",
+            key: "settings.endpoint.validation.apiVersionRequired",
+          },
+        ]}
       />,
     )
     expect(

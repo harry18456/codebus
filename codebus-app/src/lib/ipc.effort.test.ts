@@ -72,7 +72,11 @@ describe("validateClaudeCodeBlock — effort enum enforcement", () => {
     const errors = validateClaudeCodeBlock(block)
     expect(errors).toContainEqual({
       field: "claude_code.system.goal.effort",
-      message: expect.stringMatching(/effort/i),
+      key: "settings.endpoint.validation.effortInvalid",
+      vars: {
+        verb: expect.any(String),
+        allowed: expect.stringContaining("high"),
+      },
     })
   })
 
@@ -90,7 +94,11 @@ describe("validateClaudeCodeBlock — effort enum enforcement", () => {
     const errors = validateClaudeCodeBlock(block)
     expect(errors).toContainEqual({
       field: "claude_code.azure.fix.effort",
-      message: expect.stringMatching(/effort/i),
+      key: "settings.endpoint.validation.effortInvalid",
+      vars: {
+        verb: expect.any(String),
+        allowed: expect.stringContaining("high"),
+      },
     })
   })
 
@@ -123,7 +131,11 @@ describe("validateClaudeCodeBlock — effort enum enforcement", () => {
     const errors = validateClaudeCodeBlock(block)
     expect(errors).toContainEqual({
       field: "claude_code.system.query.effort",
-      message: expect.stringMatching(/effort/i),
+      key: "settings.endpoint.validation.effortInvalid",
+      vars: {
+        verb: expect.any(String),
+        allowed: expect.stringContaining("high"),
+      },
     })
   })
 })

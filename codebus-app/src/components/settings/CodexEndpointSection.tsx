@@ -326,7 +326,7 @@ export function CodexEndpointSection({
             </div>
             <ul className="ml-3 list-disc">
               {errors.map((e) => (
-                <li key={e.field}>{e.message}</li>
+                <li key={e.field}>{t(e.key, e.vars)}</li>
               ))}
             </ul>
           </div>
