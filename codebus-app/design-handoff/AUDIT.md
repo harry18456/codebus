@@ -1769,6 +1769,20 @@ grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.ts
 - 未來若加更多 settings 再考慮分 tab（Provider / Privacy / Behavior / Quiz）
 - **不開 gap**
 
+##### ST14 · 缺 language switcher [local] [v1.1 feature gap] [2026-05-26 補]
+
+- **問題**：目前 i18n 完全靠 `navigator.language` 偵測；`useLocale.ts:8` 註解明寫「v1 has no language switcher」；user 想覆蓋只能改 Windows 系統顯示語言或開 DevTools override
+- **背景**：Phase 3A + 3A followup 已把 54 處 hard-code wire 進 bundle（infrastructure ready），但沒做 user-facing 切換 UI；`useLocale(override?: Locale)` 的 `override` 參數設計就是給未來 settings switch 用、但 v1 沒接 settings store
+- **修法**：
+  - Settings UI 加 `Language` dropdown（`Auto`（依系統）/ `中文` / `English`）
+  - Settings store（`settings.ts`）加 `localeOverride: Locale | null` 欄位（`null` = auto）
+  - `App.tsx` provider 層把 store 值灌進 `useLocale(override ?? undefined)`
+  - `errors.ts` LocalizedError seam 對應 wire（後端錯誤訊息也要跟著 override）
+  - Tauri 持久化（settings.json）+ 重啟驗 + reactive 切換驗（不重啟也能即時切）
+- **預估工作量**：~1-1.5 hr（純加法、跟 layout 改動不衝突；可隨時插入）
+- **觸發時機**：建議跟 Phase 6 v1.1 batch 一起或之前插入；屬「v1 → v1.1 user-facing feature」性質
+- **驗收**：zh-tw 系統開 app → 切 English → 重啟 → 仍 English；切 Auto → 重啟 → 回 zh
+
 ### 06 沒有 layout gap
 
 - Design spec 06 沒詳細展開 settings 內容，現況 layout 設計合理
@@ -1984,6 +1998,7 @@ grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.ts
 | `loading-overlay-live-progress`（獨立、超出 design audit）| LOI-1 |
 | `chatwidget-icon-and-pulse`（小批，bundle 修法）| R7-1（icon）+ ODI-4（pulse） |
 | `codex-shell-wrapper-extract-and-utf8`（codex provider 整合） | X1 + QGEN2 |
+| `settings-language-switcher`（v1.1 feature gap、純加法）| ST14 |
 
 ### Deferred / Skipped（不在這波做）
 
@@ -2106,8 +2121,11 @@ Design v1.1 mock 已交、5 個 view 全部 spec 完成。可動：
   - spectra change：`wiki-page-reader-v1.1`
 - **ChatWidget 3 modes**（bubble + floating 360×460 固定 + centered modal 640 wide + mode 切換矩陣 + chat session sharing）
   - spectra change：`chatwidget-three-modes`（含 ODI-3 升 spec、取代 cut 掉的 05、原 chatwidget-icon-and-pulse 合進此 change）
+- **Language switcher in Settings**（ST14、純加法、~1-1.5 hr）
+  - spectra change：`settings-language-switcher`（Settings UI dropdown + `localeOverride` store + `useLocale` provider 接線 + persistence）
+  - 不依賴其他 Phase 6 mock、可獨立先做（建議排 02c 之後 / ChatWidget 之前，當 palate cleanser）
 
-→ 全部 unblock；可在 Phase 5 結束後開始動。**順序建議**：先 02c Interrupted（小、純 frontend）→ ChatWidget 3 modes（中型）→ Wiki page reader（中型）→ Quiz wizard 4 步（大）→ LoadingOverlay live progress（最大、含 backend Tauri layer 改動）
+→ 全部 unblock；可在 Phase 5 結束後開始動。**順序建議**：先 02c Interrupted（小、純 frontend）→ **settings-language-switcher**（小、純加法、palate cleanser）→ ChatWidget 3 modes（中型）→ Wiki page reader（中型）→ Quiz wizard 4 步（大）→ LoadingOverlay live progress（最大、含 backend Tauri layer 改動）
 
 ### 在等 v1.1 期間可動的批次彙總
 
@@ -2121,6 +2139,7 @@ Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5（除了 W4 backend 部份要 co
 
 - [ ] 1920×1080 100% Windows + **macOS retina baseline + 4K 150% scaling**（design v1 補）三基準視覺看過
 - [ ] zh 跟 en locale 切換無 hard-code 字串遺漏
+- [ ] Settings Language dropdown：Auto / 中文 / English 切換生效且重啟後持久化（ST14 / `settings-language-switcher`）
 - [ ] D2 follow-up notes 跑 5 種不同 goal 看品質（**empty case 嚴格 hide section、design v1 加嚴**）
 - [ ] LO-4「3-15 秒」實測（vault init 平均時間）
 - [ ] WP13 Obsidian-compatibility 雙向 wikilink 驗證
