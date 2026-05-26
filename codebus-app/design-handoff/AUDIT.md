@@ -233,6 +233,39 @@ grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.ts
 
 總計 < 1.5 hr。
 
+### Followup change · `ipc-validation-error-localization`（待開、2026-05-26 發現）
+
+`i18n-sweep-phase-3a-followup` 跑 Pattern 5 sweep 時抓到、scope 屬性不同必須拆出去的 5 處：
+
+#### Scope
+
+| # | 檔案:行 | Hard-code | 性質 |
+|---|---|---|---|
+| 1 | `src/lib/ipc.ts:339` | validation 錯誤訊息（zh）| 流經 form error 顯示 |
+| 2 | `src/lib/ipc.ts:351` | 同上 | 同上 |
+| 3 | `src/lib/ipc.ts:360` | 同上 | 同上 |
+| 4 | `src/lib/ipc.ts:483` | 同上 | 同上 |
+| 5 | `src/lib/ipc.ts:489` | 同上 | 同上 |
+
+#### 為什麼不併入 `i18n-sweep-phase-3a-followup`
+
+- **文件層不同**：`ipc.ts` 是 IPC bridge layer、不是 UI component；Pattern 6 grep procedure 本來就指出「.ts 檔需獨立思考」
+- **5 處 ≠ 1 處**：5 個 site = pattern 問題、不是 strings 問題；可能整層要走 `errors.ts` `LocalizedError` 模式（前端 catch 後再翻），不該在 ipc.ts 直接塞 `t()` call
+- **架構決策待定**：codebus 既有 `LocalizedError` pattern（前 i18n session memory 記過）、validation 錯誤該流經這個 seam；現在 5 處 raw zh 字串可能是 leak-through、修法要先看清架構再動
+
+#### 觸發時機
+
+- `i18n-sweep-phase-3a-followup` archive 後可開
+- 跟 Phase 4 / Phase 5 不衝突（純 `src/lib/*` 層、不動 component）
+
+#### 預期工作量
+
+- 評估要不要走 `LocalizedError` pattern（看 `errors.ts` 現況、看 5 處 error 是否同性質）：~15 min
+- wire 5 處（直接 `t()` 或經 LocalizedError）：~20-30 min
+- en bundle 對應翻譯 + smoke：~10 min
+
+總計 30-60 min（看架構選擇）。
+
 ---
 
 ## 04 · Lobby
