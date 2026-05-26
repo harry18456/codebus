@@ -1,0 +1,2401 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<title>codebus — v1.1 design mocks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-raised: #111111;
+    --bg-hover: #161616;
+    --bg-active: #1a1a1a;
+    --bg-sunken: #070707;
+    --bg-overlay: rgba(10, 10, 10, 0.85);
+
+    --border: #1f1f1f;
+    --border-strong: #2a2a2a;
+    --border-subtle: #161616;
+
+    --fg: #e5e5e5;
+    --fg-secondary: #8a8a8a;
+    --fg-tertiary: #5a5a5a;
+    --fg-quaternary: #3a3a3a;
+
+    --accent: #f5a623;
+    --accent-hover: #ffb13d;
+    --accent-dim: #c9881c;
+    --accent-fg: #0a0a0a;
+    --accent-tint: rgba(245, 166, 35, 0.10);
+    --accent-tint-strong: rgba(245, 166, 35, 0.18);
+    --accent-ring: rgba(245, 166, 35, 0.35);
+
+    --success: #4ade80;
+    --warn: #f5a623;
+    --error: #f87171;
+    --info: #60a5fa;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', 'Noto Sans TC', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: 'zero', 'ss02'; letter-spacing: 0; }
+
+  .page { max-width: 1040px; margin: 0 auto; padding: 56px 40px 96px; }
+
+  /* ───── headers ───── */
+  .doc-head {
+    display: flex; flex-direction: column; gap: 8px;
+    margin-bottom: 28px; padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-strong);
+  }
+  .kicker { font-size: 11px; color: var(--fg-tertiary); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; }
+  .doc-head h1 { font-size: 28px; font-weight: 600; margin: 0; letter-spacing: -0.02em; }
+  .doc-head .meta { color: var(--fg-secondary); font-size: 13px; }
+
+  h2 {
+    font-size: 24px; font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 4px 0 8px;
+  }
+  h2 .num { font-family: 'JetBrains Mono', monospace; color: var(--fg-tertiary); font-size: 18px; font-weight: 500; margin-right: 14px; }
+  h3 { font-size: 18px; font-weight: 600; margin: 28px 0 8px; letter-spacing: -0.01em; }
+  h4 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
+
+  p { margin: 8px 0; }
+  .dim { color: var(--fg-secondary); }
+  .dimmer { color: var(--fg-tertiary); }
+
+  code, .inline-mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    background: var(--bg-sunken); color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 3px;
+  }
+
+  hr.section-rule { border: 0; border-top: 1px solid var(--border-strong); margin: 56px 0 0; }
+
+  /* universal section-label (from walkthrough-decisions §01) */
+  .section-label {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 12px; font-weight: 600;
+    color: var(--fg-secondary);
+    margin: 24px 0 12px;
+  }
+  .section-label::before {
+    content: ""; width: 2px; height: 12px;
+    background: var(--accent); border-radius: 1px;
+  }
+
+  .section-intro {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 18px 22px;
+    margin: 16px 0 28px;
+  }
+  .section-intro .tldr {
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  /* ───── demo wrapper ───── */
+  .demo {
+    margin: 16px 0;
+    padding: 18px;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .demo-caption {
+    font-size: 11px; color: var(--fg-tertiary);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    margin-bottom: 14px; font-weight: 600;
+  }
+
+  table {
+    width: 100%; border-collapse: collapse;
+    margin: 12px 0; font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    color: var(--fg-tertiary); font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    border-bottom: 1px solid var(--border-strong);
+  }
+
+  /* general button */
+  .btn {
+    font-size: 13px;
+    padding: 7px 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-sunken);
+    color: var(--fg);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .btn-danger {
+    color: var(--error);
+    border-color: rgba(248,113,113,0.30);
+    background: transparent;
+  }
+  .btn-link {
+    background: transparent; border: 0;
+    color: var(--fg-tertiary);
+    padding: 7px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    text-decoration: none;
+    font-family: inherit;
+  }
+  .btn-link:hover { color: var(--fg); }
+
+  /* shared status dot pieces */
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .dot-done { background: var(--success); }
+  .dot-int  { background: var(--accent); }
+  .dot-fail { background: var(--error); }
+  .pulse-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-tint);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 4px var(--accent-tint); }
+    50% { box-shadow: 0 0 0 6px var(--accent-tint); }
+  }
+
+  /* step dots (from walkthrough-decisions §03) */
+  .step-dots { display: flex; gap: 7px; align-items: center; }
+  .step-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    border: 1px solid var(--border-strong); background: transparent;
+  }
+  .step-dot.done { background: var(--fg-tertiary); border-color: var(--fg-tertiary); }
+  .step-dot.current {
+    background: var(--accent); border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-tint);
+  }
+  .step-label {
+    font-size: 12px; color: var(--fg-secondary);
+    font-family: 'JetBrains Mono', monospace; margin-left: 4px;
+  }
+  .step-label b { color: var(--fg); font-weight: 600; }
+
+  /* ═════════ §01 LoadingOverlay ═════════ */
+
+  .lo-frame {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    aspect-ratio: 16 / 10;
+    position: relative;
+    overflow: hidden;
+  }
+  .lo-backdrop {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 30% 30%, rgba(245,166,35,0.04), transparent 60%),
+      var(--bg-overlay);
+  }
+  .lo-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px;
+    z-index: 2;
+  }
+  .lo-bus {
+    font-size: 56px;
+    line-height: 1;
+    display: inline-block;
+    animation: bus-roll 1.8s ease-in-out infinite;
+  }
+  .lo-bus .glyph {
+    display: inline-block;
+    transform: scaleX(-1); /* 車頭翻成朝右 */
+  }
+  @keyframes bus-roll {
+    0%   { transform: translate(-22px, 0)   rotate(-1deg); }
+    25%  { transform: translate(-8px, -2px) rotate(0deg); }
+    50%  { transform: translate(8px, 0)     rotate(1deg); }
+    75%  { transform: translate(20px, -2px) rotate(0deg); }
+    100% { transform: translate(-22px, 0)   rotate(-1deg); }
+  }
+  .lo-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .lo-step  {
+    font-size: 13px; color: var(--fg-secondary);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 20px;
+  }
+  .lo-dots {
+    display: flex; gap: 6px;
+    margin-top: 4px;
+  }
+  .lo-dots .step-dot { width: 6px; height: 6px; }
+
+  /* phase cycle animation */
+  .lo-cycle .lo-step::after {
+    content: " · 14s elapsed";
+    color: var(--fg-tertiary);
+    margin-left: 6px;
+  }
+
+  /* ═════════ §02 02c Interrupted ═════════ */
+
+  .ws-wrap {
+    background: var(--bg); border: 1px solid var(--border-strong); border-radius: 6px;
+    overflow: hidden; font-size: 13.5px;
+  }
+  .ws-frame {
+    display: flex; min-height: 480px;
+  }
+  .ws-side {
+    width: 200px; flex-shrink: 0;
+    background: var(--bg-sunken);
+    border-right: 1px solid var(--border-strong);
+    padding: 14px;
+    display: flex; flex-direction: column;
+  }
+  .ws-back { font-size: 12px; color: var(--fg-tertiary); margin-bottom: 14px; }
+  .ws-vault-name { font-size: 13.5px; font-weight: 600; }
+  .ws-vault-path { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--fg-tertiary); margin-top: 2px; margin-bottom: 18px; }
+  .ws-nav-row {
+    padding: 6px 10px; margin: 2px -10px;
+    border-radius: 3px;
+    color: var(--fg-secondary);
+    display: flex; align-items: center; gap: 8px;
+    position: relative;
+  }
+  .ws-nav-row .ws-count {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--fg-quaternary);
+  }
+  .ws-nav-row.active {
+    background: var(--bg-active);
+    color: var(--fg);
+  }
+  .ws-nav-row.active::before {
+    content: ""; position: absolute;
+    left: -10px; top: 4px; bottom: 4px;
+    width: 2px; background: var(--accent); border-radius: 1px;
+  }
+  .ws-side-foot {
+    margin-top: auto;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    color: var(--fg-tertiary); font-size: 12px;
+  }
+  .ws-side-foot .kbd {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    color: var(--fg-tertiary);
+  }
+  .ws-main {
+    flex: 1; padding: 18px 24px;
+  }
+  .ws-detail-head {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ws-detail-head .left { flex: 1; }
+  .ws-detail-head .back { font-size: 12px; color: var(--fg-tertiary); margin-bottom: 4px; }
+  .ws-detail-head .title { font-size: 20px; font-weight: 600; letter-spacing: -0.015em; }
+  .ws-detail-head .right {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 500;
+    padding: 3px 9px; border-radius: 3px;
+    border: 1px solid;
+  }
+  .status-int  { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-tint); }
+  .status-done { color: var(--success); border-color: rgba(74,222,128,0.30); background: rgba(74,222,128,0.06); }
+  .status-fail { color: var(--error); border-color: rgba(248,113,113,0.30); background: rgba(248,113,113,0.06); }
+
+  .interrupt-banner {
+    background: var(--accent-tint);
+    border: 1px solid var(--accent-ring);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin: 18px 0 22px;
+    font-size: 13.5px;
+    color: var(--fg);
+    line-height: 1.55;
+  }
+  .interrupt-banner .heading {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+
+  .stat-row {
+    display: flex; gap: 22px;
+    margin: 14px 0 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--fg-secondary);
+  }
+  .stat-row b { color: var(--fg); font-weight: 600; }
+
+  .cluster {
+    margin: 12px 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-raised);
+  }
+  .cluster-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cluster-head .name {
+    font-size: 11px; font-weight: 600;
+    color: var(--fg-tertiary);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .cluster-head .bar { width: 2px; height: 12px; background: var(--accent); border-radius: 1px; }
+  .cluster-head .count {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--fg-tertiary);
+  }
+
+  /* ═════════ §03 Quiz wizard ═════════ */
+
+  .wizard-frame { padding: 18px 24px; }
+  .wizard-head {
+    display: flex; align-items: center; gap: 14px;
+    padding-bottom: 14px; margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .wizard-head .back { font-size: 12px; color: var(--fg-tertiary); }
+  .wizard-head .title { font-size: 16px; font-weight: 600; }
+  .wizard-head .right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+
+  .topic-input {
+    width: 100%;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 14px 16px;
+    color: var(--fg);
+    font-size: 15px;
+    font-family: inherit;
+    margin-top: 14px;
+  }
+  .topic-input::placeholder { color: var(--fg-tertiary); }
+
+  .example-pills {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-top: 14px;
+  }
+  .example-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 5px 11px;
+    background: var(--accent-tint);
+    color: var(--accent);
+    border: 1px solid var(--accent-ring);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .example-pill::before { content: "“"; opacity: 0.7; margin-right: 2px; }
+  .example-pill::after  { content: "”"; opacity: 0.7; margin-left: 2px; }
+
+  .topic-hint {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--fg-tertiary);
+  }
+
+  /* Quiz generating */
+  .quiz-banner {
+    font-size: 13px;
+    color: var(--fg);
+    padding: 4px 0;
+    line-height: 1.5;
+  }
+  .quiz-banner .emoji { margin-right: 8px; }
+  .quiz-banner.dim { color: var(--fg-secondary); font-style: italic; }
+
+  .tool-row {
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 4px 0 4px 14px;
+    font-size: 13px;
+    border-left: 1px solid var(--border-strong);
+    margin-left: 1px;
+  }
+  .tool-row .tool-icon {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--fg-tertiary); text-align: center;
+  }
+  .tool-row .tool-body {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--fg);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .tool-row .tool-body .kind { color: var(--fg-tertiary); margin-right: 8px; }
+  .tool-row .tool-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--fg-tertiary);
+  }
+  .tool-row.live .tool-body { color: var(--accent); }
+  .tool-row.live .caret {
+    display: inline-block; width: 1px; height: 12px;
+    background: var(--accent);
+    margin-left: 2px; vertical-align: -2px;
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .spinner {
+    display: inline-block; width: 10px; height: 10px;
+    border: 1.5px solid var(--accent-ring);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Quiz answering */
+  .qa-question-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px; color: var(--fg-tertiary);
+    margin-right: 10px;
+  }
+  .qa-question-text {
+    font-size: 22px; font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--fg);
+    margin: 6px 0 18px;
+  }
+  .qa-choice-list { display: flex; flex-direction: column; gap: 8px; }
+  .qa-choice {
+    display: grid;
+    grid-template-columns: 22px 14px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 14px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: border-color 100ms, background 100ms;
+  }
+  .qa-choice:hover { border-color: var(--fg-tertiary); }
+  .qa-choice .key {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-secondary);
+    background: var(--bg-sunken);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 1px 5px;
+    text-align: center;
+  }
+  .qa-choice .radio {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    border: 1.5px solid var(--fg-tertiary);
+  }
+  .qa-choice .label { font-size: 14px; color: var(--fg); }
+  .qa-choice .tag {
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    padding: 2px 7px; border-radius: 3px;
+    text-transform: lowercase;
+  }
+  /* reviewing states */
+  .qa-choice.correct {
+    border-color: rgba(74,222,128,0.50);
+    background: rgba(74,222,128,0.04);
+  }
+  .qa-choice.correct .radio {
+    border-color: var(--success);
+    background: var(--success);
+    color: var(--accent-fg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700;
+  }
+  .qa-choice.your-wrong {
+    border-color: rgba(248,113,113,0.50);
+    background: rgba(248,113,113,0.04);
+  }
+  .qa-choice.your-wrong .radio {
+    border-color: var(--error); background: var(--error);
+    color: var(--accent-fg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700;
+  }
+  .qa-choice.faded { opacity: 0.55; }
+  .qa-choice.correct .tag {
+    background: rgba(74,222,128,0.10); color: var(--success);
+    border: 1px solid rgba(74,222,128,0.30);
+  }
+  .qa-choice.your-wrong .tag {
+    background: rgba(248,113,113,0.10); color: var(--error);
+    border: 1px solid rgba(248,113,113,0.30);
+  }
+
+  .citation-block {
+    border-left: 2px solid var(--accent);
+    background: var(--bg-raised);
+    padding: 12px 16px;
+    border-radius: 0 4px 4px 0;
+    margin: 18px 0;
+    font-size: 13.5px;
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  .citation-block::before {
+    content: "“"; color: var(--accent);
+    font-size: 22px; line-height: 0;
+    margin-right: 4px; vertical-align: -6px;
+    font-family: Georgia, serif;
+  }
+  .cite-link {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 3px;
+  }
+
+  .qa-footer {
+    display: flex; align-items: center; gap: 14px;
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .qa-footer .left { font-size: 12px; color: var(--fg-tertiary); }
+  .qa-footer .left .kbd {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    margin-right: 6px;
+    color: var(--fg-secondary);
+  }
+  .qa-footer .right { margin-left: auto; }
+
+  /* Quiz completion */
+  .summary-hero {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    border: 2px solid;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 32px;
+    margin: 0 auto 16px;
+  }
+  .summary-hero.fail { border-color: var(--error); color: var(--error); }
+  .summary-hero.pass { border-color: var(--success); color: var(--success); }
+  .summary-mock {
+    text-align: center;
+    padding: 36px 16px 24px;
+  }
+  .summary-title { font-size: 28px; font-weight: 600; letter-spacing: -0.015em; }
+  .summary-sub { font-size: 13px; color: var(--fg-secondary); margin-top: 6px; }
+
+  /* ═════════ §04 Wiki page reader ═════════ */
+
+  .wiki-frame {
+    background: var(--bg); border: 1px solid var(--border-strong); border-radius: 6px;
+    overflow: hidden; display: flex; min-height: 580px;
+  }
+  .wiki-tree {
+    width: 220px; flex-shrink: 0;
+    background: var(--bg-sunken);
+    border-right: 1px solid var(--border-strong);
+    padding: 16px 12px;
+    font-size: 13px;
+  }
+  .wiki-tree .tree-row {
+    display: flex; align-items: center; gap: 9px;
+    padding: 4px 8px;
+    margin: 1px -8px;
+    border-radius: 3px;
+    color: var(--fg-secondary);
+    position: relative;
+  }
+  .wiki-tree .tree-row.active {
+    background: var(--bg-active); color: var(--fg);
+  }
+  .wiki-tree .tree-row.active::before {
+    content: ""; position: absolute;
+    left: -8px; top: 4px; bottom: 4px;
+    width: 2px; background: var(--accent); border-radius: 1px;
+  }
+  .wiki-tree .tree-row svg {
+    width: 14px; height: 14px;
+    color: var(--fg-tertiary);
+    flex-shrink: 0;
+  }
+
+  .wiki-reader { flex: 1; padding: 28px 36px; overflow: hidden; }
+  .wiki-title {
+    font-size: 28px; font-weight: 600;
+    letter-spacing: -0.02em;
+    margin: 0 0 4px;
+  }
+  .wiki-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--fg-tertiary);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+    margin-bottom: 22px;
+  }
+  .wiki-meta a {
+    color: var(--fg-secondary);
+    border-bottom: 1px dotted var(--fg-tertiary);
+    text-decoration: none;
+  }
+  .wiki-meta a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .wiki-body { font-size: 14.5px; line-height: 1.7; }
+  .wiki-body h2 {
+    font-size: 18px; font-weight: 600;
+    margin: 24px 0 10px;
+    letter-spacing: -0.01em;
+  }
+  .wiki-body p { margin: 8px 0 14px; }
+  .wiki-body ul { margin: 8px 0 14px 20px; padding: 0; }
+  .wiki-body li { margin: 4px 0; }
+  .plain-wikilink {
+    color: var(--fg);
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 3px;
+  }
+  .plain-wikilink:hover {
+    color: var(--accent);
+    text-decoration-color: var(--accent);
+  }
+  .wiki-body pre {
+    background: var(--bg-sunken);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 14px;
+    margin: 10px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--fg);
+    overflow-x: auto;
+  }
+  .wiki-body pre .tk-key { color: var(--info); }
+  .wiki-body pre .tk-str { color: var(--success); }
+  .wiki-body pre .tk-num { color: var(--accent); }
+  .wiki-body pre .tk-com { color: var(--fg-tertiary); font-style: italic; }
+
+  .wiki-actions {
+    margin: 32px 0 0;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 10px; align-items: center;
+  }
+  .wiki-edit-hint {
+    margin-top: 24px;
+    font-size: 12.5px;
+    color: var(--fg-tertiary);
+  }
+  .wiki-edit-hint a {
+    color: var(--fg-secondary);
+    border-bottom: 1px dotted var(--fg-tertiary);
+    text-decoration: none;
+  }
+  .wiki-edit-hint a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ═════════ §05 ChatWidget ═════════ */
+
+  .cw-canvas {
+    position: relative;
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+  }
+  .cw-mock-bg {
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(to right, var(--bg-sunken) 0, var(--bg-sunken) 200px, transparent 200px),
+      var(--bg);
+    opacity: 0.4;
+  }
+  .cw-bubble {
+    position: absolute;
+    bottom: 16px; right: 16px;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    cursor: pointer;
+    z-index: 3;
+  }
+  .cw-bubble .ambient-dot {
+    position: absolute;
+    top: 4px; right: 6px;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(245, 166, 35, 0.20);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+
+  .cw-floating {
+    position: absolute;
+    bottom: 16px; right: 16px;
+    width: 360px;
+    height: 460px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    display: flex; flex-direction: column;
+    z-index: 3;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  }
+  .cw-modal {
+    position: absolute;
+    top: 60px; left: 50%;
+    transform: translateX(-50%);
+    width: 640px;
+    max-height: 480px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    display: flex; flex-direction: column;
+    z-index: 3;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+  }
+  .cw-modal-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    z-index: 2;
+  }
+
+  .cw-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cw-head .cw-title { font-size: 13px; font-weight: 500; }
+  .cw-head .cw-controls {
+    margin-left: auto;
+    display: flex; gap: 6px;
+    color: var(--fg-tertiary);
+    font-size: 12px;
+  }
+  .cw-head .cw-controls span {
+    cursor: pointer;
+    width: 18px; height: 18px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 3px;
+  }
+  .cw-head .cw-controls span:hover { background: var(--bg-hover); color: var(--fg); }
+  .cw-body {
+    flex: 1; overflow-y: auto;
+    padding: 14px 16px;
+    display: flex; flex-direction: column;
+    gap: 12px;
+    font-size: 13px;
+  }
+  .cw-msg {
+    max-width: 85%;
+    padding: 8px 12px;
+    border-radius: 6px;
+    line-height: 1.5;
+  }
+  .cw-msg.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-bottom-right-radius: 3px;
+  }
+  .cw-msg.bot {
+    align-self: flex-start;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 3px;
+  }
+  .cw-msg.bot .cite-link { font-size: 12px; }
+  .cw-input {
+    border-top: 1px solid var(--border);
+    padding: 10px 14px;
+    display: flex; gap: 8px; align-items: center;
+  }
+  .cw-input input {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    color: var(--fg);
+    font-family: inherit;
+    font-size: 13px;
+  }
+  .cw-input input::placeholder { color: var(--fg-tertiary); }
+  .cw-input .kbd {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    color: var(--fg-tertiary);
+  }
+  .cw-promote {
+    margin: 8px 0 0;
+    align-self: flex-start;
+    font-size: 11.5px;
+    color: var(--fg-tertiary);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px dashed var(--border-strong);
+    padding: 4px 9px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .cw-promote:hover { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-tint); }
+
+  .frame-cap {
+    position: absolute;
+    top: 12px; left: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--fg-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    z-index: 4;
+    pointer-events: none;
+  }
+
+  /* ───── alignment-callout ───── */
+  .alignment {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-tint);
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    margin: 14px 0;
+    font-size: 13px;
+  }
+  .alignment .lbl {
+    font-size: 10px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    font-weight: 600;
+    margin-right: 8px;
+  }
+
+  ul.list, ol.list { margin: 8px 0 8px 20px; padding: 0; }
+  ul.list li, ol.list li { margin: 5px 0; }
+
+  .footnote { font-size: 12px; color: var(--fg-tertiary); margin-top: 8px; }
+
+  /* table-of-contents */
+  .toc {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 18px 22px;
+    margin: 20px 0 36px;
+  }
+  .toc-title {
+    font-size: 11px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.12em;
+    font-weight: 600; margin-bottom: 10px;
+  }
+  .toc-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .toc-list a {
+    color: var(--fg); text-decoration: none;
+    display: grid;
+    grid-template-columns: 32px 1fr auto;
+    gap: 12px;
+    padding: 6px 0;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .toc-list a:hover { color: var(--accent); }
+  .toc-list .toc-num {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--fg-tertiary);
+    font-size: 12px;
+  }
+  .toc-list .toc-kind {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-tertiary);
+  }
+
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="doc-head">
+    <span class="kicker">codebus · v1.1 design mocks</span>
+    <h1>Design gray-area screens · formalized</h1>
+    <div class="meta">
+      五個 spec 沒覆蓋、codebus 自己建出來的畫面 — 這份把它們正式化成 v1.1 spec。<br />
+      <span class="dimmer">承接 design-reply.html + walkthrough-decisions.html · 同樣 token 系統 · 同樣 Linear-tight density</span>
+    </div>
+  </header>
+
+  <div class="toc">
+    <div class="toc-title">contents</div>
+    <ul class="toc-list">
+      <li><a href="#s01"><span class="toc-num">01</span><span>LoadingOverlay · live progress · 6 phases</span><span class="toc-kind">single overlay</span></a></li>
+      <li><a href="#s02"><span class="toc-num">02</span><span>02c Interrupted · formalized state</span><span class="toc-kind">workspace state</span></a></li>
+      <li><a href="#s03"><span class="toc-num">03</span><span>Quiz wizard · topic / generating / answering / completion</span><span class="toc-kind">4-step flow</span></a></li>
+      <li><a href="#s04"><span class="toc-num">04</span><span>Wiki page reader · metadata + body + actions</span><span class="toc-kind">workspace tab</span></a></li>
+      <li><a href="#s05"><span class="toc-num">05</span><span>ChatWidget · 3 modes (bubble / floating / centered-modal)</span><span class="toc-kind">global widget</span></a></li>
+    </ul>
+  </div>
+
+  <p>
+    每段：<strong>規格</strong>（tokens / state / copy）+ <strong>視覺 mock</strong>（HTML 模擬 final render）。
+    所有色票 / 動畫 / 字級沿用前兩份的 token，包括 §02 §03 §04 已決議的
+    <span class="mono">.section-label</span>、三態 status pill、step dots、citation block 等。
+  </p>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- §01 LoadingOverlay                          -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" id="s01" />
+  <h2 style="margin-top:36px;"><span class="num">01</span>LoadingOverlay · live progress</h2>
+
+  <div class="section-intro">
+    <div class="tldr">scope</div>
+    <p style="margin-top:4px;">
+      <span class="mono">addVault</span> init 期間的全屏 overlay。從 v1 的 4 行靜態副標
+      升級為 6 階段 live progress。72px 🚌 + 標題（靜態）+ 階段副標（隨 InitEvent 變化）
+      + 6-dot 階段指示器。動畫沿用既有 <span class="mono">codebus-bus-roll</span>。
+    </p>
+  </div>
+
+  <h3>1.1 · Layout 與動畫</h3>
+
+  <div class="demo">
+    <div class="demo-caption">LoadingOverlay · current phase = 3 / 6 · "建立獨立 git 倉庫"</div>
+    <div class="lo-frame">
+      <div class="lo-backdrop"></div>
+      <div class="lo-center lo-cycle">
+        <span class="lo-bus"><span class="glyph">🚌</span></span>
+        <div class="lo-title">公車正在發車…</div>
+        <div class="lo-step">建立獨立 git 倉庫</div>
+        <div class="lo-dots">
+          <span class="step-dot done"></span>
+          <span class="step-dot done"></span>
+          <span class="step-dot current"></span>
+          <span class="step-dot"></span>
+          <span class="step-dot"></span>
+          <span class="step-dot"></span>
+        </div>
+      </div>
+    </div>
+    <p class="footnote">
+      🚌 移動範圍 ±22px、±1° 旋轉、1.8s loop（既有 keyframes 沿用）。dots 跟 Quiz wizard step dots
+      同支元件、同樣 styling — 不另設計。
+    </p>
+  </div>
+
+  <h3>1.2 · 6 phase 對應 InitEvent</h3>
+
+  <p>
+    Backend 已在 <span class="mono">codebus-core/src/vault/init.rs run_init</span> emit 20+ 個 <span class="mono">InitEvent</span>。
+    UI 收斂成 6 階段 — 1:1 渲染太細、user 看不清。每階段對應一組 InitEvent
+    （任一 event 進來 = 該階段亮起）。
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:6%;">#</th>
+        <th style="width:24%;">copy · zh-tw</th>
+        <th style="width:22%;">copy · en</th>
+        <th>InitEvents 對應</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="mono">1</span></td>
+        <td>準備車庫</td>
+        <td>Preparing garage</td>
+        <td class="mono" style="font-size:11.5px;">Start · LayoutCreated · SourceGitignore</td>
+      </tr>
+      <tr>
+        <td><span class="mono">2</span></td>
+        <td>複製源碼並掃過敏感資料</td>
+        <td>Copying source · scrubbing secrets</td>
+        <td class="mono" style="font-size:11.5px;">PiiConfigLoaded · PiiWarn · RawSyncDone</td>
+      </tr>
+      <tr>
+        <td><span class="mono">3</span></td>
+        <td>建立獨立 git 倉庫</td>
+        <td>Setting up isolated git</td>
+        <td class="mono" style="font-size:11.5px;">InternalGitignoreDone · NestedRepoDone</td>
+      </tr>
+      <tr>
+        <td><span class="mono">4</span></td>
+        <td>搭起 wiki 結構</td>
+        <td>Building wiki structure</td>
+        <td class="mono" style="font-size:11.5px;">SchemaDone · ManifestDone · NavStubsDone · SkillBundlesDone · SettingsDone</td>
+      </tr>
+      <tr>
+        <td><span class="mono">5</span></td>
+        <td>註冊到 Obsidian</td>
+        <td>Registering with Obsidian</td>
+        <td class="mono" style="font-size:11.5px;">ObsidianResult <span class="dimmer">· 可 skip · 見 1.3</span></td>
+      </tr>
+      <tr>
+        <td><span class="mono">6</span></td>
+        <td>上路前最後檢查</td>
+        <td>Final checks</td>
+        <td class="mono" style="font-size:11.5px;">StarterConfigDone · CommitDone · Finished</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>1.3 · 階段語意</h3>
+
+  <ul class="list">
+    <li>
+      <strong>進入新階段就更新副標、dot 點亮、bus 不重置。</strong> bus 動畫是 ambient「車在跑」
+      訊號、不該被階段切換 reset；user 不該因為文字換了感受到突兀的視覺重啟。
+    </li>
+    <li>
+      <strong>同一階段內多個 InitEvent 不重複切換副標。</strong> 一個階段只渲染一次它的副標、
+      停留到下個階段 event 進來。同階段 events 不可見的細節讓 backend logging 處理。
+    </li>
+    <li>
+      <strong>階段 5 ObsidianResult skipped 時 dot 直接 done、不停留。</strong>
+      backend 不 emit ObsidianResult 也視為 done，但 UI 副標一閃即逝會像 bug —
+      strategy：階段 5 進來時 emit minimum 300ms 停留（即使 backend 馬上跳階段 6 也撐住），
+      讓 user 感受到「噢有這步、跳過了」而不是「咦剛剛閃了什麼」。
+    </li>
+    <li>
+      <strong>所有 InitEvent 都完成（=Finished）後 overlay fade-out 200ms 收掉</strong>，不要 instant
+      消失（user 會 disorient）。
+    </li>
+  </ul>
+
+  <h3>1.4 · 異常處理</h3>
+
+  <ul class="list">
+    <li>
+      <strong>單一階段超過 20s 沒進到下一階段</strong> → 副標下方加灰色 hint 行
+      「（這步比平常久一點，再等等…）」。對 user 心理預期管理。
+    </li>
+    <li>
+      <strong>InitEvent emit error</strong> → overlay 切「失敗模式」：bus 停下、step dot 變紅、
+      標題改「車子卡住了」、副標寫具體錯（從 LocalizedError 來），加 retry 按鈕。這個失敗 UI
+      跟 02c Interrupted banner 同樣 amber-warm 視覺（不是 hard-fail red）— init 失敗多半
+      是 disk / permission 之類可重試的事。
+    </li>
+    <li>
+      <strong>無 backend 進度（fallback）</strong> → 若 backend 暫時還沒接 progress emit
+      （roll-out 早期），UI 維持 v1 的靜態副標但開啟 bus 動畫；不 break。
+    </li>
+  </ul>
+
+  <h3>1.5 · ⚠ 對齊點</h3>
+  <div class="alignment">
+    <span class="lbl">align</span>
+    階段 1 / 階段 6 是「過程性」的、可能太快閃過。如果實機跑下來這兩階段都 &lt; 500ms 就過了、
+    閃 dot 沒意義 — 你們收到實機 timing 後 ping 我，可能要把首尾收進相鄰階段。
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- §02 02c Interrupted                          -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" id="s02" />
+  <h2 style="margin-top:36px;"><span class="num">02</span>02c Interrupted · formalized</h2>
+
+  <div class="section-intro">
+    <div class="tldr">scope</div>
+    <p style="margin-top:4px;">
+      v1.1 第三個正式 goal-detail state — Running / Done / <strong>Interrupted</strong>。
+      元件改名 <span class="mono">RunDetailInterrupted</span>（從 <span class="mono">RunDetailCancelled</span>）。
+      Banner 文案隨中斷原因三個變體。header 用三態 status pill。stream log 用共用 <span class="mono">&lt;CollapsibleStreamLog&gt;</span>（default closed）。
+    </p>
+  </div>
+
+  <h3>2.1 · 完整 mock</h3>
+
+  <div class="demo">
+    <div class="demo-caption">02c · app-close interrupt</div>
+
+    <div class="ws-wrap">
+      <div class="ws-frame">
+
+        <div class="ws-side">
+          <div class="ws-back">← 返回</div>
+          <div class="ws-vault-name">cc-haha</div>
+          <div class="ws-vault-path">D:\side_project\cc-haha</div>
+
+          <div class="ws-nav-row active">🚏 Goals <span class="ws-count">3</span></div>
+          <div class="ws-nav-row">📂 Wiki <span class="ws-count">5</span></div>
+          <div class="ws-nav-row">🎓 Quiz <span class="ws-count">1</span></div>
+
+          <div class="ws-side-foot">
+            <span>⚙</span><span>設定</span>
+            <span class="kbd">⌘K</span>
+          </div>
+        </div>
+
+        <div class="ws-main">
+
+          <div class="ws-detail-head">
+            <div class="left">
+              <div class="back">← Goals</div>
+              <div class="title">列出這 repo 的主要入口跟模組</div>
+            </div>
+            <div class="right">
+              <span class="status-pill status-int">
+                <span class="dot dot-int"></span>
+                Interrupted
+              </span>
+              <button class="btn btn-primary">↻ Retry</button>
+            </div>
+          </div>
+
+          <div class="interrupt-banner">
+            <div class="heading">interrupt · app-close</div>
+            中途離開了 codebus，wiki 還沒寫完。可以重跑這個 goal 補上。
+          </div>
+
+          <span class="section-label">目前進度</span>
+
+          <div class="stat-row">
+            <span>讀取 <b>0</b></span>
+            <span>寫入 <b>0</b></span>
+            <span>其他 <b>8</b></span>
+            <span>持續 <b>26s</b></span>
+            <span>用量 <b>0 tok</b></span>
+          </div>
+
+          <div class="cluster">
+            <div class="cluster-head">
+              <span class="bar"></span>
+              <span class="name">Reading codebase</span>
+              <span class="count">8 calls · before interrupt</span>
+            </div>
+          </div>
+
+          <p class="dimmer" style="font-size:12px; margin-top:14px;">
+            ▸ 展開完整 stream log <span style="margin-left:6px;">(closed by default · 顯示中斷前 raw events)</span>
+          </p>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>2.2 · 三種中斷原因 · 三個 banner 變體</h3>
+
+  <p>
+    從同一個 view 出，但 banner 文案根據 backend 提供的 <span class="mono">interrupt_reason</span>
+    換成對應變體。樣式都一樣（amber-tint banner），只有 heading label + 內文不同：
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:18%;">reason</th>
+        <th style="width:25%;">heading label</th>
+        <th>banner 內文</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="mono">"app-close"</td>
+        <td><span class="mono">interrupt · app-close</span></td>
+        <td>中途離開了 codebus，wiki 還沒寫完。可以重跑這個 goal 補上。</td>
+      </tr>
+      <tr>
+        <td class="mono">"user-cancel"</td>
+        <td><span class="mono">interrupt · user-cancel</span></td>
+        <td>你取消了這個 goal。已寫的 wiki 內容會保留，重跑會從頭開始。</td>
+      </tr>
+      <tr>
+        <td class="mono">"network-drop"</td>
+        <td><span class="mono">interrupt · connection-lost</span></td>
+        <td>codebus 中途失聯了。可以重跑這個 goal 試試看。</td>
+      </tr>
+      <tr>
+        <td class="mono">"unknown" <span class="dimmer">(default)</span></td>
+        <td><span class="mono">interrupt</span></td>
+        <td>這個 goal 沒跑完。可以重跑、或留著看記錄到哪。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="footnote">
+    Heading label 用 <span class="mono">.mono</span> 風格、半技術詞——是讓 user 知道
+    「codebus 知道自己怎麼斷的」這層 metadata，不是寫給每個 user 看的核心訊息。內文才是。
+  </p>
+
+  <h3>2.3 · Failed 跟 Interrupted 的視覺差</h3>
+
+  <p>
+    為避免 Interrupted（amber）跟 Failed（red）混淆，視覺差不只 color：
+  </p>
+
+  <table>
+    <thead>
+      <tr><th></th><th>Interrupted</th><th>Failed</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Status pill</td>
+        <td><span class="status-pill status-int"><span class="dot dot-int"></span>Interrupted</span></td>
+        <td><span class="status-pill status-fail"><span class="dot dot-fail"></span>Failed</span></td>
+      </tr>
+      <tr>
+        <td>Header action</td>
+        <td>amber primary <span class="mono">↻ Retry</span></td>
+        <td>secondary <span class="mono">看錯誤詳情</span>（不主動鼓勵 retry）</td>
+      </tr>
+      <tr>
+        <td>Banner 語氣</td>
+        <td>「可以重跑」「沒寫完」— 行動性</td>
+        <td>「codebus 撞到問題」+ error message — 解釋性</td>
+      </tr>
+      <tr>
+        <td>Goals list 點</td>
+        <td>amber 7px dot</td>
+        <td>red 7px dot</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>2.4 · State machine</h3>
+
+  <table>
+    <thead><tr><th>事件</th><th>動作</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>goal 跑中 · app 收到 close 訊號</td>
+        <td>標記 <span class="mono">interrupt_reason: "app-close"</span> · 寫入 GoalRunStore · 不嘗試 graceful shutdown LLM call（接受 partial state）</td>
+      </tr>
+      <tr>
+        <td>goal 跑中 · user 按 Cancel</td>
+        <td>標記 <span class="mono">interrupt_reason: "user-cancel"</span> · 終止 codex sandbox · 保留已寫 wiki</td>
+      </tr>
+      <tr>
+        <td>goal 跑中 · network drop / sandbox crash</td>
+        <td>標記 <span class="mono">interrupt_reason: "network-drop"</span> · 寫入錯誤 cause 到 stream log（不顯示在 banner、只在展開的 stream log 裡）</td>
+      </tr>
+      <tr>
+        <td>進入 02c view</td>
+        <td>讀 reason 渲染對應 banner · stream log default closed</td>
+      </tr>
+      <tr>
+        <td>按 Retry</td>
+        <td>建立新 GoalRun · 原 interrupted run 保留在 list（不刪、有 audit value）· retry 結果是獨立 row</td>
+      </tr>
+      <tr>
+        <td>原 interrupted run 在 list 上</td>
+        <td>amber dot · title 同原本 · 不主動標「retried at 14m ago」（避免列表雜訊；想知道就點進來看）</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>2.5 · ⚠ 對齊點</h3>
+  <div class="alignment">
+    <span class="lbl">align</span>
+    Failed 的 header action「看錯誤詳情」開的是 modal 還是 inline expand？我傾向 inline expand
+    一個 collapsible 區塊（保留 audit trail 上下文），但要看你們有沒有把 error context 做成
+    structured object。如果是純 string blob，inline 也夠。
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- §03 Quiz wizard                              -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" id="s03" />
+  <h2 style="margin-top:36px;"><span class="num">03</span>Quiz wizard · 完整 4 步</h2>
+
+  <div class="section-intro">
+    <div class="tldr">scope</div>
+    <p style="margin-top:4px;">
+      四步：<strong>topic → scope → generating → answering</strong>（+ completion as 收尾）。
+      Scope 步驟已在 walkthrough-decisions § 3.2 鎖死 Design A、這份不重畫。
+      其他三步加 completion 在這。Wizard 全程 topbar <span class="mono">+ New quiz</span> 隱藏；
+      Cancel 退回 Quiz history、不存 state。
+    </p>
+  </div>
+
+  <h3>3.1 · Step 1 · Topic</h3>
+
+  <div class="demo">
+    <div class="demo-caption">step 1 · 輸入主題</div>
+
+    <div class="ws-wrap">
+      <div class="ws-frame">
+        <div class="ws-side">
+          <div class="ws-back">← 返回</div>
+          <div class="ws-vault-name">cc-haha</div>
+          <div class="ws-vault-path">D:\side_project\cc-haha</div>
+          <div class="ws-nav-row">🚏 Goals <span class="ws-count">3</span></div>
+          <div class="ws-nav-row">📂 Wiki <span class="ws-count">5</span></div>
+          <div class="ws-nav-row active">🎓 Quiz <span class="ws-count">1</span></div>
+        </div>
+
+        <div class="ws-main wizard-frame">
+
+          <div class="wizard-head">
+            <span class="back">←</span>
+            <span class="title">New quiz</span>
+            <span class="step-dots">
+              <span class="step-dot current"></span>
+              <span class="step-dot"></span>
+              <span class="step-dot"></span>
+              <span class="step-dot"></span>
+            </span>
+            <span class="step-label">Step <b>1</b> / 4 · <b>Topic</b></span>
+            <div class="right">
+              <button class="btn">Cancel</button>
+            </div>
+          </div>
+
+          <h3 style="margin:8px 0 4px; font-size:22px;">想驗證哪個主題？</h3>
+          <p class="dim" style="font-size:13.5px;">寫下你想被 quiz 的範圍 — codebus 會挑相關 wiki 頁面出題。</p>
+
+          <input class="topic-input" placeholder="例如：auth 怎麼運作 / IM 適配器系統 / 對話傳遞流程" />
+
+          <div class="example-pills">
+            <span class="example-pill">專案目的</span>
+            <span class="example-pill">會話骨幹</span>
+            <span class="example-pill">對話傳遞流程</span>
+          </div>
+
+          <p class="topic-hint">
+            點擊範例直接填入。<span class="mono" style="margin:0 4px; color:var(--fg-secondary);">⏎</span>送出。
+          </p>
+
+          <div style="margin-top:32px; display:flex; gap:10px; justify-content:flex-end;">
+            <button class="btn">Cancel</button>
+            <button class="btn btn-primary">下一步 →</button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="list">
+    <li>
+      <strong>Topic 範例 pill = wiki 既有頁面標題</strong>（不是 hard-coded prompt）。
+      Vault 裡有什麼 page 就 surface 什麼 — 解掉 R4 的「examples 是 hard-coded English」問題、
+      順便讓 user 知道「這個 vault 有哪些 wiki 可以被 quiz」。最多顯示 3-5 個（vault 大時隨機 sample）。
+    </li>
+    <li>
+      <strong>Empty input + 按下一步</strong> → 不前進、input 加 amber 邊框 + tooltip
+      「主題不能空白」。不要 disable 下一步 button（user 看不出原因）。
+    </li>
+    <li>
+      <strong>進到 step 2 後不再可編輯 topic。</strong> 想改就 Cancel 回來；
+      因為 step 2 的 scope 是依 topic 算的、改 topic 等於 reset scope。
+    </li>
+  </ul>
+
+  <h3>3.2 · Step 2 · Scope</h3>
+
+  <p>
+    完整規格見 <span class="mono">walkthrough-decisions.html § 3.2 Design A</span>。
+    這份不重畫、避免 spec drift。
+  </p>
+
+  <h3>3.3 · Step 3 · Generating</h3>
+
+  <div class="demo">
+    <div class="demo-caption">step 3 · 出題中</div>
+
+    <div class="ws-wrap">
+      <div class="ws-frame">
+        <div class="ws-side">
+          <div class="ws-back">← 返回</div>
+          <div class="ws-vault-name">cc-haha</div>
+          <div class="ws-vault-path">D:\side_project\cc-haha</div>
+          <div class="ws-nav-row">🚏 Goals <span class="ws-count">3</span></div>
+          <div class="ws-nav-row">📂 Wiki <span class="ws-count">5</span></div>
+          <div class="ws-nav-row active">🎓 Quiz <span class="ws-count">1</span></div>
+        </div>
+
+        <div class="ws-main wizard-frame">
+
+          <div class="wizard-head">
+            <span class="back">←</span>
+            <span class="title">New quiz</span>
+            <span class="step-dots">
+              <span class="step-dot done"></span>
+              <span class="step-dot done"></span>
+              <span class="step-dot current"></span>
+              <span class="step-dot"></span>
+            </span>
+            <span class="step-label">Step <b>3</b> / 4 · <b>Generating</b></span>
+            <div class="right">
+              <span class="pulse-dot"></span>
+              <span style="color:var(--accent); font-size:13px;">Running</span>
+              <span class="mono" style="font-size:11.5px; color:var(--fg-tertiary);">14s · 3.2k tok</span>
+              <button class="btn btn-danger" style="font-size:12px; padding:4px 10px;">⏹ Cancel</button>
+            </div>
+          </div>
+
+          <div class="quiz-banner">
+            <span class="emoji">🎓</span>quiz 主題：<strong>專案目的</strong>
+          </div>
+          <div class="quiz-banner">
+            <span class="emoji">🚌</span><span class="dim">CodeBus 出題中… 範圍 5 頁：synthesis/project-purpose · modules/desktop-workspace · modules/session-backplane · modules/im-adapter-system · processes/conversation-delivery-flow</span>
+          </div>
+          <div class="quiz-banner">
+            <span class="emoji">🤔</span><span class="dim">先讀過每頁的核心論點，再規劃 5 題涵蓋這些頁的不同角度。會盡量讓題目跨頁比較、不只考單頁內容。</span>
+          </div>
+
+          <div class="cluster" style="margin-top:14px;">
+            <div class="cluster-head">
+              <span class="bar"></span>
+              <span class="name">Reading wiki</span>
+              <span class="count">5 calls</span>
+            </div>
+            <div style="padding:6px 14px 12px;">
+              <div class="tool-row" style="border-left:0; padding-left:0; margin-left:0;">
+                <span class="tool-icon">📄</span>
+                <span class="tool-body"><span class="kind">Read</span>wiki/synthesis/project-purpose.md</span>
+                <span class="tool-time">0.3s</span>
+              </div>
+              <div class="tool-row" style="border-left:0; padding-left:0; margin-left:0;">
+                <span class="tool-icon">📄</span>
+                <span class="tool-body"><span class="kind">Read</span>wiki/modules/desktop-workspace.md</span>
+                <span class="tool-time">0.4s</span>
+              </div>
+              <div class="tool-row" style="border-left:0; padding-left:0; margin-left:0;">
+                <span class="tool-icon">📄</span>
+                <span class="tool-body"><span class="kind">Read</span>wiki/modules/session-backplane.md</span>
+                <span class="tool-time">0.3s</span>
+              </div>
+              <div class="tool-row live" style="border-left:0; padding-left:0; margin-left:0;">
+                <span class="tool-icon"><span class="spinner"></span></span>
+                <span class="tool-body">drafting question 3 of 5<span class="caret"></span></span>
+                <span class="tool-time">—</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="list">
+    <li>
+      <strong>QG5 / QG6 / QG7 都在這頁解掉</strong> — header right 補 Cancel + elapsed/tokens、
+      開場有 🎓 brand banner、活動 stream 沿用 §02 activity stream 的 cluster 系統（這裡只會出現
+      Reading cluster、不會有 Writing — quiz 不寫 wiki）。
+    </li>
+    <li>
+      <strong>取消 = 退回 Quiz history</strong>，不留任何 partial quiz。與 Goal 不同（Goal 中斷
+      保留 partial wiki）— quiz 沒有「部分跑完的價值」、所以乾淨地丟掉。
+    </li>
+    <li>
+      <strong>QGEN1 marker tag filter</strong>：<span class="mono">[CODEBUS_QUIZ_NO_VALIDATE]</span>
+      之類 tag 在 ActivityStreamItem render 時 detect 並替換成 user-readable 文案
+      （見 AUDIT.md QGEN1 已有候選）。這是 thought block renderer 的責任，跟 wizard layout 解耦。
+    </li>
+  </ul>
+
+  <h3>3.4 · Step 4a · Answering · pending</h3>
+
+  <div class="demo">
+    <div class="demo-caption">step 4 pending · Q1 / 5 · 未選</div>
+
+    <div class="ws-wrap">
+      <div class="ws-frame">
+        <div class="ws-side">
+          <div class="ws-back">← 返回</div>
+          <div class="ws-vault-name">cc-haha</div>
+          <div class="ws-vault-path">D:\side_project\cc-haha</div>
+          <div class="ws-nav-row">🚏 Goals <span class="ws-count">3</span></div>
+          <div class="ws-nav-row">📂 Wiki <span class="ws-count">5</span></div>
+          <div class="ws-nav-row active">🎓 Quiz <span class="ws-count">1</span></div>
+        </div>
+
+        <div class="ws-main wizard-frame">
+
+          <div class="wizard-head">
+            <span class="back">←</span>
+            <span class="title">Quiz: <span class="mono dim">專案目的</span></span>
+            <span class="step-dots" style="margin-left:14px;">
+              <span class="step-dot done"></span>
+              <span class="step-dot done"></span>
+              <span class="step-dot done"></span>
+              <span class="step-dot current"></span>
+            </span>
+            <span class="step-label">Step <b>4</b> / 4 · <b>Answering</b></span>
+            <div class="right">
+              <span class="mono" style="font-size:13px; color:var(--fg);">Q<b>1</b> / 5</span>
+              <button class="btn">Cancel</button>
+            </div>
+          </div>
+
+          <div>
+            <span class="qa-question-num">Q1.</span>
+            <span class="dim" style="font-size:13px;">multiple-choice · single answer</span>
+            <p class="qa-question-text">這個專案為什麼把桌面工作台視為主產品，而不是只維護 CLI？</p>
+          </div>
+
+          <div class="qa-choice-list">
+            <div class="qa-choice">
+              <span class="key">A</span>
+              <span class="radio"></span>
+              <span class="label">因為 CLI 已經被完全移除，所有 agent 能力都只能在桌面端執行</span>
+              <span></span>
+            </div>
+            <div class="qa-choice">
+              <span class="key">B</span>
+              <span class="radio"></span>
+              <span class="label">因為專案要把多專案管理、遠端存取與權限核准等分散工作流收斂到可持續使用的工作台</span>
+              <span></span>
+            </div>
+            <div class="qa-choice">
+              <span class="key">C</span>
+              <span class="radio"></span>
+              <span class="label">因為桌面端只是一個臨時 demo，用來展示 WebView 效果</span>
+              <span></span>
+            </div>
+            <div class="qa-choice">
+              <span class="key">D</span>
+              <span class="radio"></span>
+              <span class="label">因為 IM 適配器可以直接取代 server 與 CLI，成為唯一執行核心</span>
+              <span></span>
+            </div>
+          </div>
+
+          <div class="qa-footer">
+            <div class="left">
+              <span class="kbd">A</span><span class="kbd">B</span><span class="kbd">C</span><span class="kbd">D</span>
+              to select · <span class="kbd">⏎</span> to submit
+            </div>
+            <div class="right">
+              <button class="btn" disabled style="opacity:0.5;">Submit</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>3.5 · Step 4b · Answering · reviewing</h3>
+
+  <div class="demo">
+    <div class="demo-caption">step 4 reviewing · 答錯 · Q2 / 5</div>
+
+    <div class="ws-wrap">
+      <div class="ws-frame">
+        <div class="ws-side">
+          <div class="ws-back">← 返回</div>
+          <div class="ws-vault-name">cc-haha</div>
+          <div class="ws-vault-path">D:\side_project\cc-haha</div>
+          <div class="ws-nav-row">🚏 Goals <span class="ws-count">3</span></div>
+          <div class="ws-nav-row">📂 Wiki <span class="ws-count">5</span></div>
+          <div class="ws-nav-row active">🎓 Quiz <span class="ws-count">1</span></div>
+        </div>
+
+        <div class="ws-main wizard-frame">
+
+          <div class="wizard-head">
+            <span class="back">←</span>
+            <span class="title">Quiz: <span class="mono dim">專案目的</span></span>
+            <span class="step-dots" style="margin-left:14px;">
+              <span class="step-dot done"></span>
+              <span class="step-dot done"></span>
+              <span class="step-dot done"></span>
+              <span class="step-dot current"></span>
+            </span>
+            <span class="step-label">Step <b>4</b> / 4 · <b>Answering</b></span>
+            <div class="right">
+              <span class="mono" style="font-size:13px; color:var(--fg);">Q<b>2</b> / 5</span>
+              <button class="btn">Cancel</button>
+            </div>
+          </div>
+
+          <div>
+            <span class="qa-question-num">Q2.</span>
+            <p class="qa-question-text"><span class="mono">session-backplane</span> 的主要責任是什麼？</p>
+          </div>
+
+          <div class="qa-choice-list">
+            <div class="qa-choice your-wrong">
+              <span class="key">A</span>
+              <span class="radio">✕</span>
+              <span class="label">直接渲染桌面 UI 的側邊欄、分頁列與內容路由</span>
+              <span class="tag">your answer</span>
+            </div>
+            <div class="qa-choice faded">
+              <span class="key">B</span>
+              <span class="radio"></span>
+              <span class="label">提供各 IM 平台的 bot SDK 與平台專屬媒體卡片</span>
+              <span></span>
+            </div>
+            <div class="qa-choice correct">
+              <span class="key">C</span>
+              <span class="radio">✓</span>
+              <span class="label">管理 session、WebSocket/REST 連線，以及 CLI 與前端之間的事件封裝</span>
+              <span class="tag">correct</span>
+            </div>
+            <div class="qa-choice faded">
+              <span class="key">D</span>
+              <span class="radio"></span>
+              <span class="label">只負責打包 Tauri 視窗，不處理任何會話狀態</span>
+              <span></span>
+            </div>
+          </div>
+
+          <div class="citation-block">
+            <a class="cite-link" href="#">會話骨幹</a> 說明
+            <span class="mono">src/server/</span> 是會話骨幹，負責 session 對應、client 與 sdk
+            雙通道連線、授權與訊息契約；UI 殼層與 IM 平台細節分別屬於其他模組。
+          </div>
+
+          <div class="qa-footer">
+            <div class="left">
+              <a class="btn btn-link" href="#">← 回 wiki page</a>
+            </div>
+            <div class="right">
+              <span class="dim" style="font-size:12px; margin-right:14px;"><span class="kbd" style="font-family:'JetBrains Mono', monospace; font-size:10.5px; padding:2px 6px; border:1px solid var(--border-strong); border-radius:3px; color:var(--fg-secondary);">→</span> to advance</span>
+              <button class="btn btn-primary">Next: Q3 →</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="list">
+    <li>
+      <strong>QA1-QA9 全解</strong>：Quiz header 變「Quiz: &lt;scope&gt;」mono、Q counter
+      在 right side、letter chip + radio + label + tag、wrong row red border + ✕、correct
+      row green border + ✓、其他 fade 0.55、citation 走 dashed-underline mono amber
+      wikilink、footer 有「← 回 wiki page」+ amber primary Next + keyboard hint。
+    </li>
+    <li>
+      <strong>最後一題答完</strong> → Next button 文字換成「看結果 →」、進 completion summary
+      （見 3.6）。
+    </li>
+  </ul>
+
+  <h3>3.6 · Step 4c · Completion summary</h3>
+
+  <div class="demo">
+    <div class="demo-caption">completion · fail</div>
+
+    <div class="ws-wrap">
+      <div class="ws-frame">
+        <div class="ws-side">
+          <div class="ws-back">← 返回</div>
+          <div class="ws-vault-name">cc-haha</div>
+          <div class="ws-vault-path">D:\side_project\cc-haha</div>
+          <div class="ws-nav-row">🚏 Goals <span class="ws-count">3</span></div>
+          <div class="ws-nav-row">📂 Wiki <span class="ws-count">5</span></div>
+          <div class="ws-nav-row active">🎓 Quiz <span class="ws-count">1</span></div>
+        </div>
+
+        <div class="ws-main wizard-frame">
+
+          <div class="wizard-head">
+            <a class="btn btn-link" href="#">← 回 history</a>
+            <span class="title" style="font-size:14px; color:var(--fg-secondary);">Quiz <span class="mono">專案目的</span> · result</span>
+          </div>
+
+          <div class="summary-mock">
+            <div class="summary-hero fail">✕</div>
+            <div class="summary-title">沒通過 <span class="dim">(40%)</span></div>
+            <div class="summary-sub">正確率 40% · 未達 69% 門檻</div>
+
+            <div style="display:flex; gap:10px; justify-content:center; margin-top:28px;">
+              <button class="btn btn-primary">↻ 重做此份</button>
+              <button class="btn">看錯題</button>
+            </div>
+
+            <div style="margin-top:22px; font-size:12px; color:var(--fg-tertiary);">
+              wrong: Q2 · Q3 · Q5
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo">
+    <div class="demo-caption">completion · pass</div>
+
+    <div class="ws-wrap">
+      <div class="ws-frame">
+        <div class="ws-side">
+          <div class="ws-back">← 返回</div>
+          <div class="ws-vault-name">cc-haha</div>
+          <div class="ws-vault-path">D:\side_project\cc-haha</div>
+          <div class="ws-nav-row">🚏 Goals <span class="ws-count">3</span></div>
+          <div class="ws-nav-row">📂 Wiki <span class="ws-count">5</span></div>
+          <div class="ws-nav-row active">🎓 Quiz <span class="ws-count">1</span></div>
+        </div>
+
+        <div class="ws-main wizard-frame">
+
+          <div class="wizard-head">
+            <a class="btn btn-link" href="#">← 回 history</a>
+            <span class="title" style="font-size:14px; color:var(--fg-secondary);">Quiz <span class="mono">桌面工作台</span> · result</span>
+          </div>
+
+          <div class="summary-mock">
+            <div class="summary-hero pass">✓</div>
+            <div class="summary-title">通過了 <span class="dim">(80%)</span></div>
+            <div class="summary-sub">正確率 80% · 超過 69% 門檻</div>
+
+            <div style="display:flex; gap:10px; justify-content:center; margin-top:28px;">
+              <button class="btn btn-primary">↻ 重做此份</button>
+              <button class="btn">看過程</button>
+            </div>
+
+            <div style="margin-top:22px; font-size:12px; color:var(--fg-tertiary);">
+              wrong: Q4
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="list">
+    <li>
+      <strong>Q8 全解</strong>：fail 用 <span class="mono">XCircle</span> red、pass 用
+      <span class="mono">CheckCircle2</span> green、2 個 button（amber primary 重做 + secondary 看錯題/看過程）、
+      「回 history」降成左上 back-link。
+    </li>
+    <li>
+      <strong>Pass 的 secondary 是「看過程」</strong>（quiz generation log）、fail 是「看錯題」（reviewing 過題目）—
+      語意不同、不要強求對稱。
+    </li>
+    <li>
+      <strong>wrong list 一行 mono 列在下方</strong>（Q2 · Q3 · Q5）— 給 user 快速 audit；不是 actionable，只是
+      ambient 訊息。Pass 時若 100% 就不顯示這行。
+    </li>
+  </ul>
+
+  <h3>3.7 · ⚠ 對齊點</h3>
+  <div class="alignment">
+    <span class="lbl">align</span>
+    Step 1 範例 pill 用「vault 既有 wiki 標題」這個 idea — 需要你們確認 wiki page metadata（標題、
+    optional summary）能在 Quiz tab init 時就拿到（不用 fetch full page content）。如果要 fetch
+    才有 title，Step 1 載入會慢、就退回 hard-coded 3-5 個範例（從 5-bucket taxonomy 各挑一）。
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- §04 Wiki page reader                        -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" id="s04" />
+  <h2 style="margin-top:36px;"><span class="num">04</span>Wiki page reader · 正式 spec</h2>
+
+  <div class="section-intro">
+    <div class="tldr">scope</div>
+    <p style="margin-top:4px;">
+      三欄 layout · sidebar (200px) + wiki tree (220px) + reader pane (彈性)。
+      頁面 = title + metadata bar（provenance only）+ Milkdown body + actions footer + edit hint。
+      Wikilinks 走 plain underline（非 citation）、citation block 才 dashed-amber-mono。
+    </p>
+  </div>
+
+  <h3>4.1 · 完整 mock</h3>
+
+  <div class="demo">
+    <div class="demo-caption">wiki page reader · 完整頁</div>
+
+    <div class="wiki-frame">
+
+      <div class="wiki-tree">
+        <span class="section-label" style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--fg-tertiary); margin:0 0 8px;">Modules</span>
+        <div class="tree-row active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          桌面工作台
+        </div>
+        <div class="tree-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          IM 適配器系統
+        </div>
+        <div class="tree-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          會話骨幹
+        </div>
+
+        <span class="section-label" style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--fg-tertiary); margin:18px 0 8px;">Processes</span>
+        <div class="tree-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+          對話傳遞流程
+        </div>
+
+        <span class="section-label" style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--fg-tertiary); margin:18px 0 8px;">Synthesis</span>
+        <div class="tree-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71"/></svg>
+          專案目的總覽
+        </div>
+
+        <div style="margin-top:auto; padding-top:18px;">
+          <div class="tree-row" style="color:var(--fg-tertiary); font-size:12px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            旅行日誌
+          </div>
+        </div>
+      </div>
+
+      <div class="wiki-reader">
+        <h1 class="wiki-title">桌面工作台</h1>
+        <div class="wiki-meta">
+          Last updated by <a href="#">完整研究專案目的</a> · 12h ago · 4 sources
+        </div>
+
+        <div class="wiki-body">
+          <p>桌面工作台是專案面向使用者的主模組。它不單純把 CLI 輸出包進一個 WebView，而是提供多分頁、多會話、側邊欄、設定、行動版 H5 入口、通知與更新檢查等完整操作殼層，讓 Claude Code 從一次性命令列操作變成長時間維持的開發工作區。</p>
+
+          <h2>模組責任</h2>
+          <p>這個模組負責三件事：</p>
+          <ul>
+            <li>啟動與恢復工作區狀態，例如設定、分頁、目前活躍會話。</li>
+            <li>提供可視化操作面，例如側邊欄、分頁列、內容路由、行動版抽屜。</li>
+            <li>透過 Tauri 原生層與 sidecar，接上真正的 server / CLI / adapters 執行面。</li>
+          </ul>
+
+          <h2>與其他模組的邊界</h2>
+          <p>
+            桌面工作台不直接執行 agent 推理，也不直接理解 IM 平台協議。它把會話與串流交給
+            <a class="plain-wikilink" href="#">session-backplane</a>，把外部聊天平台交給
+            <a class="plain-wikilink" href="#">im-adapter-system</a>。
+            這個邊界很重要，因為它讓 UI 可以繼續演進，例如增加 H5 行動端模式、通知導頁與設定頁，而不用把 bot SDK 或 CLI 細節塞進 React 元件樹。
+          </p>
+
+          <h2>核心程式</h2>
+<pre><span class="tk-com">// from desktop/src/components/layout/AppShell.tsx</span>
+<span class="tk-key">return</span> (
+  &lt;<span class="tk-key">div</span> className=<span class="tk-str">"app-shell flex overflow-hidden"</span>&gt;
+    &lt;<span class="tk-key">Sidebar</span> /&gt;
+    &lt;<span class="tk-key">ContentRouter</span> /&gt;
+    &lt;<span class="tk-key">ToastContainer</span> /&gt;
+  &lt;/<span class="tk-key">div</span>&gt;
+)</pre>
+
+          <p>這段結構顯示桌面端自己就是一個完整的工作台 shell，而不是只有單一聊天視圖。</p>
+        </div>
+
+        <div class="wiki-actions">
+          <button class="btn btn-primary">Quiz me on this</button>
+          <button class="btn">在 Obsidian 開啟</button>
+        </div>
+
+        <p class="wiki-edit-hint">
+          想改這頁？跑一個 <a href="#">goal</a> 跟 codebus 說該怎麼改 →
+        </p>
+      </div>
+
+    </div>
+  </div>
+
+  <h3>4.2 · Metadata bar 規格</h3>
+
+  <ul class="list">
+    <li><strong>位置</strong>：title 下方、body 上方。一行不換行（必要時 ellipsis）。</li>
+    <li><strong>字體</strong>：mono 12px、<span class="mono">fg-tertiary</span>。底線 1px solid <span class="mono">--border</span>，下方 14px gap。</li>
+    <li>
+      <strong>內容固定為三段</strong>：
+      <span class="mono">Last updated by &lt;goal&gt;</span> ·
+      <span class="mono">&lt;time-ago&gt;</span> ·
+      <span class="mono">&lt;N&gt; sources</span>
+    </li>
+    <li>
+      <strong>Goal name 可點 → 跳該 goal 的 detail view</strong>（hover 加 amber dotted underline）。
+      這是 codebus 最核心的「page ← goal」反向關係。
+    </li>
+    <li>
+      <strong>sources count = body 內 wikilink 數量</strong>（不含 goal name 那個）。&lt; 1 時整段不顯示。
+    </li>
+    <li>
+      <strong>不加 tags / word count / view count / authors。</strong>
+      provenance only — 多加只會稀釋這條訊息的價值。
+    </li>
+  </ul>
+
+  <h3>4.3 · Wikilink 樣式（再 lock）</h3>
+
+  <p>
+    從 walkthrough-decisions § Q7 延續、這裡列出完整 CSS：
+  </p>
+
+  <div class="demo">
+    <div class="demo-caption">兩種 wikilink · 同一 page 不同語境</div>
+<pre class="mono" style="font-size:12px; color:var(--fg); margin:0; line-height:1.6;">
+/* 普通 wikilink：wiki body 內連結到別頁。Navigation 屬性。 */
+.wiki-body a.plain-wikilink {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
+}
+.wiki-body a.plain-wikilink:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
+/* Citation wikilink：03b quiz citation block 內的引用。Provenance 屬性。 */
+.citation-block a.cite-link {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+}</pre>
+  </div>
+
+  <h3>4.4 · 「想改這頁？」hint</h3>
+
+  <p>
+    Page footer 一行 hint、<span class="mono">fg-tertiary</span> 12.5px、上方 24px gap。
+    「跑一個 goal」是個 link、點下去 = 開 NewGoalModal、自動 prefill：
+  </p>
+
+  <div class="demo">
+    <div class="demo-caption">NewGoalModal 從 wiki page hint 開啟時的 prefill</div>
+<pre class="mono" style="font-size:12px; color:var(--fg); margin:0; line-height:1.6;">
+goal: <span style="color:var(--accent);">"修改 wiki/modules/desktop-workspace.md — &lt;描述你想改的地方&gt;"</span>
+</pre>
+    <p class="footnote">
+      只 prefill 到「描述你想改的地方」前面 — 給 user 一個 starter、不要連改什麼都幫他寫。
+      Hint 詞「跑一個 goal」是品牌教學 — user 學到 goal 也能用來改 wiki，不只是讀。
+    </p>
+  </div>
+
+  <h3>4.5 · Wiki tree footer slot · 旅行日誌</h3>
+
+  <p>
+    Wiki tree 底部一個獨立區（不在任何 bucket 裡），列「旅行日誌」當 system page entry。
+    <span class="mono">fg-tertiary</span> 字色、跟 5-bucket 區分；上方 18px gap + 一條 hairline 分隔。
+    現有 「OTHER」 bucket 解散（WK2 已決議）— 「Wiki 索引」是 wiki/index.md，移到 tree
+    最上方當 vault 入口；「旅行日誌」是 audit log、移到 tree 底部當 system slot。
+  </p>
+
+  <h3>4.6 · Empty page case</h3>
+
+  <p>
+    這個 vault 有 wiki 但 user 還沒選任何 page。WikiTab default render：tree 左邊有內容、右邊
+    reader pane 顯示一個簡單的 hint card：
+  </p>
+
+  <div class="demo">
+    <div class="demo-caption">wiki tree 有頁但沒選 · reader pane empty</div>
+
+    <div class="wiki-frame" style="min-height:280px;">
+      <div class="wiki-tree" style="font-size:13px; padding:16px 12px;">
+        <span class="section-label" style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--fg-tertiary); margin:0 0 8px;">Modules</span>
+        <div class="tree-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          桌面工作台
+        </div>
+        <div class="tree-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          IM 適配器系統
+        </div>
+      </div>
+      <div class="wiki-reader" style="display:flex; align-items:center; justify-content:center; text-align:center; padding:28px;">
+        <div>
+          <div style="font-size:36px; color:var(--fg-quaternary); margin-bottom:12px;">📂</div>
+          <div style="font-size:16px; color:var(--fg-secondary);">選一頁開始讀。</div>
+          <div style="font-size:12px; color:var(--fg-tertiary); margin-top:4px;">或點下方旅行日誌看 codebus 跑過什麼。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>4.7 · ⚠ 對齊點</h3>
+  <div class="alignment">
+    <span class="lbl">align</span>
+    Wiki frontmatter 是否有 <span class="mono">last_updated_by</span>（authoring goal ID）+
+    <span class="mono">last_updated_at</span>？metadata bar 完全依賴這層。
+    如果只有 file mtime（沒 goal 關聯），「Last updated by goal X」就無法顯示、退化成
+    「Last updated · 12h ago · 4 sources」。可接受但 lose 反向關係的價值。場 #3 順便對齊。
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- §05 ChatWidget                              -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" id="s05" />
+  <h2 style="margin-top:36px;"><span class="num">05</span>ChatWidget · 3 modes</h2>
+
+  <div class="section-intro">
+    <div class="tldr">scope</div>
+    <p style="margin-top:4px;">
+      ChatWidget 三個 mode：<strong>collapsed bubble</strong>（idle）·
+      <strong>floating panel</strong>（inline 沿襲、不擋畫面）· <strong>centered modal</strong>（spotlight 體驗 · 取代 cut 掉的 05 Cmd+K Overlay）。
+      💬 emoji 保留、加 ODI-4 amber pulse dot 當 ambient goal-running 訊號。⌘K 預設開 modal mode。
+    </p>
+  </div>
+
+  <h3>5.1 · Mode 1 · Collapsed bubble</h3>
+
+  <div class="demo">
+    <div class="demo-caption">bubble · idle + goal running 兩態</div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+
+      <div class="cw-canvas">
+        <div class="cw-mock-bg"></div>
+        <div class="frame-cap">bubble · idle</div>
+        <div class="cw-bubble">💬</div>
+      </div>
+
+      <div class="cw-canvas">
+        <div class="cw-mock-bg"></div>
+        <div class="frame-cap">bubble · goal running (ambient)</div>
+        <div class="cw-bubble">
+          💬
+          <span class="ambient-dot"></span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <ul class="list">
+    <li>
+      <strong>位置永遠 fixed bottom-right · 16px / 16px</strong>。不允許 docking 任何
+      sibling button（C6 contract）。
+    </li>
+    <li>
+      <strong>大小 44×44px circle · </strong>背景 <span class="mono">--bg-raised</span> ·
+      border 1px <span class="mono">--border-strong</span> · emoji 20px。
+    </li>
+    <li>
+      <strong>Ambient pulse dot</strong> — 任一 goal 在 Running state 時顯示。Dot 7×7、amber、
+      <span class="mono">@keyframes pulse</span>（4px → 6px ring）1.4s loop。
+      Goal 結束 fade-out 300ms。
+    </li>
+    <li>
+      <strong>Hover</strong> → 邊框換 <span class="mono">--accent-ring</span> · 微 scale(1.04)。
+      <strong>Click</strong> → 開 floating mode（5.2）。
+    </li>
+  </ul>
+
+  <h3>5.2 · Mode 2 · Floating panel</h3>
+
+  <div class="demo">
+    <div class="demo-caption">floating · 360×460 · bottom-right anchored</div>
+
+    <div class="cw-canvas">
+      <div class="cw-mock-bg"></div>
+      <div class="frame-cap">floating · inline</div>
+
+      <div class="cw-floating">
+        <div class="cw-head">
+          <span style="font-size:16px;">💬</span>
+          <span class="cw-title">Ask about this vault</span>
+          <span class="cw-controls">
+            <span title="open in modal">⤢</span>
+            <span title="minimize">▿</span>
+          </span>
+        </div>
+        <div class="cw-body">
+          <div class="cw-msg bot">
+            這個 vault 有 5 個 wiki page。問我關於這個 codebase 的任何事，我會引用相關 wiki page。
+          </div>
+          <div class="cw-msg user">
+            session-backplane 為什麼跟 desktop-workspace 分開？
+          </div>
+          <div class="cw-msg bot">
+            <a class="cite-link" href="#">桌面工作台</a> 不直接執行 agent 推理也不理解 IM 協議；session 處理交給 <a class="cite-link" href="#">會話骨幹</a>。這層邊界讓 UI 可以演進、不用把 SDK 細節塞進 React。
+            <div class="cw-promote">↗ promote to goal</div>
+          </div>
+        </div>
+        <div class="cw-input">
+          <input placeholder="再問一個…" />
+          <span class="kbd">⏎</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="list">
+    <li>
+      <strong>固定大小 360×460px</strong>。不 resize（拿掉 v1 的 resize handle）。理由：
+      resize 在 Tauri WebView2 + drag region 干擾下難做、且實機觀察 user 幾乎不調。
+      固定大小換來簡潔。
+    </li>
+    <li>
+      <strong>Header 三件事</strong>：emoji + title「Ask about this vault」+ 右側兩個 control
+      （<span class="mono">⤢</span> 開 modal / <span class="mono">▿</span> minimize 回 bubble）。
+    </li>
+    <li>
+      <strong>Citation 沿用 Quiz 同樣 dashed-amber-mono 樣式</strong>。Internal navigation
+      不會出現在 ChatWidget（chat 內 wiki page reference 全是 citation 性質）。
+    </li>
+    <li>
+      <strong>「↗ promote to goal」chip</strong> 出現在 bot reply 後面、dashed border、hover
+      時 amber tint。Click → 開 NewGoalModal + prefill 該對話的 user message 當 goal。
+      這是 ChatWidget 對 codebus 的核心 unique value。
+    </li>
+    <li>
+      <strong>Esc / 點外面 不關閉</strong>。Floating 是「黏著」的、要明確 minimize 才收。
+      跟 modal mode 行為不同（5.3）。
+    </li>
+  </ul>
+
+  <h3>5.3 · Mode 3 · Centered modal</h3>
+
+  <div class="demo">
+    <div class="demo-caption">centered modal · 640 wide · ⌘K 觸發</div>
+
+    <div class="cw-canvas">
+      <div class="cw-mock-bg"></div>
+      <div class="frame-cap">modal · spotlight</div>
+      <div class="cw-modal-backdrop"></div>
+      <div class="cw-modal">
+        <div class="cw-head">
+          <span style="font-size:16px;">💬</span>
+          <span class="cw-title">Ask about this vault</span>
+          <span class="cw-controls">
+            <span title="dock to bottom-right">⤡</span>
+            <span title="close">✕</span>
+          </span>
+        </div>
+        <div class="cw-body" style="min-height:280px;">
+          <div class="cw-msg bot">
+            問我關於這個 codebase 的任何事 — 我會引用相關 wiki page。
+          </div>
+        </div>
+        <div class="cw-input">
+          <input placeholder="例如：auth 怎麼運作？" />
+          <span class="kbd">⏎</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="list">
+    <li>
+      <strong>觸發</strong>：<span class="mono">⌘K</span>（macOS）/ <span class="mono">Ctrl+K</span>
+      （Windows）。不管當下 ChatWidget 是 bubble 還是 floating mode，⌘K 都 jumps to modal。
+      Modal 關掉後回到觸發前的 state。
+    </li>
+    <li>
+      <strong>大小 640 wide · max-height 480</strong>。Top: 60px from viewport top（不要正中、視覺重心偏上更舒服）。
+    </li>
+    <li>
+      <strong>Esc / 點 backdrop 關閉</strong>。Modal 是「即時對話」的、預期短暫使用後關掉。
+    </li>
+    <li>
+      <strong>Backdrop blur 2px + 55% black</strong>（同 LoadingOverlay backdrop pattern）。
+      強調「進入專注模式」。
+    </li>
+    <li>
+      <strong>右上 dock icon</strong>（<span class="mono">⤡</span>）→ 切回 floating mode，當前對話延續。
+      這是「我想邊看 page 邊聊」的 escape。
+    </li>
+    <li>
+      <strong>對話內容跟 floating mode 共享同一 chat session</strong> — 兩個 mode 是同一個 widget
+      的不同呈現、不是兩段對話。從 bubble 開 floating 看到 history、從 ⌘K 開 modal 也看到同樣 history。
+    </li>
+  </ul>
+
+  <h3>5.4 · Mode 切換矩陣</h3>
+
+  <table>
+    <thead>
+      <tr><th></th><th>觸發 / 動作</th><th>結果 mode</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>bubble idle</td>
+        <td>click bubble</td>
+        <td>floating</td>
+      </tr>
+      <tr>
+        <td>bubble idle</td>
+        <td><span class="mono">⌘K</span></td>
+        <td>modal</td>
+      </tr>
+      <tr>
+        <td>floating</td>
+        <td>▿ minimize button</td>
+        <td>bubble idle</td>
+      </tr>
+      <tr>
+        <td>floating</td>
+        <td>⤢ expand button</td>
+        <td>modal</td>
+      </tr>
+      <tr>
+        <td>floating</td>
+        <td><span class="mono">⌘K</span></td>
+        <td>modal · 關 modal 後回 floating</td>
+      </tr>
+      <tr>
+        <td>modal</td>
+        <td>Esc / click backdrop</td>
+        <td>回到觸發前 mode（bubble 或 floating）</td>
+      </tr>
+      <tr>
+        <td>modal</td>
+        <td>⤡ dock button</td>
+        <td>floating</td>
+      </tr>
+      <tr>
+        <td>modal</td>
+        <td>✕ close</td>
+        <td>bubble idle</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>5.5 · 細節規範</h3>
+
+  <ul class="list">
+    <li>
+      <strong>持久化</strong>：chat session 跟著 vault 走（per-vault chat history、不跨 vault）。
+      Mode 偏好不持久化 — 每次 vault open 都從 bubble idle 開始；⌘K 是 mode 切換的 fast-path。
+    </li>
+    <li>
+      <strong>Loading state</strong>：bot 回應途中 user message 下方加一個小 spinner row
+      「<span class="spinner" style="vertical-align:-2px;"></span> 想中…」（不另開 message bubble、
+      不佔太多視覺空間）。
+    </li>
+    <li>
+      <strong>Streaming response</strong>：bot message 邊收邊 render、結尾 blinking amber caret
+      （沿用 02 stream tail caret）。
+    </li>
+    <li>
+      <strong>Error state</strong>：bot reply 渲染為 amber-tint error message（不用 red）—
+      ChatWidget 錯誤幾乎都是 retryable（network drop、token limit、context too long），跟
+      Interrupted goal 同色語。
+    </li>
+    <li>
+      <strong>Promote-to-goal preview</strong>：點「↗ promote to goal」chip 不直接送出 goal，
+      而是開 NewGoalModal、prefill「描述你想搞懂的事」欄位為當前 user message。User 可以
+      改、確認、再送。Chat 對話本身 stays in ChatWidget（不消失）。
+    </li>
+    <li>
+      <strong>i18n Cat C 全解</strong>：<span class="mono">aria-label</span> 全走 i18n key
+      （chat.open / chat.minimize / chat.expand-to-modal / chat.dock / chat.close）。
+    </li>
+  </ul>
+
+  <h3>5.6 · ⚠ 對齊點</h3>
+  <div class="alignment">
+    <span class="lbl">align</span>
+    Modal mode 對 ChatTranscript context 來源的處理 — modal 是 spotlight 體驗、user 希望「快速問完關掉」，
+    而 floating 是「邊用 vault 邊問」。兩個 mode 共用 chat session 但行為預期不同。
+    具體議題：modal 開啟時要不要 reset prompt context（強調這次是 fresh question）、
+    還是延續 floating 對話脈絡？我傾向延續、modal 只是換呈現，不換 session。但 spotlight 體驗有「乾淨輸入框」期待 — 場 #3 或 async 對齊。
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- CLOSE -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" />
+  <h2 style="margin-top:36px;">收束</h2>
+
+  <p>
+    五個 design 灰區畫面正式化完成。每段都列了 <span class="mono">⚠ 對齊點</span>—
+    場 #3 那 45 分鐘剛好可以把 §03 §04 §05 三個 align 點一起 cover（都是 backend metadata
+    層的小問題）。
+  </p>
+
+  <p>
+    跟前兩份 doc 一起組成 v1.1 完整 handoff：
+  </p>
+
+  <table>
+    <thead><tr><th>doc</th><th>內容</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="mono">design-reply.html</span></td>
+        <td>對 FEEDBACK.md 的 10 Open Qs 回覆 + cross-cutting 採納 + pushback</td>
+      </tr>
+      <tr>
+        <td><span class="mono">walkthrough-decisions.html</span></td>
+        <td>三場 walkthrough 取代：CJK section labels · 02 activity stream · Quiz scope-confirm</td>
+      </tr>
+      <tr>
+        <td><span class="mono">v1.1-mocks.html</span> <span class="dimmer">(this)</span></td>
+        <td>LoadingOverlay · 02c Interrupted · Quiz wizard 4 步 · Wiki page reader · ChatWidget 3 modes</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    三份合起來 = codebus v1 → v1.1 的完整 design delta。接下來節奏可以走：
+  </p>
+
+  <ol class="list">
+    <li>工程方 absorb v1.1-mocks 進 AUDIT.md（跟前兩份一樣的吸收 pattern）</li>
+    <li>場 #3 / async 對齊剩下的 ⚠ 點（多半 5-15 分鐘可解）</li>
+    <li>實作開始，中間踩到設計邊界 ping 我</li>
+    <li>實作完成後我做 v1.1 audit、回 v1.2 feedback</li>
+  </ol>
+
+  <p style="margin-top:40px;" class="dim">
+    — design<br />
+    <span class="dimmer mono" style="font-size:12px;">2026-05-26 · v1.1 mocks</span>
+  </p>
+
+</div>
+</body>
+</html>
