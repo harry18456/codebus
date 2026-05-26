@@ -535,6 +535,86 @@ mod tests {
         assert_eq!(resolved.model.as_deref(), Some("gpt-5.5"));
     }
 
+    /// Spec ADDED requirement *Settings Language Override*: `app.locale_override`
+    /// must persist through save→load with sibling `app.quiz.*` keys intact.
+    #[test]
+    fn save_persists_locale_override_with_sibling_app_quiz_keys() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        let payload = json!({
+            "app": { "quiz": { "pass_threshold": 70 }, "locale_override": "en" },
+        });
+
+        save_global_config_at(&path, &payload).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("locale_override"),
+            "locale_override must be written, got:\n{on_disk}"
+        );
+
+        let reloaded = load_global_config_at(&path).unwrap();
+        assert_eq!(reloaded["app"]["locale_override"], json!("en"));
+        assert_eq!(
+            reloaded["app"]["quiz"]["pass_threshold"],
+            json!(70),
+            "app.quiz.pass_threshold must survive locale_override write"
+        );
+    }
+
+    /// Spec scenario "Auto option follows the system locale": switching back
+    /// to Auto persists as null (not absent garbage) so a downstream reader
+    /// observes the explicit "auto" choice.
+    #[test]
+    fn save_writes_null_when_locale_override_unset() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        let payload = json!({
+            "app": { "quiz": { "pass_threshold": 80 }, "locale_override": serde_json::Value::Null },
+        });
+        save_global_config_at(&path, &payload).unwrap();
+        let reloaded = load_global_config_at(&path).unwrap();
+        assert!(reloaded["app"]["locale_override"].is_null());
+    }
+
+    /// Spec scenario "Legacy config without locale_override round-trips
+    /// safely": a config written by a pre-change version (no key) loads
+    /// without error and the field comes through as null.
+    #[test]
+    fn load_legacy_config_without_locale_override_is_null() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        std::fs::write(
+            &path,
+            "app:\n  quiz:\n    pass_threshold: 80\n    default_length: 5\n",
+        )
+        .unwrap();
+        let loaded = load_global_config_at(&path).expect("legacy must load");
+        // Schema parses with locale_override defaulted to None → re-saved
+        // payload reads back as null on the next round-trip. On this initial
+        // load the raw value is absent (the file never wrote it).
+        assert!(loaded["app"]["locale_override"].is_null() || loaded["app"].get("locale_override").is_none());
+        assert_eq!(loaded["app"]["quiz"]["pass_threshold"], json!(80));
+    }
+
+    /// Invalid locale_override values surface as ConfigParse, never silently
+    /// coerced. Backs spec failure mode "Zod parse 失敗 → 整個 settings load
+    /// 失敗".
+    #[test]
+    fn load_rejects_invalid_locale_override_string() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        std::fs::write(
+            &path,
+            "app:\n  quiz:\n    pass_threshold: 80\n  locale_override: fr\n",
+        )
+        .unwrap();
+        let err = load_global_config_at(&path).expect_err("`fr` must be rejected");
+        assert!(
+            matches!(err, AppError::ConfigParse { .. }),
+            "expected ConfigParse, got {err:?}"
+        );
+    }
+
     #[test]
     fn save_rejects_codex_with_missing_verb_model() {
         let tmp = TempDir::new().unwrap();

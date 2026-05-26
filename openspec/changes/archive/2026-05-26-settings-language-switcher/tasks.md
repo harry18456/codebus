@@ -1,0 +1,37 @@
+<!--
+Each task description states:
+- the behavior or contract being delivered (what is observably true when the
+  task is complete), and
+- the verification target that proves completion (test, CLI invocation, or
+  manual CDP smoke assertion).
+-->
+
+## 1. Schema + i18n bundle
+
+- [x] 1.1 [P] 新增 4 條 i18n keys (`settings.language.label` / `settings.language.auto` / `settings.language.zh` / `settings.language.en`)，在 `codebus-app/src/i18n/messages.ts` 的 `en` 與 `zh` map 各加一份；其中 `settings.language.zh` 與 `settings.language.en` 在兩個 locale 必須字串相同（"中文" / "English"）對應 spec MODIFIED requirement *Global Settings Modal Field Set* 的「Identifier-style language labels are not translated」scenario。**Verify**: `pnpm tsc` 綠；新增一條 `codebus-app/src/i18n/settings.test.ts` 斷言 `messages.en["settings.language.zh"] === "中文" && messages.zh["settings.language.zh"] === "中文"`、`English` 同理。
+- [x] 1.2 [P] 順手吃 `Install {provider.displayName} first; then reopen Settings.` install hint：新增 i18n key `settings.providerCli.installHint` 帶 `{name}` placeholder，en/zh bundle 都填。對應 design 段「順手吃 SettingsModal:258 install hint」。**Verify**: `codebus-app/src/i18n/settings.test.ts` 斷言 `useT` 解 `settings.providerCli.installHint` 帶 `{ name: "Claude Code" }` 在 en 回 `"Install Claude Code first; then reopen Settings."`、在 zh 回對應中文版本。
+- [x] 1.3 在 `codebus-app/src/lib/ipc.ts` 的 `GlobalConfig`（或對應 Zod schema）加 `app.locale_override: "zh" | "en" | null` 欄位（`.nullable().optional()`），確保舊 config（無此 key）仍能載入。對應 spec ADDED requirement *Settings Language Override*、design 段「Schema 位置: `app.locale_override` vs. 新 top-level」。**Verify**: 新增 `codebus-app/src/lib/ipc.locale_override.test.ts` 三條：(a) parse `{}` 不 throw 且 `app?.locale_override` 為 `undefined`；(b) parse `{ app: { locale_override: "en" } }` 通過；(c) parse `{ app: { locale_override: "fr" } }` throw。
+- [x] 1.4 在 `codebus-app/src-tauri/src/ipc/config.rs`（或對應 Tauri side IPC 序列化層）確認 `app.locale_override` 透過 `save_global_config` 寫入 `~/.codebus/config.yaml` 後重啟可被 `load_global_config` 讀回原值，且 `app` namespace 其他 sibling key（例如 `app.quiz.pass_threshold`）不被覆蓋。對應 spec MODIFIED requirement *Global Settings Modal Field Set* 的 「`app` namespace SHALL likewise preserve unknown sibling subkeys」段。**Verify**: 新增 round-trip test（Rust side 若有對應 test crate）或 frontend `ipc.locale_override.test.ts` 內 mock IPC 寫入 `{ app: { locale_override: "en", quiz: { pass_threshold: 70 } } }` 後讀回斷言兩 key 都在；若 Rust crate 已有 round-trip harness（參照 `quiz` 的既有 round-trip test），加一條 `app.locale_override` round-trip 斷言。
+
+## 2. Settings store + useLocale 接線
+
+- [x] 2.1 在 `codebus-app/src/store/settings.ts` 的 `useSettingsStore` 暴露 `app.locale_override` 的 reactive selector（例如 `useLocaleOverride()` helper 或維持既有 `useSettingsStore(state => state.config.app?.locale_override ?? null)` 直接使用），對應 design 段「Reactive: zustand subscribe vs. one-time read」。**Verify**: 新增 `codebus-app/src/store/settings.locale_override.test.ts` 斷言：load config 含 `app.locale_override: "en"` 後 `useSettingsStore.getState().config.app?.locale_override === "en"`、`update({ app: { locale_override: "zh" } })` 後 selector 回 `"zh"` 且 dirty=true。
+- [x] 2.2 重寫 `codebus-app/src/hooks/useLocale.ts` 套用 precedence「hook arg > store `locale_override` > `navigator.language`」，移除 `// v1 has no language switcher` 註解，保留 `override` 參數給測試 mock 用。對應 spec ADDED requirement *Settings Language Override*、design 段「Precedence: hook arg > store override > navigator.language」。**Verify**: 新增 `codebus-app/src/hooks/useLocale.test.tsx` 覆蓋 spec ADDED requirement 的 Example 表全部 6 列（hook arg vs store vs navigator 各種組合），含 navigator undefined 邊界。
+- [x] 2.3 確認 `LocalizedError` path（`codebus-app/src/i18n/errors.ts` + 對應 Toast 顯示元件）在 store override 變動時自動跟著切；對應 design 段「LocalizedError 路徑 — 不需改」。**Verify**: 新增（或擴充既有）`codebus-app/src/i18n/errors.test.tsx` integration 測試：mount 一個顯示 LocalizedError 的小 component、改 store `locale_override` 從 `null`(系統 zh)→`"en"`、斷言渲染輸出從中文錯誤訊息切到英文錯誤訊息，且未動 `errors.ts` source code。
+
+## 3. Settings modal Language dropdown
+
+- [x] 3.1 在 `codebus-app/src/components/settings/SettingsModal.tsx`（必要時抽出 `LanguageSection.tsx`）新增 Language dropdown，位置在 Endpoint Section 下方、PII scanner 上方，三個選項對應 `null` / `"zh"` / `"en"`；視覺套用 SettingsModal 內既有 dropdown 樣式（例如 PII scanner 的 dropdown component）。對應 spec MODIFIED requirement *Global Settings Modal Field Set* 第 12 項與「Language dropdown is positioned and labeled correctly」scenario。**Verify**: 新增 `codebus-app/src/components/settings/LanguageSection.test.tsx`（或在 `SettingsModal.test.tsx` 內加 case）斷言：(a) modal 內 Language dropdown 存在，(b) 三個 option 文字為 `"Auto"` / `"中文"` / `"English"`，(c) DOM 順序在 Endpoint Section 之後、PII scanner 之前。
+- [x] 3.2 dropdown 變更時透過 settings store `update({ app: { locale_override: <new> } })` 寫入並 mark dirty；按 Save 後透過既有 `save()` flow 持久化進 `~/.codebus/config.yaml`。對應 spec ADDED requirement *Settings Language Override* 的「Locale override survives application restart」scenario。**Verify**: `LanguageSection.test.tsx` 加 case：模擬 user 選 "English"、斷言 store dirty 為 true 且 `config.app.locale_override === "en"`；模擬選 "Auto" 斷言寫入 `null`。
+- [x] 3.3 wire `settings.providerCli.installHint` 進 `SettingsModal.tsx` 第 ~258 行的 install hint 顯示處（取代 hard-code 字串 `"Install {provider.displayName} first; then reopen Settings."`），對應 design 段「順手吃 SettingsModal:258 install hint」。**Verify**: `SettingsModal.test.tsx` 加 case：mount modal、provider CLI status 為 `not_installed`、active locale 切 en 與 zh 各斷言 install hint 文字符合對應 bundle 值；grep `codebus-app/src/components/settings/SettingsModal.tsx` 確認該 hard-code 字串已不再出現。
+
+## 4. spec 翻轉驗證 + Forbidden Behaviors 對齊
+
+- [x] 4.1 確認 `codebus-app/src/components/settings/SettingsModal.tsx` 對應 spec MODIFIED requirement *Forbidden Behaviors in v1* 的「Settings modal has no theme controls」scenario：modal 仍無 theme toggle，但 Language dropdown 已成為合法元素。對應 spec MODIFIED requirement *Forbidden Behaviors in v1*。**Verify**: 既有 `SettingsModal.test.tsx` 內所有「無 theme」相關 assertion 仍通過；若既有測試斷言「無 language switcher」必須改寫或移除，並在 `SettingsModal.test.tsx` 對應位置加一條「Language dropdown is present」反面斷言以避免回退。
+- [x] 4.2 全 repo grep 確認沒有殘留依賴「v1 forbids language switcher」的測試 / doc / comment（grep `language switcher`、`no language` 等關鍵字）；該等位置若仍存在需更新或移除，對應 spec MODIFIED requirement *Forbidden Behaviors in v1*。**Verify**: 列出 grep 結果並逐一處理，最終 `Grep "language switcher" codebus-app/` 與 `Grep "no language" codebus-app/` 應只在新加的 Language section 相關檔案命中。
+
+## 5. 真實 CDP smoke
+
+- [x] 5.1 `pnpm tsc` 與 `pnpm test` 全綠（含本 change 新增的所有 test 檔）。對應 design Acceptance Criteria 第一、二條。**Verify**: 兩個 command 都退出碼 0，並把終端輸出截圖或貼到 change 目錄底下 `notes.md` 內以供 archive review。
+- [x] 5.2 真實 CDP smoke 跑完整 5 步流程（cdp.mjs 連 9222）：(1) zh 系統開 app → 預設中文；(2) Settings 切 English → modal 內 + Workspace + Lobby 即時切英文；(3) 關 app → 重啟 → 仍英文；(4) Settings 切 Auto → 重啟 → 回中文；(5) 切英文後在 Endpoint base_url 填非法值觸發 backend error，斷言 toast 文字英文。對應 spec ADDED requirement *Settings Language Override* 全部 scenarios（reactive switch / restart persist / auto follows system / backend error follows locale）。**Verify**: 每步用 cdp.mjs 截圖存 `codebus-app/scripts/.lang-switcher-smoke/step-<n>-<desc>.png`，並在 change 目錄 `notes.md` 列出 5 張截圖路徑 + 一句結論。
+- [x] 5.3 直接 cat `~/.codebus/config.yaml` 斷言 `app.locale_override` 欄位：切 English Save 後值為 `"en"`、切 Auto Save 後值為 `null`，且 `app.quiz.*` 等 sibling key 內容未被破壞。對應 spec MODIFIED requirement *Global Settings Modal Field Set* 的 `app` namespace round-trip 段。**Verify**: notes.md 貼兩段 yaml diff（before / after）佐證；如果發現 sibling key 被洗掉，停下回頭排查 IPC merge 邏輯。

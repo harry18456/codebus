@@ -9,3 +9,4 @@ dist-ssr
 # PNG captures are working artifacts; cleaned/renamed versions go to
 # design-handoff/screenshots/ if they need committing.
 scripts/.*.png
+scripts/.*-smoke/

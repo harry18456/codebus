@@ -1,0 +1,72 @@
+agent:
+  active_provider: codex
+  providers:
+    claude:
+      active: azure
+      azure:
+        base_url: https://2026msf13.cognitiveservices.azure.com/anthropic
+        fix:
+          effort: medium
+          model: claude-opus-4-6-2026V2
+        goal:
+          effort: high
+          model: claude-opus-4-6-2026V2
+        keyring_service: codebus-azure
+        query:
+          effort: low
+          model: claude-opus-4-6-2026V2
+        verify:
+          effort: high
+          model: claude-opus-4-6-2026V2
+      system:
+        fix:
+          effort: medium
+          model: sonnet-4-6
+        goal:
+          effort: high
+          model: opus-4-7
+        query:
+          effort: low
+          model: haiku-4-5
+        verify:
+          effort: high
+          model: opus-4-6
+    codex:
+      active: azure
+      azure:
+        api_version: 2025-04-01-preview
+        base_url: https://2026msf13.cognitiveservices.azure.com/openai
+        fix:
+          effort: medium
+          model: gpt-5.4
+        goal:
+          effort: high
+          model: gpt-5.4
+        keyring_service: codebus-codex-azure
+        query:
+          effort: low
+          model: gpt-5.4
+        verify:
+          effort: high
+          model: gpt-5.4
+      system:
+        fix:
+          effort: medium
+          model: gpt-5.4-mini
+        goal:
+          effort: high
+          model: gpt-5.5
+        query:
+          effort: low
+          model: gpt-5.4-mini
+        verify:
+          effort: high
+          model: gpt-5.4
+app:
+  quiz:
+    pass_threshold: 69
+quiz:
+  content_verify: true
+  default_length: 5
+goal:
+  content_verify: true

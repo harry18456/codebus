@@ -46,8 +46,39 @@ export interface GlobalConfig {
       pass_threshold?: number
       default_length?: number
     }
+    /**
+     * User-selected locale override. `"zh"` and `"en"` pin the UI to that
+     * language; `null` (or an absent key, including in legacy configs) means
+     * "auto-detect from `navigator.language`". Validated at the UI write
+     * layer via {@link parseLocaleOverride} — the Rust side passes the value
+     * through unchanged.
+     */
+    locale_override?: "zh" | "en" | null
+    [key: string]: unknown
   }
   [key: string]: unknown
+}
+
+/**
+ * Read and validate `config.app.locale_override`. Returns `null` when the
+ * key is absent or explicitly `null` (auto-detect); returns the locale
+ * string when set to `"zh"` or `"en"`. Throws on any other value — callers
+ * (settings load path, settings modal) MUST surface the error rather than
+ * silently coerce to a fallback.
+ *
+ * Backs spec *Settings Language Override*: the schema accepts exactly three
+ * values, and legacy configs without the key resolve to auto-detect.
+ */
+export function parseLocaleOverride(
+  config: GlobalConfig | null | undefined,
+): "zh" | "en" | null {
+  const raw = (config as { app?: { locale_override?: unknown } } | null | undefined)
+    ?.app?.locale_override
+  if (raw === undefined || raw === null) return null
+  if (raw === "zh" || raw === "en") return raw
+  throw new Error(
+    `Invalid app.locale_override: expected "zh" | "en" | null, got ${JSON.stringify(raw)}`,
+  )
 }
 
 /**

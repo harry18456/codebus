@@ -125,3 +125,65 @@ describe("i18n_settings_endpoint_incompleteness_heading_localized", () => {
     ).toBe("端點設定不完整：")
   })
 })
+
+describe("i18n_settings_language_keys_present_in_both_locales", () => {
+  const KEYS = [
+    "settings.language.label",
+    "settings.language.auto",
+    "settings.language.zh",
+    "settings.language.en",
+  ] as const
+  for (const key of KEYS) {
+    it(`en: ${key}`, () => {
+      expect(messages.en).toHaveProperty(key)
+      expect(typeof (messages.en as Record<string, string>)[key]).toBe("string")
+      expect((messages.en as Record<string, string>)[key].length).toBeGreaterThan(0)
+    })
+    it(`zh: ${key}`, () => {
+      expect(messages.zh).toHaveProperty(key)
+      expect(typeof (messages.zh as Record<string, string>)[key]).toBe("string")
+      expect((messages.zh as Record<string, string>)[key].length).toBeGreaterThan(0)
+    })
+  }
+})
+
+describe("i18n_settings_language_identifier_labels_not_translated", () => {
+  it("settings.language.zh is identical '中文' in both locales", () => {
+    expect((messages.en as Record<string, string>)["settings.language.zh"]).toBe(
+      "中文",
+    )
+    expect((messages.zh as Record<string, string>)["settings.language.zh"]).toBe(
+      "中文",
+    )
+  })
+  it("settings.language.en is identical 'English' in both locales", () => {
+    expect((messages.en as Record<string, string>)["settings.language.en"]).toBe(
+      "English",
+    )
+    expect((messages.zh as Record<string, string>)["settings.language.en"]).toBe(
+      "English",
+    )
+  })
+})
+
+describe("i18n_settings_provider_cli_install_hint_localized_via_useT_template", () => {
+  it("en template substitutes {name}", () => {
+    const tpl = (messages.en as Record<string, string>)[
+      "settings.providerCli.installHint"
+    ]
+    expect(tpl).toBeDefined()
+    expect(tpl.replace(/\{name\}/g, "Claude Code")).toBe(
+      "Install Claude Code first; then reopen Settings.",
+    )
+  })
+  it("zh template substitutes {name}", () => {
+    const tpl = (messages.zh as Record<string, string>)[
+      "settings.providerCli.installHint"
+    ]
+    expect(tpl).toBeDefined()
+    expect(tpl).toContain("{name}")
+    const filled = tpl.replace(/\{name\}/g, "Claude Code")
+    expect(filled).not.toContain("{name}")
+    expect(filled.length).toBeGreaterThan(0)
+  })
+})

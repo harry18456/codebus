@@ -71,10 +71,14 @@ describe("SettingsModal", () => {
     expect(screen.getByText("Quiz pass threshold")).toBeInTheDocument()
     expect(screen.getByText("Default quiz length")).toBeInTheDocument()
 
-    // Forbidden controls (Forbidden Behaviors in v1).
+    // Forbidden controls (Forbidden Behaviors in v1). The v1 forbidden
+    // list previously included a language switcher; it was lifted by the
+    // `settings-language-switcher` change and the dropdown is now an
+    // expected element instead.
     expect(screen.queryByText(/theme/i)).toBeNull()
-    expect(screen.queryByText(/language/i)).toBeNull()
     expect(screen.queryByText(/vault-specific/i)).toBeNull()
+    // Language dropdown MUST be present (regression guard).
+    expect(screen.getByTestId("language-select-trigger")).toBeInTheDocument()
   })
 
   it("renders the runtime PII pattern count, not a hard-coded number", () => {

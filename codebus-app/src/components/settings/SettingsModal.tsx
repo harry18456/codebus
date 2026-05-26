@@ -28,6 +28,8 @@ import {
 import { PROVIDERS, type ProviderId } from "@/lib/providers"
 import { EndpointSection } from "./EndpointSection"
 import { CodexEndpointSection } from "./CodexEndpointSection"
+import { LanguageSection } from "./LanguageSection"
+import type { Locale } from "@/hooks/useLocale"
 
 /**
  * Default value table for the reset-to-default affordance. Pinned to match
@@ -137,7 +139,10 @@ export function SettingsModal({
   }, [open, provider.cliBinaryId])
 
   const safeConfig = (config ?? {}) as {
-    app?: { quiz?: { pass_threshold?: number; default_length?: number } }
+    app?: {
+      quiz?: { pass_threshold?: number; default_length?: number }
+      locale_override?: Locale | null
+    }
     quiz?: { default_length?: number; content_verify?: boolean }
     goal?: { content_verify?: boolean }
     pii?: { scanner?: string; on_hit?: string; patterns_extra?: string[] }
@@ -145,6 +150,7 @@ export function SettingsModal({
     log?: { sink?: string; dir?: string }
     hooks?: { read_image_block?: boolean }
   }
+  const localeOverride: Locale | null = safeConfig.app?.locale_override ?? null
   const passThreshold = safeConfig.app?.quiz?.pass_threshold ?? 80
   // default_length moved to the shared top-level `quiz.*` namespace
   // (v3-app-quiz). Prefer the shared key; fall back to a legacy
@@ -255,7 +261,9 @@ export function SettingsModal({
                     className="text-xs text-fg-secondary"
                     data-testid="cli-install-hint"
                   >
-                    Install {provider.displayName} first; then reopen Settings.
+                    {t("settings.providerCli.installHint", {
+                      name: provider.displayName,
+                    })}
                   </span>
                 )}
             </div>
@@ -279,6 +287,20 @@ export function SettingsModal({
             />
           )}
 
+
+          {/* 3b. Language — user-facing locale override. Positioned after
+             Endpoint Section and before the PII fields per spec MODIFIED
+             requirement *Global Settings Modal Field Set* item 12. */}
+          <Field label={t("settings.language.label")}>
+            <LanguageSection
+              value={localeOverride}
+              onChange={(next) =>
+                update({
+                  app: { locale_override: next } as Record<string, unknown>,
+                } as never)
+              }
+            />
+          </Field>
 
           {/* 4. PII scanner — dynamic count */}
           <Field label={t("settings.fields.pii.label")}>

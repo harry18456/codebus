@@ -407,6 +407,18 @@ const en = {
   // ---- Settings provider CLI field label ----
   // "CLI" is jargon (universal) — en/zh values identical.
   "settings.providerCli.fieldLabel": "{name} CLI",
+  "settings.providerCli.installHint":
+    "Install {name} first; then reopen Settings.",
+
+  // ---- Settings · Language dropdown ----
+  // The two non-Auto options identify the language they select; their
+  // displayed strings ("中文" / "English") are deliberately identical in
+  // both locales per the Cat D identifier policy. Only the field label and
+  // the "Auto" option vary by locale.
+  "settings.language.label": "Language",
+  "settings.language.auto": "Auto (system)",
+  "settings.language.zh": "中文",
+  "settings.language.en": "English",
 
   // ---- Chat token usage header indicator ----
   // "↑" arrow + numeric value composite. Value (digits or `Nk` string) is
@@ -793,6 +805,14 @@ const zh: Record<keyof typeof en, string> = {
 
   // ---- Settings provider CLI field label ----
   "settings.providerCli.fieldLabel": "{name} CLI",
+  "settings.providerCli.installHint": "請先安裝 {name}，再重新開啟設定。",
+
+  // ---- Settings · Language dropdown ----
+  // "中文" / "English" 在兩個 locale 文字相同（identifier 性質，Cat D）。
+  "settings.language.label": "語系",
+  "settings.language.auto": "自動（依系統）",
+  "settings.language.zh": "中文",
+  "settings.language.en": "English",
 
   // ---- Chat token usage header indicator ----
   "chat.tokens.indicator": "{value} ↑",

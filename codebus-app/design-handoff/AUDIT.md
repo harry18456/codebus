@@ -275,11 +275,9 @@ grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.ts
 | A4 | `src/lib/ipc.ts:483` | 同上 | 同上 |
 | A5 | `src/lib/ipc.ts:489` | 同上 | 同上 |
 
-#### Scope B · `SettingsModal.tsx` Pattern 1a blind spot（apply 時抓到）
+#### ~~Scope B · `SettingsModal.tsx` Pattern 1a blind spot（apply 時抓到）~~ → 已被 `settings-language-switcher` 順手吃掉（archived 2026-05-26）
 
-| # | 檔案:行 | Hard-code | 性質 |
-|---|---|---|---|
-| B1 | `src/components/settings/SettingsModal.tsx:258` | `Install {provider.displayName} first; then reopen Settings.` | JSX text 被 `{}` 切兩半、Latin 在 interpolation 後 |
+`SettingsModal.tsx:258` 的 `Install {provider.displayName} first; then reopen Settings.` 已 wire 進 i18n key `settings.providerCli.installHint`（含 `{name}` placeholder），en/zh bundle 都填。**`phase-3a-blind-spots-cleanup` 剩 Scope A only**。Pattern 1a 補進 spec sweep procedure（Scope C）仍待做。
 
 #### Scope C · Pattern 1a 補進 spec sweep procedure
 
@@ -291,8 +289,8 @@ grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.ts
 
 - **Scope A 文件層不同**：`ipc.ts` 是 IPC bridge layer、不是 UI component；Pattern 6 grep procedure 本來就指出「.ts 檔需獨立思考」
 - **Scope A 是架構問題**：5 個 site = pattern 問題、不是 strings 問題；可能整層要走 `errors.ts` `LocalizedError` 模式（前端 catch 後再翻），不該在 ipc.ts 直接塞 `t()` call
-- **Scope B 是 sweep procedure 結構性 gap**：Pattern 1a 在 phase 3A 沒被發現，補進 spec 才能避免未來新增類似結構的 site 又漏掉
-- A + B 同屬「phase 3A sweep blind spot」、合在一個 cleanup change 處理（archive notes 已標「下次 followup」單數意圖）
+- ~~**Scope B 是 sweep procedure 結構性 gap**：Pattern 1a 在 phase 3A 沒被發現，補進 spec 才能避免未來新增類似結構的 site 又漏掉~~ → B 已 ship；Pattern 1a 進 spec sweep procedure 留在 Scope C
+- ~~A + B 同屬「phase 3A sweep blind spot」、合在一個 cleanup change 處理（archive notes 已標「下次 followup」單數意圖）~~ → 改為 A + C only
 
 #### 觸發時機
 
@@ -303,11 +301,11 @@ grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.ts
 
 - 評估 Scope A 要不要走 `LocalizedError` pattern（看 `errors.ts` 現況、看 5 處 error 是否同性質）：~15 min
 - wire Scope A 5 處（直接 `t()` 或經 LocalizedError）：~20-30 min
-- wire Scope B 1 處 + 新增 `settings.providerCli.installHint` key：~10 min
-- Pattern 1a 進 spec Verification + grep procedure：~10 min
+- ~~wire Scope B 1 處~~ → 已 ship via `settings-language-switcher`
+- Pattern 1a 進 spec Verification + grep procedure（Scope C）：~10 min
 - en bundle 對應翻譯 + en-locale smoke：~10-15 min
 
-總計 60-80 min（看 Scope A 架構選擇）。
+總計 ~50-65 min（Scope B 已扣）。
 
 ---
 
@@ -1769,19 +1767,20 @@ grep -rPn '`[^`]*\$\{[^}]+\}[^`]*[A-Za-z]' src/ --include="*.ts" --include="*.ts
 - 未來若加更多 settings 再考慮分 tab（Provider / Privacy / Behavior / Quiz）
 - **不開 gap**
 
-##### ST14 · 缺 language switcher [local] [v1.1 feature gap] [2026-05-26 補]
+##### ST14 · 缺 language switcher [local] [v1.1 feature gap] [archived 2026-05-26]
 
-- **問題**：目前 i18n 完全靠 `navigator.language` 偵測；`useLocale.ts:8` 註解明寫「v1 has no language switcher」；user 想覆蓋只能改 Windows 系統顯示語言或開 DevTools override
-- **背景**：Phase 3A + 3A followup 已把 54 處 hard-code wire 進 bundle（infrastructure ready），但沒做 user-facing 切換 UI；`useLocale(override?: Locale)` 的 `override` 參數設計就是給未來 settings switch 用、但 v1 沒接 settings store
-- **修法**：
-  - Settings UI 加 `Language` dropdown（`Auto`（依系統）/ `中文` / `English`）
-  - Settings store（`settings.ts`）加 `localeOverride: Locale | null` 欄位（`null` = auto）
-  - `App.tsx` provider 層把 store 值灌進 `useLocale(override ?? undefined)`
-  - `errors.ts` LocalizedError seam 對應 wire（後端錯誤訊息也要跟著 override）
-  - Tauri 持久化（settings.json）+ 重啟驗 + reactive 切換驗（不重啟也能即時切）
-- **預估工作量**：~1-1.5 hr（純加法、跟 layout 改動不衝突；可隨時插入）
-- **觸發時機**：建議跟 Phase 6 v1.1 batch 一起或之前插入；屬「v1 → v1.1 user-facing feature」性質
-- **驗收**：zh-tw 系統開 app → 切 English → 重啟 → 仍 English；切 Auto → 重啟 → 回 zh
+- **狀態**：archived（`openspec/changes/archive/2026-05-26-settings-language-switcher/`）
+- **實作 scope（落地版）**：
+  - Settings UI 加 `Language` dropdown（`Auto`（依系統）/ `中文` / `English`），位於 Endpoint Section 下方 / PII 上方
+  - Settings store 加 `app.locale_override: Locale | null` 欄位（snake_case，配合 codebase YAML 慣例；propose 用的 camelCase 已在 apply 階段統一）
+  - `useLocale` precedence：hook arg > store > navigator.language；zustand 直接訂閱、modal 切換即時生效不需重啟
+  - `App.tsx` 加 mount 預載 `settingsLoad()`，讓 `locale_override` 在 Lobby 第一次 render 就生效（避免閃中文）
+  - `errors.ts` 不需改：LocalizedError 透過 `useT → useLocale` 自動跟 store
+  - 順手吃 `SettingsModal.tsx:258` 的 `Install {provider.displayName} first; then reopen Settings.` install hint，wire 進 `settings.providerCli.installHint` i18n key（含 `{name}` placeholder）
+  - Tauri side `AppConfig.locale_override: Option<LocaleOverride>` + round-trip 測試 + 拒絕非法字串 + null 寫入測試
+  - spec：app-shell 翻轉 v1 forbidden 規則、新增 *Settings Language Override* requirement + 7 scenarios + precedence table example
+- **CDP smoke 5/5 綠**：截圖留在 `codebus-app/scripts/.lang-switcher-smoke/step-{1..5}-*.png`
+- **副作用**：本 change 順手吃了 `phase-3a-blind-spots-cleanup` 的 Scope B（install hint i18n）— 該 followup 的 trailer 改為 Scope A only
 
 ### 06 沒有 layout gap
 
@@ -2121,9 +2120,7 @@ Design v1.1 mock 已交、5 個 view 全部 spec 完成。可動：
   - spectra change：`wiki-page-reader-v1.1`
 - **ChatWidget 3 modes**（bubble + floating 360×460 固定 + centered modal 640 wide + mode 切換矩陣 + chat session sharing）
   - spectra change：`chatwidget-three-modes`（含 ODI-3 升 spec、取代 cut 掉的 05、原 chatwidget-icon-and-pulse 合進此 change）
-- **Language switcher in Settings**（ST14、純加法、~1-1.5 hr）
-  - spectra change：`settings-language-switcher`（Settings UI dropdown + `localeOverride` store + `useLocale` provider 接線 + persistence）
-  - 不依賴其他 Phase 6 mock、可獨立先做（建議排 02c 之後 / ChatWidget 之前，當 palate cleanser）
+- ~~**Language switcher in Settings**（ST14、純加法、~1-1.5 hr）~~ → archived 2026-05-26（`2026-05-26-settings-language-switcher`）
 
 → 全部 unblock；可在 Phase 5 結束後開始動。**順序建議**：先 02c Interrupted（小、純 frontend）→ **settings-language-switcher**（小、純加法、palate cleanser）→ ChatWidget 3 modes（中型）→ Wiki page reader（中型）→ Quiz wizard 4 步（大）→ LoadingOverlay live progress（最大、含 backend Tauri layer 改動）
 

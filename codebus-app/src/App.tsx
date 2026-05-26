@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import { BottomStrip } from "@/components/BottomStrip"
 import { DropTargetOverlay } from "@/components/DropTargetOverlay"
@@ -17,6 +17,7 @@ import {
   isAppError,
 } from "@/lib/ipc"
 import { useRouteStore } from "@/store/route"
+import { useSettingsStore } from "@/store/settings"
 import { useVaultsStore } from "@/store/vaults"
 import { PrimitiveShowcase } from "@/sandbox/PrimitiveShowcase"
 
@@ -42,6 +43,17 @@ function AppShell() {
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pendingDetection, setPendingDetection] = useState<string | null>(null)
+
+  // Preload settings at app start so `app.locale_override` is honored from
+  // the very first render — without this, the Lobby renders in the system
+  // locale until something else (Workspace mount, Settings modal open) loads
+  // the store, which would visibly flash the wrong language for users who
+  // chose an override. Backs spec scenario "Locale override survives
+  // application restart".
+  const settingsLoad = useSettingsStore((s) => s.load)
+  useEffect(() => {
+    void settingsLoad().catch(() => {})
+  }, [settingsLoad])
 
   const triggerNewVault = useCallback(async () => {
     try {

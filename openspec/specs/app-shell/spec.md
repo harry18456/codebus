@@ -315,12 +315,13 @@ The Settings modal SHALL be invoked by the bottom-left gear in either Lobby or W
 9. Quiz pass threshold (slider 50–100%, displayed value with `%` unit suffix)
 10. Default quiz length (slider 3–10, displayed value with `questions` unit suffix)
 11. Block image / binary reads (toggle) mapping to `hooks.read_image_block`. The toggle SHALL display the current resolved boolean value (default `true` when the config key is absent), and changing it SHALL set `hooks.read_image_block` to the new value on the next Save. The toggle SHALL be accompanied by visible copy stating that disabling it allows the agent to read image / PDF / binary files into its context AND that doing so bypasses the regex_basic PII filter (which only scans text). This copy SHALL be a security-conscious warning, not a neutral description, because the default is `true` (block) and disabling it weakens the PII safety floor.
+12. Language (dropdown with exactly three options: "Auto", "中文", "English") mapping to `app.locale_override`. The "Auto" option SHALL write `null`, "中文" SHALL write `"zh"`, and "English" SHALL write `"en"`. The dropdown SHALL be positioned below the Endpoint Section and above the PII scanner field. The two non-Auto option labels ("中文" and "English") SHALL appear identically in both locales because they identify the language they select; only the "Auto" label and the field label itself SHALL be localized.
 
 The Endpoint Section SHALL render a read-only `chat` row that displays the model and effort the `chat` verb inherits from the `query` verb, in the form "沿用 query（<model> / <effort>）", kept in sync with the editable `query` row. The `chat` row SHALL NOT be editable and SHALL NOT introduce any `chat`-specific configuration key.
 
-No theme toggle, language switcher, or per-vault override section SHALL be present. Sub-labels under fields SHALL NOT promise features absent from v1. The PII on-hit field SHALL display copy stating that Critical-severity matches are always masked regardless of this setting (the security floor cannot be disabled from the UI). The Quiz content verify and Goal content verify toggles SHALL each display copy stating that enabling them incurs additional verify/repair agent spawns.
+No theme toggle and no per-vault override section SHALL be present. Sub-labels under fields SHALL NOT promise features absent from v1. The PII on-hit field SHALL display copy stating that Critical-severity matches are always masked regardless of this setting (the security floor cannot be disabled from the UI). The Quiz content verify and Goal content verify toggles SHALL each display copy stating that enabling them incurs additional verify/repair agent spawns.
 
-The `save_global_config` IPC SHALL preserve every known and unknown subkey under any namespace it does not exclusively own. In particular, when enriching the `quiz` namespace with the resolved `default_length`, the IPC SHALL merge into the existing `quiz` object rather than replace it, so sibling keys (e.g. `quiz.content_verify`) set by the Settings UI survive a save→load round-trip. Unknown top-level YAML sections SHALL likewise continue to round-trip unchanged. The `hooks` namespace SHALL likewise round-trip through Save without losing unknown subkeys (forward-compat for future hook toggles).
+The `save_global_config` IPC SHALL preserve every known and unknown subkey under any namespace it does not exclusively own. In particular, when enriching the `quiz` namespace with the resolved `default_length`, the IPC SHALL merge into the existing `quiz` object rather than replace it, so sibling keys (e.g. `quiz.content_verify`) set by the Settings UI survive a save→load round-trip. Unknown top-level YAML sections SHALL likewise continue to round-trip unchanged. The `hooks` namespace SHALL likewise round-trip through Save without losing unknown subkeys (forward-compat for future hook toggles). The `app` namespace SHALL likewise preserve unknown sibling subkeys when the Settings UI writes `app.locale_override`.
 
 #### Scenario: Modal opens from Lobby gear
 
@@ -376,27 +377,46 @@ The `save_global_config` IPC SHALL preserve every known and unknown subkey under
 - **WHEN** `save_global_config` writes the payload to disk and a subsequent `load_global_config` reads it back
 - **THEN** the reloaded payload still contains `quiz.default_length: 7` AND `quiz.content_verify: true`
 
-#### Scenario: Block image reads toggle defaults on when config key is absent
+#### Scenario: Language dropdown is positioned and labeled correctly
 
-- **WHEN** `~/.codebus/config.yaml` has no `hooks` section AND the user opens the Settings modal
-- **THEN** the "Block image / binary reads" toggle SHALL render in the ON position (matches the runtime default of `hooks.read_image_block: true`)
+- **WHEN** the user opens the Settings modal
+- **THEN** a Language dropdown SHALL be present below the Endpoint Section AND above the PII scanner field, AND the dropdown SHALL offer exactly three options whose displayed strings are "Auto" (or its localized equivalent), "中文", and "English"
 
-#### Scenario: Block image reads toggle displays security warning copy
+#### Scenario: Identifier-style language labels are not translated
 
-- **WHEN** the Settings modal renders the "Block image / binary reads" toggle
-- **THEN** the toggle SHALL display visible copy warning that disabling it allows the agent to read image and binary files which would bypass the regex_basic PII filter
+- **GIVEN** the active locale is `"en"`
+- **WHEN** the Settings modal renders the Language dropdown
+- **THEN** the option labels for the two non-Auto values SHALL appear as "中文" and "English" verbatim, identical to how they appear when the active locale is `"zh"`
 
-#### Scenario: Disabling block image reads writes hooks.read_image_block false
 
-- **GIVEN** `~/.codebus/config.yaml` has no `hooks` section AND the toggle is ON
-- **WHEN** the user clicks the "Block image / binary reads" toggle to OFF and clicks Save
-- **THEN** `~/.codebus/config.yaml` contains a `hooks` section with `read_image_block: false` after save AND reopening Settings shows the toggle in the OFF position
-
-#### Scenario: Hooks namespace survives save
-
-- **GIVEN** the in-memory config payload has `hooks.read_image_block: false` AND `hooks.future_hook_toggle: true` (forward-compat unknown subkey)
-- **WHEN** `save_global_config` writes the payload to disk and a subsequent `load_global_config` reads it back
-- **THEN** the reloaded payload still contains `hooks.read_image_block: false` AND `hooks.future_hook_toggle: true`
+<!-- @trace
+source: settings-language-switcher
+updated: 2026-05-26
+code:
+  - codebus-app/scripts/.lang-switcher-smoke/step-4-back-to-auto.png
+  - codebus-app/src/lib/ipc.ts
+  - codebus-app/src/components/settings/LanguageSection.tsx
+  - codebus-app/scripts/.lang-switcher-smoke/step-2-switch-en.png
+  - codebus-app/src/components/settings/SettingsModal.tsx
+  - codebus-app/src/App.tsx
+  - codebus-app/src-tauri/src/config.rs
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - codebus-app/scripts/.lang-switcher-smoke/step-1-default-zh.png
+  - codebus-app/scripts/.lang-switcher-smoke/step-5-backend-error-en.png
+  - codebus-app/src/i18n/messages.ts
+  - codebus-app/scripts/.lang-switcher-smoke/step-3-restart-en.png
+  - codebus-app/src/hooks/useLocale.ts
+tests:
+  - codebus-app/src/App.test.tsx
+  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/test/forbidden-behaviors.test.tsx
+  - codebus-app/src/i18n/errors.test.tsx
+  - codebus-app/src/lib/ipc.localeOverride.test.ts
+  - codebus-app/src/store/settings.localeOverride.test.ts
+  - codebus-app/src/hooks/useLocale.test.tsx
+  - codebus-app/src/components/settings/LanguageSection.test.tsx
+  - codebus-app/src/i18n/settings.test.ts
+-->
 
 ---
 ### Requirement: AppConfig Namespace Isolation
@@ -608,7 +628,6 @@ The system SHALL translate the canonical design tokens from `codebus-app/design-
 The v1 codebus-app SHALL NOT include any of the following:
 
 - Theme toggle or light-mode support (dark mode is hard-coded)
-- Language switcher UI (locale auto-detected from system: `zh-*` → 中文, otherwise English)
 - Vault-specific settings override UI in the Settings modal
 - Multi-AI-provider selection UI
 - Quest banner, progress bar, or any "graduated" / "mastered" / "learned" page-level state in the Lobby or Workspace
@@ -618,12 +637,14 @@ The v1 codebus-app SHALL NOT include any of the following:
 - Graph view entry in any sidebar
 - Chat-mode Cmd+K with conversation memory (the overlay itself is out of scope for this change; no precursor UI element SHALL be added)
 - Direct LLM API calls from the frontend (all agent interaction goes through `codebus-core`)
-- Multiple concurrently-active goal runs within a single vault session (per `app-workspace`'s One Active Goal Run At A Time requirement)
+- Multiple concurrently-active goal runs within a single vault session (per the One Active Goal Run At A Time requirement in `app-workspace`)
 
-#### Scenario: Settings modal has no theme or language controls
+A user-facing language override SHALL be permitted in the Settings modal as defined by "Settings Language Override" and "Global Settings Modal Field Set"; it is explicitly NOT a forbidden behavior.
+
+#### Scenario: Settings modal has no theme controls
 
 - **WHEN** the user opens the Settings modal in any state
-- **THEN** the rendered modal contains exactly the fields defined in "Global Settings Modal Field Set" plus the CLI Status row and Endpoint Section defined by their own requirements, and no theme or language controls
+- **THEN** the rendered modal contains exactly the fields defined in "Global Settings Modal Field Set" (including the Language dropdown) plus the CLI Status row and Endpoint Section defined by their own requirements, AND no theme controls are present
 
 #### Scenario: No telemetry network calls
 
@@ -632,33 +653,32 @@ The v1 codebus-app SHALL NOT include any of the following:
 
 
 <!-- @trace
-source: settings-config-frontend
-updated: 2026-05-20
+source: settings-language-switcher
+updated: 2026-05-26
 code:
-  - codebus-core/src/verb/goal.rs
-  - codebus-app/src/components/settings/EndpointSection.tsx
-  - codebus-core/src/git/mod.rs
-  - codebus-cli/src/commands/goal.rs
-  - codebus-core/src/verb/content_verify.rs
-  - docs/2026-05-14-pii-settings-ui-backlog.md
-  - codebus-core/src/git/nested_repo.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - docs/2026-05-19-settings-config-coverage-backlog.md
-  - docs/BACKLOG.md
-  - codebus-core/src/config/goal.rs
-  - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-core/src/verb/mod.rs
+  - codebus-app/scripts/.lang-switcher-smoke/step-4-back-to-auto.png
+  - codebus-app/src/lib/ipc.ts
+  - codebus-app/src/components/settings/LanguageSection.tsx
+  - codebus-app/scripts/.lang-switcher-smoke/step-2-switch-en.png
   - codebus-app/src/components/settings/SettingsModal.tsx
-  - codebus-core/src/verb/quiz.rs
-  - docs/2026-05-19-raw-sync-nested-git-leak-backlog.md
+  - codebus-app/src/App.tsx
+  - codebus-app/src-tauri/src/config.rs
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - codebus-app/scripts/.lang-switcher-smoke/step-1-default-zh.png
+  - codebus-app/scripts/.lang-switcher-smoke/step-5-backend-error-en.png
   - codebus-app/src/i18n/messages.ts
-  - codebus-core/src/config/mod.rs
+  - codebus-app/scripts/.lang-switcher-smoke/step-3-restart-en.png
+  - codebus-app/src/hooks/useLocale.ts
 tests:
+  - codebus-app/src/App.test.tsx
   - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/components/settings/EndpointSection.test.tsx
-  - codebus-cli/tests/bins/mock_claude.rs
-  - codebus-cli/tests/goal_flow.rs
-  - codebus-cli/tests/goal_content_verify_cli.rs
+  - codebus-app/src/test/forbidden-behaviors.test.tsx
+  - codebus-app/src/i18n/errors.test.tsx
+  - codebus-app/src/lib/ipc.localeOverride.test.ts
+  - codebus-app/src/store/settings.localeOverride.test.ts
+  - codebus-app/src/hooks/useLocale.test.tsx
+  - codebus-app/src/components/settings/LanguageSection.test.tsx
+  - codebus-app/src/i18n/settings.test.ts
 -->
 
 ---
@@ -1106,4 +1126,97 @@ tests:
   - codebus-app/src/i18n/activityBanner.test.ts
   - codebus-app/src/components/workspace/RunListItem.test.tsx
   - codebus-app/src/lib/quiz-parse.test.ts
+-->
+
+---
+### Requirement: Settings Language Override
+
+The codebus-app SHALL persist a user-selected locale override at `app.locale_override` in `~/.codebus/config.yaml` with three valid values: `"zh"`, `"en"`, or `null`. A `null` value (or an absent key, including in configs written by earlier versions) SHALL mean "auto-detect from the system locale".
+
+The `useLocale` hook (`codebus-app/src/hooks/useLocale.ts`) SHALL resolve the active locale by this precedence, evaluated top-down on every render:
+
+1. The `override` argument passed to `useLocale(override?: Locale)`, when non-nullish — this path SHALL remain available for tests to inject a deterministic locale
+2. The `app.locale_override` value read reactively from the settings store, when non-`null`
+3. Otherwise, `navigator.language`: a value beginning with `zh` (case-insensitive) SHALL resolve to `"zh"`; any other value (including when `navigator` is undefined) SHALL resolve to `"en"`
+
+The settings store SHALL expose `app.locale_override` such that React components subscribing via the store hook re-render when the value changes, so changing the language selection in the Settings modal SHALL take effect immediately without restarting the application or remounting the React tree.
+
+Changes to `app.locale_override` SHALL persist through the existing `save_global_config` / `load_global_config` IPC round-trip, so the selected locale SHALL be sticky across application restarts. Backend errors surfaced through `LocalizedError` (`codebus-app/src/i18n/errors.ts`) SHALL render in the active locale because the toast layer resolves them through `useT` / `useLocale` at display time; this requirement SHALL NOT require any imperative locale lookup in `errors.ts`.
+
+A standalone synchronous helper `tStatic` that resolves locale outside the React tree is out of scope for this requirement and MAY continue to read `navigator.language` directly until a follow-up change wires it to the store.
+
+#### Scenario: Language dropdown switches the UI reactively
+
+- **GIVEN** the user has the Settings modal open and the active locale is `"zh"`
+- **WHEN** the user selects "English" in the Language dropdown
+- **THEN** the Settings modal contents, the Workspace background, and the Lobby background re-render in English without any restart, remount, or page reload
+
+#### Scenario: Locale override survives application restart
+
+- **GIVEN** the user has set the Language dropdown to "English" and clicked Save
+- **WHEN** the user closes and relaunches the codebus-app
+- **THEN** `~/.codebus/config.yaml` contains `app.locale_override: "en"` AND the relaunched app renders in English regardless of the system locale
+
+#### Scenario: Auto option follows the system locale
+
+- **GIVEN** `navigator.language` resolves to `zh-TW`
+- **WHEN** the user sets the Language dropdown to "Auto" and clicks Save
+- **THEN** `~/.codebus/config.yaml` contains `app.locale_override: null` AND the active locale resolves to `"zh"`
+
+#### Scenario: Backend error toast follows the active locale
+
+- **GIVEN** the user has the Language dropdown set to "English" and has saved
+- **WHEN** the user triggers a backend error from the Settings modal (for example by submitting an invalid endpoint base URL)
+- **THEN** the resulting toast renders the error message in English
+
+#### Scenario: Hook override argument outranks the store
+
+- **GIVEN** `app.locale_override` in the settings store is `"en"`
+- **WHEN** a component calls `useLocale("zh")` directly (typically a test injecting a deterministic locale)
+- **THEN** the call SHALL return `"zh"`
+
+##### Example: Precedence resolution table
+
+| Hook arg `override` | Store `locale_override` | `navigator.language`  | Resolved locale |
+| ------------------- | ---------------------- | --------------------- | --------------- |
+| `"zh"`              | `"en"`                 | `en-US`               | `"zh"`          |
+| `undefined`         | `"en"`                 | `zh-TW`               | `"en"`          |
+| `undefined`         | `null`                 | `zh-TW`               | `"zh"`          |
+| `undefined`         | `null`                 | `en-US`               | `"en"`          |
+| `undefined`         | `null`                 | `fr-FR`               | `"en"`          |
+| `undefined`         | `null`                 | (navigator undefined) | `"en"`          |
+
+#### Scenario: Legacy config without locale_override round-trips safely
+
+- **GIVEN** `~/.codebus/config.yaml` was written by a version before this change and contains no `app.locale_override` key
+- **WHEN** the codebus-app loads the config and the user later opens Settings, makes no language change, and clicks Save
+- **THEN** the load SHALL succeed AND the active locale SHALL be derived from `navigator.language` AND the saved config SHALL preserve all other existing keys unchanged
+
+<!-- @trace
+source: settings-language-switcher
+updated: 2026-05-26
+code:
+  - codebus-app/scripts/.lang-switcher-smoke/step-4-back-to-auto.png
+  - codebus-app/src/lib/ipc.ts
+  - codebus-app/src/components/settings/LanguageSection.tsx
+  - codebus-app/scripts/.lang-switcher-smoke/step-2-switch-en.png
+  - codebus-app/src/components/settings/SettingsModal.tsx
+  - codebus-app/src/App.tsx
+  - codebus-app/src-tauri/src/config.rs
+  - codebus-app/src-tauri/src/ipc/config.rs
+  - codebus-app/scripts/.lang-switcher-smoke/step-1-default-zh.png
+  - codebus-app/scripts/.lang-switcher-smoke/step-5-backend-error-en.png
+  - codebus-app/src/i18n/messages.ts
+  - codebus-app/scripts/.lang-switcher-smoke/step-3-restart-en.png
+  - codebus-app/src/hooks/useLocale.ts
+tests:
+  - codebus-app/src/App.test.tsx
+  - codebus-app/src/components/settings/SettingsModal.test.tsx
+  - codebus-app/src/test/forbidden-behaviors.test.tsx
+  - codebus-app/src/i18n/errors.test.tsx
+  - codebus-app/src/lib/ipc.localeOverride.test.ts
+  - codebus-app/src/store/settings.localeOverride.test.ts
+  - codebus-app/src/hooks/useLocale.test.tsx
+  - codebus-app/src/components/settings/LanguageSection.test.tsx
+  - codebus-app/src/i18n/settings.test.ts
 -->

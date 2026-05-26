@@ -55,10 +55,27 @@ impl AppQuizConfig {
     }
 }
 
+/// User-selected locale override for the UI. `Zh` / `En` pin the active
+/// language; absence (None) means "auto-detect from `navigator.language`".
+/// Backs spec *Settings Language Override*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LocaleOverride {
+    Zh,
+    En,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub quiz: AppQuizConfig,
+    /// `null` (or absent) means auto-detect; `"zh"` / `"en"` pin the locale.
+    /// Round-tripped via serde — invalid string values surface as
+    /// `AppError::ConfigParse` through [`read_app_config`]. Serialized
+    /// explicitly (no `skip_serializing_if`) so the saved YAML always
+    /// states the user's choice, including the explicit `null` for "Auto".
+    #[serde(default)]
+    pub locale_override: Option<LocaleOverride>,
 }
 
 /// Read the `app.*` namespace from a JSON-shaped global config payload.

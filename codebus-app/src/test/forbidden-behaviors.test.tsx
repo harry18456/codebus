@@ -44,7 +44,9 @@ const VAULT = {
 const FORBIDDEN_PHRASES: Array<{ label: string; regex: RegExp }> = [
   { label: "theme toggle", regex: /theme\s*(toggle|switch)/i },
   { label: "light mode", regex: /light\s*mode/i },
-  { label: "language switcher", regex: /language\s*(switch|picker|selector)/i },
+  // The language switcher entry was lifted from v1 forbidden list by the
+  // `settings-language-switcher` change — Settings now exposes a Language
+  // dropdown by design.
   { label: "quest banner", regex: /quest\s*(banner|bar)?/i },
   { label: "Recent Pages panel", regex: /recent\s+pages/i },
   { label: "Graph view entry", regex: /graph\s*view/i },
