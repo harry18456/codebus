@@ -22,18 +22,30 @@ function makeRun(over: Partial<RunLogSummary> = {}): RunLogSummary {
 }
 
 describe("RunListItem", () => {
-  // Spec: app-workspace § Goals Overview List and Filter — row icon
-  // mapping table. Parametrized over the five outcomes.
-  it.each([
-    ["running", "🚌"],
-    ["succeeded", "✓"],
-    ["cancelled", "⏹"],
-    ["failed", "⚠"],
-    ["interrupted", "⚠"],
-  ])("RunListItem_icon_per_outcome (%s → %s)", (outcome, icon) => {
-    render(<RunListItem run={makeRun({ outcome })} onClick={() => {}} />)
-    expect(screen.getByTestId("run-row-r1")).toHaveTextContent(icon)
+  // Spec: design-system § Status visuals consume StatusPill — non-running
+  // outcomes render the three-state dot; running keeps the 🚌 motif since
+  // the dot variant excludes running by design (motion > color dot).
+  it("RunListItem_running_outcome_renders_bus_glyph_with_pulse", () => {
+    render(<RunListItem run={makeRun({ outcome: "running" })} onClick={() => {}} />)
+    const row = screen.getByTestId("run-row-r1")
+    expect(row).toHaveTextContent("🚌")
   })
+
+  it.each([
+    ["succeeded", "bg-status-done"],
+    ["cancelled", "bg-status-interrupted"],
+    ["interrupted", "bg-status-interrupted"],
+    ["failed", "bg-status-failed"],
+  ])(
+    "RunListItem_status_dot_per_outcome (%s → %s)",
+    (outcome, dotClass) => {
+      const { container } = render(
+        <RunListItem run={makeRun({ outcome })} onClick={() => {}} />,
+      )
+      const dot = container.querySelector(`.${dotClass}`)
+      expect(dot).not.toBeNull()
+    },
+  )
 
   it("RunListItem_click_navigates_to_detail", () => {
     const onClick = vi.fn()

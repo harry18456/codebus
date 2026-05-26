@@ -1,35 +1,29 @@
 import type { RunLogSummary } from "@/lib/ipc"
 import { cn } from "@/lib/cn"
+import {
+  StatusPill,
+  type StatusPillStatus,
+} from "@/components/ui/StatusPill"
 
 /**
- * One row in the Goals overview list.
- *
- * Spec: app-workspace § Goals Overview List and Filter — row icon
- * mapping table:
- *
- * | RunLog outcome                                  | Row icon |
- * | ----------------------------------------------- | -------- |
- * | (active run in progress, no RunLog row yet)     | ⚪       |
- * | succeeded                                       | ✓        |
- * | cancelled                                       | ⏹        |
- * | failed                                          | ⚠        |
- * | virtual interrupted (events have no RunLog row) | ⚠        |
+ * Map a RunLog outcome to a canonical three-state status (Phase 3B).
+ * Returns `null` for the `running` outcome (rendered with the legacy
+ * 🚌 + animate-pulse glyph since the dot variant excludes running by
+ * design — running uses motion, not a color dot, in the Goals list).
  */
-function outcomeIcon(outcome: string): string {
+function outcomeToStatus(outcome: string): StatusPillStatus | null {
   switch (outcome) {
     case "running":
-      // Mirrors the CLI's bus motif (init Start banner "🚌 來囉來囉"),
-      // pulsing via Tailwind's `animate-pulse` in render.
-      return "🚌"
+      return null
     case "succeeded":
-      return "✓"
+      return "done"
     case "cancelled":
-      return "⏹"
-    case "failed":
     case "interrupted":
-      return "⚠"
+      return "interrupted"
+    case "failed":
+      return "failed"
     default:
-      return "•"
+      return null
   }
 }
 
@@ -69,15 +63,25 @@ export function RunListItem({ run, onClick }: RunListItemProps) {
         "hover:bg-bg-sunken focus:outline-none focus:ring-2 focus:ring-accent-ring",
       )}
     >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "text-body-lg",
-          run.outcome === "running" && "animate-pulse",
-        )}
-      >
-        {outcomeIcon(run.outcome)}
-      </span>
+      {run.outcome === "running" ? (
+        <span
+          aria-hidden="true"
+          className={cn("text-body-lg", "animate-pulse")}
+        >
+          🚌
+        </span>
+      ) : (
+        (() => {
+          const status = outcomeToStatus(run.outcome)
+          return status ? (
+            <StatusPill status={status} variant="dot" />
+          ) : (
+            <span aria-hidden="true" className="text-body-lg">
+              •
+            </span>
+          )
+        })()
+      )}
       <span className="flex-1 truncate text-body">
         {truncate(run.goal || "(no goal text)")}
       </span>

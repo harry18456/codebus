@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/ui/StatusPill"
 import type { VerbEvent } from "@/lib/ipc"
 import { useGoalsStore } from "@/store/goals"
 import { useT } from "@/i18n/useT"
@@ -74,12 +75,8 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
         >
           {activeRun.goal}
         </span>
-        <span
-          data-tauri-drag-region
-          data-testid="running-badge"
-          className="rounded-full bg-accent/20 px-2 py-0.5 text-meta text-accent"
-        >
-          {t("workspace.runDetail.runningBadge")}
+        <span data-tauri-drag-region data-testid="running-badge">
+          <StatusPill status="running" variant="pill" />
         </span>
       </header>
       <div

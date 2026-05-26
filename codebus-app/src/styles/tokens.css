@@ -27,6 +27,15 @@
   --color-error: #f87171;
   --color-info: #60a5fa;
 
+  /* Status semantic aliases — Phase 3B three-state status system.
+   * Spec: openspec/specs/design-system/spec.md · Requirement "Status semantic color tokens"
+   * running === interrupted hue by design intent (don't try a fourth hue);
+   * differentiation comes from motion + caret, not color. */
+  --color-status-done: var(--color-success);
+  --color-status-interrupted: var(--color-warn);
+  --color-status-failed: var(--color-error);
+  --color-status-running: var(--color-warn);
+
   --radius-sm: 3px;
   --radius-md: 4px;
   --radius-lg: 6px;

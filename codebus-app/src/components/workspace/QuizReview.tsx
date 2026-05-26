@@ -14,6 +14,7 @@
 import { useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/ui/StatusPill"
 import {
   Dialog,
   DialogClose,
@@ -93,16 +94,22 @@ export function QuizReview({
       {total > 0 && (
         <p
           data-testid="quiz-review-summary"
-          className={pass ? "text-green-500" : "text-red-500"}
+          className="flex items-center gap-2"
         >
-          {t("workspace.quiz.review.summaryLine", {
-            correct: correctCount,
-            total,
-            percent: Math.round((correctCount / total) * 100),
-            outcome: pass
-              ? t("workspace.quiz.answering.outcomePassed", { n: passThreshold })
-              : t("workspace.quiz.answering.outcomeFailed", { n: passThreshold }),
-          })}
+          <StatusPill
+            status={pass ? "done" : "failed"}
+            variant="pill"
+          />
+          <span>
+            {t("workspace.quiz.review.summaryLine", {
+              correct: correctCount,
+              total,
+              percent: Math.round((correctCount / total) * 100),
+              outcome: pass
+                ? t("workspace.quiz.answering.outcomePassed", { n: passThreshold })
+                : t("workspace.quiz.answering.outcomeFailed", { n: passThreshold }),
+            })}
+          </span>
         </p>
       )}
 

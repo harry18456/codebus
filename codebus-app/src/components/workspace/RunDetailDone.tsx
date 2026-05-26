@@ -3,6 +3,7 @@ import { useMemo, useState } from "react"
 import type { EventEnvelope, RunDetail, VerbEvent } from "@/lib/ipc"
 import { useT, type TFunction } from "@/i18n/useT"
 import { useWikiStore } from "@/store/wiki"
+import { StatusPill } from "@/components/ui/StatusPill"
 
 import {
   ActivityStreamItem,
@@ -72,12 +73,8 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
         >
           {summary.goal}
         </span>
-        <span
-          data-tauri-drag-region
-          data-testid="done-badge"
-          className="rounded-full bg-success/20 px-2 py-0.5 text-meta text-success"
-        >
-          {t("workspace.runDetail.doneBadge")}
+        <span data-tauri-drag-region data-testid="done-badge">
+          <StatusPill status="done" variant="pill" />
         </span>
       </header>
       <div className="border-b border-border px-3 py-1.5 text-meta text-fg-tertiary">

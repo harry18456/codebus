@@ -166,6 +166,12 @@ const en = {
   "workspace.newGoalModal.blockedHint":
     "Wait for current run to finish or cancel it before starting a new one.",
 
+  // ---- Workspace · Status pill labels (Phase 3B three-state) ----
+  "workspace.status.done": "Done",
+  "workspace.status.interrupted": "Interrupted",
+  "workspace.status.failed": "Failed",
+  "workspace.status.running": "Running",
+
   // ---- Workspace · Run detail · Running ----
   "workspace.runDetail.backLink": "← back",
   "workspace.runDetail.runningBadge": "⏺ Running",
@@ -523,6 +529,12 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.newGoalModal.run": "執行",
   "workspace.newGoalModal.blockedHint":
     "請等目前的 goal 結束或先取消，再啟動新的 goal。",
+
+  // ---- Workspace · Status pill labels (Phase 3B three-state) ----
+  "workspace.status.done": "完成",
+  "workspace.status.interrupted": "已中斷",
+  "workspace.status.failed": "失敗",
+  "workspace.status.running": "執行中",
 
   // ---- Workspace · Run detail · Running ----
   "workspace.runDetail.backLink": "← 回上頁",

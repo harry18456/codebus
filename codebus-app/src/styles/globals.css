@@ -70,6 +70,29 @@ button:disabled,
   color: var(--color-fg-tertiary);
 }
 
+/* StatusPill — three-state status visual primitive (design-system capability).
+ * Spec: openspec/specs/design-system/spec.md · Requirement "StatusPill component"
+ * The running variant carries both classes; CSS @media gates the animation so
+ * `prefers-reduced-motion: reduce` users see a static ring (no frame change). */
+.status-pill__dot--running-ring {
+  box-shadow: 0 0 0 4px var(--color-accent-tint);
+}
+
+@media not (prefers-reduced-motion: reduce) {
+  @keyframes status-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 4px var(--color-accent-tint);
+    }
+    50% {
+      box-shadow: 0 0 0 6px var(--color-accent-tint);
+    }
+  }
+  .status-pill__dot--running-animated {
+    animation: status-pulse 1.4s ease-in-out infinite;
+  }
+}
+
 @keyframes codebus-bus-roll {
   0%, 100% {
     transform: translateX(-26px) rotate(-2deg);

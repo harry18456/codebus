@@ -1,0 +1,38 @@
+<!--
+Phase 3B status three-state token + StatusPill。token + consumer 同 change land
+規範來自 design.md「Token plus consumer same-change land」決策。
+TDD：StatusPill 寫測試先，token 不寫測試但要 snapshot regen。
+-->
+
+## 1. Token + 動畫基礎（Token naming uses color-status prefix to ride Tailwind v4 utility generation · Running 不找第 4 hue · Pulse 動畫 gate 於 prefers-reduced-motion reduce）
+
+- [x] 1.1 [P] 在 `codebus-app/src/styles/tokens.css` 的 `@theme` block 追加 **Status semantic color tokens**（`--color-status-done` / `--color-status-interrupted` / `--color-status-failed` / `--color-status-running`），各自 alias `--color-success` / `--color-warn` / `--color-error` / `--color-warn`，落實「running 不找第 4 hue · 走 same amber + pulse + caret」決策（running 與 interrupted 都 alias `--color-warn`）。驗證：在 dev server 開 DevTools console 跑 `getComputedStyle(document.documentElement).getPropertyValue('--color-status-done')` 回非空字串 `#4ade80`（spec scenario "CSS variable inject sanity check"）—— 注意此時尚無 consumer，Tailwind v4 可能不 inject；驗證 step 移至 task 5 sweep 完成後再跑。
+- [x] 1.2 [P] 在 `codebus-app/src/styles/globals.css` 追加 `.status-pill__dot--running-ring` 靜態 4px box-shadow ring class（在 media query 外），以及 `@media not (prefers-reduced-motion: reduce)` block 內的 `@keyframes status-pulse`（4px → 6px ring）+ `.status-pill__dot--running-animated { animation: status-pulse 1.4s ease-in-out infinite; }`，為 StatusPill pulse animation respects prefers-reduced-motion 提供 CSS 基礎。驗證：grep `globals.css` 三條 class / keyframe 各出現一次、`@media` 包覆位置正確。
+
+## 2. StatusPill 元件（TDD）（StatusPill component · Dot variant 不接受 running status · StatusPill pulse animation respects prefers-reduced-motion）
+
+- [x] 2.1 在 `codebus-app/src/components/ui/StatusPill.test.tsx` 寫 8 個 status × variant cases（4 status × 2 variant）作為 StatusPill component 行為的 TDD 起點，對應 spec scenarios「Dot variant renders only a colored circle」「Pill variant renders dot plus localized label」「Running pill renders pulse ring and optional caret」「Running plus dot variant triggers development warning」（驗證 Dot variant 不接受 running status invariant）「Custom className merges without overwriting」。驗證：跑 `pnpm vitest run StatusPill` 應全部 fail（component 還沒寫）。
+- [x] 2.2 在 `codebus-app/src/components/ui/StatusPill.test.tsx` 為 StatusPill pulse animation respects prefers-reduced-motion requirement 補 1 個 case：running + pill variant 渲染時 dot 同時帶 `status-pill__dot--running-ring`（靜態 ring）+ `status-pill__dot--running-animated`（動畫 hook）兩個 class，由 CSS `@media not (prefers-reduced-motion: reduce)` 自然 gate animation（reduce 模式 animation 規則不 emit、只剩靜態 ring；該行為由 task 5.5 CDP smoke 驗）。驗證：跑 `pnpm vitest run StatusPill` 該 case 先 fail。
+- [x] 2.3 實作 `codebus-app/src/components/ui/StatusPill.tsx`（StatusPill component），輸出 `StatusPillStatus` / `StatusPillVariant` / `StatusPillProps` types 跟 `StatusPill` function（簽名見 design.md Interface 區）。pill variant label 透過 `useT("workspace.status.<status>")` 取；running + pill 加 `status-pill__dot--running-ring` + `status-pill__dot--running-animated`（後者交給 CSS media query 自動失效，落實 StatusPill pulse animation respects prefers-reduced-motion）；dot variant 排除 running、用 `process.env.NODE_ENV !== "production"` gate 的 `console.warn`，不 throw。驗證：跑 `pnpm vitest run StatusPill` 全綠（10 cases）。
+
+## 3. i18n bundle（i18n key 走 workspace.status namespace）
+
+- [x] 3.1 在 `codebus-app/src/i18n/messages.ts` zh-tw bundle 的 `workspace` namespace 加 `status` 子物件，含 `done: "完成"` / `interrupted: "已中斷"` / `failed: "失敗"` / `running: "執行中"`。驗證：StatusPill pill variant test 抓「執行中」「失敗」字串斷言通過。
+- [x] 3.2 在 `codebus-app/src/i18n/messages.ts` en bundle 的 `workspace` namespace 加同樣 `status` 子物件，值為 `Done` / `Interrupted` / `Failed` / `Running`。驗證：切 en locale 跑 StatusPill snapshot 後 label 改英文；vitest 改 locale fixture 跑 1 case 確認。
+
+## 4. Sweep consumer（Status visuals consume StatusPill instead of inline color literals · Token plus consumer same-change land · 元件 sweep 算 consumer）
+
+- [x] 4.1 [P] 把 `codebus-app/src/components/workspace/RunListItem.tsx`（GoalsTab 透過此 component 渲染 row）的 outcome emoji icon (`✓` / `⏹` / `⚠` / `•`) 換成 `<StatusPill status={...} variant="dot" />`，outcome mapping：`succeeded` → `done`、`cancelled` / `interrupted` → `interrupted`、`failed` → `failed`；`running` outcome 保留現有 `🚌` + `animate-pulse`（dot variant 排除 running），落實 Status visuals consume StatusPill instead of inline color literals 在 Goals list 的呈現。驗證：跑 `pnpm vitest run RunListItem` 通過（既無 test 則 grep 該檔確認舊 emoji 字面對非-running 已移除），舊 `text-amber-` / `text-green-` / `text-red-` 等 Tailwind palette 不再用於 row dot。
+- [x] 4.2 [P] 把 `codebus-app/src/components/workspace/RunDetailRunning.tsx` header `<span data-testid="running-badge">` 換成 `<StatusPill status="running" variant="pill" />`，保留 `data-testid="running-badge"`（用 wrapper span 包外層或加 className+data-testid 到 StatusPill；以 wrapper span 為佳，因 StatusPill props 不支援 data-testid）；caret prop 本 task 暫不傳——RunDetailRunning 尚無 stream-tail mono narration 來源（W5/GP8 後續 change 才會 wire），caret slot 保留以待。驗證：跑 `pnpm vitest run RunDetailRunning` 通過（既有 `running-badge` testid 仍可取得；existing 5 個 test case 無 break）。
+- [x] 4.3 [P] 把 `codebus-app/src/components/workspace/RunDetailDone.tsx` header status 換成 `<StatusPill status="done" variant="pill" />`。驗證：跑 `pnpm vitest run RunDetailDone` snapshot regen 後通過。
+- [x] 4.4 [P] 把 `codebus-app/src/components/workspace/RunDetailCancelled.tsx` 內 `RunDetailCancelled` 跟 `RunDetailInterrupted` 兩個 component 的 header `<span data-testid="cancelled-badge">` / `<span data-testid="interrupted-badge">` 各自換成 `<StatusPill status="interrupted" variant="pill" />`，保留 testid（同 4.2 用 wrapper span）；不改 banner、不改 Retry 行為、不重命名檔案、不搬位置、不動 banner amber-tint warning block CSS class。驗證：跑 `pnpm vitest run RunDetailCancelled` 通過（existing warning / retry test case 無 break）。
+- [x] 4.5 [P] 把 `codebus-app/src/components/workspace/QuizAnswering.tsx` 完成 summary 段（`data-testid="quiz-outcome"`）跟 `codebus-app/src/components/workspace/QuizReview.tsx` 頂部 summary 段（`data-testid="quiz-review-summary"`）的 colored text indicator（`text-green-500` / `text-red-500`）替成 inline `<StatusPill status="done|failed" variant="pill" />`，保留原 outcome 文字（含 threshold 百分比）在 pill 後面（不破壞 quiz-outcome / quiz-review-summary `toHaveTextContent("Passed")` / `("Failed")` 既有 assertion；不動 quiz answer choice 選項的 `bg-green-500/15` / `bg-red-500/15` 對錯標示——那是 quiz interaction 層、不是 status semantic），延伸 Status visuals consume StatusPill instead of inline color literals 到 Quiz surface。驗證：跑 `pnpm vitest run QuizReview QuizAnswering` 全綠。
+
+## 5. 整體驗證（Token plus consumer same-change land · Token naming uses color-status prefix to ride Tailwind v4 utility generation）
+
+- [x] 5.1 跑 `pnpm vitest run` 全套，所有 test 綠（含 snapshot regen）。驗證：terminal exit code 0 + 無 skipped status test。
+- [x] 5.2 跑 `pnpm typecheck` 全綠。驗證：terminal exit code 0。
+- [x] 5.3 CDP smoke 驗 token inject（依 user memory `project_webview2_cdp_real_frontend.md` 操作）：開 `--remote-debugging-port=9222` 跑 `codebus-app/scripts/cdp.mjs`，evaluate `getComputedStyle(document.documentElement).getPropertyValue('--color-status-done')` 預期非空字串 `#4ade80`（spec scenario "CSS variable inject sanity check"）。
+- [x] 5.4 CDP smoke 驗三態視覺：建 vault → 跑三個 goal 分別讓 row 落 done / interrupted / failed 三態，截圖比對 row dot 色（綠 / amber / 紅）。跑一個 running goal 開 Goal Detail 看 header pill 帶 amber + pulse ring + caret。Quiz pass / fail 各跑一次截圖比對 result tag 色。
+- [x] 5.5 CDP smoke 驗 reduce-motion fallback：DevTools rendering tab 啟用 emulate `prefers-reduced-motion: reduce`，重 render Goal Detail running state，截圖確認 pulse ring 為靜態（無動畫 frame 變化）。
+- [x] 5.6 grep `codebus-app/src/components/workspace/` 內 hard-code status color class（`text-amber-` / `text-green-` / `text-red-` / `bg-amber-` / `bg-green-` / `bg-red-` 等 Tailwind palette）數量明顯下降；剩餘 match 必須是非 status 用途（accent decoration / 圖示等），逐筆檢查並在 PR comment 寫清。

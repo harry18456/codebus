@@ -1,6 +1,7 @@
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/ui/StatusPill"
 import type { RunDetail } from "@/lib/ipc"
 import { useT } from "@/i18n/useT"
 
@@ -58,12 +59,8 @@ export function RunDetailCancelled({
         >
           {summary.goal}
         </span>
-        <span
-          data-tauri-drag-region
-          data-testid="cancelled-badge"
-          className="rounded-full bg-warning/20 px-2 py-0.5 text-meta text-warning"
-        >
-          {t("workspace.runDetail.cancelledBadge")}
+        <span data-tauri-drag-region data-testid="cancelled-badge">
+          <StatusPill status="interrupted" variant="pill" />
         </span>
       </header>
       <div
@@ -130,12 +127,8 @@ export function RunDetailInterrupted({
         >
           {summary.goal}
         </span>
-        <span
-          data-tauri-drag-region
-          data-testid="interrupted-badge"
-          className="rounded-full bg-warning/20 px-2 py-0.5 text-meta text-warning"
-        >
-          {t("workspace.runDetail.interruptedBadge")}
+        <span data-tauri-drag-region data-testid="interrupted-badge">
+          <StatusPill status="interrupted" variant="pill" />
         </span>
       </header>
       <div
