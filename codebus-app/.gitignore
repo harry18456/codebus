@@ -5,5 +5,7 @@ dist-ssr
 .vite
 .DS_Store
 
-# CDP bridge screenshot scratch (scripts/cdp.mjs)
-scripts/.cdp-shot.png
+# CDP bridge screenshot scratch (scripts/cdp.mjs) — all dot-prefixed
+# PNG captures are working artifacts; cleaned/renamed versions go to
+# design-handoff/screenshots/ if they need committing.
+scripts/.*.png

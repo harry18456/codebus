@@ -1,0 +1,1785 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<title>codebus — walkthrough decisions (三場合一)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-raised: #111111;
+    --bg-hover: #161616;
+    --bg-active: #1a1a1a;
+    --bg-sunken: #070707;
+
+    --border: #1f1f1f;
+    --border-strong: #2a2a2a;
+    --border-subtle: #161616;
+
+    --fg: #e5e5e5;
+    --fg-secondary: #8a8a8a;
+    --fg-tertiary: #5a5a5a;
+    --fg-quaternary: #3a3a3a;
+
+    --accent: #f5a623;
+    --accent-hover: #ffb13d;
+    --accent-dim: #c9881c;
+    --accent-fg: #0a0a0a;
+    --accent-tint: rgba(245, 166, 35, 0.10);
+    --accent-tint-strong: rgba(245, 166, 35, 0.18);
+    --accent-ring: rgba(245, 166, 35, 0.35);
+
+    --success: #4ade80;
+    --warn: #f5a623;
+    --error: #f87171;
+    --info: #60a5fa;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    background: var(--bg);
+    color: var(--fg);
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    font-family: 'Inter', 'Noto Sans TC', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  .mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-feature-settings: 'zero', 'ss02';
+    letter-spacing: 0;
+  }
+
+  .page {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 56px 40px 96px;
+  }
+
+  /* ───── Top header ───── */
+  .doc-head {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 28px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-strong);
+  }
+  .kicker {
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .doc-head h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
+  .doc-head .meta {
+    color: var(--fg-secondary);
+    font-size: 13px;
+  }
+
+  /* ───── New section-label treatment (universal) ───── */
+  .section-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-secondary);
+    margin: 32px 0 12px;
+  }
+  .section-label::before {
+    content: "";
+    width: 2px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+  /* English domain-term variant (taxonomy headers) */
+  .section-label--caps {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 11px;
+    color: var(--fg-tertiary);
+  }
+
+  h2 {
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 4px 0 8px;
+  }
+  h2 .num {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--fg-tertiary);
+    font-size: 18px;
+    font-weight: 500;
+    margin-right: 14px;
+  }
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 28px 0 8px;
+    letter-spacing: -0.01em;
+  }
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 16px 0 6px;
+    color: var(--fg);
+  }
+  p { margin: 8px 0; }
+  .dim { color: var(--fg-secondary); }
+  .dimmer { color: var(--fg-tertiary); }
+
+  code, .inline-mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    background: var(--bg-sunken);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  hr.section-rule {
+    border: 0;
+    border-top: 1px solid var(--border-strong);
+    margin: 56px 0 0;
+  }
+
+  /* ───── Section intro ───── */
+  .section-intro {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 18px 22px;
+    margin: 16px 0 28px;
+  }
+  .section-intro .tldr {
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  /* ───── Demo containers ───── */
+  .demo {
+    margin: 14px 0;
+    padding: 18px;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .demo-caption {
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 14px;
+    font-weight: 600;
+  }
+  .demo-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  /* ───── Token table ───── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    color: var(--fg-tertiary);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-bottom: 1px solid var(--border-strong);
+  }
+  td.mono {
+    color: var(--fg);
+  }
+
+  /* ───── Inline status pill helpers ───── */
+  .pill {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    border: 1px solid;
+    text-transform: lowercase;
+    letter-spacing: 0;
+  }
+  .pill-keep   { color: var(--success); border-color: rgba(74,222,128,0.35); background: rgba(74,222,128,0.08); }
+  .pill-amber  { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-tint); }
+  .pill-drop   { color: var(--error); border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.08); }
+  .pill-neutral { color: var(--fg-tertiary); border-color: var(--border-strong); background: var(--bg-raised); }
+
+  /* ────────────────────────────────────────── */
+  /* Section 1 helpers: CJK label demos          */
+  /* ────────────────────────────────────────── */
+
+  /* The current broken version */
+  .label-broken {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-tertiary);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .demo-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    font-size: 13.5px;
+  }
+  .demo-row .right {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-tertiary);
+  }
+  .surface {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 18px;
+    margin-top: 8px;
+  }
+  .surface .surface-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* ────────────────────────────────────────── */
+  /* Section 2 helpers: activity stream         */
+  /* ────────────────────────────────────────── */
+
+  .stream-mock {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 20px 22px;
+    margin-top: 14px;
+  }
+
+  .stream-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .stream-back {
+    font-size: 12px;
+    color: var(--fg-tertiary);
+  }
+  .stream-title {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  .stream-status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .pulse-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-tint);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 4px var(--accent-tint); }
+    50% { box-shadow: 0 0 0 6px var(--accent-tint); }
+  }
+  .status-text { font-size: 13px; color: var(--accent); font-weight: 500; }
+  .status-meta { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--fg-tertiary); }
+  .cancel-btn {
+    font-size: 12px;
+    color: var(--error);
+    border: 1px solid rgba(248,113,113,0.30);
+    background: transparent;
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  /* Phase banner (brand emoji line, persists) */
+  .phase-banner {
+    font-size: 13px;
+    color: var(--fg);
+    padding: 8px 0;
+    line-height: 1.5;
+  }
+  .phase-banner.dim { color: var(--fg-secondary); font-style: italic; }
+  .phase-banner .emoji { margin-right: 8px; font-style: normal; }
+
+  /* Cluster section: phase label + left guide */
+  .cluster {
+    margin: 18px 0;
+  }
+  .cluster-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .cluster-head .bar { width: 2px; height: 12px; background: var(--accent); border-radius: 1px; }
+  .cluster-head .name {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .cluster-head .count {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-tertiary);
+  }
+  .cluster-head .toggle {
+    width: 12px; height: 12px;
+    color: var(--fg-tertiary);
+    flex-shrink: 0;
+  }
+
+  .cluster-body {
+    border-left: 1px solid var(--border-strong);
+    padding-left: 18px;
+    margin-left: 1px;
+  }
+  .tool-row {
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 5px 0;
+    font-size: 13px;
+    position: relative;
+  }
+  .tool-row::before {
+    /* tick mark */
+    content: "";
+    position: absolute;
+    left: -19px;
+    top: 50%;
+    width: 6px;
+    height: 1px;
+    background: var(--border-strong);
+  }
+  .tool-row .tool-icon {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    text-align: center;
+  }
+  .tool-row .tool-body {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--fg);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .tool-row .tool-body .kind {
+    color: var(--fg-tertiary);
+    margin-right: 8px;
+  }
+  .tool-row .tool-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-tertiary);
+  }
+  .tool-row.live .tool-body {
+    color: var(--accent);
+  }
+  .tool-row.live .caret {
+    display: inline-block;
+    width: 1px;
+    height: 12px;
+    background: var(--accent);
+    margin-left: 2px;
+    vertical-align: -2px;
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .tool-row.live .spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid var(--accent-ring);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .stream-log-card {
+    margin-top: 18px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--bg-raised);
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--fg-secondary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .stream-log-card .chev {
+    color: var(--fg-tertiary);
+  }
+
+  /* ────────────────────────────────────────── */
+  /* Section 3 helpers: Quiz scope-confirm     */
+  /* ────────────────────────────────────────── */
+
+  .wizard-mock {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 20px 22px;
+    margin-top: 14px;
+  }
+
+  .wizard-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 16px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .wizard-head .back {
+    font-size: 12px; color: var(--fg-tertiary);
+  }
+  .wizard-head .title {
+    font-size: 16px; font-weight: 600;
+  }
+  .step-dots {
+    display: flex; gap: 7px; align-items: center;
+    margin-left: 10px;
+  }
+  .step-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    background: transparent;
+  }
+  .step-dot.done { background: var(--fg-tertiary); border-color: var(--fg-tertiary); }
+  .step-dot.current {
+    background: var(--accent); border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-tint);
+  }
+  .step-label {
+    font-size: 12px;
+    color: var(--fg-secondary);
+    font-family: 'JetBrains Mono', monospace;
+    margin-left: 4px;
+  }
+  .step-label b { color: var(--fg); font-weight: 600; }
+  .wizard-head .right {
+    margin-left: auto;
+  }
+
+  .topic-banner {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+  }
+  .topic-banner .topic-emoji { font-size: 16px; }
+  .topic-banner .topic-label { color: var(--fg-tertiary); font-size: 11px; }
+  .topic-banner .topic-value { color: var(--fg); font-weight: 500; }
+
+  .scope-instr {
+    font-size: 13px;
+    color: var(--fg-secondary);
+    margin: 8px 0 14px;
+  }
+
+  .scope-list {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bg-raised);
+  }
+  .scope-item {
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    gap: 14px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    align-items: start;
+  }
+  .scope-item:last-child { border-bottom: 0; }
+  .scope-check {
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid var(--accent);
+    border-radius: 3px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+  .scope-check.unchecked {
+    background: transparent;
+    border-color: var(--fg-tertiary);
+    color: transparent;
+  }
+  .scope-item.unchecked { opacity: 0.55; }
+  .scope-page-path {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--fg-tertiary);
+    margin-bottom: 4px;
+  }
+  .scope-page-title {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .scope-page-snippet {
+    font-size: 12.5px;
+    color: var(--fg-secondary);
+    margin-top: 6px;
+    line-height: 1.5;
+    /* 2-line clamp */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .reason-tags {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .reason-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--accent-tint);
+    color: var(--accent);
+    border: 1px solid var(--accent-ring);
+  }
+  .reason-tag.neutral {
+    background: var(--bg-sunken);
+    color: var(--fg-tertiary);
+    border-color: var(--border-strong);
+  }
+
+  .scope-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .scope-footer .left {
+    font-size: 12px;
+    color: var(--fg-tertiary);
+  }
+  .scope-footer .actions {
+    margin-left: auto;
+    display: flex;
+    gap: 10px;
+  }
+  .btn {
+    font-size: 13px;
+    padding: 7px 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-sunken);
+    color: var(--fg);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .alert-banner {
+    background: rgba(245,166,35,0.06);
+    border: 1px solid var(--accent-ring);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin: 14px 0;
+    font-size: 12.5px;
+    color: var(--accent);
+  }
+  .alert-banner .label {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 10px;
+    font-weight: 600;
+    margin-right: 8px;
+  }
+
+  /* ───── List helpers ───── */
+  ul.list, ol.list {
+    margin: 8px 0 8px 20px;
+    padding: 0;
+  }
+  ul.list li, ol.list li {
+    margin: 5px 0;
+  }
+
+  .footnote {
+    font-size: 12px;
+    color: var(--fg-tertiary);
+    margin-top: 8px;
+  }
+
+  /* Compare side-by-side */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 14px 0;
+  }
+  .compare .card {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 16px;
+  }
+  .compare .card.recommended {
+    border-color: var(--accent-ring);
+    background: rgba(245,166,35,0.04);
+  }
+  .compare .card-title {
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .compare .card.recommended .card-title { color: var(--accent); }
+
+  /* Sidebar mini-mock for context demos */
+  .ws-mock {
+    display: flex;
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  .ws-sidebar {
+    width: 200px;
+    background: var(--bg-sunken);
+    border-right: 1px solid var(--border-strong);
+    padding: 14px;
+  }
+  .ws-content {
+    flex: 1;
+    padding: 16px 20px;
+  }
+  .ws-vault-name { font-size: 13.5px; font-weight: 600; }
+  .ws-vault-path { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--fg-tertiary); margin-top: 2px; margin-bottom: 14px; }
+  .ws-nav-row {
+    padding: 6px 10px;
+    margin: 2px -10px;
+    border-radius: 3px;
+    color: var(--fg-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+  }
+  .ws-nav-row .ws-count {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-quaternary);
+  }
+  .ws-nav-row.active {
+    background: var(--bg-active);
+    color: var(--fg);
+  }
+  .ws-nav-row.active::before {
+    content: "";
+    position: absolute;
+    left: -10px;
+    top: 4px; bottom: 4px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="doc-head">
+    <span class="kicker">codebus · walkthrough decisions · 三場合一</span>
+    <h1>CJK labels · 02 activity stream · Quiz scope-confirm</h1>
+    <div class="meta">
+      取代原本三場 walkthrough。每段都有可實作的視覺 mock + tokens，<br />
+      <span class="dimmer">能直接 land 的就 land，需要對齊的地方在段落最後標 <span class="mono">⚠ 對齊點</span>。</span>
+    </div>
+  </header>
+
+  <p>
+    這份接續 <span class="mono">design-reply.html</span>。三段彼此獨立，可以並行 land。
+    Q1 / W4 / Q3 的決定都已下到「可以開始寫程式」的細度——除非段尾標
+    <span class="mono">⚠ 對齊點</span>。
+  </p>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- SECTION 1: CJK SECTION LABELS                -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" />
+  <h2 style="margin-top:36px;"><span class="num">01</span>CJK section labels</h2>
+
+  <div class="section-intro">
+    <div class="tldr">decision</div>
+    <p style="margin-top:4px;">
+      Retire <span class="mono">uppercase + tracked</span> token。所有 section label 改用
+      <strong>「2px amber 左 bar · 12px / 500 / fg-secondary · 不 caps 不 tracking」</strong>
+      作為通用 treatment（簡稱 <span class="mono">.section-label</span>）。Wiki 5-bucket
+      taxonomy 為唯一例外：保留英文 caps，但 caps 收斂為 11px / 0.08em（不是原本的 10px / 0.12em），
+      搭配同一支 amber bar。
+    </p>
+  </div>
+
+  <h3>1.1 · Token spec</h3>
+
+  <p>新增兩個 CSS class（取代原本 <span class="mono">cb-section-label</span>）：</p>
+
+  <div class="demo">
+    <div class="demo-caption">.section-label · 通用 treatment</div>
+<pre class="mono" style="font-size:12px; color:var(--fg); margin:0; line-height:1.6;">
+.section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;          /* 字號 +1 級後對齊新的 meta 12 */
+  font-weight: 600;
+  color: var(--fg-secondary);
+  letter-spacing: 0;        /* 不再 tracked */
+  text-transform: none;     /* 不再 uppercase */
+}
+.section-label::before {
+  content: "";
+  width: 2px;
+  height: 12px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+/* English taxonomy 變體（domain term，全 app 只用於 wiki tree 5 buckets） */
+.section-label--caps {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;   /* 從 0.12em 收斂 */
+  font-size: 11px;
+  color: var(--fg-tertiary);
+}
+
+/* 右側 mono count（pattern 跟 sidebar nav count 一致） */
+.section-label__count {
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--fg-tertiary);
+}</pre>
+  </div>
+
+  <h3>1.2 · 每個出現位置的歸屬</h3>
+
+  <p>
+    全 app sweep 後共 14 個位置會被影響。決策按位置分組：
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:30%;">位置</th>
+        <th style="width:20%;">原本</th>
+        <th style="width:50%;">新版</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Workspace sidebar · "VAULT" nav label</td>
+        <td><span class="pill pill-drop">drop</span></td>
+        <td>整個 label 拿掉（只有一個 nav group）</td>
+      </tr>
+      <tr>
+        <td>Lobby populated · "近期 VAULT"</td>
+        <td><span class="pill pill-drop">broken</span></td>
+        <td><span class="mono">.section-label</span>「最近」+ count</td>
+      </tr>
+      <tr>
+        <td>Lobby empty · "QUICKSTART / 快速開始"</td>
+        <td><span class="pill pill-amber">change</span></td>
+        <td><span class="mono">.section-label</span>「快速開始」</td>
+      </tr>
+      <tr>
+        <td>Goals overview · "RECENT"</td>
+        <td><span class="pill pill-amber">change</span></td>
+        <td><span class="mono">.section-label</span>「最近」+ count <span class="mono">3 / 3</span></td>
+      </tr>
+      <tr>
+        <td>Goal Detail · "WIKI PAGES CHANGED" / "LINT" / "活動摘要" / "注意事項"</td>
+        <td><span class="pill pill-amber">change</span></td>
+        <td>全部 <span class="mono">.section-label</span>，中英統一</td>
+      </tr>
+      <tr>
+        <td>Goal Detail · "READING CODEBASE" / "WRITING WIKI"</td>
+        <td><span class="pill pill-amber">change</span></td>
+        <td>同上（見 § 02 activity stream）</td>
+      </tr>
+      <tr>
+        <td>02c Interrupted · "PARTIAL TIMELINE"</td>
+        <td><span class="pill pill-amber">change</span></td>
+        <td><span class="mono">.section-label</span>「目前進度」</td>
+      </tr>
+      <tr>
+        <td>Wiki tree · MODULES / PROCESSES / SYNTHESIS / CONCEPTS / ENTITIES</td>
+        <td><span class="pill pill-keep">keep caps</span></td>
+        <td><span class="mono">.section-label--caps</span>（保留英文 + 收斂 tracking）</td>
+      </tr>
+      <tr>
+        <td>Wiki tree · "OTHER"</td>
+        <td><span class="pill pill-drop">drop</span></td>
+        <td>整個 bucket 解散（WK2 已決議）</td>
+      </tr>
+      <tr>
+        <td>Quiz history · "RECENT" / 時間群組</td>
+        <td><span class="pill pill-amber">change</span></td>
+        <td><span class="mono">.section-label</span>「最近」/「上週」/「更早」</td>
+      </tr>
+      <tr>
+        <td>Settings modal · PII / Behavior / Log / Quiz 各子段</td>
+        <td><span class="pill pill-amber">change</span></td>
+        <td>全部 <span class="mono">.section-label</span>，中文化</td>
+      </tr>
+      <tr>
+        <td>Quiz wizard step header · "Step 2/4 · Scope"</td>
+        <td><span class="pill pill-neutral">N/A</span></td>
+        <td>不用 section-label · 走 dots + label（見 § 03）</td>
+      </tr>
+      <tr>
+        <td>LoadingOverlay 子標</td>
+        <td><span class="pill pill-neutral">N/A</span></td>
+        <td>不用 section-label · status line treatment</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>1.3 · 視覺對照</h3>
+
+  <p>三個最痛點位置的 before / after：</p>
+
+  <div class="demo">
+    <div class="demo-caption">A · Lobby populated · "近期" section</div>
+
+    <div class="compare">
+      <div class="card">
+        <div class="card-title">before · 04a-lobby-populated</div>
+        <div style="padding-top:4px;">
+          <span class="label-broken">近期 VAULT</span>
+          <span class="mono" style="margin-left:12px; font-size:11px; color:var(--fg-tertiary);">1</span>
+        </div>
+        <p class="footnote" style="margin-top:14px;">tracking 只吃 Latin run，「近期」跟「VAULT」之間視覺斷層。實機看像 bug。</p>
+      </div>
+      <div class="card recommended">
+        <div class="card-title">after · 採 .section-label</div>
+        <div style="display:flex; align-items:center; gap:12px; padding-top:4px;">
+          <span class="section-label" style="margin:0;">最近</span>
+          <span class="mono" style="margin-left:auto; font-size:11px; color:var(--fg-tertiary);">1</span>
+        </div>
+        <p class="footnote" style="margin-top:14px;">amber bar 承擔 ceremony，文字本身只負責讀。中文友善、英文也照樣 work。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo">
+    <div class="demo-caption">B · Workspace sidebar · drop the label</div>
+
+    <div class="compare">
+      <div class="card">
+        <div class="card-title">before · 規格原案</div>
+        <div class="ws-mock">
+          <div class="ws-sidebar">
+            <div class="ws-vault-name">cc-haha</div>
+            <div class="ws-vault-path">D:\side_project\cc-haha</div>
+            <span class="label-broken" style="display:block; margin-bottom:8px;">VAULT</span>
+            <div class="ws-nav-row active">Goals <span class="ws-count">3</span></div>
+            <div class="ws-nav-row">Wiki <span class="ws-count">5</span></div>
+            <div class="ws-nav-row">Quiz <span class="ws-count">1</span></div>
+          </div>
+          <div class="ws-content" style="font-size:12px; color:var(--fg-tertiary);">(content area)</div>
+        </div>
+      </div>
+      <div class="card recommended">
+        <div class="card-title">after · drop · 加 amber bar + count</div>
+        <div class="ws-mock">
+          <div class="ws-sidebar">
+            <div class="ws-vault-name">cc-haha</div>
+            <div class="ws-vault-path">D:\side_project\cc-haha</div>
+            <div style="height:14px;"></div>
+            <div class="ws-nav-row active">🚏 Goals <span class="ws-count">3</span></div>
+            <div class="ws-nav-row">📂 Wiki <span class="ws-count">5</span></div>
+            <div class="ws-nav-row">🎓 Quiz <span class="ws-count">1</span></div>
+          </div>
+          <div class="ws-content" style="font-size:12px; color:var(--fg-tertiary);">(content area)</div>
+        </div>
+        <p class="footnote" style="margin-top:10px;">label 拿掉 · emoji prefix 補 brand · active 左 amber bar · 右側 mono count。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo">
+    <div class="demo-caption">C · Wiki tree · 英文 taxonomy 用 caps 變體</div>
+
+    <div class="surface">
+      <div class="surface-title">wiki tree column · width 240px</div>
+
+      <span class="section-label section-label--caps" style="margin:4px 0 10px;">Modules</span>
+      <div class="demo-row" style="font-size:13.5px;">桌面工作台 <span class="right">module</span></div>
+      <div class="demo-row" style="font-size:13.5px;">IM 適配器系統 <span class="right">module</span></div>
+      <div class="demo-row" style="font-size:13.5px;">會話骨幹 <span class="right">module</span></div>
+
+      <span class="section-label section-label--caps" style="margin:14px 0 10px;">Processes</span>
+      <div class="demo-row" style="font-size:13.5px;">對話傳遞流程 <span class="right">process</span></div>
+
+      <span class="section-label section-label--caps" style="margin:14px 0 10px;">Synthesis</span>
+      <div class="demo-row" style="font-size:13.5px;">專案目的總覽 <span class="right">synthesis</span></div>
+    </div>
+
+    <p class="footnote">
+      Wiki 5-bucket 是 spec 定義的 domain term（Karpathy taxonomy），保留英文 + caps
+      是合理的 jargon discipline，跟 <span class="mono">Goals / Wiki / Quiz</span> tab 同等級。
+      不過 caps 跟 tracking 都收斂 — bar 來扛 ceremony，文字輕一點。
+    </p>
+  </div>
+
+  <h3>1.4 · 兩個 edge case</h3>
+
+  <h4>子段在 section 內部（second-level）</h4>
+  <p>
+    Settings modal 內目前是「子標題 + 一行 dim 解說」這種兩層結構，下一層不用 amber bar，
+    改用 <span class="mono">font-size: 13px; font-weight: 500; color: var(--fg);</span>
+    + 上方 8px gap。bar 限定 first-level。同層出現兩支 bar 會把畫面切碎。
+  </p>
+
+  <h4>section 同時有 count 跟 action</h4>
+  <p>
+    例如 Goals "RECENT · 3 / 3" 旁邊配 <span class="mono">+ New goal</span> CTA：
+    label 跟 count 一起左對齊（label 內部處理），CTA 獨立靠右——不要塞進 label 的右側。
+    section-label 永遠是「行的一部分」，不是完整一行。
+  </p>
+
+  <div class="surface" style="margin-top:14px;">
+    <div class="surface-title">Goals 內容區 header row · 完整 layout</div>
+    <div style="display:flex; align-items:center; gap:18px; padding-top:4px;">
+      <h3 style="margin:0; font-size:20px; font-weight:600;">Goals</h3>
+      <span class="dim" style="font-size:13px;">列出你想搞懂的事，公車一站一站讀給你看。</span>
+      <button class="btn btn-primary" style="margin-left:auto;">+ New goal</button>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px; margin-top:18px;">
+      <span class="section-label" style="margin:0;">最近</span>
+      <span class="mono" style="margin-left:auto; font-size:11px; color:var(--fg-tertiary);">3 / 3</span>
+    </div>
+  </div>
+
+  <h3>1.5 · ⚠ 對齊點</h3>
+  <ul class="list">
+    <li>
+      <strong>Wiki taxonomy 英文還是中文？</strong> 我傾向保留英文（domain term，CLI 也可能會用到、
+      跟 README spec 對齊）。但如果你們已經內部用「模組 / 流程 / 概念 / 實體 / 綜述」這套中文做溝通，
+      告訴我，taxonomy header 就統一中文 + 走 <span class="mono">.section-label</span>（不走 caps 變體）。
+    </li>
+    <li>
+      <strong>amber bar 高度</strong>。Demo 用 12px，跟字高呼吸。如果你們的 line-height 計算下實際字
+      box 是 16-18px，bar 改 14px 更平衡。實機看一眼。
+    </li>
+  </ul>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- SECTION 2: 02 ACTIVITY STREAM                -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" />
+  <h2 style="margin-top:36px;"><span class="num">02</span>02 activity stream · 2-phase clustering + Shell kind enum</h2>
+
+  <div class="section-intro">
+    <div class="tldr">decision</div>
+    <p style="margin-top:4px;">
+      Activity stream 走兩個 phase cluster：<strong>READING CODEBASE</strong>（intake）+
+      <strong>WRITING WIKI</strong>（output）。brand emoji banner 留 inline 在 phase 開頭。
+      Shell 工具靠 backend emit 的 <span class="mono">kind: "read" | "inspect" | "mutation"</span>
+      決定 cluster 歸屬——frontend 不做 regex 判斷。
+    </p>
+  </div>
+
+  <h3>2.1 · Shell kind enum 定義</h3>
+
+  <p>
+    Codebus-core emit <span class="mono">Shell</span> tool event 時帶一個額外欄位
+    <span class="mono">kind</span>，由 LLM intent layer 決定（你們已知道哪段 prompt 在發
+    shell call、它意圖讀還是寫）。三層分類：
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:14%;">kind</th>
+        <th style="width:30%;">語意</th>
+        <th>典型範例</th>
+        <th style="width:18%;">cluster 歸屬</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="mono">"read"</span></td>
+        <td>讀檔案內容 / 列目錄 / pattern match</td>
+        <td>
+          <span class="mono">cat</span> / <span class="mono">head</span> / <span class="mono">ls</span> /
+          <span class="mono">find</span> / <span class="mono">rg</span> / <span class="mono">grep</span> /
+          <span class="mono">wc</span>
+        </td>
+        <td>READING CODEBASE</td>
+      </tr>
+      <tr>
+        <td><span class="mono">"inspect"</span></td>
+        <td>讀環境 / 中性 introspection · 沒有檔案內容</td>
+        <td>
+          <span class="mono">git status</span> / <span class="mono">git log</span> /
+          <span class="mono">git diff</span> / <span class="mono">ps</span> /
+          <span class="mono">env</span> / <span class="mono">which</span> /
+          <span class="mono">npm ls</span>
+        </td>
+        <td>READING CODEBASE</td>
+      </tr>
+      <tr>
+        <td><span class="mono">"mutation"</span></td>
+        <td>改 state（檔案 / git / 系統 / 安裝）</td>
+        <td>
+          <span class="mono">rm</span> / <span class="mono">mv</span> / <span class="mono">mkdir</span> /
+          <span class="mono">git commit</span> / <span class="mono">npm install</span> /
+          <span class="mono">&gt;file</span>（redirect 寫入）
+        </td>
+        <td>WRITING WIKI</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    "inspect" 視覺上跟 "read" 同 cluster（都是 intake phase），但 tool icon prefix 不一樣，
+    後續若要做 per-tool filter / icon 也有區隔空間。LLM intent 拿不到時 default
+    <span class="mono">"inspect"</span>（最安全的 unknown — 不歸到 mutation cluster，
+    才不會誤造成「咦它寫東西了？」的錯覺）。
+  </p>
+
+  <h3>2.2 · Tool kind → cluster 對應</h3>
+
+  <p>連帶把所有 Claude API tool 一起定下歸屬：</p>
+
+  <table>
+    <thead>
+      <tr><th>tool</th><th>cluster</th><th>icon prefix</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><span class="mono">Read</span></td><td>READING CODEBASE</td><td><span class="mono">📄</span></td></tr>
+      <tr><td><span class="mono">Glob</span></td><td>READING CODEBASE</td><td><span class="mono">🗂</span></td></tr>
+      <tr><td><span class="mono">Grep</span></td><td>READING CODEBASE</td><td><span class="mono">🔍</span></td></tr>
+      <tr><td><span class="mono">Shell</span> · kind=read</td><td>READING CODEBASE</td><td><span class="mono">$_</span></td></tr>
+      <tr><td><span class="mono">Shell</span> · kind=inspect</td><td>READING CODEBASE</td><td><span class="mono">$?</span></td></tr>
+      <tr><td><span class="mono">Write</span></td><td>WRITING WIKI</td><td><span class="mono">✎</span></td></tr>
+      <tr><td><span class="mono">Edit</span></td><td>WRITING WIKI</td><td><span class="mono">✎</span></td></tr>
+      <tr><td><span class="mono">Shell</span> · kind=mutation</td><td>WRITING WIKI</td><td><span class="mono">$!</span></td></tr>
+    </tbody>
+  </table>
+
+  <p class="footnote">
+    Icon 用 mono ASCII 不用 emoji——這層是技術細節 ambient，不該再加 brand 量。Brand emoji
+    留給 phase banner（🚌 / 🎯 / 🤔）跟最後的 commit / done banner（🚏 / 🎉）。
+  </p>
+
+  <h3>2.3 · 完整 02a Running mock</h3>
+
+  <div class="stream-mock">
+
+    <div class="stream-header">
+      <div>
+        <div class="stream-back">← Goals</div>
+        <div class="stream-title">完整研究專案目的</div>
+      </div>
+      <div class="stream-status">
+        <span class="pulse-dot"></span>
+        <span class="status-text">Running</span>
+        <span class="status-meta">23s · 8.2k tok</span>
+        <button class="cancel-btn">⏹ Cancel</button>
+      </div>
+    </div>
+
+    <div class="phase-banner">
+      <span class="emoji">🚌</span><span class="dim" style="color:var(--fg-secondary); font-style:italic;">來囉來囉~ CodeBus 駛入 D:/side_project/cc-haha…</span>
+    </div>
+    <div class="phase-banner">
+      <span class="emoji">🎯</span>任務目標：完整研究專案目的
+    </div>
+    <div class="phase-banner">
+      <span class="emoji">🤔</span><span class="dim" style="color:var(--fg-secondary); font-style:italic;">使用 codebus-goal 技能處理這個目標。我會先掃描 raw/code/ 和現有 wiki/，確認這個專案的入口、模組分工，以及哪些頁面應該新建或補充。</span>
+    </div>
+
+    <div class="cluster">
+      <div class="cluster-head">
+        <span class="bar"></span>
+        <span class="name">Reading codebase</span>
+        <span class="count">12 calls</span>
+      </div>
+      <div class="cluster-body">
+        <div class="tool-row">
+          <span class="tool-icon">📄</span>
+          <span class="tool-body"><span class="kind">Read</span>raw/code/README.md</span>
+          <span class="tool-time">0.4s</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-icon">🗂</span>
+          <span class="tool-body"><span class="kind">Glob</span>raw/code/src/**/*.ts</span>
+          <span class="tool-time">0.2s</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-icon">🔍</span>
+          <span class="tool-body"><span class="kind">Grep</span>"AppShell" raw/code/src</span>
+          <span class="tool-time">0.3s</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-icon">$_</span>
+          <span class="tool-body"><span class="kind">Shell · read</span>Get-Content package.json | Select first 50</span>
+          <span class="tool-time">0.5s</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-icon">$?</span>
+          <span class="tool-body"><span class="kind">Shell · inspect</span>git log --oneline -n 20</span>
+          <span class="tool-time">0.3s</span>
+        </div>
+        <div class="tool-row live">
+          <span class="tool-icon"><span class="spinner"></span></span>
+          <span class="tool-body">analyzing token validation flow<span class="caret"></span></span>
+          <span class="tool-time">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="phase-banner">
+      <span class="emoji">🤔</span><span class="dim" style="color:var(--fg-secondary); font-style:italic;">我已確認 wiki/ 幾乎是空白，這次會以新建頁面為主。接下來聚焦在 README、根目錄設定和幾個入口模組。</span>
+    </div>
+
+    <div class="cluster">
+      <div class="cluster-head">
+        <span class="bar"></span>
+        <span class="name">Writing wiki</span>
+        <span class="count">5 calls</span>
+      </div>
+      <div class="cluster-body">
+        <div class="tool-row">
+          <span class="tool-icon">✎</span>
+          <span class="tool-body"><span class="kind">Write</span>wiki/synthesis/project-purpose.md <span style="color:var(--accent);">new</span></span>
+          <span class="tool-time">2.1s</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-icon">✎</span>
+          <span class="tool-body"><span class="kind">Write</span>wiki/modules/desktop-workspace.md <span style="color:var(--accent);">new</span></span>
+          <span class="tool-time">1.8s</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-icon">✎</span>
+          <span class="tool-body"><span class="kind">Edit</span>wiki/index.md <span style="color:var(--fg-tertiary);">updated</span></span>
+          <span class="tool-time">0.6s</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stream-log-card">
+      <span class="chev">▸</span>
+      <span>展開完整 stream log <span class="dimmer">(closed by default · 顯示 raw events 含 timestamps + tags)</span></span>
+    </div>
+
+  </div>
+
+  <h3>2.4 · 細節規範</h3>
+
+  <ul class="list">
+    <li>
+      <strong>Brand emoji banner 不收進 cluster。</strong> 🚌 / 🎯 / 🤔 是「敘事層」、跨 cluster 流動，
+      不該被 cluster 的左 border guide 包進去。flat 排在 cluster 之間，當「段落之間的轉折」。
+    </li>
+    <li>
+      <strong>Cluster 之間可以重複出現（thought → reading → thought → reading → thought → writing）。</strong>
+      不要強制把所有 reading 集中成一個 cluster。LLM 會在思考之間穿插讀檔案、寫 wiki 之前重新讀一遍——
+      cluster 是「同類連續發生」的視覺收斂，不是 phase 的單例。
+    </li>
+    <li>
+      <strong>Live tail（W5）只出現在當前正在跑的 cluster 最底。</strong> 不要每個 cluster 都顯示
+      live tail——只有最新那一個 cluster 才有「spinner + amber 文字 + caret」。
+    </li>
+    <li>
+      <strong>Cluster collapsible · default open during run / closed when complete。</strong>
+      跑中保持展開（user 想看 ambient progress），跑完之後預設收合（02b 視圖該突顯成果，不是過程）。
+      <span class="mono">CollapsibleStreamLog</span> 一律 default closed（per-user sticky · key
+      <span class="mono">codebus.stream-log.default-open</span>）。
+    </li>
+    <li>
+      <strong>Cluster count 不算 thought blocks。</strong> "12 calls" 只算真的有 tool call 的 row。
+      thought blocks 是敘事、不是動作。
+    </li>
+  </ul>
+
+  <h3>2.5 · 02b Done · 跑完後 cluster collapse</h3>
+
+  <p>
+    Done 視圖 cluster 收合後，每 cluster header 顯示 summary：
+  </p>
+
+  <div class="surface">
+    <div class="surface-title">02b done · clusters collapsed</div>
+
+    <div style="margin: 6px 0;">
+      <div class="cluster-head" style="margin-bottom:0;">
+        <span class="bar"></span>
+        <span class="name">Reading codebase</span>
+        <span class="dim" style="font-size:11px; color:var(--fg-tertiary); margin-left:14px;">12 reads · 195 shell · 6.2s</span>
+        <span class="count">▸ expand</span>
+      </div>
+    </div>
+
+    <div style="margin: 6px 0;">
+      <div class="cluster-head" style="margin-bottom:0;">
+        <span class="bar"></span>
+        <span class="name">Writing wiki</span>
+        <span class="dim" style="font-size:11px; color:var(--fg-tertiary); margin-left:14px;">3 new · 2 updated · 4.5s</span>
+        <span class="count">▸ expand</span>
+      </div>
+    </div>
+
+    <div style="margin: 14px 0 6px;">
+      <span class="section-label" style="margin:0;">Wiki pages changed</span>
+    </div>
+    <div class="demo-row" style="font-size:13px;">
+      <span class="mono" style="color:var(--accent); font-size:11px;">new</span>
+      synthesis/project-purpose.md
+      <span class="right">2.1s</span>
+    </div>
+    <div class="demo-row" style="font-size:13px;">
+      <span class="mono" style="color:var(--accent); font-size:11px;">new</span>
+      modules/desktop-workspace.md
+      <span class="right">1.8s</span>
+    </div>
+    <div class="demo-row" style="font-size:13px;">
+      <span class="mono" style="color:var(--fg-tertiary); font-size:11px;">updated</span>
+      index.md
+      <span class="right">0.6s</span>
+    </div>
+  </div>
+
+  <h3>2.6 · ⚠ 對齊點</h3>
+  <ul class="list">
+    <li>
+      <strong>Shell kind 由 codebus-core 還是 codebus-quiz / codebus-goal 各 skill 自己決定？</strong>
+      設計上偏好「skill 自己標」——goal skill 比較知道它發這個 <span class="mono">git log</span> 是為了
+      讀歷史（inspect）還是為了驗 commit message（也算 read）。core 統一 default 太粗。
+    </li>
+    <li>
+      <strong>不在表內的 tool（Task / WebFetch / 未來新 tool）怎麼歸？</strong>
+      default 走 READING CODEBASE。emit 端可以額外帶
+      <span class="mono">cluster: "reading" | "writing"</span> override（這層才是 cluster identity，
+      kind 是 cluster 內部分類）。如果你們覺得多一個欄位太冗，那就把
+      <span class="mono">kind</span> 擴成
+      <span class="mono">"read" | "inspect" | "mutation" | "other-read" | "other-write"</span>。
+    </li>
+    <li>
+      <strong>02b done 的 cluster summary 文案</strong>。我寫了「12 reads · 195 shell · 6.2s」這種
+      mixed-language pattern——可以中文化（「讀檔 12 次 · shell 195 次 · 6.2 秒」）或繼續英文。
+      傾向英文短一點、ambient 用。但跟 i18n 原則有點摩擦，列出來對齊。
+    </li>
+  </ul>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- SECTION 3: QUIZ SCOPE-CONFIRM                -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" />
+  <h2 style="margin-top:36px;"><span class="num">03</span>Quiz scope-confirm · flagship surface</h2>
+
+  <div class="section-intro">
+    <div class="tldr">decision</div>
+    <p style="margin-top:4px;">
+      兩版設計都 spec 出來——Design A（backend expose match metadata · 完整版）跟
+      Design B（無 metadata · fallback）。看 walkthrough #3 codebus-quiz prompt
+      內部結構決定走哪版。共用結構：topic banner / 可勾選的 page list / 兩個 action。
+      sweet spot 是 2-7 pages，超出範圍要警告 user。
+    </p>
+  </div>
+
+  <h3>3.1 · 共用結構（兩版都長這樣）</h3>
+
+  <table>
+    <thead>
+      <tr><th style="width:30%;">區塊</th><th>內容</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Header strip</td>
+        <td>
+          <span class="mono">← Quiz history</span> · 中間 wizard title「New quiz」+
+          dots <span class="mono">●●○○</span> + label <span class="mono">Step 2 / 4 · Scope</span>
+          · 右側 <span class="mono">Cancel</span>
+        </td>
+      </tr>
+      <tr>
+        <td>Topic banner</td>
+        <td>
+          <span class="mono">🎓 quiz 主題：</span>+ user 輸入的 topic（read-only，不能在這步改；
+          想改就 Cancel 回去重輸）
+        </td>
+      </tr>
+      <tr>
+        <td>Instruction line</td>
+        <td>
+          一句話告訴 user 這步在做什麼。Design A 跟 B 文案不同（見下）。
+        </td>
+      </tr>
+      <tr>
+        <td>Scope alert（conditional）</td>
+        <td>
+          少於 2 頁或多於 7 頁時顯示 amber alert（不擋路、只 warn）。
+        </td>
+      </tr>
+      <tr>
+        <td>Page list</td>
+        <td>
+          每頁一個 row · checkbox + 路徑 + 標題 + summary / reason tags ·
+          全 default checked · user 可逐項 uncheck
+        </td>
+      </tr>
+      <tr>
+        <td>Footer</td>
+        <td>
+          左側 <span class="mono">5 pages selected</span>（live count）·
+          右側 <span class="mono">[ 重新規劃 ]</span> secondary + <span class="mono">[ 確認 · 開始出題 ]</span> amber primary
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>3.2 · Design A · 有 match metadata · 推薦走這版</h3>
+
+  <p>
+    Backend expose「為什麼這頁被挑」的訊號——matched keywords / recency / authoring goal。
+    Reason tags 是 trust-builder 的核心。
+  </p>
+
+  <div class="wizard-mock">
+
+    <div class="wizard-head">
+      <span class="back">←</span>
+      <span class="title">New quiz</span>
+      <span class="step-dots">
+        <span class="step-dot done"></span>
+        <span class="step-dot current"></span>
+        <span class="step-dot"></span>
+        <span class="step-dot"></span>
+      </span>
+      <span class="step-label">Step <b>2</b> / 4 · <b>Scope</b></span>
+      <button class="btn" style="margin-left:auto;">Cancel</button>
+    </div>
+
+    <div class="topic-banner">
+      <span class="topic-emoji">🎓</span>
+      <span class="topic-label">quiz 主題</span>
+      <span class="topic-value">專案目的</span>
+    </div>
+
+    <p class="scope-instr">
+      codebus 從 wiki/ 挑出這 <strong>5 頁</strong>跟主題最相關。請確認 — 不對勁的頁可以 uncheck，
+      或按下方「重新規劃」讓 codebus 再挑一次。
+    </p>
+
+    <div class="scope-list">
+
+      <div class="scope-item">
+        <span class="scope-check">✓</span>
+        <div>
+          <div class="scope-page-path">wiki/synthesis/project-purpose.md</div>
+          <div class="scope-page-title">專案目的總覽</div>
+          <div class="scope-page-snippet">codebus 的核心目的不是把 CLI 包進 WebView，而是承接多分頁、多會話、設定、通知與 H5 模式…</div>
+          <div class="reason-tags">
+            <span class="reason-tag">matched · 專案 · 目的</span>
+            <span class="reason-tag neutral">authored · 完整研究專案目的</span>
+            <span class="reason-tag neutral">updated · 12h ago</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scope-item">
+        <span class="scope-check">✓</span>
+        <div>
+          <div class="scope-page-path">wiki/modules/desktop-workspace.md</div>
+          <div class="scope-page-title">桌面工作台</div>
+          <div class="scope-page-snippet">桌面工作台是專案面向使用者的主模組。它不單純把 CLI 輸出包進一個 WebView…</div>
+          <div class="reason-tags">
+            <span class="reason-tag">matched · 專案 · 主模組</span>
+            <span class="reason-tag neutral">authored · 完整研究專案目的</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scope-item">
+        <span class="scope-check">✓</span>
+        <div>
+          <div class="scope-page-path">wiki/modules/session-backplane.md</div>
+          <div class="scope-page-title">會話骨幹</div>
+          <div class="scope-page-snippet">會話骨幹說明 src/server/ 是會話骨幹，負責 session 對應、client 與 sdk 雙通道連線…</div>
+          <div class="reason-tags">
+            <span class="reason-tag neutral">linked from · 桌面工作台</span>
+            <span class="reason-tag neutral">authored · 完整研究專案目的</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scope-item">
+        <span class="scope-check">✓</span>
+        <div>
+          <div class="scope-page-path">wiki/modules/im-adapter-system.md</div>
+          <div class="scope-page-title">IM 適配器系統</div>
+          <div class="scope-page-snippet">IM 適配器系統負責把各家聊天平台（Telegram / Discord / Slack）的協議統一收進 codebus…</div>
+          <div class="reason-tags">
+            <span class="reason-tag neutral">linked from · 桌面工作台</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scope-item unchecked">
+        <span class="scope-check unchecked"></span>
+        <div>
+          <div class="scope-page-path">wiki/processes/conversation-delivery-flow.md</div>
+          <div class="scope-page-title">對話傳遞流程</div>
+          <div class="scope-page-snippet">這頁說明訊息從 IM 平台進到 client、經過 session-backplane 到 agent runtime 的完整路徑…</div>
+          <div class="reason-tags">
+            <span class="reason-tag neutral">linked from · 會話骨幹</span>
+            <span class="reason-tag neutral">low match · 0.3</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="scope-footer">
+      <div class="left">
+        <span class="mono"><strong style="color:var(--fg);">4</strong> / 5 pages selected</span>
+      </div>
+      <div class="actions">
+        <button class="btn">重新規劃</button>
+        <button class="btn btn-primary">確認 · 開始出題</button>
+      </div>
+    </div>
+
+  </div>
+
+  <h4>Reason tag 三種色</h4>
+  <ul class="list">
+    <li>
+      <span class="reason-tag" style="display:inline-block;">matched · ...</span>
+      Amber tint — 直接 keyword match 命中。最強 signal。
+    </li>
+    <li>
+      <span class="reason-tag neutral" style="display:inline-block;">linked from / authored / updated</span>
+      Neutral — 間接 signal（被鏈接、最近被同 goal 寫的、最近 update）。
+    </li>
+    <li>
+      <span class="reason-tag neutral" style="display:inline-block;">low match · 0.3</span>
+      Neutral · score 偏低 — codebus 對這頁的 confidence 低，user 該特別判斷要不要保留。
+      score &lt; 0.5 時自動加這個 tag。
+    </li>
+  </ul>
+
+  <h3>3.3 · Design B · 無 metadata · fallback</h3>
+
+  <p>
+    Backend 拿不到 match reason 時 fallback。每頁靠 first-paragraph snippet 讓 user 自己判斷。
+    Reason tags 整個拿掉、scope-page-snippet 加長到 3 行 clamp。
+  </p>
+
+  <div class="wizard-mock">
+
+    <div class="wizard-head">
+      <span class="back">←</span>
+      <span class="title">New quiz</span>
+      <span class="step-dots">
+        <span class="step-dot done"></span>
+        <span class="step-dot current"></span>
+        <span class="step-dot"></span>
+        <span class="step-dot"></span>
+      </span>
+      <span class="step-label">Step <b>2</b> / 4 · <b>Scope</b></span>
+      <button class="btn" style="margin-left:auto;">Cancel</button>
+    </div>
+
+    <div class="topic-banner">
+      <span class="topic-emoji">🎓</span>
+      <span class="topic-label">quiz 主題</span>
+      <span class="topic-value">專案目的</span>
+    </div>
+
+    <p class="scope-instr">
+      codebus 從 wiki/ 挑出這 <strong>5 頁</strong>跟主題最相關。檢查每頁的摘要——
+      不對勁的可以 uncheck，或讓 codebus 重新挑。
+    </p>
+
+    <div class="scope-list">
+
+      <div class="scope-item">
+        <span class="scope-check">✓</span>
+        <div>
+          <div class="scope-page-path">wiki/synthesis/project-purpose.md</div>
+          <div class="scope-page-title">專案目的總覽</div>
+          <div class="scope-page-snippet" style="-webkit-line-clamp: 3;">codebus 的核心目的不是把 CLI 包進 WebView，而是承接多分頁、多會話、設定、通知與 H5 模式。CLI 仍保留為底層執行核心，桌面端負責人機互動的長時間工作區。</div>
+        </div>
+      </div>
+
+      <div class="scope-item">
+        <span class="scope-check">✓</span>
+        <div>
+          <div class="scope-page-path">wiki/modules/desktop-workspace.md</div>
+          <div class="scope-page-title">桌面工作台</div>
+          <div class="scope-page-snippet" style="-webkit-line-clamp: 3;">桌面工作台是專案面向使用者的主模組。它不單純把 CLI 輸出包進一個 WebView，而是提供多分頁、多會話、側邊欄、設定、行動版 H5 入口、通知與更新檢查等完整操作殼層。</div>
+        </div>
+      </div>
+
+      <div class="scope-item">
+        <span class="scope-check">✓</span>
+        <div>
+          <div class="scope-page-path">wiki/modules/session-backplane.md</div>
+          <div class="scope-page-title">會話骨幹</div>
+          <div class="scope-page-snippet" style="-webkit-line-clamp: 3;">會話骨幹說明 src/server/ 是會話骨幹，負責 session 對應、client 與 sdk 雙通道連線、授權與訊息契約。UI 殼層與 IM 平台細節分別屬於其他模組。</div>
+        </div>
+      </div>
+
+      <div class="scope-item">
+        <span class="scope-check">✓</span>
+        <div>
+          <div class="scope-page-path">wiki/modules/im-adapter-system.md</div>
+          <div class="scope-page-title">IM 適配器系統</div>
+          <div class="scope-page-snippet" style="-webkit-line-clamp: 3;">IM 適配器系統負責把各家聊天平台（Telegram / Discord / Slack）的協議統一收進 codebus，提供 bot SDK 與平台專屬媒體卡片。</div>
+        </div>
+      </div>
+
+      <div class="scope-item">
+        <span class="scope-check">✓</span>
+        <div>
+          <div class="scope-page-path">wiki/processes/conversation-delivery-flow.md</div>
+          <div class="scope-page-title">對話傳遞流程</div>
+          <div class="scope-page-snippet" style="-webkit-line-clamp: 3;">這頁說明訊息從 IM 平台進到 client、經過 session-backplane 到 agent runtime 的完整路徑，以及錯誤情境下的 retry / dead-letter 處理。</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="scope-footer">
+      <div class="left">
+        <span class="mono"><strong style="color:var(--fg);">5</strong> / 5 pages selected</span>
+      </div>
+      <div class="actions">
+        <button class="btn">重新規劃</button>
+        <button class="btn btn-primary">確認 · 開始出題</button>
+      </div>
+    </div>
+
+  </div>
+
+  <h3>3.4 · 兩版差異總結</h3>
+
+  <table>
+    <thead>
+      <tr><th></th><th>Design A · with metadata</th><th>Design B · fallback</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Backend 需求</td>
+        <td>quiz scope event 帶 <span class="mono">{ path, match_score, matched_keywords, linked_from?, authoring_goal?, last_updated_at }</span></td>
+        <td>quiz scope event 只需 <span class="mono">{ path, summary }</span>（summary 可以是 wiki page 的 first paragraph 或 first H2 + 1 段）</td>
+      </tr>
+      <tr>
+        <td>Reason tags</td>
+        <td>有（amber + neutral 兩色）</td>
+        <td>無</td>
+      </tr>
+      <tr>
+        <td>Page snippet</td>
+        <td>2 行 clamp（輔助用）</td>
+        <td>3 行 clamp（主要 trust signal）</td>
+      </tr>
+      <tr>
+        <td>Trust-builder 來源</td>
+        <td>「為什麼選這頁」直接展示</td>
+        <td>「這頁長什麼樣」讓 user 自己判斷</td>
+      </tr>
+      <tr>
+        <td>實作成本</td>
+        <td>backend 改動較多</td>
+        <td>只要 wiki page 抓首段</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>3.5 · Scope alert（兩版共用）</h3>
+
+  <p>2-7 pages 是 quiz 的 sweet spot。超出範圍時顯示 amber alert，但不擋路：</p>
+
+  <div class="demo">
+    <div class="alert-banner">
+      <span class="label">scope · few</span>
+      只挑到 1 頁，quiz 可能會太單薄。試試擴大主題、或先「重新規劃」看看 codebus 有沒有忽略相關頁面。
+    </div>
+
+    <div class="alert-banner">
+      <span class="label">scope · many</span>
+      挑到 9 頁，問題會很雜。建議 uncheck 一些次要的、或拆成多個 quiz 各自聚焦。
+    </div>
+  </div>
+
+  <h3>3.6 · State machine</h3>
+
+  <p>scope-confirm step 的進出狀態：</p>
+
+  <table>
+    <thead>
+      <tr><th>觸發</th><th>動作</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>進入此 step</td>
+        <td>planning step 完成 emit <span class="mono">scope-proposed</span> 後到</td>
+      </tr>
+      <tr>
+        <td>「確認 · 開始出題」</td>
+        <td>送出 <span class="mono">selected_paths: string[]</span> · 進 generating step</td>
+      </tr>
+      <tr>
+        <td>「重新規劃」</td>
+        <td>退回 planning step · LLM 重新規劃（會在 prompt 帶 prior selection + uncheck 過的 path 當 negative signal）</td>
+      </tr>
+      <tr>
+        <td>「Cancel」</td>
+        <td>退回 Quiz history · 不存任何 state</td>
+      </tr>
+      <tr>
+        <td>uncheck 全部 page</td>
+        <td>「確認」disable · footer count 標紅 <span class="mono">0 / 5 pages selected · pick at least 1</span></td>
+      </tr>
+      <tr>
+        <td>refresh / app 重開</td>
+        <td>state lost · 回 Quiz history（這步不持久化，比較像 modal 邊界）</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>3.7 · ⚠ 對齊點</h3>
+  <ul class="list">
+    <li>
+      <strong>場 #3 直接決定走 A 還是 B</strong>。場 #3 我會問你們三件事：
+      <ol class="list" style="margin-top:6px;">
+        <li>codebus-quiz prompt 內部目前怎麼挑 scope？是 LLM rank 還是 embedding similarity？</li>
+        <li>每頁的 metadata（authoring goal / last updated / linked from）是不是已經在 wiki frontmatter 裡？</li>
+        <li>實作 Design A 大概多少工？如果 ≥ 2-3 週、產品節奏吃緊就先上 B、A 列下個版本。</li>
+      </ol>
+    </li>
+    <li>
+      <strong>「重新規劃」的 LLM context</strong>。我假設可以把 uncheck 過的 path 當 negative signal
+      餵回 prompt，這樣使用者第二次規劃會更貼題。如果你們 prompt 結構目前不接受這層 feedback,
+      「重新規劃」就會變成「再隨機挑一次」——體驗會差很多。場 #3 對。
+    </li>
+    <li>
+      <strong>Topic banner 的 emoji 用 🎓 還是 🎯。</strong> Goal 已經用 🎯 當任務目標 banner；
+      quiz 主題用 🎓 區分（同 sidebar Quiz tab 的 emoji）。如果你們覺得 🎯 跟 🎓 在 generation log
+      裡會搞混，可以兩個都用 🎓 統一 quiz brand。
+    </li>
+  </ul>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- WRAP -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <hr class="section-rule" />
+  <h2 style="margin-top:36px;">收束</h2>
+
+  <p>
+    三段都到「能直接開工」的細度。<span class="mono">⚠ 對齊點</span>裡的問題你們答得出來就直接答，
+    答不出來就排場 #3 那 45 分鐘（場 #3 的 Quiz scope-confirm 是最沒辦法 async 對齊的，
+    因為依賴你們的 prompt 結構訊息）。
+  </p>
+
+  <p>
+    平行可以動的清單（前一份 cover message 列過）仍然成立——這份只是把三個原本要 live 走的議題
+    補完。v1.1 mock 我下週末交：LoadingOverlay (live progress) / 02c Interrupted 正式版 /
+    Quiz wizard 完整 4 步（其他三步：topic / generating / completion）/ Wiki page reader /
+    ChatWidget centered-modal mode 規格。
+  </p>
+
+  <p style="margin-top:40px;" class="dim">
+    — design<br />
+    <span class="dimmer mono" style="font-size:12px;">2026-05-26 · 三場合一</span>
+  </p>
+
+</div>
+</body>
+</html>

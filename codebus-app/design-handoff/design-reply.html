@@ -1,0 +1,1411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>codebus — design reply to engineering audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-raised: #111111;
+    --bg-hover: #161616;
+    --bg-active: #1a1a1a;
+    --bg-sunken: #070707;
+
+    --border: #1f1f1f;
+    --border-strong: #2a2a2a;
+    --border-subtle: #161616;
+
+    --fg: #e5e5e5;
+    --fg-secondary: #8a8a8a;
+    --fg-tertiary: #5a5a5a;
+    --fg-quaternary: #3a3a3a;
+
+    --accent: #f5a623;
+    --accent-hover: #ffb13d;
+    --accent-dim: #c9881c;
+    --accent-fg: #0a0a0a;
+    --accent-tint: rgba(245, 166, 35, 0.10);
+    --accent-tint-strong: rgba(245, 166, 35, 0.18);
+    --accent-ring: rgba(245, 166, 35, 0.35);
+
+    --success: #4ade80;
+    --warn: #f5a623;
+    --error: #f87171;
+    --info: #60a5fa;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: 'zero', 'ss02'; letter-spacing: 0; }
+
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 56px 40px 96px;
+  }
+
+  /* Document-level header */
+  .doc-head {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 36px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-strong);
+  }
+  .doc-head .kicker {
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .doc-head h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
+  .doc-head .meta {
+    color: var(--fg-secondary);
+    font-size: 13px;
+  }
+  .doc-head .meta .mono { color: var(--fg-tertiary); }
+
+  /* Linear-style section labels (Latin: uppercase/tracked). */
+  .rail-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin: 32px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .rail-label::before {
+    content: "";
+    width: 2px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+  h2 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 4px 0 12px;
+  }
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 28px 0 8px;
+    letter-spacing: -0.01em;
+  }
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 16px 0 6px;
+    color: var(--fg);
+  }
+  p { margin: 8px 0; }
+  p, li { color: var(--fg); }
+  .dim { color: var(--fg-secondary); }
+  .dimmer { color: var(--fg-tertiary); }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+  code, .inline-mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12.5px;
+    background: var(--bg-sunken);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .card {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 18px 22px;
+  }
+  .card + .card { margin-top: 12px; }
+
+  /* TL;DR table */
+  .tldr {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-top: 12px;
+  }
+  .tldr-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 90px;
+    gap: 16px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+  }
+  .tldr-row:last-child { border-bottom: 0; }
+  .tldr-row .id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-tertiary);
+  }
+  .tldr-row .what { font-size: 13.5px; }
+  .verdict {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 3px;
+    text-align: center;
+    letter-spacing: 0.02em;
+    border: 1px solid;
+  }
+  .v-ship   { color: var(--success); border-color: rgba(74,222,128,0.35); background: rgba(74,222,128,0.08); }
+  .v-tweak  { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-tint); }
+  .v-pushback { color: var(--error); border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.08); }
+
+  /* Q&A */
+  .qa {
+    border-top: 1px solid var(--border);
+    padding: 22px 0 18px;
+  }
+  .qa:first-of-type { border-top: 0; padding-top: 8px; }
+  .qa-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 6px;
+  }
+  .qa-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--fg-tertiary);
+    flex: 0 0 32px;
+  }
+  .qa-q {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--fg);
+  }
+  .qa-body {
+    padding-left: 46px;
+  }
+  .qa-body p { margin: 8px 0; }
+  .qa-stance {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border: 1px solid;
+  }
+  .stance-yes { color: var(--success); border-color: rgba(74,222,128,0.35); background: rgba(74,222,128,0.08); }
+  .stance-yes-tweak { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-tint); }
+  .stance-no { color: var(--error); border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.08); }
+  .stance-design { color: var(--info); border-color: rgba(96,165,250,0.35); background: rgba(96,165,250,0.08); }
+
+  /* In-page mini visual demos */
+  .demo {
+    margin: 14px 0;
+    padding: 18px;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .demo-caption {
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .demo-slot {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px;
+    min-height: 80px;
+  }
+  .demo-slot .label-line {
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    margin-bottom: 6px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .demo-slot .verdict-pill {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-bottom: 8px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .pill-good { background: rgba(74,222,128,0.10); color: var(--success); border: 1px solid rgba(74,222,128,0.30); }
+  .pill-ok   { background: rgba(245,166,35,0.10); color: var(--accent); border: 1px solid var(--accent-ring); }
+  .pill-no   { background: rgba(248,113,113,0.10); color: var(--error); border: 1px solid rgba(248,113,113,0.35); }
+
+  /* CJK label demo helpers */
+  .cjk-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+  }
+  /* (A) current — uppercase tracked, mixed-script bug */
+  .cjk-current {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-tertiary);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  /* (B) drop the section label, only one group */
+  .cjk-dropped { font-size: 13px; color: var(--fg); font-weight: 500; }
+  /* (C) amber left bar — recommended */
+  .cjk-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-secondary);
+  }
+  .cjk-bar::before {
+    content: "";
+    width: 2px;
+    height: 11px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+  /* (D) box outline */
+  .cjk-box {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    color: var(--fg-secondary);
+  }
+  /* (E) dot prefix */
+  .cjk-dot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-secondary);
+  }
+  .cjk-dot::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+
+  /* Status dot demo */
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .dot-done { background: var(--success); }
+  .dot-int  { background: var(--accent); }
+  .dot-fail { background: var(--error); }
+  .dot-run  { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-tint); }
+  .row-demo {
+    display: grid;
+    grid-template-columns: 16px 1fr auto;
+    gap: 14px;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px;
+  }
+  .row-demo:last-child { border-bottom: 0; }
+  .row-demo .time { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--fg-tertiary); }
+  .row-demo .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .tag-done { background: rgba(74,222,128,0.08); color: var(--success); border: 1px solid rgba(74,222,128,0.30); }
+  .tag-int  { background: rgba(245,166,35,0.10); color: var(--accent); border: 1px solid var(--accent-ring); }
+  .tag-fail { background: rgba(248,113,113,0.10); color: var(--error); border: 1px solid rgba(248,113,113,0.35); }
+
+  /* Step indicator demo */
+  .step-strip {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 0;
+  }
+  .step-dots {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .step-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    background: transparent;
+  }
+  .step-dot.done {
+    background: var(--fg-tertiary);
+    border-color: var(--fg-tertiary);
+  }
+  .step-dot.current {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-tint);
+  }
+  .step-label {
+    font-size: 12px;
+    color: var(--fg-secondary);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .step-label b { color: var(--fg); font-weight: 600; }
+
+  /* Icon-row demo for wiki tree */
+  .wiki-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    font-size: 13.5px;
+    color: var(--fg);
+  }
+  .wiki-row .ico {
+    width: 14px;
+    height: 14px;
+    color: var(--fg-tertiary);
+    flex: 0 0 14px;
+  }
+  .wiki-row .bucket-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--fg-quaternary);
+    margin-left: auto;
+  }
+
+  /* Citation block demo */
+  .cite-block {
+    border-left: 2px solid var(--accent);
+    background: var(--bg-raised);
+    padding: 12px 16px;
+    border-radius: 0 4px 4px 0;
+    margin: 12px 0;
+    font-size: 13.5px;
+    color: var(--fg);
+  }
+  .cite-block::before {
+    content: "“";
+    color: var(--accent);
+    font-size: 22px;
+    line-height: 0;
+    margin-right: 4px;
+    vertical-align: -6px;
+    font-family: Georgia, serif;
+  }
+  .cite-link {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 3px;
+  }
+  .plain-wikilink {
+    color: var(--fg);
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 3px;
+  }
+  .plain-wikilink:hover {
+    color: var(--accent);
+    text-decoration-color: var(--accent);
+  }
+
+  /* Pushback / surprise list */
+  ul.list, ol.list {
+    margin: 8px 0 8px 22px;
+    padding: 0;
+  }
+  ul.list li, ol.list li {
+    margin: 5px 0;
+  }
+  .footnote {
+    font-size: 12px;
+    color: var(--fg-tertiary);
+    margin-top: 6px;
+  }
+
+  hr.section-rule {
+    border: 0;
+    border-top: 1px solid var(--border-strong);
+    margin: 48px 0 0;
+  }
+
+  /* Walkthrough callout */
+  .callout {
+    border: 1px solid var(--accent-ring);
+    background: var(--accent-tint);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-top: 16px;
+    font-size: 13.5px;
+  }
+  .callout strong { color: var(--accent); }
+
+  /* Quiz completion mini-mock */
+  .summary-mock {
+    text-align: center;
+    padding: 28px 16px 22px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+  }
+  .summary-mock .hero-ico {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: 2px solid var(--error);
+    color: var(--error);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 30px;
+    margin-bottom: 14px;
+  }
+  .summary-mock .summary-title { font-size: 24px; font-weight: 600; letter-spacing: -0.015em; }
+  .summary-mock .summary-sub { font-size: 13px; color: var(--fg-secondary); margin-top: 4px; }
+  .summary-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 22px;
+    align-items: center;
+  }
+  .btn {
+    font-size: 13px;
+    padding: 7px 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-sunken);
+    color: var(--fg);
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .btn-link {
+    background: transparent;
+    border: 0;
+    color: var(--fg-tertiary);
+    text-decoration: none;
+    padding: 7px 6px;
+    font-size: 12px;
+  }
+  .btn-link:hover { color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <header class="doc-head">
+    <span class="kicker">codebus · design reply</span>
+    <h1>Re: implementation feedback for v1 design</h1>
+    <div class="meta">
+      Reading <span class="mono">FEEDBACK.md</span> + <span class="mono">AUDIT.md</span> + the 24 captures, against
+      <span class="mono">design-handoff/README.md</span> v1.<br />
+      <span class="dimmer">2026-05-26 · for codebus engineering</span>
+    </div>
+  </header>
+
+  <p>
+    Short version: I'm aligned with the audit. Most of what you flagged are real misses on the v1 spec —
+    a few were genuinely my blind spots (CJK section labels, Windows ClearType density, the third
+    "interrupted" state). I'll answer the 10 Qs in order at the bottom. First, the cross-cutting
+    sanity check you asked for.
+  </p>
+
+  <!-- ============================== -->
+  <!-- TL;DR -->
+  <!-- ============================== -->
+
+  <div class="rail-label">TL;DR · all 11 calls</div>
+
+  <div class="tldr">
+    <div class="tldr-row">
+      <span class="id">C1</span>
+      <span class="what">+1 step typography bump for Windows / CJK density</span>
+      <span class="verdict v-ship">ship it</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">C2</span>
+      <span class="what">i18n surgical fix to Cat A / B / C; reserved-English list is correct</span>
+      <span class="verdict v-ship">ship it</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">C3</span>
+      <span class="what">CJK section labels — drop uppercase-tracked, use amber left-bar treatment</span>
+      <span class="verdict v-tweak">w/ tweak</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">C4</span>
+      <span class="what">Border hairlines — promote default to <span class="mono">#2a2a2a</span></span>
+      <span class="verdict v-ship">ship it</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">C5</span>
+      <span class="what">Three-state status (done / interrupted / failed) — absorb into the spec</span>
+      <span class="verdict v-ship">ship it</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">C6</span>
+      <span class="what">ChatWidget vs Cancel collision → Cancel to header right (already in spec)</span>
+      <span class="verdict v-ship">ship it</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">C7</span>
+      <span class="what">Primary CTAs to content header, not topbar</span>
+      <span class="verdict v-ship">ship it</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">C8</span>
+      <span class="what">Codex shell wrapper extraction — UI fix is right; UTF-8 is a codex-side bug</span>
+      <span class="verdict v-ship">ship it</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">cut 05</span>
+      <span class="what">Cut Cmd+K Overlay; reuse ChatWidget. Add a centered-modal mode later if needed.</span>
+      <span class="verdict v-ship">ship it</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">vault</span>
+      <span class="what">Remove “vault” from UI; keep in CLI/data model</span>
+      <span class="verdict v-ship">ship it</span>
+    </div>
+    <div class="tldr-row">
+      <span class="id">R7-1</span>
+      <span class="what">💬 → <span class="mono">MessageSquare</span> — mostly yes, but read the pushback below</span>
+      <span class="verdict v-pushback">pushback</span>
+    </div>
+  </div>
+
+  <!-- ============================== -->
+  <!-- CROSS-CUTTING SANITY CHECK -->
+  <!-- ============================== -->
+
+  <hr class="section-rule" />
+
+  <h2 style="margin-top:36px;">Sanity check · cross-cutting decisions</h2>
+
+  <h3>C1 · +1 step typography</h3>
+  <p>
+    Approve as-is. The 13/11/10 scale was tuned at macOS Retina 2x — that doesn't survive Windows
+    100% scaling, and CJK glyph hinting at sub-13px is genuinely soft (zero subjective tolerance from
+    me on this; the audit instinct is correct). Bumping headings together preserves rhythm.
+  </p>
+  <p>
+    One nudge: when you re-snapshot at 1920×1080 Win 100%, also spot-check 4K @ 150% scaling and a
+    macOS retina baseline. If macOS feels chunky after the bump, that's the signal you need the
+    user-level font-scale setting later — but agree with not adding it yet.
+  </p>
+
+  <h3>C2 · i18n holes</h3>
+  <p>
+    Aligned. Cat A / B / C is a clean accounting and the reserved-English list is exactly the right
+    discipline (jargon users learn = stays English; everything else translates). Two small refinements:
+  </p>
+  <ul class="list">
+    <li>
+      For Cat C aria-labels, prefer one shared key per concept (one <span class="mono">a11y.pageNotFound</span>,
+      not three <span class="mono">title="Page not found"</span>) — easier to audit, easier to translate.
+    </li>
+    <li>
+      <span class="mono">"Endpoint configuration is incomplete:"</span> — translate as
+      "端點設定不完整：" with <span class="mono">端點</span> in Chinese. The CLI-aligned jargon is the
+      <em>key names</em> (<span class="mono">base_url</span>, <span class="mono">api_version</span>),
+      not the sentence around them.
+    </li>
+  </ul>
+
+  <h3>C3 · CJK section labels</h3>
+  <p>
+    This is the biggest miss in the v1 spec and I owe you a real answer (see Q1 below for the
+    recommendation + visuals). Short form: <strong>drop uppercase-tracked entirely in zh-tw</strong>.
+    It's a Latin-only affordance. Substitute amber-left-bar in fg-secondary at meta size. Works for
+    both scripts.
+  </p>
+
+  <h3>C4 · Border hairlines</h3>
+  <p>
+    Approve. <span class="mono">#1f1f1f</span> on <span class="mono">#0a0a0a</span> is below
+    ClearType's perceptual floor — that's not a calibration thing, that's just thin sub-pixel anti-aliasing
+    losing the line. Promote default to <span class="mono">--border-strong: #2a2a2a</span>. Keep the
+    <span class="mono">#1f1f1f</span> token only for in-card row separators where you genuinely want
+    "almost invisible". Spec was written looking at Figma against pure black, where any line wins.
+  </p>
+
+  <h3>C5 · Three-state status</h3>
+  <p>
+    Yes — absorb into the spec. <em>Interrupted</em> is a meaningful, recoverable state and bundling it
+    into <em>failed</em> was a v1 oversight. Lock the tokens as you have them:
+  </p>
+
+  <div class="demo">
+    <div class="demo-caption">canonical three-state, applied to a goals row</div>
+    <div class="row-demo">
+      <span class="dot dot-done"></span>
+      <span>auth flow 怎麼運作</span>
+      <span class="time">14m ago</span>
+    </div>
+    <div class="row-demo">
+      <span class="dot dot-int"></span>
+      <span>列出這 repo 的主要入口跟模組</span>
+      <span class="tag tag-int">interrupted</span>
+    </div>
+    <div class="row-demo">
+      <span class="dot dot-fail"></span>
+      <span>extract billing webhook contract</span>
+      <span class="tag tag-fail">failed</span>
+    </div>
+    <div class="row-demo">
+      <span class="dot dot-run"></span>
+      <span>map the public API surface <span class="mono dim" style="font-size:11.5px; margin-left:6px;">analyzing token validation flow<span style="color:var(--accent);">|</span></span></span>
+      <span class="mono" style="color:var(--accent); font-size:11.5px;">streaming · 4.2k tok</span>
+    </div>
+  </div>
+
+  <p class="footnote">
+    Running uses the same amber as interrupted but with an outer pulse ring + caret — those are
+    motion/affordance, not color. Don't try to find a fourth hue.
+  </p>
+
+  <h3>C6 · ChatWidget vs Cancel collision</h3>
+  <p>
+    Aligned. Cancel belongs in the title row right — that's already in the v1 spec, the
+    bottom-right Cancel was an implementation regression. Fixing W3 fixes C6 for free.
+  </p>
+  <p>
+    Bigger contract: <strong>the bottom-right is ChatWidget's territory and nothing else docks there</strong>.
+    Any future "ambient goal-progress" affordance lives on the ChatWidget bubble itself
+    (e.g. amber pulse dot when a goal is running), not as a sibling button. This keeps the visual
+    edge of the app uncluttered and gives the widget a real signaling role.
+  </p>
+
+  <h3>C7 · CTA placement</h3>
+  <p>
+    Aligned. <span class="mono">+ New goal</span> / <span class="mono">+ New quiz</span> belong in
+    the content header row paired with a screen <span class="mono">&lt;h1&gt;</span>. The topbar is
+    drag-only. Don't add an <span class="mono">&lt;h1&gt;</span> in the topbar to "save space" — that
+    breaks the affordance.
+  </p>
+
+  <h3>C8 · Codex shell wrapper</h3>
+  <p>
+    Aligned with both moves: client-side wrapper extraction in <span class="mono">ActivityStreamItem</span>
+    for the readability fix, plus the upstream UTF-8 issue (which is genuinely a codex-side bug, not yours
+    to fix in UI). Worth filing the codex bug separately; the LLM retrying on its own is real token waste.
+  </p>
+
+  <h3>Cut 05 · Cmd+K Overlay</h3>
+  <p>
+    Right call. v1 split the surface because the team hadn't built ChatWidget yet; now that ChatWidget
+    exists with multi-turn + promote-to-goal + token counter, maintaining two chat-like surfaces is pure
+    overhead. Keep <span class="mono">⌘K</span> as the ChatWidget toggle. The escape hatch (centered-modal
+    mode on the same widget) is the right shape <em>if</em> spotlight UX ever comes back as a need —
+    don't build it speculatively.
+  </p>
+
+  <h3>Vault terminology removal</h3>
+  <p>
+    Right call. Two names for one container = friction, and "近期 VAULT" was visually broken anyway.
+    Keep <span class="mono">VaultEntry</span> / <span class="mono">codebus init</span> / docs — the
+    internal model name is fine.
+  </p>
+
+  <!-- ============================== -->
+  <!-- 10 OPEN QUESTIONS -->
+  <!-- ============================== -->
+
+  <hr class="section-rule" />
+
+  <h2 style="margin-top:36px;">Open Questions · answers</h2>
+  <p class="dim">Inline, numbered per FEEDBACK § Open Questions for Design.</p>
+
+  <!-- Q1 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">01</span>
+      <span class="qa-q">CJK section-label affordance</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes-tweak">recommend amber left-bar</span>
+      <p>
+        Drop uppercase-tracked entirely in zh-tw. The treatment is a Latin-script ceremony — caps + Roman
+        tracking creates "officialness". CJK has no equivalent mechanism at that size. Trying to retrofit
+        either looks broken (mixed strings) or just reads "small bold gray".
+      </p>
+      <p>The replacement should signal "this starts a group" without trying to be ceremonial:</p>
+
+      <div class="demo">
+        <div class="demo-caption">CJK section-label candidates</div>
+        <div class="demo-grid">
+
+          <div class="demo-slot">
+            <div class="verdict-pill pill-no">A · current (broken)</div>
+            <div class="label-line">uppercase + tracked, applied to mixed string</div>
+            <div class="cjk-line"><span class="cjk-current">近期 VAULT</span></div>
+            <div class="dimmer" style="font-size:12px; margin-top:6px;">Tracking only hits the Latin run — outright bug.</div>
+          </div>
+
+          <div class="demo-slot">
+            <div class="verdict-pill pill-ok">B · drop the label</div>
+            <div class="label-line">only valid when there's exactly one group</div>
+            <div class="cjk-line"><span class="cjk-dropped">cc-haha</span></div>
+            <div class="dimmer" style="font-size:12px; margin-top:6px;">Right move for the Workspace sidebar nav (one group). Wrong for the Lobby recent list (paired with a title) or the wiki tree (5 buckets).</div>
+          </div>
+
+          <div class="demo-slot" style="border-color: var(--accent-ring); background: var(--bg-raised);">
+            <div class="verdict-pill pill-good">C · amber left-bar — recommended</div>
+            <div class="label-line">2px amber bar + meta-12 / 500 / fg-secondary, no caps, no tracking</div>
+            <div class="cjk-line"><span class="cjk-bar">最近</span></div>
+            <div class="cjk-line"><span class="cjk-bar">快速開始</span></div>
+            <div class="cjk-line"><span class="cjk-bar">MODULES</span></div>
+            <div class="dimmer" style="font-size:12px; margin-top:6px;">Echoes the Linear active-row affordance, scales to mixed strings, ceremony is in the bar not the text.</div>
+          </div>
+
+          <div class="demo-slot">
+            <div class="verdict-pill pill-ok">D · box outline</div>
+            <div class="label-line">badge-shape</div>
+            <div class="cjk-line"><span class="cjk-box">最近</span></div>
+            <div class="cjk-line"><span class="cjk-box">快速開始</span></div>
+            <div class="dimmer" style="font-size:12px; margin-top:6px;">Reads more like a filter chip than a header. Reserve for things that <em>are</em> filters.</div>
+          </div>
+
+          <div class="demo-slot">
+            <div class="verdict-pill pill-ok">E · amber dot prefix</div>
+            <div class="label-line">softer than C</div>
+            <div class="cjk-line"><span class="cjk-dot">最近</span></div>
+            <div class="cjk-line"><span class="cjk-dot">快速開始</span></div>
+            <div class="dimmer" style="font-size:12px; margin-top:6px;">Workable, but it competes with the goal-status dot pattern. Don't use two dot meanings.</div>
+          </div>
+
+        </div>
+      </div>
+
+      <p><strong>Final call:</strong></p>
+      <ul class="list">
+        <li><strong>Use C (amber left-bar)</strong> as the universal section-label treatment. Apply it everywhere a label is needed in any locale (Latin or CJK).</li>
+        <li>For the wiki taxonomy headers (<span class="mono">MODULES</span>, <span class="mono">PROCESSES</span>, <span class="mono">SYNTHESIS</span>) — keep them English-uppercase as bucket names (they're domain identifiers from the spec, not user-translatable), but render with the amber-bar treatment, not standalone caps+tracking.</li>
+        <li>Drop the label entirely (option B) only where there's exactly one group — the Workspace nav is the only such place.</li>
+        <li>Retire the uppercase-tracked CSS token. It was wrong for zh, and it's now redundant for en.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Q2 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">02</span>
+      <span class="qa-q">02c Interrupted — into the spec, or codebus extension?</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes">absorb into spec</span>
+      <p>
+        Interrupted vs Failed is a real UX distinction, not codebus-specific — any long-running LLM job
+        has a "you can retry safely" and "something is broken, retrying won't help" axis. v1 spec collapsed
+        them because the mocks were paper-only and never confronted the actual lifecycle. Your three-state
+        is the canonical version going forward.
+      </p>
+      <p>
+        Two things to tighten while you're formalizing:
+      </p>
+      <ul class="list">
+        <li>
+          Name the routing rule explicitly in the spec — <em>user-cancel / app-close / network-drop</em>
+          = interrupted; <em>LLM API hard error / sandbox crash / lint loop irrecoverable</em> = failed.
+          If you can't tell which side an error falls on, default to interrupted (retry is cheaper than
+          investigation).
+        </li>
+        <li>
+          The component is named <span class="mono">RunDetailCancelled</span> but handles all three
+          interrupt sources. Rename to <span class="mono">RunDetailInterrupted</span> so the file
+          matches the state name in the spec. Small thing, but state-vs-trigger naming drift is a slow
+          source of bugs.
+        </li>
+      </ul>
+      <p>
+        Banner copy: I'd nudge your draft from "app 中途被關閉" → <strong>"中途離開了 codebus，wiki 還沒寫完。可以重跑這個 goal 補上。"</strong>
+        — "被關閉" sounds blameful (was it me? did codebus crash?), and "可以重跑" is more
+        active than "需要的話". Same shape, different mood.
+      </p>
+    </div>
+  </div>
+
+  <!-- Q3 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">03</span>
+      <span class="qa-q">Quiz wizard form factor — fullscreen view OK?</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes">accept the departure</span>
+      <p>
+        Yes — fullscreen wizard is the right shape and the parallel with <span class="mono">+ New goal</span>
+        was the original mistake. Goal flow is one-shot (modal is fine); quiz flow is six steps with a
+        human-in-the-loop scope confirmation (modal is wrong). Different shapes get different patterns.
+      </p>
+      <p>One ask while you're refactoring this:</p>
+      <ul class="list">
+        <li>
+          When the wizard is active, the topbar <span class="mono">+ New quiz</span> should be
+          <strong>hidden</strong>, not disabled. Disabled creates "what happens if I click that?" hesitation;
+          hiding is unambiguous. (Same rule as "don't show + New Goal during a Goal Running view".)
+        </li>
+        <li>
+          The scope-confirmation step is the single most valuable thing in this flow — it's the only
+          point where users can correct the LLM's page picks before paying for generation. Lavish
+          design attention here: show the picked pages with their summaries (or first H2 line), let users
+          uncheck individual pages, expose <em>why these were picked</em> (matched keywords, recently
+          updated, recently authored by). This is the surface where users learn to trust the LLM's
+          scoping.
+        </li>
+        <li>
+          Wizard exits → return to Quiz history. Don't return to the empty state or Lobby. Continuity
+          matters here.
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Q4 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">04</span>
+      <span class="qa-q">Step indicator for the Quiz wizard</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes-tweak">dots + label</span>
+      <p>
+        Text alone ("Step 2/4 · Scope") communicates position but not progression. Progress dots alone
+        look like a generic onboarding flow and don't say what each step <em>is</em>. Both, side-by-side
+        in the header strip:
+      </p>
+
+      <div class="demo">
+        <div class="demo-caption">wizard header — dots + step label</div>
+
+        <div class="step-strip">
+          <div class="step-dots">
+            <span class="step-dot done"></span>
+            <span class="step-dot current"></span>
+            <span class="step-dot"></span>
+            <span class="step-dot"></span>
+          </div>
+          <span class="step-label">Step <b>2</b> / 4 · <b>Scope</b></span>
+        </div>
+
+        <div class="step-strip">
+          <div class="step-dots">
+            <span class="step-dot done"></span>
+            <span class="step-dot done"></span>
+            <span class="step-dot done"></span>
+            <span class="step-dot current"></span>
+          </div>
+          <span class="step-label">Step <b>4</b> / 4 · <b>Answering</b> · Q3 / 5</span>
+        </div>
+      </div>
+
+      <p>
+        Dots: 7px circles, filled-amber for current, filled-tertiary for completed, ring-only for
+        pending. Sits flush-left in the header strip where <span class="mono">Quiz: &lt;scope&gt;</span>
+        normally goes. During the answering step, the dot indicator drops away and the strip shows
+        <span class="mono">Q3 / 5</span> instead (because per-question progress is the live concern, not
+        per-step).
+      </p>
+      <p>
+        Concretely the four steps are: <span class="mono">topic → scope → generating → answering</span>.
+        Don't break "answering" into per-question dots — that's QuizAnswering's job.
+      </p>
+    </div>
+  </div>
+
+  <!-- Q5 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">05</span>
+      <span class="qa-q">Bus motion vocabulary</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes-tweak">lock 2 moods, nothing else</span>
+      <p>
+        Yes to the distinction. Codify it as a 2-mood vocabulary and stop there — any new bus animation
+        proposal has to map to one of these or get rejected:
+      </p>
+      <ul class="list">
+        <li>
+          <strong>Moving forward</strong> — <span class="mono">codebus-bus-roll</span> (translate -26→12px,
+          ±2° rotate, slight Y bob, 1.8s). Used for: LoadingOverlay (vault init). Conceptually:
+          "codebus is doing work that will end".
+        </li>
+        <li>
+          <strong>Idling in place</strong> — vertical 2px bob, 1px horizontal jitter, 1.4s, no rotation.
+          Used for: 04b Lobby empty hero. Conceptually: "codebus is waiting for you".
+        </li>
+      </ul>
+      <p>
+        Hard nos:
+      </p>
+      <ul class="list">
+        <li>
+          No bus animation on goal-running. That surface already has the amber pulsing dot and the
+          stream-tail caret — adding bus motion competes with them. The pulsing dot <em>is</em> the
+          "codebus is currently driving" affordance.
+        </li>
+        <li>
+          No bus animation on Quiz generation. Same reasoning. (And we'd just be reusing LoadingOverlay's
+          mood there, which would dilute it.)
+        </li>
+        <li>
+          Wordmark <span class="mono">🚌</span> stays static. Static glyph + 2 deliberate motion moments
+          is the right cadence. Three+ animated buses tips into mascot-overuse.
+        </li>
+      </ul>
+      <p>
+        Both animations gate on <span class="mono">prefers-reduced-motion: reduce</span> — fall back
+        to static <span class="mono">🚌</span> with no transform.
+      </p>
+    </div>
+  </div>
+
+  <!-- Q6 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">06</span>
+      <span class="qa-q">Wiki tree page-type icons — yes/no?</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes-tweak">yes — lucide, monochrome, subdued</span>
+      <p>
+        Yes — the bucket has semantic weight (5-bucket Karpathy taxonomy is the spine of the wiki),
+        and a glanceable bucket cue at the page level lowers the cost of scanning across buckets.
+        Use lucide, single color (<span class="mono">fg-tertiary</span>), 14px, never colored.
+      </p>
+
+      <div class="demo">
+        <div class="demo-caption">wiki tree row with bucket icon</div>
+
+        <div style="display:flex; align-items:center; gap:10px; padding:6px 12px; color:var(--fg-tertiary); font-size:11px; font-weight:600;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:2px; height:11px; background:var(--accent); border-radius:1px;"></span>
+            MODULES
+          </div>
+        </div>
+
+        <div class="wiki-row">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+          <span>桌面工作台</span>
+          <span class="bucket-hint">module</span>
+        </div>
+        <div class="wiki-row">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+          <span>IM 適配器系統</span>
+          <span class="bucket-hint">module</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px; padding:14px 12px 6px; color:var(--fg-tertiary); font-size:11px; font-weight:600;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:2px; height:11px; background:var(--accent); border-radius:1px;"></span>
+            PROCESSES
+          </div>
+        </div>
+        <div class="wiki-row">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="M7 22l-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg>
+          <span>對話傳遞流程</span>
+          <span class="bucket-hint">process</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px; padding:14px 12px 6px; color:var(--fg-tertiary); font-size:11px; font-weight:600;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:2px; height:11px; background:var(--accent); border-radius:1px;"></span>
+            SYNTHESIS
+          </div>
+        </div>
+        <div class="wiki-row">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71"></path></svg>
+          <span>專案目的總覽</span>
+          <span class="bucket-hint">synthesis</span>
+        </div>
+      </div>
+
+      <p>Mapping:</p>
+      <ul class="list">
+        <li><span class="mono">Lightbulb</span> · concept</li>
+        <li><span class="mono">Box</span> · entity</li>
+        <li><span class="mono">Blocks</span> · module</li>
+        <li><span class="mono">Repeat</span> · process</li>
+        <li><span class="mono">Link</span> · synthesis</li>
+      </ul>
+      <p>
+        If usability testing shows the icons feel noisy at scale, the fallback is just two glyphs
+        (concept/synthesis = abstract knowledge; entity/module/process = concrete artifact) — but
+        start with all five.
+      </p>
+    </div>
+  </div>
+
+  <!-- Q7 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">07</span>
+      <span class="qa-q">Citation wikilink vs wiki-internal wikilink</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes">confirmed</span>
+      <p>
+        Yes. The dashed-amber-mono treatment is <strong>citation-specific</strong> — it marks "this claim
+        is sourced from here". Wiki-internal navigation links should be plain underline (amber on hover).
+        Two different semantics deserve two different treatments.
+      </p>
+
+      <div class="demo">
+        <div class="demo-caption">Quiz reviewing — citation blockquote (03b)</div>
+        <div class="cite-block">
+          <a class="cite-link" href="#">專案目的總覽</a> 與
+          <a class="cite-link" href="#">桌面工作台</a> 都指出，桌面端不是包裝 CLI 的殼，而是承接多分頁、多會話、設定、通知、H5 與權限流程的長時間工作區；CLI 仍保留為底層執行核心。
+        </div>
+      </div>
+
+      <div class="demo">
+        <div class="demo-caption">Wiki body — plain wikilink to a sibling page</div>
+        <p style="margin: 6px 0;">
+          桌面工作台不直接執行 agent 推理，也不直接理解 IM 平台協議。它把會話與串流交給
+          <a class="plain-wikilink" href="#">session-backplane</a>，把外部聊天平台交給
+          <a class="plain-wikilink" href="#">im-adapter-system</a>。
+        </p>
+      </div>
+
+      <p>
+        Quiz Reviewing's "Back to wiki page" link should also use the plain treatment, not the
+        citation one — it's navigation, not provenance.
+      </p>
+    </div>
+  </div>
+
+  <!-- Q8 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">08</span>
+      <span class="qa-q">Quiz completion summary redesign</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes-tweak">approve w/ tweaks</span>
+      <p>
+        Approve the shape. Two tweaks:
+      </p>
+      <ol class="list">
+        <li>
+          <strong>Color of the fail hero is red, not amber.</strong> Three-state language (C5):
+          done/pass = green, interrupted = amber, failed = red. Quiz fail is a definitive
+          outcome, not an interrupted state — use red. Pass = <span class="mono">CheckCircle2</span> green.
+        </li>
+        <li>
+          <strong>Three buttons is too many for an end-screen.</strong> The user just answered five
+          questions; they're tired. Demote "回 history" from a button to a quiet back-link in the
+          top-left of the page (where it belongs anyway). Leave two real actions: amber primary
+          <em>重做此份</em>, secondary <em>看錯題</em>.
+        </li>
+      </ol>
+
+      <div class="demo">
+        <div class="demo-caption">recommended quiz fail summary</div>
+        <div class="summary-mock">
+          <div class="hero-ico">✕</div>
+          <div class="summary-title">沒通過 <span class="dim">(40%)</span></div>
+          <div class="summary-sub">正確率 40%，未達 69% 門檻</div>
+          <div class="summary-actions">
+            <button class="btn btn-primary">重做此份</button>
+            <button class="btn">看錯題</button>
+          </div>
+        </div>
+        <div style="text-align:left; margin-top:10px;">
+          <button class="btn btn-link">← 回 history</button>
+        </div>
+      </div>
+
+      <p>
+        Pass case: same layout, swap red XCircle for green CheckCircle2, title to
+        "通過了 (88%)", subtitle to "正確率 88%，超過 69% 門檻", primary CTA becomes "重做此份"
+        (still useful — users redo to polish) and secondary becomes "看過程" (the generation
+        log, for curiosity). The structural shape is symmetric; only color + copy diverge.
+      </p>
+    </div>
+  </div>
+
+  <!-- Q9 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">09</span>
+      <span class="qa-q">"Goal Log" → "旅行日誌"</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes">yes</span>
+      <p>
+        Perfect. The bus metaphor pays off when it shows up in deliberate, low-frequency places:
+        wordmark, LoadingOverlay, the 04b idle hero — and now "旅行日誌". You earn warmth without
+        spending it.
+      </p>
+      <p>
+        I considered "公車日誌" briefly because it's more direct, but it's also more literal and
+        steals user attention. "旅行日誌" sits one layer abstract — it's the <em>user's</em> trip
+        through the codebase, recorded by codebus. That framing matches what the file actually
+        contains better than the engineering framing does.
+      </p>
+      <p>
+        EN counterpart: keep "Goal Log" as the canonical English name (matches CLI / file path).
+        Optional small flourish: subtitle the page with "your trip through this repo" once,
+        as a one-time framing line at the top.
+      </p>
+    </div>
+  </div>
+
+  <!-- Q10 -->
+  <div class="qa">
+    <div class="qa-head">
+      <span class="qa-num">10</span>
+      <span class="qa-q">Page metadata bar on wiki preview</span>
+    </div>
+    <div class="qa-body">
+      <span class="qa-stance stance-yes-tweak">yes — single line, provenance only</span>
+      <p>
+        Yes, and keep it tight. Position: directly below the page title, above the body
+        content. Single line, mono-12 (post-bump), <span class="mono">fg-tertiary</span>.
+        Format:
+      </p>
+
+      <div class="demo">
+        <div class="demo-caption">wiki page header (after the title)</div>
+        <h3 style="margin:0 0 4px; font-size:22px; font-weight:600;">桌面工作台</h3>
+        <div class="mono" style="font-size:12px; color: var(--fg-tertiary);">
+          Last updated by <a href="#" style="color: var(--fg-secondary); text-decoration:none; border-bottom:1px dotted var(--fg-tertiary);">完整研究專案目的</a> · 12h ago · 4 sources
+        </div>
+      </div>
+
+      <p>
+        Constraints:
+      </p>
+      <ul class="list">
+        <li>
+          <strong>Provenance only.</strong> Goal name → time → source count. Resist adding word count,
+          tag chips, view count, or anything analytics-flavored. Provenance is what users actually need
+          to judge "do I trust this page?" — the rest is noise.
+        </li>
+        <li>
+          Goal name hovers + clicks through to that goal's detail view. This is the closing of the loop —
+          "this page exists because this goal ran" is the single most important relationship in codebus,
+          and one click is the price.
+        </li>
+        <li>
+          "4 sources" is the wikilink-citation count from the page body. Only show if &gt; 0.
+        </li>
+        <li>
+          If the page was edited via a follow-up goal, list the most recent. Don't try to show
+          authorship history here — that belongs in 旅行日誌.
+        </li>
+      </ul>
+
+      <p>
+        Related: WP5 (the "humans edit by running a goal" philosophy) — I'd add a quiet hint at the
+        page footer, not the metadata bar. Something like
+        <span class="mono">"想改這頁？跑一個 goal 跟 codebus 說該怎麼改 →"</span> as a fg-tertiary link
+        that opens NewGoalModal pre-filled with "修改 [此頁] 的 …". Keeps the philosophy visible
+        without nagging.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============================== -->
+  <!-- SURPRISES + PUSHBACK -->
+  <!-- ============================== -->
+
+  <hr class="section-rule" />
+
+  <h2 style="margin-top:36px;">Surprises &amp; pushback</h2>
+
+  <h3>Things in the audit that surprised me (positively)</h3>
+  <ul class="list">
+    <li>
+      <strong>The scope-confirmation step in the Quiz wizard</strong> is genuinely good UX I would
+      have spec'd in v1 if I'd thought through the flow shape. Don't bury it as "an extra step" — it's
+      the single most useful trust-builder in the entire app. Treat it as a flagship surface.
+    </li>
+    <li>
+      <strong>The bus-roll keyframes for LoadingOverlay.</strong> Translate + bob + rotate is exactly
+      the playful-but-not-too-much I'd want, and I haven't seen it before — please keep the file
+      checked in even if you redesign other parts later. It's a brand asset.
+    </li>
+    <li>
+      <strong>The "interrupted" state.</strong> I should have caught this in v1. The fact that you
+      built it before asking, and the routing rules came out of real failure modes (app close /
+      cancel / network), means it's grounded. Add it to the spec.
+    </li>
+    <li>
+      <strong>QL1 (hash ID as quiz row title) is a clean catch.</strong> "Show users the topic they
+      typed, not the topic's internal ID" is the kind of bug that's invisible to engineers and
+      obvious to users. Prioritize this.
+    </li>
+  </ul>
+
+  <h3>Things I'd push back on</h3>
+
+  <h4>R7-1 · "Replace 💬 with lucide MessageSquare"</h4>
+  <p>
+    I'll push back gently. The audit says 💬 is "the only cartoon element left" — but consider that's
+    a feature: codebus is <em>trying</em> to be warm. The 🚌 wordmark, the LoadingOverlay bus, the
+    idle hero, the 旅行日誌 — all the warmth lives in a handful of deliberate emoji moments. If 💬 is
+    the chat one, that's coherent.
+  </p>
+  <p>
+    Two alternatives before you reach for <span class="mono">MessageSquare</span>:
+  </p>
+  <ol class="list">
+    <li>
+      <strong>Keep 💬 as-is.</strong> It's exactly one emoji on exactly one always-visible affordance.
+      It's only "cartoony" relative to Linear-tight; in the context of a brand that already has
+      <span class="mono">🚌</span> in the wordmark, it lands fine.
+    </li>
+    <li>
+      <strong>Replace 💬 with 🚌 specifically</strong> — ChatWidget is a chat with codebus-the-bus, the
+      bus icon doubles as a "talk to your driver" affordance. Tight fit with brand. Caveat:
+      now <span class="mono">🚌</span> would appear in 4 places (wordmark, loading, idle hero,
+      chat bubble); risks dilution.
+    </li>
+  </ol>
+  <p>
+    If the team's gut is still "MessageSquare", do it — but make sure the brand has somewhere else to
+    breathe. Don't strip all the warmth out chasing Linear consistency. Codebus isn't Linear, it's
+    a friendlier sibling.
+  </p>
+
+  <h4>D2 · "注意事項" / Follow-ups section</h4>
+  <p>
+    Keep it, but be ruthless about the empty case. The audit's verification plan (5/5 different goal
+    types should yield notes) is the right test. If <em>any</em> goal type comes back with no notes,
+    the section needs to fully hide — not render as "Follow-ups: (empty)". Empty sections train users
+    to skip the section, which kills its value when it <em>does</em> have something to say.
+  </p>
+
+  <h4>Visual grouping in 02 activity stream — don't over-engineer it</h4>
+  <p>
+    Your hybrid plan (keep emoji banners + add tool-kind grouping with 1px-left-border guide) is
+    correct in shape, but resist the temptation to make every tool-kind cluster its own collapsible
+    section. The spec's <em>READING CODEBASE / WRITING WIKI</em> split is two semantic phases of work
+    (intake → output), not five tool flavors. Mirror that semantic split, not the technical taxonomy:
+  </p>
+  <ul class="list">
+    <li>One implicit grouping by phase: reading-cluster (Read/Glob/Grep/Shell-for-inspection), writing-cluster (Write/Edit/Shell-for-mutation).</li>
+    <li>Within a cluster, individual tool calls stay flat — that's where the brand emoji banners do their work.</li>
+    <li>Raw event log stays in the collapsible stream-log card (default closed, per spec). That's where the engineering audience goes when they need the full firehose.</li>
+  </ul>
+
+  <h4>X2 · &lt;CollapsibleStreamLog&gt; shared component</h4>
+  <p>
+    Good abstraction call. One spec addition: the <em>default-closed</em> state should be sticky
+    per-user, not per-page. If I expand the stream log on goal #1, opening goal #2 should
+    remember that I'm a "show me the raw logs" person. Use localStorage; don't put it in the
+    user-facing settings page yet.
+  </p>
+
+  <h4>GP8 · running row stream tail</h4>
+  <p>
+    Strongly approve. This is the v1-spec affordance I'm most attached to and the audit correctly
+    flagged it as missing. The "current action narration" with amber blinking caret in the list view
+    is what makes the Goals overview feel <em>alive</em> — without it, a running goal looks identical
+    to a done goal, and users will check back constantly. Don't deprioritize this.
+  </p>
+
+  <!-- ============================== -->
+  <!-- WALKTHROUGH -->
+  <!-- ============================== -->
+
+  <hr class="section-rule" />
+
+  <h2 style="margin-top:36px;">What's easier with a real-time walkthrough</h2>
+  <p>
+    Most of this is fine async. Three things would be faster to resolve live:
+  </p>
+  <ul class="list">
+    <li>
+      <strong>The CJK label treatment</strong> (Q1) — happy to sketch on shared screen with you on a
+      real WebView2 render. Words in this doc only get you 80% there; the last 20% is "does it look
+      right next to actual content on your monitors?". Schedule 30 min.
+    </li>
+    <li>
+      <strong>The 02 activity stream visual grouping</strong> (W4 + my pushback above) — easier to
+      mark up on a live capture than to describe. 20 min.
+    </li>
+    <li>
+      <strong>The Quiz wizard scope-confirmation step</strong> (Q3) — this is the surface I'd most
+      like to design in detail with you, since it's where engineering knowledge (what data is
+      actually available about page picks) meets the UX shape. Block out 45 min for this one,
+      and bring whoever knows the scope-planning prompt internals.
+    </li>
+  </ul>
+
+  <div class="callout">
+    <strong>Next handoff from me</strong> — once you've sent the inline replies on the 10 Qs and
+    we've done the scope-confirm walkthrough, I'll do v1.1 mocks for the screens the spec was
+    silent on: LoadingOverlay (with live progress), 02c Interrupted (formalized), Quiz wizard
+    (all four steps), Wiki page reader, and ChatWidget. Aiming for end of next week.
+  </div>
+
+  <p style="margin-top:40px;" class="dim">
+    — design<br />
+    <span class="dimmer mono" style="font-size:12px;">2026-05-26</span>
+  </p>
+
+</div>
+</body>
+</html>
