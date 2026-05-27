@@ -857,7 +857,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - 修法：呼叫 `t("common.minutesAgo", { n: 34 })` → zh 「34 分鐘前」/ en `34m ago`
 - 補進 i18n Cat B sweep
 
-##### GP8 · Running row 設計沒落地 [local] [HIGH PRIORITY, design v1 強烈表態]
+##### GP8 · Running row 設計沒落地 [local] [archived 2026-05-27 via goals-running-row-stream-tail]
 - **設計稿**：running row expanded 顯示 mono 11px stream tail（"current action narration"）+ 1px amber blinking caret + 右側 `streaming · 4,218 tok` amber
 - **現況**：running 時 row 跟其他 row 同樣 collapsed，user 不點進 detail 看不到進度
 - **影響**：ambient awareness 不足；user 不知道「現在在做什麼」、會反覆切回去看
