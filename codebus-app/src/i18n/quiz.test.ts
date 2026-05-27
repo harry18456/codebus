@@ -45,6 +45,10 @@ const QUIZ_KEYS = [
   "workspace.quiz.tab.noMatchPrefix",
   "workspace.quiz.tab.errorPrefix",
   "workspace.quiz.tab.backButton",
+
+  // ---- Content header row (Phase 4C) ----
+  "workspace.quiz.headerTitle",
+  "workspace.quiz.headerSubtitle",
 ] as const
 
 describe("i18n_quiz_keys_in_both_locales", () => {
@@ -60,6 +64,29 @@ describe("i18n_quiz_keys_in_both_locales", () => {
       const value = (messages.zh as Record<string, string>)[key]
       expect(typeof value).toBe("string")
       expect(value.length).toBeGreaterThan(0)
+    })
+  }
+})
+
+/**
+ * Content header row (Phase 4C): new Quiz header keys MUST be real
+ * translations — never the key literal — so useT never falls back to
+ * showing the i18n identifier.
+ */
+const PHASE_4C_QUIZ_KEYS = [
+  "workspace.quiz.headerTitle",
+  "workspace.quiz.headerSubtitle",
+] as const
+
+describe("i18n_phase_4c_quiz_header_keys_are_translated_not_key_literal", () => {
+  for (const key of PHASE_4C_QUIZ_KEYS) {
+    it(`en value differs from key: ${key}`, () => {
+      const value = (messages.en as Record<string, string>)[key]
+      expect(value).not.toBe(key)
+    })
+    it(`zh value differs from key: ${key}`, () => {
+      const value = (messages.zh as Record<string, string>)[key]
+      expect(value).not.toBe(key)
     })
   }
 })

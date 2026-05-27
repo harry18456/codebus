@@ -159,6 +159,12 @@ const en = {
   "workspace.goals.examplePlaceholder1": "describe the authentication flow",
   "workspace.goals.examplePlaceholder2": "summarize the data ingestion pipeline",
   "workspace.goals.examplePlaceholder3": "map the public API surface",
+  "workspace.goals.headerTitle": "Goals",
+  "workspace.goals.headerSubtitle":
+    "List what you want to understand — codebus reads the codebase one stop at a time.",
+  "workspace.goals.emptyHeroTitle": "No goals yet",
+  "workspace.goals.emptyHeroSubtitle":
+    "Start with one of the examples below, or write your own.",
 
   // ---- Workspace · New Goal modal ----
   "workspace.newGoalModal.title": "New goal",
@@ -375,6 +381,9 @@ const en = {
   "workspace.quiz.tab.backButton": "Back",
   "workspace.quiz.generationLogLoadError":
     "Could not load generation log: {error}",
+  "workspace.quiz.headerTitle": "Quiz",
+  "workspace.quiz.headerSubtitle":
+    "Test how well you understood the wiki.",
 
   // ---- Workspace · WikiPreview action (residual sweep) ----
   "workspace.wiki.quizMeOnThis": "Quiz me on this",
@@ -586,6 +595,12 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.goals.examplePlaceholder1": "說明認證流程",
   "workspace.goals.examplePlaceholder2": "整理資料 ingest pipeline 概要",
   "workspace.goals.examplePlaceholder3": "畫出公開 API surface",
+  "workspace.goals.headerTitle": "Goals",
+  "workspace.goals.headerSubtitle":
+    "列出你想搞懂的事——公車一站一站讀給你看。",
+  "workspace.goals.emptyHeroTitle": "還沒有任務",
+  "workspace.goals.emptyHeroSubtitle":
+    "從下面範例挑一個開始、或自己寫一個。",
 
   // ---- Workspace · New Goal modal ----
   "workspace.newGoalModal.title": "新增 Goal",
@@ -797,6 +812,8 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.quiz.tab.errorPrefix": "Quiz 失敗：{message}",
   "workspace.quiz.tab.backButton": "返回",
   "workspace.quiz.generationLogLoadError": "無法載入生成記錄：{error}",
+  "workspace.quiz.headerTitle": "Quiz",
+  "workspace.quiz.headerSubtitle": "驗證自己有沒有看懂 wiki。",
 
   // ---- Workspace · WikiPreview action (residual sweep) ----
   "workspace.wiki.quizMeOnThis": "考我這頁",

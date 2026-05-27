@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "react"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 
 import { Button } from "@/components/ui/button"
+import { TabContentHeader } from "@/components/ui/TabContentHeader"
 import { useSettingsStore } from "@/store/settings"
 import { useT } from "@/i18n/useT"
 import { useWatcherEvent } from "@/hooks/useWatcherEvent"
@@ -511,26 +512,26 @@ export function QuizTab({
       className="flex h-full w-full flex-col"
     >
       <WatcherStatusBanner vaultPath={vaultPath} />
-      {/* Header mirrors GoalsTab exactly (full-width, border-b, p-3,
-          pr-[160px] for the fixed WindowControls) so + New quiz lands
-          in the same screen position/style as + New goal across tabs. */}
-      <div
-        data-tauri-drag-region
-        className="flex items-center justify-between border-b border-border p-3 pr-[160px]"
-      >
-        <h2 className="text-body-lg font-medium text-fg-primary">
-          {t("workspace.quiz.tab.heading")}
-        </h2>
-        {(phase === "history" || phase === "idle") && (
-          <Button
-            variant="primary"
-            data-testid="new-quiz"
-            onClick={() => setPhase("idle")}
-          >
-            {t("workspace.quiz.tab.newButton")}
-          </Button>
-        )}
-      </div>
+      {/* Phase 4C: history view consumes the shared TabContentHeader so
+          the h1, subtitle, and `+ New quiz` CTA match the Goals tab's
+          content header row exactly. Non-history phases keep their
+          existing in-flow layout (no content header). */}
+      {phase === "history" && (
+        <TabContentHeader
+          testId="tab-content-header-quiz"
+          title={t("workspace.quiz.headerTitle")}
+          subtitle={t("workspace.quiz.headerSubtitle")}
+          cta={
+            <Button
+              variant="primary"
+              data-testid="new-quiz"
+              onClick={() => setPhase("idle")}
+            >
+              {t("workspace.quiz.tab.newButton")}
+            </Button>
+          }
+        />
+      )}
 
       <div className="flex flex-1 flex-col overflow-auto px-8 py-6">
 

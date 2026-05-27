@@ -36,6 +36,7 @@ function makeRun(id: string, startedAt: string): RunLogSummary {
 describe("GoalsTab", () => {
   beforeEach(() => {
     useGoalsStore.setState({ runs: [], activeRun: null })
+    mockedUseLocale.mockReturnValue("en")
   })
 
   afterEach(() => {
@@ -54,32 +55,100 @@ describe("GoalsTab", () => {
     render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
     const rows = screen.getAllByTestId(/^run-row-/)
     expect(rows.map((r) => r.dataset.testid)).toEqual([
-      "run-row-b", // 12:00 (newest)
-      "run-row-c", // 11:00
-      "run-row-a", // 10:00
+      "run-row-b",
+      "run-row-c",
+      "run-row-a",
     ])
   })
 
-  it("GoalsTab_empty_state_shows_hint_with_three_prefill_rows", () => {
+  // Phase 4C content header row scenarios.
+
+  it("GoalsTab_renders_content_header_row_with_cta_and_shortcut_chip", () => {
     useGoalsStore.setState({ runs: [], activeRun: null })
     render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
-    expect(screen.getByTestId("goals-empty")).toHaveTextContent(
-      "Click + New goal to ask codebus to ingest something into the wiki",
+    const header = screen.getByTestId("tab-content-header-goals")
+    expect(header).toBeInTheDocument()
+    // h1 title from headerTitle key.
+    expect(header.querySelector("h1")?.textContent).toBe("Goals")
+    // Subtitle from headerSubtitle key.
+    expect(header.querySelector("p")?.textContent).toContain(
+      "List what you want to understand",
     )
+    // CTA still present (now inside the header row).
+    expect(screen.getByTestId("new-goal-button")).toHaveTextContent("+ New goal")
+    // Shortcut chip with literal "N".
+    const chip = header.querySelector("[data-tch-chip]")
+    expect(chip).not.toBeNull()
+    expect(chip?.textContent).toBe("N")
+    // No legacy standalone right-aligned topbar (only the header row).
+    expect(
+      document.querySelectorAll("[data-tch-cta]").length,
+    ).toBeGreaterThanOrEqual(1)
+  })
+
+  it("GoalsTab_populated_renders_RECENT_section_label_above_list", () => {
+    useGoalsStore.setState({
+      runs: [makeRun("a", "2026-05-13T10:00:00Z")],
+      activeRun: null,
+    })
+    render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
+    const recent = screen.getByText("RECENT")
+    expect(recent).toBeInTheDocument()
+    // Caps variant present on the SectionLabel root.
+    expect(recent.classList.contains("section-label--caps")).toBe(true)
+  })
+
+  it("GoalsTab_empty_state_shows_three_region_layout_with_i18n_prefill_examples", () => {
+    useGoalsStore.setState({ runs: [], activeRun: null })
+    render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
+
+    // Region 1: content header row at the top.
+    expect(screen.getByTestId("tab-content-header-goals")).toBeInTheDocument()
+
+    // Region 2: hero region with heroTitle + heroSubtitle.
+    const hero = screen.getByTestId("goals-empty-hero")
+    expect(hero).toHaveTextContent("No goals yet")
+    expect(hero).toHaveTextContent(
+      "Start with one of the examples below, or write your own.",
+    )
+
+    // Region 3: three pre-fill pills sourced from i18n keys (en values).
     const prefills = [
       screen.getByTestId("goals-empty-prefill-0"),
       screen.getByTestId("goals-empty-prefill-1"),
       screen.getByTestId("goals-empty-prefill-2"),
     ]
-    expect(prefills).toHaveLength(3)
+    expect(prefills[0]).toHaveTextContent("describe the authentication flow")
+    expect(prefills[1]).toHaveTextContent(
+      "summarize the data ingestion pipeline",
+    )
+    expect(prefills[2]).toHaveTextContent("map the public API surface")
 
+    // Clicking opens the modal with that example pre-filled.
     fireEvent.click(prefills[0])
     expect(screen.getByTestId("new-goal-modal")).toBeInTheDocument()
-    // Modal opens with the prefill text in its textarea.
     const textarea = screen.getByTestId(
       "new-goal-textarea",
     ) as HTMLTextAreaElement
-    expect(textarea.value).toBe(prefills[0].textContent?.replaceAll("“", "").replaceAll("”", "") ?? "")
+    expect(textarea.value).toBe("describe the authentication flow")
+  })
+
+  it("GoalsTab_zh_locale_shows_no_english_prefill_literals", () => {
+    mockedUseLocale.mockReturnValue("zh")
+    useGoalsStore.setState({ runs: [], activeRun: null })
+    render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
+    const prefills = [
+      screen.getByTestId("goals-empty-prefill-0"),
+      screen.getByTestId("goals-empty-prefill-1"),
+      screen.getByTestId("goals-empty-prefill-2"),
+    ]
+    expect(prefills[0]).toHaveTextContent("說明認證流程")
+    expect(prefills[1]).toHaveTextContent("整理資料 ingest pipeline 概要")
+    expect(prefills[2]).toHaveTextContent("畫出公開 API surface")
+    // Crucially, none of the English literals leak through in zh locale.
+    expect(prefills[0].textContent).not.toContain(
+      "describe the authentication flow",
+    )
   })
 
   it("filters non-goal modes out of the visible list", () => {
@@ -94,8 +163,6 @@ describe("GoalsTab", () => {
     expect(screen.queryByTestId("run-row-c")).toBeNull()
     expect(screen.getByTestId("run-row-g")).toBeInTheDocument()
   })
-
-  // ---- Watcher integration (codebus-fs-watcher) ----
 
   it("terminal_spawn_appears_via_goals_changed", async () => {
     let capturedCallback: ((ev: { payload: unknown }) => void) | undefined
@@ -131,4 +198,28 @@ describe("GoalsTab", () => {
       expect(screen.getByTestId("new-goal-button")).toHaveTextContent(expected)
     },
   )
+
+  it("GoalsTab_pressing_bare_N_opens_new_goal_modal", () => {
+    useGoalsStore.setState({ runs: [], activeRun: null })
+    render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
+    expect(screen.queryByTestId("new-goal-modal")).toBeNull()
+    fireEvent.keyDown(window, { key: "n" })
+    expect(screen.getByTestId("new-goal-modal")).toBeInTheDocument()
+  })
+
+  it("GoalsTab_N_shortcut_ignored_when_modal_already_open", () => {
+    useGoalsStore.setState({ runs: [], activeRun: null })
+    render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
+    // Open modal by clicking the CTA first.
+    fireEvent.click(screen.getByTestId("new-goal-button"))
+    expect(screen.getByTestId("new-goal-modal")).toBeInTheDocument()
+    const textarea = screen.getByTestId(
+      "new-goal-textarea",
+    ) as HTMLTextAreaElement
+    // Pre-fill some text the user is typing.
+    fireEvent.change(textarea, { target: { value: "describe " } })
+    // Pressing N inside the textarea SHALL NOT re-fire the shortcut.
+    fireEvent.keyDown(textarea, { key: "n", bubbles: true })
+    expect(textarea.value).toBe("describe ")
+  })
 })

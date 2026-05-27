@@ -17,6 +17,10 @@ const WORKSPACE_KEYS = [
   "workspace.goals.examplePlaceholder1",
   "workspace.goals.examplePlaceholder2",
   "workspace.goals.examplePlaceholder3",
+  "workspace.goals.headerTitle",
+  "workspace.goals.headerSubtitle",
+  "workspace.goals.emptyHeroTitle",
+  "workspace.goals.emptyHeroSubtitle",
   "workspace.newGoalModal.title",
   "workspace.newGoalModal.placeholder",
   "workspace.newGoalModal.cancel",
@@ -55,6 +59,31 @@ describe("i18n_has_workspace_messages_in_both_locales", () => {
       const value = (messages.zh as Record<string, string>)[key]
       expect(typeof value).toBe("string")
       expect(value.length).toBeGreaterThan(0)
+    })
+  }
+})
+
+/**
+ * Content header row (Phase 4C): new header / hero keys MUST be real
+ * translations — never the key literal — so the runtime never falls back
+ * to showing the i18n identifier to the user.
+ */
+const PHASE_4C_GOALS_KEYS = [
+  "workspace.goals.headerTitle",
+  "workspace.goals.headerSubtitle",
+  "workspace.goals.emptyHeroTitle",
+  "workspace.goals.emptyHeroSubtitle",
+] as const
+
+describe("i18n_phase_4c_goals_header_keys_are_translated_not_key_literal", () => {
+  for (const key of PHASE_4C_GOALS_KEYS) {
+    it(`en value differs from key: ${key}`, () => {
+      const value = (messages.en as Record<string, string>)[key]
+      expect(value).not.toBe(key)
+    })
+    it(`zh value differs from key: ${key}`, () => {
+      const value = (messages.zh as Record<string, string>)[key]
+      expect(value).not.toBe(key)
     })
   }
 })

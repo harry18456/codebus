@@ -152,10 +152,13 @@ describe("QuizTab", () => {
     ).not.toBeInTheDocument()
   })
 
-  // --- fix-app-quiz task 12.1 (defect #7): + New quiz only in the
-  // browse/compose context (history + idle), hidden once inside a quiz.
-  // Spec: app-workspace § Quiz Tab Plan-Confirm-Generate Flow.
-  it("+ New quiz is hidden once inside a quiz flow", async () => {
+  // Phase 4C update: the content header row (with `+ New quiz`) only
+  // renders in the history-listing view. Once the user clicks + New quiz
+  // and the topic-input view appears, the entire content header row is
+  // gone — the CTA goes with it. Showing a duplicate `+ New quiz` button
+  // while the user is already composing a new quiz would be redundant.
+  // Spec: app-workspace § Quiz Tab Content Header Row.
+  it("+ New quiz is visible only in the history view", async () => {
     render(<QuizTab vaultPath="/v" />)
     await waitFor(() =>
       expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
@@ -163,7 +166,8 @@ describe("QuizTab", () => {
     expect(screen.getByTestId("new-quiz")).toBeInTheDocument() // history
     fireEvent.click(screen.getByTestId("new-quiz"))
     await screen.findByTestId("quiz-topic-input")
-    expect(screen.getByTestId("new-quiz")).toBeInTheDocument() // idle
+    // idle (topic input) — content header is gone, CTA with it.
+    expect(screen.queryByTestId("new-quiz")).not.toBeInTheDocument()
     fireEvent.change(screen.getByTestId("quiz-topic-input"), {
       target: { value: "auth" },
     })
@@ -174,12 +178,14 @@ describe("QuizTab", () => {
     expect(screen.queryByTestId("new-quiz")).not.toBeInTheDocument()
   })
 
-  // --- fix-app-quiz task 6.1: header must not collide with the fixed
-  // WindowControls (min/max/close). Mirror GoalsTab: reserve pr-[160px]
-  // and be a drag region. Spec: app-workspace § Workspace Layout.
+  // --- fix-app-quiz task 6.1 (Phase 4C): header must not collide with
+  // the fixed WindowControls (min/max/close). Header is now the shared
+  // TabContentHeader component (which itself reserves `pr-[160px]` and
+  // is a drag region) — assert via the tab-content-header-quiz testid.
+  // Spec: app-workspace § Quiz Tab Content Header Row.
   it("Quiz header reserves WindowControls inset and is a drag region", () => {
     render(<QuizTab vaultPath="/v" />)
-    const header = screen.getByTestId("new-quiz").parentElement!
+    const header = screen.getByTestId("tab-content-header-quiz")
     expect(header).toHaveAttribute("data-tauri-drag-region")
     expect(header.className).toContain("pr-[160px]")
     // Style parity with GoalsTab's + New goal (variant="primary").
@@ -1018,5 +1024,45 @@ describe("QuizTab", () => {
       ).length
       expect(calls).toBeGreaterThanOrEqual(2)
     })
+  })
+
+  // --- Phase 4C: content header row scenarios ---
+
+  it("QuizTab_history_view_renders_content_header_row_with_cta", async () => {
+    render(<QuizTab vaultPath="/v" />)
+    // History view is the default mount phase.
+    expect(await screen.findByTestId("quiz-history")).toBeInTheDocument()
+    const header = screen.getByTestId("tab-content-header-quiz")
+    expect(header).toBeInTheDocument()
+    // h1 from new headerTitle key.
+    expect(header.querySelector("h1")?.textContent).toBe("Quiz")
+    // Subtitle from new headerSubtitle key.
+    expect(header.querySelector("p")?.textContent).toContain(
+      "Test how well you understood the wiki",
+    )
+    // CTA still wired to + New quiz.
+    expect(screen.getByTestId("new-quiz")).toHaveTextContent("+ New quiz")
+    // No shortcut chip on the Quiz tab.
+    expect(header.querySelector("[data-tch-chip]")).toBeNull()
+  })
+
+  it("QuizTab_non_history_phases_omit_content_header_row", async () => {
+    render(<QuizTab vaultPath="/v" />)
+    expect(await screen.findByTestId("quiz-history")).toBeInTheDocument()
+    expect(screen.getByTestId("tab-content-header-quiz")).toBeInTheDocument()
+
+    // Click + New quiz to leave history → enter idle (input phase).
+    fireEvent.click(screen.getByTestId("new-quiz"))
+    await screen.findByTestId("quiz-topic-input")
+    // Content header SHALL NOT render in the idle/input phase.
+    expect(screen.queryByTestId("tab-content-header-quiz")).toBeNull()
+  })
+
+  it("QuizTab_content_header_cta_transitions_to_new_quiz_input", async () => {
+    render(<QuizTab vaultPath="/v" />)
+    expect(await screen.findByTestId("quiz-history")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("new-quiz"))
+    // Clicking the CTA SHALL transition to the new-quiz input phase.
+    expect(await screen.findByTestId("quiz-topic-input")).toBeInTheDocument()
   })
 })
