@@ -2120,14 +2120,22 @@ Phase 4 三個 change 結束後，跨 4A (G4) + 4B (S3 drop 不算套) + 4C (GP3
 
 #### Phase 5 · 結構性 + behavior（高 impact、有些需 backend 配合）
 
-- **GP8 running row stream tail**（high priority、design 強烈表態；Phase 4 後立刻動）
-- **W4 + X1 backend contract**：codebus-goal / codebus-quiz skill emit shell event 加 `kind: "read" | "inspect" | "mutation" | "other-*"`、frontend 2-phase cluster rendering、icon prefix、live tail 規矩
-- **QNEW-1/2 wizard topbar hide**（state machine 改、`QuizTab.tsx` 重 layout 進 fullscreen wizard view）
-- **ODI-4 ChatWidget pulse dot**（圓鈕右上 7px amber dot + 200ms fade-in + 跟 stream tail 同步）
-- **R7-2 · Goal Cancel 搬 02a header right**（解 ChatWidget 圓鈕 collision + 跟 spec 對齊）
-- **02c rename** `RunDetailCancelled.tsx` → `RunDetailInterrupted.tsx`（純 rename 可先做、full layout 等 v1.1 mock）
+**順序**（2026-05-27 重編號、原 5.1 `interrupted-rename` skip 後上移）：
 
-→ spectra changes：`goals-running-row-stream-tail` + `activity-stream-2-phase-cluster` + `quiz-fullscreen-wizard-view` + `chatwidget-pulse-and-cancel-move` + `interrupted-rename`
+- **5.1 ODI-4 + R7-2** · ChatWidget pulse dot + Goal Cancel 搬 02a header（小、frontend、ODI-4 圓鈕右上 7px amber dot + 200ms fade-in + 跟 stream tail 同步；R7-2 解 ChatWidget 圓鈕 collision + 跟 spec 對齊）
+- **5.2 GP8 running row stream tail**（中、frontend、design 強烈表態 priority）
+- **5.3 W4 + X1 backend contract**：codebus-goal / codebus-quiz skill emit shell event 加 `kind: "read" | "inspect" | "mutation" | "other-*"`、frontend 2-phase cluster rendering、icon prefix、live tail 規矩（大、含 backend 出手）
+- **5.4 QNEW-1/2 wizard topbar hide**（state machine 改、`QuizTab.tsx` 重 layout 進 fullscreen wizard view，大、純 frontend）
+
+→ spectra changes：`chatwidget-pulse-and-cancel-move` + `goals-running-row-stream-tail` + `activity-stream-2-phase-cluster` + `quiz-fullscreen-wizard-view`
+
+##### ~~原 Phase 5.1 · `interrupted-rename`~~（**obsolete 2026-05-27、不開 change**）
+
+- 原本規劃：`02c rename` `RunDetailCancelled.tsx` → `RunDetailInterrupted.tsx`（純 rename 可先做、full layout 等 v1.1 mock）
+- **2026-05-27 校準發現**：`RunDetailInterrupted` component 早於本 audit 已被 `2026-05-14-v3-app-workspace-goal` archive 加進來；當前 `RunDetailCancelled.tsx` 內**同時 export 兩個 component**（`RunDetailCancelled` 服務 outcome=cancelled/failed、`RunDetailInterrupted` 服務 outcome=interrupted），Workspace.tsx 兩者都 import 並 route
+- 「純 rename」前提 broken（命名 collision）；行為合併 = state machine 整理 + 視覺對齊 + backend `interrupt_reason` 對接，本來就是 Phase 6 `interrupted-state-formalize` 的核心
+- **決議**：skip 5.1、檔名 + export name rename 併入 Phase 6 `interrupted-state-formalize`
+- 教訓：跟 phase-3a-blind-spots-cleanup 的 5→12 校準同性質——AUDIT 寫的 site / scope 假設可能落後實機，apply 第一步 grep 校準很重要
 
 #### Phase 6 · v1.1 spec 落地（**已 unblock 2026-05-26**）
 
@@ -2136,7 +2144,7 @@ Design v1.1 mock 已交、5 個 view 全部 spec 完成。可動：
 - **LoadingOverlay live progress**（LOI-1 完整 6 phase + InitEvent 對應表 + minimum 300ms timer + 異常處理）
   - spectra change：`loading-overlay-live-progress`
 - **02c Interrupted full layout**（3 變體 banner + Failed vs Interrupted 視覺差 + state machine + Retry 建立新 GoalRun）
-  - spectra change：`interrupted-state-formalize`（含 rename `RunDetailCancelled` → `RunDetailInterrupted` + backend `interrupt_reason` 欄位）
+  - spectra change：`interrupted-state-formalize`（含 rename `RunDetailCancelled` → `RunDetailInterrupted` + backend `interrupt_reason` 欄位 + **2026-05-27 補：原 Phase 5.1 純 rename 已併入本 change**，兩 component 並存需合併為單一 `RunDetailInterrupted` + state machine 統一）
 - **Quiz wizard 完整 4 步 layout**（Step 1 topic + pill / Step 3 generating + brand banner / Step 4a pending / Step 4b reviewing / Step 4c completion）
   - spectra change：`quiz-fullscreen-wizard-view`（Phase 5 已列、現在 v1.1 細節落地）
 - **Wiki page reader 新版**（metadata bar + wikilink CSS + edit hint + 旅行日誌 footer slot + WP-empty-page）
