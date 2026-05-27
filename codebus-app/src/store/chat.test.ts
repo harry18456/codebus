@@ -39,9 +39,8 @@ function resetStore(): void {
     activeTurn: INITIAL_STATE.activeTurn,
     tokensTotal: INITIAL_STATE.tokensTotal,
     promoteSuggestion: INITIAL_STATE.promoteSuggestion,
-    expanded: INITIAL_STATE.expanded,
-    width: INITIAL_STATE.width,
-    height: INITIAL_STATE.height,
+    mode: INITIAL_STATE.mode,
+    modalReturnMode: INITIAL_STATE.modalReturnMode,
     onboardedVaults: new Set(),
     lastTranscript: INITIAL_STATE.lastTranscript,
     lastSessionId: INITIAL_STATE.lastSessionId,
@@ -59,8 +58,9 @@ describe("useChatStore", () => {
     listenMock.mockClear()
   })
 
-  it("Vault switch resets the chat session", () => {
-    // Seed an "active" session for V1.
+  it("Vault switch resets the chat session and returns widget to bubble mode", () => {
+    // Seed an active session in modal mode for V1 (covers the failure-mode
+    // mitigation: modal open during vault switch must reset mode too).
     useChatStore.setState({
       sessionId: "abc-123",
       turns: [
@@ -68,9 +68,8 @@ describe("useChatStore", () => {
         { userText: "q2", events: [], startedAt: "t2", finishedAt: "t2" },
         { userText: "q3", events: [], startedAt: "t3", finishedAt: "t3" },
       ],
-      expanded: true,
-      width: 30,
-      height: 40,
+      mode: "modal",
+      modalReturnMode: "floating",
     })
 
     // Workspace unmount on vault switch calls resetForVault for V2.
@@ -83,12 +82,11 @@ describe("useChatStore", () => {
     expect(s.promoteSuggestion).toBeNull()
     expect(s.lastSessionId).toBeNull()
     expect(s.lastTranscript).toBeNull()
-    // Spec: vault switch collapses the widget back to a bubble so the
-    // next vault opens in a clean visual state. Width / height survive
-    // (user resize preference persists across the lobby round-trip).
-    expect(s.expanded).toBe(false)
-    expect(s.width).toBe(30)
-    expect(s.height).toBe(40)
+    // Per spec "Chat Session Lifecycle and Reset Triggers" scenario
+    // "Vault switch resets the chat session and returns widget to bubble mode":
+    // mode reverts to bubble + modalReturnMode clears.
+    expect(s.mode).toBe("bubble")
+    expect(s.modalReturnMode).toBeNull()
   })
 
   it("+ New chat triggers undo toast (saves last buffer + clears session)", () => {
@@ -160,11 +158,12 @@ describe("useChatStore", () => {
     expect(s.lastTranscript).toBeNull()
   })
 
-  it("Tab switch preserves chat session (store state untouched without a trigger)", () => {
+  it("Tab switch preserves chat session and mode (mode-switch actions do not clobber session)", () => {
     // Tab switching is a Workspace concern — at the store level it simply
-    // means: nothing happens. We verify that none of the non-reset actions
-    // (toggleExpanded, setSize) clobber sessionId / turns, since the widget
-    // remains mounted while tabs switch.
+    // means: nothing happens. We verify that none of the mode-switch actions
+    // clobber sessionId / turns, since the widget remains mounted while tabs
+    // switch. Covers spec "Chat Session Lifecycle and Reset Triggers" scenario
+    // "Tab switch preserves chat session and mode".
     useChatStore.setState({
       sessionId: "abc-123",
       turns: [
@@ -172,20 +171,182 @@ describe("useChatStore", () => {
         { userText: "q2", events: [], startedAt: "t2", finishedAt: "t2" },
         { userText: "q3", events: [], startedAt: "t3", finishedAt: "t3" },
       ],
-      expanded: true,
+      mode: "floating",
     })
 
-    // Simulate widget surviving across tab toggles + a resize.
-    useChatStore.getState().toggleExpanded()
-    useChatStore.getState().toggleExpanded()
-    useChatStore.getState().setSize(28, 36)
+    // Exercise the full mode-switch cycle.
+    useChatStore.getState().openModal()
+    useChatStore.getState().dockToFloating()
+    useChatStore.getState().minimizeToBubble()
+    useChatStore.getState().openFloating()
 
     const s = useChatStore.getState()
     expect(s.sessionId).toBe("abc-123")
     expect(s.turns).toHaveLength(3)
-    expect(s.expanded).toBe(true)
-    expect(s.width).toBe(28)
-    expect(s.height).toBe(36)
+    expect(s.mode).toBe("floating")
+  })
+})
+
+describe("useChatStore mode state machine", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    resetStore()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("starts in bubble mode with modalReturnMode = null", () => {
+    const s = useChatStore.getState()
+    expect(s.mode).toBe("bubble")
+    expect(s.modalReturnMode).toBeNull()
+  })
+
+  it("openFloating: bubble → floating with modalReturnMode null", () => {
+    useChatStore.setState({ mode: "bubble", modalReturnMode: null })
+    useChatStore.getState().openFloating()
+    const s = useChatStore.getState()
+    expect(s.mode).toBe("floating")
+    expect(s.modalReturnMode).toBeNull()
+  })
+
+  it("openFloating: no-op when mode !== 'bubble'", () => {
+    useChatStore.setState({ mode: "floating", modalReturnMode: null })
+    useChatStore.getState().openFloating()
+    expect(useChatStore.getState().mode).toBe("floating")
+
+    useChatStore.setState({ mode: "modal", modalReturnMode: "floating" })
+    useChatStore.getState().openFloating()
+    expect(useChatStore.getState().mode).toBe("modal")
+    expect(useChatStore.getState().modalReturnMode).toBe("floating")
+  })
+
+  it("minimizeToBubble: floating → bubble with modalReturnMode null", () => {
+    useChatStore.setState({ mode: "floating", modalReturnMode: null })
+    useChatStore.getState().minimizeToBubble()
+    const s = useChatStore.getState()
+    expect(s.mode).toBe("bubble")
+    expect(s.modalReturnMode).toBeNull()
+  })
+
+  it("minimizeToBubble: no-op when mode !== 'floating'", () => {
+    useChatStore.setState({ mode: "modal", modalReturnMode: "bubble" })
+    useChatStore.getState().minimizeToBubble()
+    expect(useChatStore.getState().mode).toBe("modal")
+    expect(useChatStore.getState().modalReturnMode).toBe("bubble")
+  })
+
+  it("openModal from bubble: snapshots 'bubble' as modalReturnMode", () => {
+    useChatStore.setState({ mode: "bubble", modalReturnMode: null })
+    useChatStore.getState().openModal()
+    const s = useChatStore.getState()
+    expect(s.mode).toBe("modal")
+    expect(s.modalReturnMode).toBe("bubble")
+  })
+
+  it("openModal from floating: snapshots 'floating' as modalReturnMode", () => {
+    useChatStore.setState({ mode: "floating", modalReturnMode: null })
+    useChatStore.getState().openModal()
+    const s = useChatStore.getState()
+    expect(s.mode).toBe("modal")
+    expect(s.modalReturnMode).toBe("floating")
+  })
+
+  it("openModal while already in modal: no-op, does NOT re-snapshot modalReturnMode", () => {
+    // Failure-mode case: multiple ⌘K presses must not overwrite the snapshot.
+    useChatStore.setState({ mode: "modal", modalReturnMode: "bubble" })
+    useChatStore.getState().openModal()
+    expect(useChatStore.getState().mode).toBe("modal")
+    expect(useChatStore.getState().modalReturnMode).toBe("bubble")
+  })
+
+  it("dockToFloating: modal → floating with modalReturnMode null (ignores prior return mode)", () => {
+    // Per spec "Modal dock button always returns to floating" — ignores
+    // modalReturnMode regardless of value.
+    for (const returnMode of ["bubble", "floating", null] as const) {
+      useChatStore.setState({ mode: "modal", modalReturnMode: returnMode })
+      useChatStore.getState().dockToFloating()
+      const s = useChatStore.getState()
+      expect(s.mode).toBe("floating")
+      expect(s.modalReturnMode).toBeNull()
+    }
+  })
+
+  it("dockToFloating: no-op when mode !== 'modal'", () => {
+    useChatStore.setState({ mode: "bubble", modalReturnMode: null })
+    useChatStore.getState().dockToFloating()
+    expect(useChatStore.getState().mode).toBe("bubble")
+  })
+
+  it("closeModalToReturnMode: modal → modalReturnMode value", () => {
+    useChatStore.setState({ mode: "modal", modalReturnMode: "floating" })
+    useChatStore.getState().closeModalToReturnMode()
+    expect(useChatStore.getState().mode).toBe("floating")
+    expect(useChatStore.getState().modalReturnMode).toBeNull()
+
+    useChatStore.setState({ mode: "modal", modalReturnMode: "bubble" })
+    useChatStore.getState().closeModalToReturnMode()
+    expect(useChatStore.getState().mode).toBe("bubble")
+    expect(useChatStore.getState().modalReturnMode).toBeNull()
+  })
+
+  it("closeModalToReturnMode: falls back to bubble when modalReturnMode is null", () => {
+    useChatStore.setState({ mode: "modal", modalReturnMode: null })
+    useChatStore.getState().closeModalToReturnMode()
+    expect(useChatStore.getState().mode).toBe("bubble")
+    expect(useChatStore.getState().modalReturnMode).toBeNull()
+  })
+
+  it("closeModalToReturnMode: no-op when mode !== 'modal'", () => {
+    useChatStore.setState({ mode: "floating", modalReturnMode: null })
+    useChatStore.getState().closeModalToReturnMode()
+    expect(useChatStore.getState().mode).toBe("floating")
+  })
+
+  it("closeModalToBubble: modal → bubble regardless of modalReturnMode", () => {
+    for (const returnMode of ["bubble", "floating", null] as const) {
+      useChatStore.setState({ mode: "modal", modalReturnMode: returnMode })
+      useChatStore.getState().closeModalToBubble()
+      const s = useChatStore.getState()
+      expect(s.mode).toBe("bubble")
+      expect(s.modalReturnMode).toBeNull()
+    }
+  })
+
+  it("closeModalToBubble: no-op when mode !== 'modal'", () => {
+    useChatStore.setState({ mode: "floating", modalReturnMode: null })
+    useChatStore.getState().closeModalToBubble()
+    expect(useChatStore.getState().mode).toBe("floating")
+  })
+
+  it("acceptPromoteSuggestion success collapses to bubble", async () => {
+    // Per Task 1.1 alignment finding: acceptPromoteSuggestion previously
+    // set `expanded: false`; in the three-mode model it must set
+    // `mode: "bubble"` + `modalReturnMode: null`.
+    invokeMock.mockResolvedValue("goal-run-1")
+    useChatStore.setState({
+      mode: "modal",
+      modalReturnMode: "floating",
+      promoteSuggestion: { reason: "test reason", turnIndex: 0 },
+      turns: [
+        {
+          userText: "promote me",
+          events: [],
+          startedAt: "t1",
+          finishedAt: "t1",
+        },
+      ],
+    })
+
+    vi.useRealTimers()
+    await useChatStore.getState().acceptPromoteSuggestion("/v")
+    vi.useFakeTimers()
+
+    const s = useChatStore.getState()
+    expect(s.promoteSuggestion).toBeNull()
+    expect(s.mode).toBe("bubble")
+    expect(s.modalReturnMode).toBeNull()
   })
 })
 

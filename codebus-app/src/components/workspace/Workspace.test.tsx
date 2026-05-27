@@ -38,7 +38,6 @@ const VAULT: VaultEntry = {
   is_missing: false,
 }
 
-const CHAT_INITIAL_STATE = useChatStore.getState()
 const SETTINGS_INITIAL_STATE = useSettingsStore.getState()
 
 function resetSettingsStore(): void {
@@ -59,9 +58,8 @@ function resetChatStore(): void {
     activeTurn: null,
     tokensTotal: { input_tokens: 0, output_tokens: 0 },
     promoteSuggestion: null,
-    expanded: false,
-    width: CHAT_INITIAL_STATE.width,
-    height: CHAT_INITIAL_STATE.height,
+    mode: "bubble",
+    modalReturnMode: null,
     onboardedVaults: new Set<string>(),
     lastTranscript: null,
     lastSessionId: null,
@@ -342,34 +340,34 @@ describe("Workspace", () => {
     })
   })
 
-  it("keeps chat widget expanded state across tab switches", () => {
+  it("keeps chat widget mode across tab switches", () => {
     render(<Workspace vault={VAULT} />)
-    // Open the chat widget by toggling the store directly (sidesteps the
-    // collapsed-bubble click which lives inside the widget). After expand
-    // we navigate Goals → Wiki → Goals and assert the widget is still
-    // mounted + still in `expanded` state.
+    // Open the chat widget by transitioning the store directly to floating
+    // (sidesteps the bubble click which lives inside the widget). After
+    // open we navigate Goals → Wiki → Goals and assert the widget is still
+    // mounted + still in `floating` mode.
     act(() => {
-      useChatStore.getState().toggleExpanded()
+      useChatStore.getState().openFloating()
     })
     expect(screen.getByTestId("chat-widget")).toHaveAttribute(
       "data-state",
-      "expanded",
+      "floating",
     )
     fireEvent.click(screen.getByTestId("workspace-tab-wiki"))
     expect(screen.getByTestId("chat-widget")).toHaveAttribute(
       "data-state",
-      "expanded",
+      "floating",
     )
     fireEvent.click(screen.getByTestId("workspace-tab-goals"))
     expect(screen.getByTestId("chat-widget")).toHaveAttribute(
       "data-state",
-      "expanded",
+      "floating",
     )
     // The store-level session id stays untouched across tab swaps.
-    expect(useChatStore.getState().expanded).toBe(true)
+    expect(useChatStore.getState().mode).toBe("floating")
   })
 
-  it("resets chat store for vault on unmount", () => {
+  it("resets chat store for vault on unmount (returns widget to bubble mode)", () => {
     // Seed a session so we can prove resetForVault wiped it.
     useChatStore.setState({
       sessionId: "session-keep",
@@ -382,16 +380,18 @@ describe("Workspace", () => {
         },
       ],
     })
-    // Also seed widget expanded so we can prove vault-switch collapses it.
-    useChatStore.setState({ expanded: true })
+    // Also seed widget in modal mode (with a return mode snapshot) so we
+    // can prove vault-switch resets BOTH `mode` and `modalReturnMode`.
+    useChatStore.setState({ mode: "modal", modalReturnMode: "floating" })
     const { unmount } = render(<Workspace vault={VAULT} />)
     expect(useChatStore.getState().sessionId).toBe("session-keep")
     unmount()
-    // resetForVault clears sessionId + turns AND collapses the widget back
-    // to a bubble. Width / height (user resize) intentionally survive.
+    // resetForVault clears sessionId + turns AND returns the widget back
+    // to bubble mode with no return-mode snapshot.
     expect(useChatStore.getState().sessionId).toBeNull()
     expect(useChatStore.getState().turns).toEqual([])
-    expect(useChatStore.getState().expanded).toBe(false)
+    expect(useChatStore.getState().mode).toBe("bubble")
+    expect(useChatStore.getState().modalReturnMode).toBeNull()
   })
 
   it("switches to Goals tab + RunDetailRunning after promote suggestion accepted", async () => {
@@ -402,8 +402,12 @@ describe("Workspace", () => {
     const acceptSpy = vi
       .spyOn(useChatStore.getState(), "acceptPromoteSuggestion")
       .mockImplementation(async () => {
-        // Mirror real store behavior: collapse widget on success.
-        useChatStore.setState({ expanded: false, promoteSuggestion: null })
+        // Mirror real store behavior: return widget to bubble on success.
+        useChatStore.setState({
+          mode: "bubble",
+          modalReturnMode: null,
+          promoteSuggestion: null,
+        })
         return PROMOTED_RUN_ID
       })
 
@@ -411,7 +415,7 @@ describe("Workspace", () => {
     // park `useGoalsStore.activeRun` so the GoalsArea router renders
     // RunDetailRunning for the promoted run id.
     useChatStore.setState({
-      expanded: true,
+      mode: "floating",
       promoteSuggestion: { reason: "Make a goal", turnIndex: 0 },
       turns: [
         {

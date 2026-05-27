@@ -127,7 +127,7 @@ describe("ChatTranscript", () => {
       pages: { "modules/auth": pageMeta("modules/auth", "Auth") },
     })
     useChatStore.setState({
-      expanded: true,
+      mode: "floating",
       turns: [
         {
           userText: "auth 怎麼運作",
@@ -157,7 +157,7 @@ describe("ChatTranscript", () => {
     // Spec: callback receives the extracted slug, NOT the raw href.
     expect(onWikiLinkClick).toHaveBeenCalledTimes(1)
     expect(onWikiLinkClick).toHaveBeenCalledWith("modules/auth")
-    expect(useChatStore.getState().expanded).toBe(false)
+    expect(useChatStore.getState().mode).toBe("bubble")
     // Spec: external opener NOT invoked.
     expect(openUrlMock).not.toHaveBeenCalled()
   })
@@ -208,7 +208,7 @@ describe("ChatTranscript", () => {
       pages: { "modules/auth": pageMeta("modules/auth", "Authentication") },
     })
     useChatStore.setState({
-      expanded: true,
+      mode: "floating",
       turns: [
         {
           userText: "auth?",
@@ -239,13 +239,13 @@ describe("ChatTranscript", () => {
     // Spec: callback receives slug (the decoded part after codebus://wiki/).
     expect(onWikiLinkClick).toHaveBeenCalledTimes(1)
     expect(onWikiLinkClick).toHaveBeenCalledWith("modules/auth")
-    expect(useChatStore.getState().expanded).toBe(false)
+    expect(useChatStore.getState().mode).toBe("bubble")
   })
 
   it("[[slug]] wikilink to nonexistent page renders dimmed with tooltip and is inert", () => {
     // pages map deliberately empty — slug is unresolvable.
     useChatStore.setState({
-      expanded: true,
+      mode: "floating",
       turns: [
         {
           userText: "missing?",
@@ -280,12 +280,12 @@ describe("ChatTranscript", () => {
       fireEvent.click(unresolvable)
     }
     expect(onWikiLinkClick).not.toHaveBeenCalled()
-    expect(useChatStore.getState().expanded).toBe(true)
+    expect(useChatStore.getState().mode).toBe("floating")
   })
 
   it("external https link opens in browser via Tauri opener plugin without collapsing chat", async () => {
     useChatStore.setState({
-      expanded: true,
+      mode: "floating",
       turns: [
         {
           userText: "找文件",
@@ -324,7 +324,7 @@ describe("ChatTranscript", () => {
     expect(openUrlMock).toHaveBeenCalledWith("https://example.com/foo")
     // Spec: tab + chat state untouched.
     expect(onWikiLinkClick).not.toHaveBeenCalled()
-    expect(useChatStore.getState().expanded).toBe(true)
+    expect(useChatStore.getState().mode).toBe("floating")
   })
 
   it("source code path renders as inert text with no click handler and no anchor href", () => {
@@ -412,7 +412,7 @@ describe("ChatTranscript", () => {
   it("clicking Promote calls acceptPromoteSuggestion and collapses + routes on success", async () => {
     const acceptPromote = vi.fn().mockResolvedValue("2026-05-14T10-20-30Z")
     useChatStore.setState({
-      expanded: true,
+      mode: "floating",
       turns: [
         {
           userText: "Q1",

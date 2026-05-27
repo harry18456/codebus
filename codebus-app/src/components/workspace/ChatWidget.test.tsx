@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, act } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // Mock Tauri event/core so the chat store's import-time `listen(...)` calls
@@ -25,9 +25,8 @@ function resetStore(): void {
     activeTurn: INITIAL_STATE.activeTurn,
     tokensTotal: INITIAL_STATE.tokensTotal,
     promoteSuggestion: INITIAL_STATE.promoteSuggestion,
-    expanded: INITIAL_STATE.expanded,
-    width: INITIAL_STATE.width,
-    height: INITIAL_STATE.height,
+    mode: INITIAL_STATE.mode,
+    modalReturnMode: INITIAL_STATE.modalReturnMode,
     onboardedVaults: new Set(),
     lastTranscript: INITIAL_STATE.lastTranscript,
     lastSessionId: INITIAL_STATE.lastSessionId,
@@ -47,147 +46,44 @@ function seedActiveRun(): void {
   })
 }
 
-/**
- * JSDOM defaults to 1024x768. With 1rem = 16px:
- *   - 50% viewport width = 32rem
- *   - 80% viewport height = 38.4rem
- * Tests that need to assert clamp-to-viewport behavior override these
- * via Object.defineProperty so the auto-clamp math is deterministic.
- */
-function setViewport(widthPx: number, heightPx: number): void {
-  Object.defineProperty(window, "innerWidth", {
-    configurable: true,
-    writable: true,
-    value: widthPx,
-  })
-  Object.defineProperty(window, "innerHeight", {
-    configurable: true,
-    writable: true,
-    value: heightPx,
-  })
-}
-
-describe("ChatWidget", () => {
+describe("ChatWidget — bubble mode", () => {
   beforeEach(() => {
     resetStore()
-    // 80rem x 60rem viewport — large enough that the default 22x32 and the
-    // resize-test target 40x60 both fit without auto-clamp interference.
-    setViewport(1280, 960)
   })
 
   afterEach(() => {
     resetStore()
   })
 
-  it("renders as a bottom-right bubble when collapsed", () => {
+  it("renders as a 44px bottom-right bubble (data-state='bubble')", () => {
     render(<ChatWidget />)
     const widget = screen.getByTestId("chat-widget")
-    expect(widget.getAttribute("data-state")).toBe("collapsed")
-    // 3rem × 3rem (`h-12 w-12`), pinned bottom-right. Right edge sits 16px
-    // from the viewport; bottom edge is offset by the 32px `BottomStrip`
-    // plus the 16px gap so the bubble never overlaps the version label.
+    expect(widget.getAttribute("data-state")).toBe("bubble")
     expect(widget.tagName.toLowerCase()).toBe("button")
-    expect(widget.className).toMatch(/\bh-12\b/)
-    expect(widget.className).toMatch(/\bw-12\b/)
+    // 44×44 (`h-11 w-11`), pinned bottom-right (16px from each anchor,
+    // bottom offset = BottomStrip (32px) + 16px gap = 48px).
+    expect(widget.className).toMatch(/\bh-11\b/)
+    expect(widget.className).toMatch(/\bw-11\b/)
     expect(widget.className).toMatch(/\bfixed\b/)
     const style = widget.getAttribute("style") ?? ""
     expect(style).toMatch(/bottom:\s*48px/)
     expect(style).toMatch(/right:\s*16px/)
-    const aria = widget.getAttribute("aria-label") ?? ""
-    expect(aria.toLowerCase()).toContain("open chat")
+    // Default aria-label points to the no-active-goal variant.
+    expect(widget.getAttribute("aria-label")).toBe(
+      messages.en["chat.widget.aria.openChat"],
+    )
   })
 
-  it("expands to default 22rem × 32rem panel when bubble clicked", () => {
+  it("click transitions to floating mode (data-state='floating')", () => {
     render(<ChatWidget />)
     fireEvent.click(screen.getByTestId("chat-widget"))
-    const widget = screen.getByTestId("chat-widget")
-    expect(widget.getAttribute("data-state")).toBe("expanded")
-    const style = widget.getAttribute("style") ?? ""
-    expect(style).toMatch(/width:\s*22rem/)
-    expect(style).toMatch(/height:\s*32rem/)
-    // Bottom offset accounts for the 32px BottomStrip + 16px gap.
-    expect(style).toMatch(/bottom:\s*48px/)
-    expect(style).toMatch(/right:\s*16px/)
+    expect(useChatStore.getState().mode).toBe("floating")
+    expect(screen.getByTestId("chat-widget").getAttribute("data-state")).toBe(
+      "floating",
+    )
   })
 
-  it("clamps resize handle drag to width ≤ 40rem and height ≤ 60rem", () => {
-    // Big viewport so the bounds we're checking are the hard rem caps, not
-    // the 50%×80% viewport caps.
-    setViewport(2000, 2000)
-    useChatStore.setState({ expanded: true, width: 22, height: 32 })
-    render(<ChatWidget />)
-    const handle = screen.getByTestId("chat-widget-resize-handle")
-    // Top-left handle: pointer moves up-left by (delta * 16px) per rem.
-    // Start at an arbitrary anchor (500, 500); end at a position that would
-    // yield width = startWidth + 28rem = 50rem, height = startHeight + 38rem
-    // = 70rem if unclamped.
-    fireEvent.pointerDown(handle, { clientX: 500, clientY: 500, pointerId: 1 })
-    fireEvent.pointerMove(handle, {
-      clientX: 500 - 28 * 16,
-      clientY: 500 - 38 * 16,
-      pointerId: 1,
-    })
-    fireEvent.pointerUp(handle, {
-      clientX: 500 - 28 * 16,
-      clientY: 500 - 38 * 16,
-      pointerId: 1,
-    })
-    expect(useChatStore.getState().width).toBe(40)
-    expect(useChatStore.getState().height).toBe(60)
-  })
-
-  it("auto-clamps width when viewport shrinks below current widget width", () => {
-    // Start expanded at 30rem × 40rem in a generous viewport.
-    setViewport(1280, 960)
-    useChatStore.setState({ expanded: true, width: 30, height: 40 })
-    render(<ChatWidget />)
-    // Viewport shrinks so 50% width = 25rem (400px) → width must clamp.
-    // Height clamp is independent; leave it under the 80% cap.
-    act(() => {
-      setViewport(800, 960)
-      window.dispatchEvent(new Event("resize"))
-    })
-    expect(useChatStore.getState().width).toBe(25)
-  })
-
-  it("minimize button in the header collapses the widget", () => {
-    useChatStore.setState({ expanded: true })
-    render(<ChatWidget />)
-    const minimize = screen.getByTestId("chat-widget-minimize")
-    expect(minimize).toBeInTheDocument()
-    fireEvent.click(minimize)
-    expect(useChatStore.getState().expanded).toBe(false)
-  })
-
-  it("resize handle renders a visible affordance (svg) plus nwse-resize cursor", () => {
-    useChatStore.setState({ expanded: true })
-    render(<ChatWidget />)
-    const handle = screen.getByTestId("chat-widget-resize-handle")
-    // Visible affordance — an SVG child the user can see without hovering.
-    expect(handle.querySelector("svg")).not.toBeNull()
-    // Cursor hint preserved.
-    expect(handle.className).toMatch(/cursor-nwse-resize/)
-  })
-
-  it("renders a red-dot badge on the collapsed bubble when a promote suggestion is pending", () => {
-    useChatStore.setState({
-      expanded: false,
-      promoteSuggestion: { reason: "auth + JWT looks like a wiki topic", turnIndex: 0 },
-    })
-    const { rerender } = render(<ChatWidget />)
-    expect(screen.getByTestId("chat-widget-promote-badge")).toBeInTheDocument()
-    // Expanding clears the badge (per spec: "badge SHALL disappear the next
-    // time the widget expands"). We still allow the suggestion itself to
-    // persist in the expanded panel — only the bubble badge goes away,
-    // which is automatic since the bubble is unmounted on expand.
-    useChatStore.setState({ expanded: true })
-    rerender(<ChatWidget />)
-    expect(screen.queryByTestId("chat-widget-promote-badge")).not.toBeInTheDocument()
-  })
-
-  // ----- Active-goal pulse dot -----
-
-  it("renders pulse dot inside the collapsed bubble while a goal is running", () => {
+  it("renders pulse dot inside the bubble while a goal is running", () => {
     seedActiveRun()
     render(<ChatWidget />)
     const widget = screen.getByTestId("chat-widget")
@@ -195,32 +91,30 @@ describe("ChatWidget", () => {
     expect(widget).toContainElement(dot)
   })
 
-  it("pulse dot is not visible when no active goal exists", () => {
-    // resetStore() in beforeEach already nulls activeRun. Per spec scenario
-    // "Active goal pulse dot disappears when run ends", the dot may EITHER
-    // be unmounted OR remain mounted at opacity-0. Design picks the latter
-    // so the 200ms fade-out can play; assert the contract, not the choice.
+  it("pulse dot stays mounted but hidden when no active goal exists", () => {
     render(<ChatWidget />)
     const dot = screen.queryByTestId("chat-widget-active-goal-pulse")
+    // Either unmounted OR mounted-but-opacity-0; the contract from spec.
     if (dot !== null) {
       expect(dot.className).toMatch(/\bopacity-0\b/)
     }
   })
 
-  it("does not render pulse dot while the widget is expanded", () => {
-    seedActiveRun()
-    useChatStore.setState({ expanded: true })
+  it("renders red promote badge on bubble when a promote suggestion is pending", () => {
+    useChatStore.setState({
+      promoteSuggestion: {
+        reason: "auth + JWT looks like a wiki topic",
+        turnIndex: 0,
+      },
+    })
     render(<ChatWidget />)
-    expect(
-      screen.queryByTestId("chat-widget-active-goal-pulse"),
-    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("chat-widget-promote-badge")).toBeInTheDocument()
   })
 
-  it("renders pulse dot and promote badge simultaneously on the collapsed bubble", () => {
+  it("renders pulse dot and promote badge simultaneously on bubble", () => {
     seedActiveRun()
     useChatStore.setState({
-      expanded: false,
-      promoteSuggestion: { reason: "looks like a wiki topic", turnIndex: 0 },
+      promoteSuggestion: { reason: "wiki topic candidate", turnIndex: 0 },
     })
     render(<ChatWidget />)
     expect(
@@ -229,33 +123,111 @@ describe("ChatWidget", () => {
     expect(screen.getByTestId("chat-widget-promote-badge")).toBeInTheDocument()
   })
 
-  it("switches collapsed bubble aria-label to the active-goal variant while a goal runs", () => {
+  it("active-goal aria-label switches when a goal starts running", () => {
     seedActiveRun()
     render(<ChatWidget />)
     const widget = screen.getByTestId("chat-widget")
-    const expected =
-      messages.en["chat.widget.aria.openChatWithActiveGoalRunning"]
-    expect(widget.getAttribute("aria-label")).toBe(expected)
+    expect(widget.getAttribute("aria-label")).toBe(
+      messages.en["chat.widget.aria.openChatWithActiveGoalRunning"],
+    )
+  })
+})
+
+describe("ChatWidget — floating mode", () => {
+  beforeEach(() => {
+    resetStore()
+    useChatStore.setState({ mode: "floating", modalReturnMode: null })
   })
 
-  it("collapsed bubble renders without crashing when activeRun is missing from the store", () => {
-    // Simulates the Failure Modes scenario in design.md: if the goals
-    // store has been wiped (e.g. during vault unmount/remount races) the
-    // selector returns `undefined`. The bubble SHALL degrade to the
-    // no-active-goal visuals rather than crashing.
-    useGoalsStore.setState(
-      { activeRun: undefined as unknown as null },
-      false,
-    )
-    expect(() => render(<ChatWidget />)).not.toThrow()
+  afterEach(() => {
+    resetStore()
+  })
+
+  it("renders panel with data-state='floating' at fixed 360×460 size", () => {
+    render(<ChatWidget />)
     const widget = screen.getByTestId("chat-widget")
-    expect(widget.getAttribute("data-state")).toBe("collapsed")
-    const dot = screen.queryByTestId("chat-widget-active-goal-pulse")
-    if (dot !== null) {
-      expect(dot.className).toMatch(/\bopacity-0\b/)
-    }
-    expect(widget.getAttribute("aria-label")).toBe(
-      messages.en["chat.widget.aria.openChat"],
-    )
+    expect(widget.getAttribute("data-state")).toBe("floating")
+    const style = widget.getAttribute("style") ?? ""
+    expect(style).toMatch(/width:\s*360px/)
+    expect(style).toMatch(/height:\s*460px/)
+    expect(style).toMatch(/bottom:\s*48px/)
+    expect(style).toMatch(/right:\s*16px/)
+  })
+
+  it("renders NO resize handle (Resize Affordance was removed)", () => {
+    render(<ChatWidget />)
+    expect(
+      screen.queryByTestId("chat-widget-resize-handle"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not render pulse dot in floating mode", () => {
+    seedActiveRun()
+    render(<ChatWidget />)
+    expect(
+      screen.queryByTestId("chat-widget-active-goal-pulse"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("minimize button returns the widget to bubble mode", () => {
+    render(<ChatWidget />)
+    fireEvent.click(screen.getByTestId("chat-widget-minimize"))
+    expect(useChatStore.getState().mode).toBe("bubble")
+    expect(useChatStore.getState().modalReturnMode).toBeNull()
+  })
+
+  it("expand-to-modal button opens modal with modalReturnMode='floating'", () => {
+    render(<ChatWidget />)
+    fireEvent.click(screen.getByTestId("chat-widget-expand-to-modal"))
+    expect(useChatStore.getState().mode).toBe("modal")
+    expect(useChatStore.getState().modalReturnMode).toBe("floating")
+  })
+})
+
+describe("ChatWidget — modal mode", () => {
+  beforeEach(() => {
+    resetStore()
+    // Seed modal with bubble as the recorded return mode so the close-
+    // to-return-mode behavior is exercised by Esc / backdrop click tests.
+    useChatStore.setState({ mode: "modal", modalReturnMode: "bubble" })
+  })
+
+  afterEach(() => {
+    resetStore()
+  })
+
+  it("renders centered modal via radix Dialog (data-state='modal' + role='dialog')", () => {
+    render(<ChatWidget />)
+    // The Dialog content IS the widget root — same element carries
+    // role="dialog", aria-modal="true", data-testid="chat-widget", and
+    // data-state="modal".
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.getAttribute("aria-modal")).toBe("true")
+    expect(dialog.getAttribute("data-testid")).toBe("chat-widget")
+    expect(dialog.getAttribute("data-state")).toBe("modal")
+  })
+
+  it("does not render pulse dot in modal mode", () => {
+    seedActiveRun()
+    render(<ChatWidget />)
+    expect(
+      screen.queryByTestId("chat-widget-active-goal-pulse"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("dock button transitions modal → floating regardless of return mode", () => {
+    render(<ChatWidget />)
+    fireEvent.click(screen.getByTestId("chat-widget-dock-to-floating"))
+    expect(useChatStore.getState().mode).toBe("floating")
+    expect(useChatStore.getState().modalReturnMode).toBeNull()
+  })
+
+  it("close button transitions modal → bubble regardless of return mode", () => {
+    // Seed with floating as the return mode to prove ✕ ignores it.
+    useChatStore.setState({ mode: "modal", modalReturnMode: "floating" })
+    render(<ChatWidget />)
+    fireEvent.click(screen.getByTestId("chat-widget-modal-close"))
+    expect(useChatStore.getState().mode).toBe("bubble")
+    expect(useChatStore.getState().modalReturnMode).toBeNull()
   })
 })

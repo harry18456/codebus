@@ -760,12 +760,12 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - **順帶 i18n**：`"⏹ Cancel"` / `"Cancelling…"` hard-code 英文（`RunDetailRunning.tsx:108`）→ 補進 Cat B
 - **跟 ODI-4 的共構視覺契約**：Cancel 搬 header 後，bottom-right ChatWidget 圓鈕成為唯一右下元素；ODI-4（active goal pulse dot）在這位置加 amber pulse 提示 goal 進行中。**契約**：未來右下位置不再新增其他 action button，避免再撞位（任何「跟 goal status 有關」的視覺都收進 ChatWidget 圓鈕 ODI-4 系統）
 
-###### R7-3 · ChatWidget 跟 05 Cmd+K Overlay 關係 — 砍 05
+###### R7-3 · ChatWidget 跟 05 Cmd+K Overlay 關係 — 砍 05 [implemented by change chatwidget-three-modes, awaiting archive]
 - 決議見下方 `## 05 · Cmd+K Overlay (CUT)` 區
 - ChatWidget 保留 Cmd+K toggle、但 v1.1 升級：**⌘K 預設開 centered modal mode**、不再只是 toggle
 - ODI-3 被 v1.1 升 spec、不再 deferred；見下方 R7-modes
 
-###### R7-modes · ChatWidget 三 mode spec [design v1.1 spec lock]
+###### R7-modes · ChatWidget 三 mode spec [design v1.1 spec lock] [implemented by change chatwidget-three-modes, awaiting archive]
 
 | Mode | 用途 | 規格 |
 |---|---|---|
@@ -1847,7 +1847,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - **觸發條件**：G1 landed + harry 在 1920×1080 100% 縮放下實測 fullscreen 仍覺得空
 - **不立即做的理由**：可能 G1 修完視覺密度就夠、ODI-2 是備案
 
-### ODI-3 · ChatWidget centered modal mode → **升 spec、不再 deferred**（design v1.1）
+### ODI-3 · ChatWidget centered modal mode → **升 spec、不再 deferred**（design v1.1）[implemented by change chatwidget-three-modes, awaiting archive]
 
 - **狀態變化**：原 proposed → **v1.1 升正式 spec**（2026-05-26）
 - 詳細規格見 R7-modes（3 mode 完整 spec + 切換矩陣）
@@ -2155,7 +2155,7 @@ Design v1.1 mock 已交、5 個 view 全部 spec 完成。可動：
   - spectra change：`quiz-fullscreen-wizard-view`（Phase 5 已列、現在 v1.1 細節落地）
 - **Wiki page reader 新版**（metadata bar + wikilink CSS + edit hint + 旅行日誌 footer slot + WP-empty-page）
   - spectra change：`wiki-page-reader-v1.1`
-- **ChatWidget 3 modes**（bubble + floating 360×460 固定 + centered modal 640 wide + mode 切換矩陣 + chat session sharing）
+- **ChatWidget 3 modes**（bubble + floating 360×460 固定 + centered modal 640 wide + mode 切換矩陣 + chat session sharing） [implemented by change chatwidget-three-modes, awaiting archive]
   - spectra change：`chatwidget-three-modes`（含 ODI-3 升 spec、取代 cut 掉的 05、原 chatwidget-icon-and-pulse 合進此 change）
 - ~~**Language switcher in Settings**（ST14、純加法、~1-1.5 hr）~~ → archived 2026-05-26（`2026-05-26-settings-language-switcher`）
 

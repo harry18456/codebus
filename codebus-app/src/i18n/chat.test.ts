@@ -33,6 +33,15 @@ const CHAT_KEYS = [
   "chat.widget.aria.openChat",
   "chat.widget.aria.openChatWithActiveGoalRunning",
   "chat.widget.aria.closeChat",
+  // chatwidget-three-modes: mode-aware aria-label keys (per spec
+  // "Chat Widget Layout and Two-State Toggle" i18n section).
+  "chat.widget.aria.floating.title",
+  "chat.widget.aria.floating.minimize",
+  "chat.widget.aria.floating.expandToModal",
+  "chat.widget.aria.modal.title",
+  "chat.widget.aria.modal.dockToFloating",
+  "chat.widget.aria.modal.close",
+  "chat.widget.aria.modal.input",
 ] as const
 
 // Keys whose `zh` bundle value MUST contain at least one CJK
@@ -59,6 +68,15 @@ const ZH_KEYS_REQUIRING_HAN = [
   "chat.widget.aria.openChat",
   "chat.widget.aria.openChatWithActiveGoalRunning",
   "chat.widget.aria.closeChat",
+  // chatwidget-three-modes: zh bundle for mode-aware aria-labels must
+  // contain at least one CJK ideograph.
+  "chat.widget.aria.floating.title",
+  "chat.widget.aria.floating.minimize",
+  "chat.widget.aria.floating.expandToModal",
+  "chat.widget.aria.modal.title",
+  "chat.widget.aria.modal.dockToFloating",
+  "chat.widget.aria.modal.close",
+  "chat.widget.aria.modal.input",
 ] as const
 
 // CJK Unified Ideographs (basic block U+4E00–U+9FFF).

@@ -81,6 +81,24 @@ export interface PromoteSuggestion {
   turnIndex: number
 }
 
+/**
+ * Three visible modes for the chat widget; see openspec/specs/app-workspace
+ * "Chat Widget Layout and Two-State Toggle" requirement for the contract.
+ *
+ * - `bubble`   — 44×44 collapsed bubble pinned bottom-right
+ * - `floating` — 360×460 fixed-size panel anchored bottom-right
+ * - `modal`    — 640-wide centered modal rendered via radix Dialog
+ */
+export type ChatWidgetMode = "bubble" | "floating" | "modal"
+
+/**
+ * Snapshot of the mode the user was in *before* `mode` transitioned to
+ * `"modal"`; `closeModalToReturnMode()` consults this to know whether
+ * Esc / backdrop click should return to bubble or floating. `null` when
+ * not currently in modal mode.
+ */
+export type ChatWidgetReturnMode = "bubble" | "floating" | null
+
 interface ChatStore {
   // Session 狀態
   sessionId: string | null
@@ -96,9 +114,8 @@ interface ChatStore {
   promoteSuggestion: PromoteSuggestion | null
 
   // Widget UI 狀態（per-vault memory-only except onboardedVaults）
-  expanded: boolean
-  width: number
-  height: number
+  mode: ChatWidgetMode
+  modalReturnMode: ChatWidgetReturnMode
   onboardedVaults: Set<string>
 
   // Undo 緩衝
@@ -110,8 +127,12 @@ interface ChatStore {
   cancelActiveTurn: () => Promise<void>
   newSession: () => void
   undoNewSession: () => void
-  toggleExpanded: () => void
-  setSize: (width: number, height: number) => void
+  openFloating: () => void
+  minimizeToBubble: () => void
+  openModal: () => void
+  dockToFloating: () => void
+  closeModalToReturnMode: () => void
+  closeModalToBubble: () => void
   dismissPromoteSuggestion: () => void
   acceptPromoteSuggestion: (vaultPath: string) => Promise<string>
   resetForVault: (vaultPath: string) => void
@@ -128,8 +149,6 @@ interface ChatStore {
 }
 
 const DEFAULT_TOKENS: TokenUsage = { input_tokens: 0, output_tokens: 0 }
-const DEFAULT_WIDTH_REM = 22
-const DEFAULT_HEIGHT_REM = 32
 const UNDO_WINDOW_MS = 5000
 const ONBOARDED_KEY_PREFIX = "codebus-chat-onboarded-"
 
@@ -250,9 +269,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
     tokensTotal: { ...DEFAULT_TOKENS },
     promoteSuggestion: null,
 
-    expanded: false,
-    width: DEFAULT_WIDTH_REM,
-    height: DEFAULT_HEIGHT_REM,
+    mode: "bubble",
+    modalReturnMode: null,
     onboardedVaults: readOnboardedVaults(),
 
     lastTranscript: null,
@@ -350,14 +368,47 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }))
     },
 
-    toggleExpanded() {
-      set((state) => ({ expanded: !state.expanded }))
+    openFloating() {
+      // bubble → floating. Any other current mode is a no-op so callers
+      // can fire this action without first probing the current mode.
+      if (get().mode !== "bubble") return
+      set({ mode: "floating", modalReturnMode: null })
     },
 
-    setSize(width, height) {
-      // Clamping is the UI layer's responsibility (different aesthetics on
-      // expand vs. drag-resize); store keeps the raw values.
-      set({ width, height })
+    minimizeToBubble() {
+      // floating → bubble (▿ minimize button). No-op from other modes.
+      if (get().mode !== "floating") return
+      set({ mode: "bubble", modalReturnMode: null })
+    },
+
+    openModal() {
+      // ⌘K universal: snapshot the current mode so closing the modal can
+      // return to it. While already in modal mode the call is a no-op so
+      // repeated ⌘K presses do NOT overwrite the snapshot.
+      const current = get().mode
+      if (current === "modal") return
+      set({ mode: "modal", modalReturnMode: current })
+    },
+
+    dockToFloating() {
+      // modal → floating (⤡ dock button). Always lands in floating
+      // regardless of `modalReturnMode`.
+      if (get().mode !== "modal") return
+      set({ mode: "floating", modalReturnMode: null })
+    },
+
+    closeModalToReturnMode() {
+      // modal → modalReturnMode value (Esc / backdrop click). Falls back
+      // to bubble when the snapshot is null (defensive).
+      if (get().mode !== "modal") return
+      const target = get().modalReturnMode ?? "bubble"
+      set({ mode: target, modalReturnMode: null })
+    },
+
+    closeModalToBubble() {
+      // modal → bubble (✕ close button). Ignores `modalReturnMode`.
+      if (get().mode !== "modal") return
+      set({ mode: "bubble", modalReturnMode: null })
     },
 
     dismissPromoteSuggestion() {
@@ -372,8 +423,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const transcript = buildTranscriptDump(turns, promoteSuggestion.reason)
       try {
         const runId = await spawnGoalIpc(vaultPath, transcript)
-        // On success, clear the pill + collapse the widget per spec.
-        set({ promoteSuggestion: null, expanded: false })
+        // On success, clear the pill + collapse the widget to bubble per
+        // spec (Task 1.1 校準: previously `expanded: false`, now full
+        // mode reset since the widget may have been floating or modal).
+        set({ promoteSuggestion: null, mode: "bubble", modalReturnMode: null })
         return runId
       } catch (error) {
         // Leave promoteSuggestion intact so the UI can render an inline
@@ -384,10 +437,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     resetForVault(_vaultPath) {
       // Vault switch reset trigger — drop session + transcript + undo
-      // buffer + token tally + promote pill AND collapse the widget back
-      // to the bubble so the next vault opens in a clean visual state.
-      // Width / height / onboardedVaults survive (user resize / per-vault
-      // localStorage flag carry across the lobby round-trip).
+      // buffer + token tally + promote pill AND return the widget to
+      // bubble mode so the next vault opens in a clean visual state.
+      // `onboardedVaults` survives (per-vault localStorage flag carry
+      // across the lobby round-trip).
       clearUndoGcTimer()
       set({
         sessionId: null,
@@ -398,7 +451,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         promoteSuggestion: null,
         lastSessionId: null,
         lastTranscript: null,
-        expanded: false,
+        mode: "bubble",
+        modalReturnMode: null,
       })
     },
 

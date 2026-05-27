@@ -624,11 +624,16 @@ function renderWikiSlug({
       onClick={(e) => {
         e.preventDefault()
         onWikiLinkClick?.(slug)
-        // Collapse the chat widget only when currently expanded so
-        // tests / callers can probe the state transition without a
-        // surprise re-expand.
-        if (useChatStore.getState().expanded) {
-          useChatStore.getState().toggleExpanded()
+        // Return the chat widget to bubble mode so the user lands on the
+        // wiki page without a floating panel / modal occluding it. Mode-
+        // aware per Task 1.1 校準: previously toggled `expanded`, now
+        // dispatches the correct close action by current mode (no-op for
+        // bubble — there is nothing to close).
+        const state = useChatStore.getState()
+        if (state.mode === "floating") {
+          state.minimizeToBubble()
+        } else if (state.mode === "modal") {
+          state.closeModalToBubble()
         }
       }}
     >

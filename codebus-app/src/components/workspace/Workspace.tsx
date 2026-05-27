@@ -115,9 +115,10 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
       wikiReset()
       quizHistoryReset()
       // Drop chat session + transcript + token tally + pending promote
-      // suggestion when the user leaves the vault. Widget UI prefs
-      // (expanded, width, height, onboardedVaults) intentionally survive
-      // per spec's `Session Reset Behaviors` table.
+      // suggestion when the user leaves the vault. resetForVault also
+      // returns the widget to bubble mode (mode + modalReturnMode reset);
+      // `onboardedVaults` survives per spec "Chat Session Lifecycle and
+      // Reset Triggers" (per-vault localStorage flag).
       useChatStore.getState().resetForVault(vaultPath)
     }
   }, [
@@ -414,12 +415,13 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
       </section>
       {/*
        * ChatWidget lives at Workspace level (sibling of the tab-bound
-       * `<section>`) so it survives tab switches — collapsing the widget,
+       * `<section>`) so it survives tab switches — minimizing to bubble,
        * opening Wiki, then returning to Goals keeps the transcript,
-       * sessionId, and `expanded` state intact. The widget pins itself via
-       * fixed position so this DOM placement does not affect layout, but
-       * the React subtree must NOT live inside an `activeTab` conditional
-       * or it would unmount and lose its state.
+       * sessionId, and `mode` state intact. The widget pins itself via
+       * fixed position (or radix Portal for modal mode) so this DOM
+       * placement does not affect layout, but the React subtree must
+       * NOT live inside an `activeTab` conditional or it would unmount
+       * and lose its state.
        */}
       <ChatWidget
         vaultPath={vault.path}

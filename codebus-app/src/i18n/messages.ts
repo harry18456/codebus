@@ -421,6 +421,14 @@ const en = {
   "chat.widget.aria.minimizeChat": "Minimize chat",
   "chat.widget.title.dragToResize": "Drag to resize",
   "chat.widget.title.minimizeShortcut": "Minimize (Cmd+K)",
+  // ---- Chat widget · mode-aware aria-label keys (chatwidget-three-modes) ----
+  "chat.widget.aria.floating.title": "Ask about this vault",
+  "chat.widget.aria.floating.minimize": "Minimize chat",
+  "chat.widget.aria.floating.expandToModal": "Expand chat to centered modal",
+  "chat.widget.aria.modal.title": "Ask about this vault",
+  "chat.widget.aria.modal.dockToFloating": "Dock chat to bottom-right",
+  "chat.widget.aria.modal.close": "Close chat",
+  "chat.widget.aria.modal.input": "Chat message",
 
   // ---- Activity stream · internal sentinel markers ----
   // QGEN1: translations for `[CODEBUS_*]` thought-block sentinel
@@ -926,6 +934,14 @@ const zh: Record<keyof typeof en, string> = {
   "chat.widget.aria.minimizeChat": "縮小聊天視窗",
   "chat.widget.title.dragToResize": "拖曳以調整大小",
   "chat.widget.title.minimizeShortcut": "縮小（Cmd+K）",
+  // ---- Chat widget · mode-aware aria-label keys (chatwidget-three-modes) ----
+  "chat.widget.aria.floating.title": "問這個 vault",
+  "chat.widget.aria.floating.minimize": "縮小聊天視窗",
+  "chat.widget.aria.floating.expandToModal": "放大聊天視窗為置中彈窗",
+  "chat.widget.aria.modal.title": "問這個 vault",
+  "chat.widget.aria.modal.dockToFloating": "停靠聊天視窗到右下",
+  "chat.widget.aria.modal.close": "關閉聊天視窗",
+  "chat.widget.aria.modal.input": "聊天訊息",
 
   // ---- Activity stream · internal sentinel markers ----
   "activity.marker.codebusQuizNoValidate":
