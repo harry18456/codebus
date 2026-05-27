@@ -184,7 +184,7 @@ Each vault card SHALL expose a visible kebab (`⋮`) button on hover and on keyb
 
 The empty state SHALL display a hero with a large 🚌 emoji, a title, a subtitle, a primary `+ Board a new bus` CTA (or its localized equivalent), and a Quickstart 3-step orientation card. The Quickstart card SHALL render each step number as a monospace digit without a trailing period, in `text-fg-tertiary` color. The Quickstart step 2 SHALL render its example fragment inside an amber-tinted monospace pill (background `accent-tint`, foreground `accent`, 1px amber-tinted border, `rounded-sm`, monospace font); the example fragment SHALL be sourced from a dedicated i18n key separate from the step prefix so that pill styling and step wording can evolve independently.
 
-The Lobby `<main>` content SHALL flow from the top using a vertical flex column; it SHALL NOT vertically center its content within the viewport in either state. The bottom strip (Settings gear left, version label right) SHALL remain a sibling of the Lobby `<main>` rendered at the application shell level, naturally occupying the bottom of the viewport.
+The Lobby `<main>` content SHALL flow from the top using a vertical flex column; it SHALL NOT vertically center its content within the viewport in either state. The bottom strip (Settings gear left, version label right) SHALL render ONLY when the application route is the Lobby (i.e., `route.kind === "lobby"`); it SHALL NOT render in the Workspace route. When rendered, the bottom strip SHALL remain a sibling of the Lobby `<main>` at the application shell level, naturally occupying the bottom of the viewport.
 
 #### Scenario: Empty list renders empty state
 
@@ -244,21 +244,31 @@ The Lobby `<main>` content SHALL flow from the top using a vertical flex column;
 - **WHEN** the Lobby renders the populated state's recent-cards label or the empty state's Quickstart label
 - **THEN** each label is rendered by the shared `SectionLabel` component in its default (non-uppercase-tracked) variant, so the visual treatment is identical between Latin and CJK label text
 
+#### Scenario: Bottom strip is hidden in the Workspace route
+
+- **GIVEN** the user has opened a vault and the application route is the Workspace
+- **WHEN** the application shell renders
+- **THEN** no element with `data-testid="bottom-strip"` exists in the DOM AND no Lobby version-label element exists in the DOM
+
+#### Scenario: Bottom strip reappears when returning to the Lobby
+
+- **GIVEN** the user is in the Workspace with no bottom strip rendered
+- **WHEN** the user clicks the sidebar `← Back to Lobby` control and the route transitions back to the Lobby
+- **THEN** the bottom strip is rendered again as a sibling of the Lobby `<main>` with its Settings gear on the left and the version label on the right
+
 
 <!-- @trace
-source: lobby-holistic-refresh
+source: workspace-sidebar-rework
 updated: 2026-05-27
 code:
-  - codebus-app/design-handoff/AUDIT.md
-  - codebus-app/src/components/lobby/VaultCard.tsx
-  - codebus-app/src/components/lobby/Lobby.tsx
-  - codebus-app/scripts/cdp.mjs
-  - codebus-app/src/components/lobby/EmptyState.tsx
-  - codebus-app/src/i18n/messages.ts
-  - codebus-app/src/styles/globals.css
+  - codebus-app/src/store/quiz-history.ts
+  - codebus-app/src/App.tsx
+  - codebus-app/src/components/workspace/Workspace.tsx
 tests:
-  - codebus-app/src/components/lobby/VaultCard.test.tsx
-  - codebus-app/src/components/lobby/EmptyState.test.tsx
+  - codebus-app/src/components/workspace/Workspace.test.tsx
+  - codebus-app/src/App.test.tsx
+  - codebus-app/src/test/forbidden-behaviors.test.tsx
+  - codebus-app/src/store/quiz-history.test.ts
 -->
 
 ---
@@ -708,11 +718,13 @@ The v1 codebus-app SHALL NOT include any of the following:
 - Telemetry, analytics, crash reporting, or auto-update channels
 - A "Recent Pages" panel inside any sidebar
 - Graph view entry in any sidebar
-- Chat-mode Cmd+K with conversation memory (the overlay itself is out of scope for this change; no precursor UI element SHALL be added)
+- Chat-mode Cmd+K with conversation memory (the overlay / command-palette UI itself is out of scope; no precursor UI element such as a centered Cmd+K spotlight, an input modal triggered by Cmd+K, or a Recent-Pages-style palette SHALL be added)
 - Direct LLM API calls from the frontend (all agent interaction goes through `codebus-core`)
 - Multiple concurrently-active goal runs within a single vault session (per the One Active Goal Run At A Time requirement in `app-workspace`)
 
 A user-facing language override SHALL be permitted in the Settings modal as defined by "Settings Language Override" and "Global Settings Modal Field Set"; it is explicitly NOT a forbidden behavior.
+
+A passive `⌘K` keyboard-shortcut chip rendered in the Workspace sidebar footer (per the `app-workspace` capability's "Workspace Sidebar Footer" requirement) SHALL be permitted; it labels the existing `useChatShortcut`-bound ChatWidget toggle and is NOT a Cmd+K overlay or command palette. The chip SHALL render only `<kbd>`-styled `⌘K` and SHALL NOT open a centered overlay or palette UI.
 
 #### Scenario: Settings modal has no theme controls
 
@@ -724,34 +736,24 @@ A user-facing language override SHALL be permitted in the Settings modal as defi
 - **WHEN** the codebus-app launches and runs through any Lobby or Settings flow
 - **THEN** no outbound network requests are made by the app shell itself (LLM/agent invocations remain the responsibility of `codebus-core` and are out of scope for this change)
 
+#### Scenario: Workspace sidebar ⌘K chip does not open a palette
+
+- **WHEN** the user is in the Workspace and the sidebar footer's `⌘K` kbd chip is rendered
+- **THEN** the chip displays only `<kbd>`-styled `⌘K` text AND no centered Cmd+K overlay or command-palette UI is mounted in the DOM as a result of the chip being rendered or hovered
+
 
 <!-- @trace
-source: settings-language-switcher
-updated: 2026-05-26
+source: workspace-sidebar-rework
+updated: 2026-05-27
 code:
-  - codebus-app/scripts/.lang-switcher-smoke/step-4-back-to-auto.png
-  - codebus-app/src/lib/ipc.ts
-  - codebus-app/src/components/settings/LanguageSection.tsx
-  - codebus-app/scripts/.lang-switcher-smoke/step-2-switch-en.png
-  - codebus-app/src/components/settings/SettingsModal.tsx
+  - codebus-app/src/store/quiz-history.ts
   - codebus-app/src/App.tsx
-  - codebus-app/src-tauri/src/config.rs
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - codebus-app/scripts/.lang-switcher-smoke/step-1-default-zh.png
-  - codebus-app/scripts/.lang-switcher-smoke/step-5-backend-error-en.png
-  - codebus-app/src/i18n/messages.ts
-  - codebus-app/scripts/.lang-switcher-smoke/step-3-restart-en.png
-  - codebus-app/src/hooks/useLocale.ts
+  - codebus-app/src/components/workspace/Workspace.tsx
 tests:
+  - codebus-app/src/components/workspace/Workspace.test.tsx
   - codebus-app/src/App.test.tsx
-  - codebus-app/src/components/settings/SettingsModal.test.tsx
   - codebus-app/src/test/forbidden-behaviors.test.tsx
-  - codebus-app/src/i18n/errors.test.tsx
-  - codebus-app/src/lib/ipc.localeOverride.test.ts
-  - codebus-app/src/store/settings.localeOverride.test.ts
-  - codebus-app/src/hooks/useLocale.test.tsx
-  - codebus-app/src/components/settings/LanguageSection.test.tsx
-  - codebus-app/src/i18n/settings.test.ts
+  - codebus-app/src/store/quiz-history.test.ts
 -->
 
 ---
@@ -1360,4 +1362,37 @@ code:
 tests:
   - codebus-app/src/components/lobby/VaultCard.test.tsx
   - codebus-app/src/components/lobby/EmptyState.test.tsx
+-->
+
+---
+### Requirement: Settings Modal Invocation From Workspace Sidebar Footer
+
+The Settings modal SHALL be reachable from the Workspace state via a Settings icon button rendered in the Workspace sidebar footer (see `app-workspace` capability: "Workspace Sidebar Footer"). Clicking this Settings icon button SHALL open the same single application-shell `<SettingsModal>` instance that the Lobby BottomStrip's bottom-left gear opens, sharing a single `settingsOpen` state owned by the application shell. The Workspace SHALL receive the open-settings callback via a prop from the application shell and SHALL NOT mount its own `<SettingsModal>` instance.
+
+The Settings modal's field set, save behavior, validation, and IPC contract (defined in "Global Settings Modal Field Set") are unaffected by the invocation source; only the entry point in the Workspace state SHALL move from the BottomStrip gear (now hidden in the Workspace route per "Lobby Two-State Rendering") to the Workspace sidebar footer.
+
+#### Scenario: Workspace sidebar Settings icon opens the application-shell Settings modal
+
+- **GIVEN** the user is in the Workspace and the bottom strip is not rendered
+- **WHEN** the user clicks the Settings icon button in the Workspace sidebar footer
+- **THEN** the application-shell `<SettingsModal>` opens centered over a dimmed Workspace background, identical in identity and field set to the modal opened by the Lobby BottomStrip's bottom-left gear
+
+#### Scenario: Lobby and Workspace share a single Settings modal instance
+
+- **GIVEN** the application shell exposes one `settingsOpen` state and one `<SettingsModal>` element
+- **WHEN** the user opens Settings from the Lobby BottomStrip gear, closes it, navigates to the Workspace, and opens Settings from the sidebar footer
+- **THEN** both invocations toggle the same `settingsOpen` state and render the same `<SettingsModal>` instance (no duplicate modal element is mounted in the DOM)
+
+<!-- @trace
+source: workspace-sidebar-rework
+updated: 2026-05-27
+code:
+  - codebus-app/src/store/quiz-history.ts
+  - codebus-app/src/App.tsx
+  - codebus-app/src/components/workspace/Workspace.tsx
+tests:
+  - codebus-app/src/components/workspace/Workspace.test.tsx
+  - codebus-app/src/App.test.tsx
+  - codebus-app/src/test/forbidden-behaviors.test.tsx
+  - codebus-app/src/store/quiz-history.test.ts
 -->

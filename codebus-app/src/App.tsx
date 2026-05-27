@@ -111,13 +111,18 @@ function AppShell() {
             onRevealInFiles={(v) => void revealInFiles(v)}
           />
         ) : (
-          <Workspace vault={route.vault} />
+          <Workspace
+            vault={route.vault}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
         )}
       </div>
-      <BottomStrip
-        version={APP_VERSION}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
+      {route.kind === "lobby" && (
+        <BottomStrip
+          version={APP_VERSION}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+      )}
       <WindowControls />
       <Toast />
       {isDragOver && <DropTargetOverlay />}

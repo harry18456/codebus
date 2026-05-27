@@ -9,6 +9,7 @@ import {
 import { cn } from "@/lib/cn"
 import { useChatStore } from "@/store/chat"
 import { useGoalsStore } from "@/store/goals"
+import { useQuizHistoryStore } from "@/store/quiz-history"
 import { useRouteStore } from "@/store/route"
 import { useSettingsStore } from "@/store/settings"
 import { useVaultsStore } from "@/store/vaults"
@@ -21,6 +22,8 @@ import {
   invoke as tauriInvoke,
 } from "@tauri-apps/api/core"
 
+import { Settings } from "lucide-react"
+
 import { ChatWidget } from "./ChatWidget"
 import { GoalsTab } from "./GoalsTab"
 import { QuizTab } from "./QuizTab"
@@ -31,6 +34,15 @@ import { WikiTab } from "./WikiTab"
 
 interface WorkspaceProps {
   vault: VaultEntry
+  /**
+   * Opens the application-shell `<SettingsModal>` from the Workspace
+   * sidebar footer's Settings button. Owned by `AppShell` so Lobby
+   * BottomStrip and Workspace sidebar share one modal instance.
+   * Spec: app-shell § Settings Modal Invocation From Workspace Sidebar Footer.
+   * Optional only so legacy unit tests that render `<Workspace>` in
+   * isolation can omit it; production callers (`App.tsx`) MUST pass it.
+   */
+  onOpenSettings?: () => void
 }
 
 type TabId = "goals" | "wiki" | "quiz"
@@ -46,7 +58,7 @@ type TabId = "goals" | "wiki" | "quiz"
  * Goals overview and the Wiki tab tree have data immediately.
  * Unmount: clear both stores so a fresh vault open starts clean.
  */
-export function Workspace({ vault }: WorkspaceProps) {
+export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
   const t = useT()
   const back = useRouteStore((s) => s.back)
   const loadVaults = useVaultsStore((s) => s.loadVaults)
@@ -57,6 +69,8 @@ export function Workspace({ vault }: WorkspaceProps) {
   const loadPage = useWikiStore((s) => s.loadPage)
   const wikiPages = useWikiStore((s) => s.pages)
   const wikiReset = useWikiStore((s) => s.reset)
+  const loadQuizAttempts = useQuizHistoryStore((s) => s.loadAttempts)
+  const quizHistoryReset = useQuizHistoryStore((s) => s.reset)
 
   const [activeTab, setActiveTab] = useState<TabId>("goals")
   // Monotonic counter bumped when the user selects the Quiz tab while it
@@ -91,17 +105,30 @@ export function Workspace({ vault }: WorkspaceProps) {
   useEffect(() => {
     void refreshRuns(vault.path).catch(() => {})
     void listPages(vault.path).catch(() => {})
+    // Sidebar Quiz nav count seam — see `useQuizHistoryStore`. Loaded on
+    // mount + cleared on unmount so the count tracks vault scope without
+    // forcing QuizTab to expose its component-local attempts state.
+    void loadQuizAttempts(vault.path).catch(() => {})
     const vaultPath = vault.path
     return () => {
       goalsReset()
       wikiReset()
+      quizHistoryReset()
       // Drop chat session + transcript + token tally + pending promote
       // suggestion when the user leaves the vault. Widget UI prefs
       // (expanded, width, height, onboardedVaults) intentionally survive
       // per spec's `Session Reset Behaviors` table.
       useChatStore.getState().resetForVault(vaultPath)
     }
-  }, [vault.path, refreshRuns, listPages, goalsReset, wikiReset])
+  }, [
+    vault.path,
+    refreshRuns,
+    listPages,
+    loadQuizAttempts,
+    goalsReset,
+    wikiReset,
+    quizHistoryReset,
+  ])
 
   // When the goal thread finishes, `useGoalsStore.activeRun` flips
   // back to null via the `goal-terminal` channel. If the user was
@@ -236,6 +263,14 @@ export function Workspace({ vault }: WorkspaceProps) {
     void loadVaults()
   }
 
+  // Sidebar nav counts come from stores so the count tracks live store
+  // changes (goal spawn / watcher-driven wiki refresh / quiz attempt write)
+  // without prop drilling. Spec: app-workspace § Workspace Sidebar Nav
+  // Row Visual Contract (count source).
+  const goalsCount = useGoalsStore((s) => s.runs.length)
+  const wikiCount = useWikiStore((s) => Object.keys(s.pages).length)
+  const quizCount = useQuizHistoryStore((s) => s.attempts.length)
+
   return (
     <main data-testid="workspace" className="flex h-full w-full">
       <aside
@@ -268,10 +303,19 @@ export function Workspace({ vault }: WorkspaceProps) {
             {vault.path}
           </button>
         </div>
+        {/*
+         * Spec: app-workspace § Workspace Sidebar Section Label Policy.
+         * The sidebar nav region SHALL NOT render any section label above
+         * the three tab rows (the design v1 mock's `VAULT` label is
+         * deliberately not adopted — only 3 ungrouped tabs, so a section
+         * heading would be visual noise). Do not re-introduce.
+         */}
         <nav className="mt-4 flex flex-col gap-1">
           <TabButton
             id="goals"
+            emoji="🚏"
             label={t("workspace.tab.goals")}
+            count={goalsCount}
             activeTab={activeTab}
             onSelect={(next) => {
               setActiveTab(next)
@@ -281,13 +325,17 @@ export function Workspace({ vault }: WorkspaceProps) {
           />
           <TabButton
             id="wiki"
+            emoji="📂"
             label={t("workspace.tab.wiki")}
+            count={wikiCount}
             activeTab={activeTab}
             onSelect={(next) => setActiveTab(next)}
           />
           <TabButton
             id="quiz"
+            emoji="🎓"
             label={t("workspace.tab.quiz")}
+            count={quizCount}
             activeTab={activeTab}
             onSelect={(next) => {
               if (activeTab === "quiz") {
@@ -300,6 +348,33 @@ export function Workspace({ vault }: WorkspaceProps) {
             }}
           />
         </nav>
+        <div
+          data-testid="workspace-sidebar-footer"
+          className="mt-auto flex items-center justify-between border-t border-border pt-2"
+        >
+          <button
+            type="button"
+            data-testid="workspace-sidebar-settings"
+            aria-label={t("bottomStrip.settings")}
+            title={t("bottomStrip.settings")}
+            onClick={() => onOpenSettings?.()}
+            className="flex items-center gap-1.5 rounded-sm text-meta text-fg-secondary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </button>
+          <span
+            data-testid="workspace-sidebar-kbd"
+            aria-hidden="true"
+            className="flex items-center gap-0.5 font-mono text-[10px] text-fg-tertiary"
+          >
+            <kbd className="rounded-sm border border-border bg-bg-raised px-1 py-px">
+              ⌘
+            </kbd>
+            <kbd className="rounded-sm border border-border bg-bg-raised px-1 py-px">
+              K
+            </kbd>
+          </span>
+        </div>
       </aside>
       <section
         data-testid="workspace-main"
@@ -371,12 +446,30 @@ async function openVaultInFiles(path: string): Promise<void> {
 
 interface TabButtonProps {
   id: TabId
+  /** Inline emoji prefix; component-encoded, not sourced from i18n. */
+  emoji: string
   label: string
+  /** Store-driven count rendered right-aligned, mono / tabular-nums. */
+  count: number
   activeTab: TabId
   onSelect: (tab: TabId) => void
 }
 
-function TabButton({ id, label, activeTab, onSelect }: TabButtonProps) {
+/**
+ * Sidebar nav row. Spec: app-workspace § Workspace Sidebar Nav Row Visual
+ * Contract. Three segments: optional 2px left amber bar (active only),
+ * emoji + label, right-aligned mono count. Active state uses the left
+ * bar as the dominant signal; whole-row accent-tint fill was removed so
+ * the bar reads cleanly (per spec).
+ */
+function TabButton({
+  id,
+  emoji,
+  label,
+  count,
+  activeTab,
+  onSelect,
+}: TabButtonProps) {
   const active = activeTab === id
   return (
     <button
@@ -385,14 +478,28 @@ function TabButton({ id, label, activeTab, onSelect }: TabButtonProps) {
       data-active={active}
       onClick={() => onSelect(id)}
       className={cn(
-        "rounded-sm px-2 py-1 text-left text-meta",
+        "relative flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-meta",
         active
-          ? "bg-accent/20 text-accent"
+          ? "text-fg"
           : "text-fg-secondary hover:bg-bg-hover hover:text-fg",
         "focus:outline-none focus:ring-2 focus:ring-accent-ring",
       )}
     >
-      {label}
+      {active && (
+        <span
+          data-testid={`workspace-tab-${id}-bar`}
+          aria-hidden="true"
+          className="absolute inset-y-1 left-0 w-[2px] rounded-sm bg-accent"
+        />
+      )}
+      <span aria-hidden="true">{emoji}</span>
+      <span className="flex-1 truncate">{label}</span>
+      <span
+        data-testid={`workspace-tab-${id}-count`}
+        className="font-mono tabular-nums text-meta text-fg-tertiary"
+      >
+        {count}
+      </span>
     </button>
   )
 }

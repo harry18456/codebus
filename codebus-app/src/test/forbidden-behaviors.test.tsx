@@ -50,7 +50,13 @@ const FORBIDDEN_PHRASES: Array<{ label: string; regex: RegExp }> = [
   { label: "quest banner", regex: /quest\s*(banner|bar)?/i },
   { label: "Recent Pages panel", regex: /recent\s+pages/i },
   { label: "Graph view entry", regex: /graph\s*view/i },
-  { label: "Cmd\\+K UI", regex: /(⌘k|cmd\+k|command\s*palette)/i },
+  // Cmd+K UI: forbids the overlay / command-palette pattern (spec
+  // `Forbidden Behaviors in v1`). The Workspace sidebar footer is
+  // permitted to render a passive `⌘K` kbd chip that labels the
+  // `useChatShortcut` toggle (per `app-shell` carve-out + `app-workspace`
+  // § Workspace Sidebar Footer), so the regex matches only the
+  // overlay/palette variants — not the chip text itself.
+  { label: "Cmd+K palette UI", regex: /(cmd\+k|⌘\+k).*(palette|overlay|spotlight)|command\s*palette/i },
   { label: "Tutorial slideshow", regex: /tutorial\s*(slideshow|carousel)/i },
   { label: "learned/mastered/graduated", regex: /(learned|mastered|graduated)/i },
 ]

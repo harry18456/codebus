@@ -25,6 +25,7 @@ import type { VaultEntry } from "@/lib/ipc"
 import { Workspace } from "./Workspace"
 import { useChatStore } from "@/store/chat"
 import { useGoalsStore } from "@/store/goals"
+import { useQuizHistoryStore } from "@/store/quiz-history"
 import { useSettingsStore } from "@/store/settings"
 import { useWikiStore } from "@/store/wiki"
 
@@ -78,6 +79,11 @@ describe("Workspace", () => {
       body: null,
       _bodyCache: {},
     })
+    useQuizHistoryStore.setState({
+      vaultPath: null,
+      attempts: [],
+      loading: false,
+    })
     resetChatStore()
     resetSettingsStore()
   })
@@ -89,6 +95,11 @@ describe("Workspace", () => {
       currentPath: null,
       body: null,
       _bodyCache: {},
+    })
+    useQuizHistoryStore.setState({
+      vaultPath: null,
+      attempts: [],
+      loading: false,
     })
     resetChatStore()
     resetSettingsStore()
@@ -146,12 +157,189 @@ describe("Workspace", () => {
     expect(main).toContainElement(screen.getByTestId("goals-tab"))
   })
 
+  it("loads quiz history attempts on mount and resets them on unmount", async () => {
+    const attempt = {
+      slug: "session-vs-token",
+      quiz_id: "q1",
+      trigger: "topic",
+      topic: "session vs token",
+      target_page: null,
+      events_log: null,
+      path: "/v/.codebus/quiz/session-vs-token/q1.md",
+    }
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_quiz_attempts") return Promise.resolve([attempt])
+      return Promise.resolve([])
+    })
+
+    const { unmount } = render(<Workspace vault={VAULT} />)
+    await waitFor(() => {
+      const state = useQuizHistoryStore.getState()
+      expect(state.vaultPath).toBe("/v")
+      expect(state.attempts).toHaveLength(1)
+    })
+
+    unmount()
+    const after = useQuizHistoryStore.getState()
+    expect(after.vaultPath).toBeNull()
+    expect(after.attempts).toEqual([])
+  })
+
   it("renders the vault display name and path in the sidebar", () => {
     render(<Workspace vault={VAULT} />)
     expect(screen.getByTestId("workspace-vault-name")).toHaveTextContent(
       "vault",
     )
     expect(screen.getByTestId("workspace-vault-path")).toHaveTextContent("/v")
+  })
+
+  describe("sidebar nav row visual contract", () => {
+    it("renders each nav row with emoji prefix (aria-hidden), label and right-aligned mono count", () => {
+      useGoalsStore.setState({
+        runs: [
+          { run_id: "r1", kind: "goal", outcome: "succeeded", title: "t", started_at: "x", finished_at: "y" },
+          { run_id: "r2", kind: "goal", outcome: "succeeded", title: "t2", started_at: "x", finished_at: "y" },
+        ] as any,
+      })
+      useWikiStore.setState({
+        pages: { a: { slug: "a", path: "/p", title: "A" } as any },
+      })
+      useQuizHistoryStore.setState({
+        vaultPath: "/v",
+        attempts: [{ slug: "s", quiz_id: "q1", trigger: "topic", topic: null, target_page: null, events_log: null, path: "/p" }] as any,
+        loading: false,
+      })
+      render(<Workspace vault={VAULT} />)
+
+      const goalsTab = screen.getByTestId("workspace-tab-goals")
+      const wikiTab = screen.getByTestId("workspace-tab-wiki")
+      const quizTab = screen.getByTestId("workspace-tab-quiz")
+
+      for (const [tab, emoji, label, count] of [
+        [goalsTab, "🚏", "Goals", "2"],
+        [wikiTab, "📂", "Wiki", "1"],
+        [quizTab, "🎓", "Quiz", "1"],
+      ] as const) {
+        expect(tab.textContent).toContain(emoji)
+        expect(tab.textContent).toContain(label)
+        const countSpan = tab.querySelector('[data-testid$="-count"]') as HTMLElement
+        expect(countSpan).toBeTruthy()
+        expect(countSpan.textContent).toBe(count)
+        // count uses font-mono tabular-nums tertiary fg
+        expect(countSpan.className).toMatch(/font-mono/)
+        expect(countSpan.className).toMatch(/tabular-nums/)
+        expect(countSpan.className).toMatch(/text-fg-tertiary/)
+        // emoji is wrapped in aria-hidden span (filter out the empty
+        // left-bar span on the active row, which is also aria-hidden).
+        const emojiSpan = Array.from(tab.querySelectorAll("span")).find(
+          (s) =>
+            s.getAttribute("aria-hidden") === "true" &&
+            s.textContent === emoji,
+        )
+        expect(emojiSpan).toBeTruthy()
+      }
+    })
+
+    it("displays literal 0 when the underlying store is empty", () => {
+      render(<Workspace vault={VAULT} />)
+      for (const id of ["goals", "wiki", "quiz"] as const) {
+        const tab = screen.getByTestId(`workspace-tab-${id}`)
+        const countSpan = tab.querySelector(`[data-testid="workspace-tab-${id}-count"]`) as HTMLElement
+        expect(countSpan).toBeTruthy()
+        expect(countSpan.textContent).toBe("0")
+      }
+    })
+
+    it("active row shows a left amber bar that follows the active tab without residue", () => {
+      render(<Workspace vault={VAULT} />)
+      const goalsBar = () =>
+        screen
+          .getByTestId("workspace-tab-goals")
+          .querySelector('[data-testid="workspace-tab-goals-bar"]')
+      const wikiBar = () =>
+        screen
+          .getByTestId("workspace-tab-wiki")
+          .querySelector('[data-testid="workspace-tab-wiki-bar"]')
+      const quizBar = () =>
+        screen
+          .getByTestId("workspace-tab-quiz")
+          .querySelector('[data-testid="workspace-tab-quiz-bar"]')
+
+      // Initial: Goals active.
+      expect(goalsBar()).toBeTruthy()
+      expect(wikiBar()).toBeNull()
+      expect(quizBar()).toBeNull()
+
+      fireEvent.click(screen.getByTestId("workspace-tab-wiki"))
+      expect(wikiBar()).toBeTruthy()
+      expect(goalsBar()).toBeNull()
+      expect(quizBar()).toBeNull()
+
+      fireEvent.click(screen.getByTestId("workspace-tab-quiz"))
+      expect(quizBar()).toBeTruthy()
+      expect(goalsBar()).toBeNull()
+      expect(wikiBar()).toBeNull()
+    })
+
+    it("emoji prefix characters are not present in the i18n message values for tab labels", async () => {
+      const { messages } = await import("@/i18n/messages")
+      for (const lang of [messages.en, messages.zh]) {
+        for (const key of [
+          "workspace.tab.goals",
+          "workspace.tab.wiki",
+          "workspace.tab.quiz",
+        ] as const) {
+          const value = (lang as Record<string, string>)[key]
+          expect(value).toBeDefined()
+          expect(value).not.toMatch(/[🚏📂🎓]/u)
+        }
+      }
+    })
+  })
+
+  describe("sidebar section label policy", () => {
+    it("does not render a VAULT or any section label between vault path and the first nav row", () => {
+      render(<Workspace vault={VAULT} />)
+      const sidebar = screen.getByTestId("workspace-sidebar")
+      expect(sidebar.textContent ?? "").not.toMatch(/VAULT/)
+      // No section label-style element with caps tracking between vault
+      // path block and the nav region.
+      const pathBlock = screen.getByTestId("workspace-vault-path")
+      const nav = sidebar.querySelector("nav")
+      expect(nav).toBeTruthy()
+      // Walk from pathBlock's parent to nav and ensure no element with
+      // uppercase tracking text exists between them.
+      let between: Element | null | undefined = pathBlock.parentElement?.nextElementSibling
+      while (between && between !== nav) {
+        expect(between.textContent ?? "").not.toMatch(/VAULT|Vault/)
+        between = between.nextElementSibling
+      }
+    })
+  })
+
+  describe("sidebar footer", () => {
+    it("renders a Settings button and a ⌘K kbd chip, with no refresh button", () => {
+      render(<Workspace vault={VAULT} />)
+      const footer = screen.getByTestId("workspace-sidebar-footer")
+      expect(footer).toBeInTheDocument()
+      const settingsBtn = screen.getByTestId("workspace-sidebar-settings")
+      expect(footer).toContainElement(settingsBtn)
+      const kbdChip = screen.getByTestId("workspace-sidebar-kbd")
+      expect(footer).toContainElement(kbdChip)
+      expect(kbdChip.textContent).toContain("⌘")
+      expect(kbdChip.textContent).toContain("K")
+      expect(kbdChip.getAttribute("aria-hidden")).toBe("true")
+      expect(
+        screen.queryByTestId("workspace-sidebar-refresh"),
+      ).not.toBeInTheDocument()
+    })
+
+    it("clicking sidebar Settings button invokes onOpenSettings", () => {
+      const onOpenSettings = vi.fn()
+      render(<Workspace vault={VAULT} onOpenSettings={onOpenSettings} />)
+      fireEvent.click(screen.getByTestId("workspace-sidebar-settings"))
+      expect(onOpenSettings).toHaveBeenCalledTimes(1)
+    })
   })
 
   it("keeps chat widget expanded state across tab switches", () => {

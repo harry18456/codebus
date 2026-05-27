@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -94,5 +94,87 @@ describe("App preloads settings on mount", () => {
       const calls = mockedInvoke.mock.calls.map((c) => c[0])
       expect(calls).toContain("load_global_config")
     })
+  })
+})
+
+/**
+ * BottomStrip lives at the application shell level and SHALL render ONLY
+ * when the route is Lobby (spec: `app-shell` § Lobby Two-State Rendering).
+ * Workspace SHALL invoke Settings via its sidebar footer (spec: `app-shell` §
+ * Settings Modal Invocation From Workspace Sidebar Footer) and the modal
+ * instance SHALL be the same one Lobby uses.
+ */
+describe("BottomStrip Lobby-only render + Workspace settings invocation", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset()
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "load_global_config") return Promise.resolve({})
+      if (cmd === "list_vaults") return Promise.resolve([])
+      return Promise.resolve([])
+    })
+    useSettingsStore.setState({
+      config: {},
+      initialConfig: {},
+      dirty: false,
+      loading: false,
+      saving: false,
+      error: null,
+    })
+    useVaultsStore.setState({ vaults: [], loading: false, error: null })
+    useRouteStore.setState({ route: { kind: "lobby" } })
+  })
+
+  it("renders BottomStrip when route is Lobby", async () => {
+    render(<App />)
+    await waitFor(() => {
+      expect(screen.getByTestId("bottom-strip")).toBeInTheDocument()
+    })
+  })
+
+  it("does not render BottomStrip when route is Workspace", async () => {
+    useRouteStore.setState({
+      route: {
+        kind: "workspace",
+        vault: {
+          path: "/v",
+          display_name: "v",
+          last_opened: "2026-05-27T00:00:00Z",
+          is_missing: false,
+        },
+      },
+    })
+    render(<App />)
+    await waitFor(() => {
+      expect(screen.getByTestId("workspace")).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId("bottom-strip")).not.toBeInTheDocument()
+  })
+
+  it("Workspace sidebar settings button opens the same SettingsModal as the Lobby gear", async () => {
+    useRouteStore.setState({
+      route: {
+        kind: "workspace",
+        vault: {
+          path: "/v",
+          display_name: "v",
+          last_opened: "2026-05-27T00:00:00Z",
+          is_missing: false,
+        },
+      },
+    })
+    render(<App />)
+    await waitFor(() => {
+      expect(screen.getByTestId("workspace")).toBeInTheDocument()
+    })
+    // Sidebar Settings button SHALL be present and SHALL open the same
+    // single SettingsModal instance owned by the app shell.
+    const sidebarSettings = screen.getByTestId("workspace-sidebar-settings")
+    fireEvent.click(sidebarSettings)
+    await waitFor(() => {
+      // Settings modal renders into a portal; assert by testid.
+      expect(screen.getByTestId("settings-modal")).toBeInTheDocument()
+    })
+    // Only one modal instance in the DOM.
+    expect(screen.getAllByTestId("settings-modal")).toHaveLength(1)
   })
 })
