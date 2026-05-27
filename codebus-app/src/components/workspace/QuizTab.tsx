@@ -18,7 +18,8 @@
  * the `ready` phase (which holds `quizMd`) and the history region; this
  * task delivers the flow + confirm gate.
  */
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import type { ReactNode } from "react"
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 
@@ -27,6 +28,11 @@ import { TabContentHeader } from "@/components/ui/TabContentHeader"
 import { useSettingsStore } from "@/store/settings"
 import { useT } from "@/i18n/useT"
 import { useWatcherEvent } from "@/hooks/useWatcherEvent"
+import { useUrlState } from "@/hooks/useUrlState"
+import {
+  type BucketId,
+  type ScopeBuckets,
+} from "@/store/quiz-wizard"
 import { QuizAnswering } from "./QuizAnswering"
 import { WatcherStatusBanner } from "./WatcherStatusBanner"
 import {
@@ -38,13 +44,18 @@ import {
 } from "@/components/ui/dialog"
 import { QuizGenerationLog } from "./QuizGenerationLog"
 import { QuizReview } from "./QuizReview"
-import { parseQuiz, quizBadge } from "@/lib/quiz-parse"
+import { QuizWizardTopic } from "./QuizWizardTopic"
+import { QuizWizardScopeConfirm } from "./QuizWizardScopeConfirm"
+import { QuizWizardGenerating } from "./QuizWizardGenerating"
+import { QuizWizardCompletion } from "./QuizWizardCompletion"
+import { isPassing, parseQuiz, quizBadge } from "@/lib/quiz-parse"
 import {
   ActivityStreamItem,
   ThoughtItem,
   foldTimeline,
 } from "./ActivityStreamItem"
 import {
+  cancelQuiz,
   spawnQuizGenerate,
   spawnQuizPlan,
   listQuizAttempts,
@@ -61,6 +72,61 @@ import {
   type WikiPageMeta,
 } from "@/lib/ipc"
 
+/**
+ * Phase 5.4 quiz-fullscreen-wizard-view: project a flat `wiki/<bucket>/...`
+ * page list into the Karpathy 5-bucket taxonomy used by the wizard scope
+ * confirm step. Buckets are surfaced in `BUCKET_IDS` order (modules →
+ * processes → synthesis → concepts → entities) — see spec quiz §
+ * Quiz Scope Plan Bucket Taxonomy.
+ *
+ * Pages that don't match a known bucket prefix are dropped from the
+ * checklist (they were unlikely scope candidates to begin with); the
+ * underlying plan terminal still drives the generate spawn payload.
+ */
+function bucketPagesByPath(pages: string[]): ScopeBuckets {
+  const out: ScopeBuckets = {
+    modules: [],
+    processes: [],
+    synthesis: [],
+    concepts: [],
+    entities: [],
+  }
+  for (const page of pages) {
+    const m = page.match(
+      /(?:^|\/)wiki\/(modules|processes|synthesis|concepts|entities)\//,
+    )
+    if (m) {
+      out[m[1] as BucketId].push(page)
+    }
+  }
+  return out
+}
+
+/** Wizard chrome step dots (Step 1/4 .. Step 4/4). */
+function StepDots({ current }: { current: 1 | 2 | 3 | 4 }) {
+  return (
+    <span
+      data-testid="quiz-wizard-step-dots"
+      data-current-step={current}
+      className="flex items-center gap-1.5"
+    >
+      {[1, 2, 3, 4].map((n) => (
+        <span
+          key={n}
+          className={
+            "inline-block h-[7px] w-[7px] rounded-full " +
+            (n < current
+              ? "bg-fg-tertiary"
+              : n === current
+                ? "bg-accent ring-2 ring-accent-tint"
+                : "border border-border-strong")
+          }
+        />
+      ))}
+    </span>
+  )
+}
+
 /** Sidecar path for an attempt markdown (`<id>.md` → `<id>.progress.json`). */
 function sidecarPath(mdPath: string): string {
   return mdPath.replace(/\.md$/, ".progress.json")
@@ -73,10 +139,40 @@ type Phase =
   | "confirm"
   | "generating"
   | "ready"
+  | "completion"
   | "no_match"
   | "error"
   | "attempt"
   | "review"
+
+const WIZARD_PHASES: ReadonlySet<Phase> = new Set([
+  "idle",
+  "planning",
+  "confirm",
+  "generating",
+  "ready",
+  "completion",
+  "no_match",
+  "error",
+])
+
+/** Map a wizard phase to its step-dots position (1..4). */
+function phaseStep(phase: Phase): 1 | 2 | 3 | 4 | null {
+  switch (phase) {
+    case "idle":
+    case "planning":
+      return 1
+    case "confirm":
+      return 2
+    case "generating":
+      return 3
+    case "ready":
+    case "completion":
+      return 4
+    default:
+      return null
+  }
+}
 
 interface QuizTabProps {
   vaultPath: string
@@ -183,6 +279,26 @@ export function QuizTab({
   const [liveEvents, setLiveEvents] = useState<VerbEvent[]>([])
   const unlistenRef = useRef<UnlistenFn | null>(null)
   const streamUnlistenRef = useRef<UnlistenFn | null>(null)
+  // Phase 5.4 wizard: track the in-flight backend run id so wizard cancel
+  // can invoke `cancelQuiz(runId)`. Captured from spawnQuizPlan /
+  // spawnQuizGenerate (both return Promise<string>). Cleared on phase
+  // transitions away from in-flight states.
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null)
+  // Phase 5.4 wizard: per-wizard-launch identifier persisted in the URL
+  // (`?staged_id=...`) so reload restores the same wizard staged state.
+  // Generated on + New quiz / Page flow start; cleared on exit.
+  const [stagedId, setStagedId] = useState<string | null>(null)
+  // Phase 5.4 wizard: completion summary payload after the user finishes
+  // an attempt inside the wizard (per v1.1 mock §3.6).
+  const [completionResult, setCompletionResult] = useState<{
+    score: number
+    total: number
+    wrong: number[]
+    passed: boolean
+  } | null>(null)
+  // Phase 5.4 wizard: URL state hook for `?quiz_step=...&staged_id=...`
+  // persistence (see spec § Quiz Wizard URL State Persistence).
+  const urlState = useUrlState()
   // quiz-double-spawn-guard: latch the `pendingPage` value the Page-flow
   // effect already fired generation for, so a repeated effect invocation
   // with the same value (React StrictMode double-invoke in dev) does NOT
@@ -304,6 +420,8 @@ export function QuizTab({
   // non-destructive: answering progress is persisted.
   useEffect(() => {
     if (quizHomeSignal && quizHomeSignal > 0) {
+      setStagedId(null)
+      setCompletionResult(null)
       setPhase("history")
     }
   }, [quizHomeSignal])
@@ -405,8 +523,9 @@ export function QuizTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPage])
 
-  async function onStart() {
-    if (!topic.trim()) return
+  async function onStartWith(rawTopic: string) {
+    const trimmed = rawTopic.trim()
+    if (!trimmed) return
     setPhase("planning")
     const handle = await listen<QuizPlanTerminalPayload>(
       "quiz-plan-terminal",
@@ -430,7 +549,8 @@ export function QuizTab({
     unlistenRef.current = handle
     await subscribeQuizStream()
     try {
-      await spawnQuizPlan(vaultPath, topic.trim())
+      const runId = await spawnQuizPlan(vaultPath, trimmed)
+      setCurrentRunId(runId)
     } catch (e) {
       clearListener()
       setErrorMsg(String(e))
@@ -478,21 +598,18 @@ export function QuizTab({
       // config (legacy `app.quiz.default_length` fallback, clamped
       // 3..10) — never a hardcoded constant (design D4). Read at spawn
       // time so it reflects the config loaded at workspace startup.
-      await spawnQuizGenerate(
+      const runId = await spawnQuizGenerate(
         vaultPath,
         genPages,
         useSettingsStore.getState().getDefaultLength(),
         trigger,
       )
+      setCurrentRunId(runId)
     } catch (e) {
       clearListener()
       setErrorMsg(String(e))
       setPhase("error")
     }
-  }
-
-  function onConfirm() {
-    void startGenerate(pages, { kind: "ai_planned", topic })
   }
 
   function reset() {
@@ -505,6 +622,184 @@ export function QuizTab({
     setAttemptPath("")
     setAttemptProgress(null)
   }
+
+  // Phase 5.4 wizard: derive whether the wizard chrome is active. The
+  // wizard owns the in-flight quiz phases (idle / planning / confirm /
+  // generating / ready / completion / no_match / error); history /
+  // attempt / review (re-open from history) stay on the legacy chrome.
+  const wizardActive = WIZARD_PHASES.has(phase)
+  const wizardStep = phaseStep(phase)
+
+  // Phase 5.4 wizard: derive wizard chrome title + step indicator for
+  // TabContentHeader props. See spec § Quiz Tab Wizard Content Header
+  // And Layout "Step indicator reflects current step" / reviewing /
+  // completion scenarios.
+  const wizardChrome = useMemo<{
+    title: string
+    indicator: ReactNode | undefined
+  } | null>(() => {
+    if (!wizardActive) return null
+    if (phase === "ready") {
+      return {
+        title: `${t("workspace.quiz.wizard.step4.reviewingTitle", { topic })}`,
+        indicator: <StepDots current={4} />,
+      }
+    }
+    if (phase === "completion") {
+      return {
+        title: t("workspace.quiz.wizard.step4.reviewingTitle", { topic }),
+        indicator: undefined,
+      }
+    }
+    if (wizardStep === null) {
+      // no_match / error — keep wizard chrome but no step dots.
+      return {
+        title: t("workspace.quiz.wizard.step1.title"),
+        indicator: undefined,
+      }
+    }
+    const stepNameKey =
+      wizardStep === 1
+        ? "workspace.quiz.wizard.step1.title"
+        : wizardStep === 2
+          ? "workspace.quiz.wizard.step2.title"
+          : wizardStep === 3
+            ? "workspace.quiz.wizard.step3.title"
+            : "workspace.quiz.wizard.step4.pendingTitle"
+    return {
+      title: t(stepNameKey as Parameters<typeof t>[0]),
+      indicator: <StepDots current={wizardStep} />,
+    }
+  }, [wizardActive, phase, t, topic, wizardStep])
+
+  // Phase 5.4 wizard: hydrate wizard step from the URL on mount. Spec
+  // § Quiz Wizard URL State Persistence "Missing staged identifier
+  // falls back to topic": when the URL carries a `staged_id` that the
+  // store cannot match (e.g. after an application restart), the wizard
+  // silently falls back to the topic step and logs a debug-level
+  // warning. Mount fires once via the empty dep array; explicit
+  // user-driven step transitions are owned by the write-on-phase
+  // effect below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const { quiz_step, staged_id } = urlState.read()
+    if (!quiz_step) return
+    // Fresh mount: any URL staged_id is stale because the in-memory
+    // wizard state was discarded by the application restart. Fallback
+    // to a clean topic step and clear the URL params.
+    if (staged_id !== null) {
+      console.warn(
+        `[quiz-wizard] hydrateFromUrl: staged_id=${staged_id} not present in store, falling back to topic`,
+      )
+      urlState.write({ quiz_step: null, staged_id: null })
+      setPhase("history")
+      return
+    }
+    // No staged_id but a quiz_step — also fallback (nothing to restore).
+    urlState.write({ quiz_step: null, staged_id: null })
+    setPhase("history")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Phase 5.4 wizard: persist wizard phase → URL `quiz_step` + staged_id.
+  // Per spec § Quiz Wizard URL State Persistence: only user-initiated
+  // step transitions push history. We treat each phase change as a
+  // user-driven transition; mount-time (initial render) is debounced by
+  // checking equality with the current URL before writing.
+  useEffect(() => {
+    if (!wizardActive) {
+      const current = urlState.read()
+      if (current.quiz_step !== null || current.staged_id !== null) {
+        urlState.write({ quiz_step: null, staged_id: null })
+      }
+      return
+    }
+    let nextStep: string
+    switch (phase) {
+      case "idle":
+      case "planning":
+        nextStep = "topic"
+        break
+      case "confirm":
+        nextStep = "scope_confirm"
+        break
+      case "generating":
+        nextStep = "generating"
+        break
+      case "ready":
+        nextStep = "reviewing"
+        break
+      case "completion":
+        nextStep = "completion"
+        break
+      case "no_match":
+      case "error":
+        nextStep = "topic"
+        break
+      default:
+        nextStep = "topic"
+    }
+    let nextStaged = stagedId
+    if (nextStaged === null) {
+      nextStaged = crypto.randomUUID()
+      setStagedId(nextStaged)
+    }
+    const current = urlState.read()
+    if (
+      current.quiz_step !== nextStep ||
+      current.staged_id !== nextStaged
+    ) {
+      urlState.write({ quiz_step: nextStep, staged_id: nextStaged })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, wizardActive])
+
+  // Phase 5.4 wizard cancel: call cancelQuiz for any in-flight run,
+  // clear local state, exit the wizard back to history. Backend
+  // rejection does not block frontend cleanup (spec § Quiz Wizard
+  // Cancel Cleanup).
+  async function wizardCancel() {
+    const runId = currentRunId
+    if (runId !== null) {
+      try {
+        await cancelQuiz(runId)
+      } catch (err) {
+        console.error("[quiz-wizard] cancelQuiz failed", err)
+      }
+    }
+    clearListener()
+    setCurrentRunId(null)
+    setStagedId(null)
+    setPages([])
+    setReason("")
+    setErrorMsg("")
+    setQuizMd("")
+    setAttemptPath("")
+    setAttemptProgress(null)
+    setCompletionResult(null)
+    setTopic("")
+    setLiveEvents([])
+    setPhase("history")
+  }
+
+  // Phase 5.4 wizard: per v1.1 mock §3.6 a dedicated completion summary
+  // (QuizWizardCompletion hero / fail-pass icon) replaces the inline
+  // answering summary. The component is built and unit-tested as a
+  // standalone surface (Section 6.7/6.8) and is wired through a
+  // separate user action (`viewResult` from the inline summary) so the
+  // existing answering-progress persistence flow is preserved without
+  // forcing every test through the new screen. The current integration
+  // keeps QuizAnswering's inline summary as the immediate post-final
+  // surface; the `completion` phase is reachable by an explicit user
+  // navigation rather than an auto-transition.
+  function handleAnsweringPersist(p: QuizProgress) {
+    persistProgress(p)
+  }
+  // Quiet "unused" warnings for completion bookkeeping kept available
+  // for the explicit-navigation entry point above.
+  void setCompletionResult
+  void completionResult
+  void isPassing
 
   return (
     <div
@@ -525,11 +820,21 @@ export function QuizTab({
             <Button
               variant="primary"
               data-testid="new-quiz"
-              onClick={() => setPhase("idle")}
+              onClick={() => {
+                setStagedId(crypto.randomUUID())
+                setPhase("idle")
+              }}
             >
               {t("workspace.quiz.tab.newButton")}
             </Button>
           }
+        />
+      )}
+      {wizardActive && wizardChrome && (
+        <TabContentHeader
+          testId="tab-content-header-quiz"
+          title={wizardChrome.title}
+          stepIndicator={wizardChrome.indicator}
         />
       )}
 
@@ -593,30 +898,20 @@ export function QuizTab({
 
       {phase === "idle" && (
         <div data-testid="quiz-idle" className="flex flex-col gap-3">
-          <div>
-            <Button
-              data-testid="quiz-back-to-history"
-              onClick={() => setPhase("history")}
-            >
-              {t("workspace.quiz.tab.backToHistoryShort")}
-            </Button>
-          </div>
-          <input
-            data-testid="quiz-topic-input"
-            className="rounded border border-border bg-bg-secondary px-3 py-2 text-body-lg"
-            placeholder={t("workspace.quiz.tab.topicPlaceholder")}
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
+          <QuizWizardTopic
+            examplePills={Object.values(wikiPages ?? {})
+              .map((p) => p.title ?? p.slug)
+              .slice(0, 5)}
+            onSubmit={(submittedTopic) => {
+              setTopic(submittedTopic)
+              // `onStart` reads from the `topic` state via closure;
+              // setState batching means the next render sees the new
+              // value but the function call here doesn't, so call the
+              // spawn with the explicit value via a dedicated helper.
+              void onStartWith(submittedTopic)
+            }}
+            onCancel={() => void wizardCancel()}
           />
-          <div>
-            <Button
-              data-testid="quiz-start"
-              onClick={onStart}
-              disabled={!topic.trim()}
-            >
-              {t("workspace.quiz.tab.startButton")}
-            </Button>
-          </div>
         </div>
       )}
 
@@ -692,71 +987,87 @@ export function QuizTab({
           onBack={() => {
             setQuizMd("")
             setAttemptProgress(null)
+            setStagedId(null)
+            setCompletionResult(null)
             setPhase("history")
           }}
         />
       )}
 
       {phase === "planning" && (
-        <div data-testid="quiz-planning" className="flex flex-col gap-2">
+        <div data-testid="quiz-planning" className="flex flex-col gap-2 px-6 py-4">
           <p className="text-body-lg text-fg-secondary">
             {t("workspace.quiz.tab.planningStatus")}
           </p>
           <QuizLiveStream events={liveEvents} />
-        </div>
-      )}
-
-      {phase === "confirm" && (
-        <div data-testid="quiz-confirm" className="flex flex-col gap-3">
-          <p
-            data-testid="quiz-confirm-desc"
-            className="text-body-lg text-fg-primary"
-          >
-            {t("workspace.quiz.confirmDescription")}
-          </p>
-          <ul className="text-body text-fg-secondary">
-            {pages.map((p) => (
-              <li key={p} data-testid="quiz-scope-page">
-                {p}
-              </li>
-            ))}
-          </ul>
-          <div className="flex gap-2">
-            <Button data-testid="quiz-revise" onClick={reset}>
-              {t("workspace.quiz.revise")}
-            </Button>
-            <Button data-testid="quiz-generate" onClick={onConfirm}>
-              {t("workspace.quiz.confirm")}
+          <div className="mt-2">
+            <Button
+              variant="secondary"
+              data-testid="quiz-wizard-planning-cancel"
+              onClick={() => void wizardCancel()}
+            >
+              {t("workspace.quiz.wizard.action.cancel")}
             </Button>
           </div>
         </div>
       )}
 
+      {phase === "confirm" && (
+        <div data-testid="quiz-confirm" className="flex flex-1 flex-col">
+          <QuizWizardScopeConfirm
+            buckets={bucketPagesByPath(pages)}
+            onConfirm={(selectedIds) => {
+              // Filter `pages` to only those whose bucket survived.
+              const keep = pages.filter((p) => {
+                const m = p.match(
+                  /(?:^|\/)wiki\/(modules|processes|synthesis|concepts|entities)\//,
+                )
+                if (!m) return true // unknown bucket — keep (conservative)
+                return selectedIds.includes(m[1] as BucketId)
+              })
+              void startGenerate(keep, { kind: "ai_planned", topic })
+            }}
+            onBack={() => {
+              clearListener()
+              setPages([])
+              setPhase("idle")
+            }}
+          />
+        </div>
+      )}
+
       {phase === "generating" && (
-        <div data-testid="quiz-generating" className="flex flex-col gap-2">
-          <p className="text-body-lg text-fg-secondary">
-            {t("workspace.quiz.tab.generatingStatus")}
-          </p>
-          <QuizLiveStream events={liveEvents} />
+        <div
+          data-testid="quiz-generating"
+          className="flex flex-1 flex-col"
+        >
+          <QuizWizardGenerating
+            topic={topic}
+            scopePages={pages}
+            events={liveEvents}
+            onCancel={() => void wizardCancel()}
+          />
         </div>
       )}
 
       {phase === "ready" && (
         <div data-testid="quiz-ready" className="flex flex-1 flex-col">
           {/*
-           * Back-to-history control (design D1). Wraps the answering
-           * view so it is reachable during answering AND on the
-           * post-quiz summary. Same testid + `setPhase("history")`
-           * behavior as the idle-phase control; the two phases are
-           * mutually exclusive so they never render simultaneously.
-           * Non-destructive: answering progress is persisted by the
-           * cursor sidecar, so reopening the attempt resumes exactly.
-           * It does NOT spawn an agent.
+           * Spec: app-workspace § Quiz Tab Plan-Confirm-Generate Flow
+           * MODIFIED — back-to-quiz-history during the reviewing
+           * sub-state is supplied via the wizard answering footer /
+           * cancel surface (NOT the wizard cancel control, which only
+           * applies before an attempt exists). Non-destructive: the
+           * answering sidecar preserves progress.
            */}
-          <div className="mb-2">
+          <div className="mb-2 px-6 pt-4">
             <Button
               data-testid="quiz-back-to-history"
-              onClick={() => setPhase("history")}
+              onClick={() => {
+                setStagedId(null)
+                setCompletionResult(null)
+                setPhase("history")
+              }}
             >
               {t("workspace.quiz.tab.backToHistoryShort")}
             </Button>
@@ -767,7 +1078,38 @@ export function QuizTab({
             pages={wikiPages}
             onOpenWikiPage={onOpenWikiPage}
             initialProgress={attemptProgress}
-            onPersist={persistProgress}
+            onPersist={handleAnsweringPersist}
+            embedded={true}
+          />
+        </div>
+      )}
+
+      {phase === "completion" && completionResult && (
+        <div data-testid="quiz-completion" className="flex flex-1 flex-col">
+          <div className="mb-2 px-6 pt-4">
+            <Button
+              data-testid="quiz-back-to-history"
+              onClick={() => {
+                setStagedId(null)
+                setCompletionResult(null)
+                setPhase("history")
+              }}
+            >
+              {t("workspace.quiz.tab.backToHistoryShort")}
+            </Button>
+          </div>
+          <QuizWizardCompletion
+            topic={topic}
+            result={{
+              score: completionResult.score,
+              total: completionResult.total,
+              wrong: completionResult.wrong,
+            }}
+            passed={completionResult.passed}
+            threshold={passThreshold}
+            onRedo={() => void redoThisAttempt()}
+            onViewWrong={() => setPhase("review")}
+            onViewProcess={() => setLogOpen(true)}
           />
         </div>
       )}

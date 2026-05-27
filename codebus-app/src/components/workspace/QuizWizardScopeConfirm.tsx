@@ -111,14 +111,14 @@ export function QuizWizardScopeConfirm({
           onClick={onBack}
           data-testid="quiz-wizard-scope-back"
         >
-          {t("workspace.quiz.wizard.action.back")}
+          {t("workspace.quiz.revise")}
         </Button>
         <Button
           variant="primary"
           onClick={() => onConfirm(selectedIds)}
           data-testid="quiz-wizard-scope-confirm"
         >
-          {t("workspace.quiz.wizard.action.start")}
+          {t("workspace.quiz.confirm")}
         </Button>
       </div>
     </div>

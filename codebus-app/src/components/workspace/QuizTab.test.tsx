@@ -36,7 +36,7 @@ const FIVE_Q_MD = [1, 2, 3, 4, 5]
  */
 async function openNewQuiz() {
   fireEvent.click(screen.getByTestId("new-quiz"))
-  await screen.findByTestId("quiz-topic-input")
+  await screen.findByTestId("quiz-wizard-topic-input")
 }
 
 /**
@@ -46,18 +46,18 @@ async function openNewQuiz() {
  */
 async function runFiveQuizFourCorrect() {
   await openNewQuiz()
-  fireEvent.change(screen.getByTestId("quiz-topic-input"), {
+  fireEvent.change(screen.getByTestId("quiz-wizard-topic-input"), {
     target: { value: "auth" },
   })
-  fireEvent.click(screen.getByTestId("quiz-start"))
+  fireEvent.click(screen.getByTestId("quiz-wizard-topic-next"))
   await waitFor(() => expect(listeners.has("quiz-plan-terminal")).toBe(true))
   listeners.get("quiz-plan-terminal")!({
     payload: { run_id: "p1", result: { kind: "scope", pages: ["wiki/a.md"] } },
   })
   await waitFor(() =>
-    expect(screen.getByTestId("quiz-generate")).toBeInTheDocument(),
+    expect(screen.getByTestId("quiz-wizard-scope-confirm")).toBeInTheDocument(),
   )
-  fireEvent.click(screen.getByTestId("quiz-generate"))
+  fireEvent.click(screen.getByTestId("quiz-wizard-scope-confirm"))
   await waitFor(() =>
     expect(listeners.has("quiz-generate-terminal")).toBe(true),
   )
@@ -165,13 +165,13 @@ describe("QuizTab", () => {
     )
     expect(screen.getByTestId("new-quiz")).toBeInTheDocument() // history
     fireEvent.click(screen.getByTestId("new-quiz"))
-    await screen.findByTestId("quiz-topic-input")
+    await screen.findByTestId("quiz-wizard-topic-input")
     // idle (topic input) — content header is gone, CTA with it.
     expect(screen.queryByTestId("new-quiz")).not.toBeInTheDocument()
-    fireEvent.change(screen.getByTestId("quiz-topic-input"), {
+    fireEvent.change(screen.getByTestId("quiz-wizard-topic-input"), {
       target: { value: "auth" },
     })
-    fireEvent.click(screen.getByTestId("quiz-start"))
+    fireEvent.click(screen.getByTestId("quiz-wizard-topic-next"))
     await waitFor(() =>
       expect(screen.getByTestId("quiz-planning")).toBeInTheDocument(),
     )
@@ -201,7 +201,7 @@ describe("QuizTab", () => {
     await waitFor(() =>
       expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
     )
-    expect(screen.queryByTestId("quiz-topic-input")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("quiz-wizard-topic-input")).not.toBeInTheDocument()
   })
 
   it("+ New quiz opens the topic input and hides history", async () => {
@@ -211,11 +211,15 @@ describe("QuizTab", () => {
     )
     fireEvent.click(screen.getByTestId("new-quiz"))
     await waitFor(() =>
-      expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument(),
+      expect(screen.getByTestId("quiz-wizard-topic-input")).toBeInTheDocument(),
     )
     expect(screen.queryByTestId("quiz-history")).not.toBeInTheDocument()
   })
 
+  // Phase 5.4 wizard: the legacy `quiz-back-to-history` button in the
+  // topic step is replaced by the wizard cancel control (Topic step's
+  // `quiz-wizard-topic-cancel`). Clicking it triggers wizardCancel
+  // which exits to the quiz history list.
   it("← History returns from the input view to history", async () => {
     render(<QuizTab vaultPath="/v" />)
     await waitFor(() =>
@@ -223,13 +227,15 @@ describe("QuizTab", () => {
     )
     fireEvent.click(screen.getByTestId("new-quiz"))
     await waitFor(() =>
-      expect(screen.getByTestId("quiz-back-to-history")).toBeInTheDocument(),
+      expect(
+        screen.getByTestId("quiz-wizard-topic-cancel"),
+      ).toBeInTheDocument(),
     )
-    fireEvent.click(screen.getByTestId("quiz-back-to-history"))
+    fireEvent.click(screen.getByTestId("quiz-wizard-topic-cancel"))
     await waitFor(() =>
       expect(screen.getByTestId("quiz-history")).toBeInTheDocument(),
     )
-    expect(screen.queryByTestId("quiz-topic-input")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("quiz-wizard-topic-input")).not.toBeInTheDocument()
   })
 
   it("pendingPage still generates directly without showing history", async () => {
@@ -275,10 +281,10 @@ describe("QuizTab", () => {
   it("Start invokes spawn_quiz_plan, not spawn_quiz_generate", async () => {
     render(<QuizTab vaultPath="/v" />)
     await openNewQuiz()
-    fireEvent.change(screen.getByTestId("quiz-topic-input"), {
+    fireEvent.change(screen.getByTestId("quiz-wizard-topic-input"), {
       target: { value: "how does auth work" },
     })
-    fireEvent.click(screen.getByTestId("quiz-start"))
+    fireEvent.click(screen.getByTestId("quiz-wizard-topic-next"))
     await waitFor(() =>
       expect(invokedCommands()).toContain("spawn_quiz_plan"),
     )
@@ -291,10 +297,10 @@ describe("QuizTab", () => {
   it("renders live agent stream during planning (not just a static label)", async () => {
     render(<QuizTab vaultPath="/v" />)
     await openNewQuiz()
-    fireEvent.change(screen.getByTestId("quiz-topic-input"), {
+    fireEvent.change(screen.getByTestId("quiz-wizard-topic-input"), {
       target: { value: "auth" },
     })
-    fireEvent.click(screen.getByTestId("quiz-start"))
+    fireEvent.click(screen.getByTestId("quiz-wizard-topic-next"))
     await waitFor(() => expect(listeners.has("quiz-stream")).toBe(true))
     listeners.get("quiz-stream")!({
       payload: {
@@ -320,10 +326,10 @@ describe("QuizTab", () => {
     try {
       render(<QuizTab vaultPath="/v" />)
       await openNewQuiz()
-      fireEvent.change(screen.getByTestId("quiz-topic-input"), {
+      fireEvent.change(screen.getByTestId("quiz-wizard-topic-input"), {
         target: { value: "auth" },
       })
-      fireEvent.click(screen.getByTestId("quiz-start"))
+      fireEvent.click(screen.getByTestId("quiz-wizard-topic-next"))
       await waitFor(() =>
         expect(listeners.has("quiz-plan-terminal")).toBe(true),
       )
@@ -336,20 +342,19 @@ describe("QuizTab", () => {
       await waitFor(() =>
         expect(screen.getByTestId("quiz-confirm")).toBeInTheDocument(),
       )
-      // (a) description states it will generate from the listed pages.
-      expect(screen.getByTestId("quiz-confirm-desc")).toHaveTextContent(
-        "將依下列 wiki 頁面出題",
-      )
-      // (b) relabeled revise control + (d) confirm label, from i18n.
-      expect(screen.getByTestId("quiz-revise")).toHaveTextContent("重新規劃")
-      expect(screen.getByTestId("quiz-generate")).toHaveTextContent("確認")
+      // Phase 5.4 wizard: the verbose "將依下列 wiki 頁面出題"
+      // description is removed; the bucket checklist is now
+      // self-explanatory per v1.1 mock §3.2 (Design A). The control
+      // labels remain at `重新規劃` / `確認` per i18n.
+      expect(screen.getByTestId("quiz-wizard-scope-back")).toHaveTextContent("重新規劃")
+      expect(screen.getByTestId("quiz-wizard-scope-confirm")).toHaveTextContent("確認")
       // (c) revise returns to the topic-input view; the click itself
       // spawns nothing (reaching confirm legitimately required a plan
       // spawn, so assert no NEW spawn after clearing the call record).
       invokeMock.mockClear()
-      fireEvent.click(screen.getByTestId("quiz-revise"))
+      fireEvent.click(screen.getByTestId("quiz-wizard-scope-back"))
       await waitFor(() =>
-        expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument(),
+        expect(screen.getByTestId("quiz-wizard-topic-input")).toBeInTheDocument(),
       )
       expect(invokedCommands()).not.toContain("spawn_quiz_plan")
       expect(invokedCommands()).not.toContain("spawn_quiz_generate")
@@ -364,10 +369,10 @@ describe("QuizTab", () => {
   it("scope plan shows confirm controls and does NOT auto-generate", async () => {
     render(<QuizTab vaultPath="/v" />)
     await openNewQuiz()
-    fireEvent.change(screen.getByTestId("quiz-topic-input"), {
+    fireEvent.change(screen.getByTestId("quiz-wizard-topic-input"), {
       target: { value: "auth" },
     })
-    fireEvent.click(screen.getByTestId("quiz-start"))
+    fireEvent.click(screen.getByTestId("quiz-wizard-topic-next"))
     await waitFor(() => expect(listeners.has("quiz-plan-terminal")).toBe(true))
 
     // Plan resolves with a scope.
@@ -381,15 +386,17 @@ describe("QuizTab", () => {
     await waitFor(() =>
       expect(screen.getByTestId("quiz-confirm")).toBeInTheDocument(),
     )
-    expect(screen.getByTestId("quiz-scope-page")).toHaveTextContent(
-      "wiki/modules/auth.md",
-    )
-    expect(screen.getByTestId("quiz-generate")).toBeInTheDocument()
+    // Phase 5.4 wizard: pages are grouped by bucket — assert the
+    // modules bucket section contains the planned page path.
+    expect(
+      screen.getByTestId("quiz-wizard-bucket-modules"),
+    ).toHaveTextContent("wiki/modules/auth.md")
+    expect(screen.getByTestId("quiz-wizard-scope-confirm")).toBeInTheDocument()
     // Confirm gate: generation MUST NOT have started yet.
     expect(invokedCommands()).not.toContain("spawn_quiz_generate")
 
     // Explicit confirm starts generation.
-    fireEvent.click(screen.getByTestId("quiz-generate"))
+    fireEvent.click(screen.getByTestId("quiz-wizard-scope-confirm"))
     await waitFor(() =>
       expect(invokedCommands()).toContain("spawn_quiz_generate"),
     )
@@ -398,10 +405,10 @@ describe("QuizTab", () => {
   it("no-match plan shows reason and never generates", async () => {
     render(<QuizTab vaultPath="/v" />)
     await openNewQuiz()
-    fireEvent.change(screen.getByTestId("quiz-topic-input"), {
+    fireEvent.change(screen.getByTestId("quiz-wizard-topic-input"), {
       target: { value: "quantum mechanics" },
     })
-    fireEvent.click(screen.getByTestId("quiz-start"))
+    fireEvent.click(screen.getByTestId("quiz-wizard-topic-next"))
     await waitFor(() => expect(listeners.has("quiz-plan-terminal")).toBe(true))
 
     listeners.get("quiz-plan-terminal")!({
@@ -423,10 +430,10 @@ describe("QuizTab", () => {
   it("generate success surfaces the quiz body", async () => {
     render(<QuizTab vaultPath="/v" />)
     await openNewQuiz()
-    fireEvent.change(screen.getByTestId("quiz-topic-input"), {
+    fireEvent.change(screen.getByTestId("quiz-wizard-topic-input"), {
       target: { value: "auth" },
     })
-    fireEvent.click(screen.getByTestId("quiz-start"))
+    fireEvent.click(screen.getByTestId("quiz-wizard-topic-next"))
     await waitFor(() => expect(listeners.has("quiz-plan-terminal")).toBe(true))
     listeners.get("quiz-plan-terminal")!({
       payload: {
@@ -435,9 +442,9 @@ describe("QuizTab", () => {
       },
     })
     await waitFor(() =>
-      expect(screen.getByTestId("quiz-generate")).toBeInTheDocument(),
+      expect(screen.getByTestId("quiz-wizard-scope-confirm")).toBeInTheDocument(),
     )
-    fireEvent.click(screen.getByTestId("quiz-generate"))
+    fireEvent.click(screen.getByTestId("quiz-wizard-scope-confirm"))
     await waitFor(() =>
       expect(listeners.has("quiz-generate-terminal")).toBe(true),
     )
@@ -588,7 +595,7 @@ describe("QuizTab", () => {
     // Leave history: enter the topic-input view.
     fireEvent.click(screen.getByTestId("new-quiz"))
     await waitFor(() =>
-      expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument(),
+      expect(screen.getByTestId("quiz-wizard-topic-input")).toBeInTheDocument(),
     )
     expect(screen.queryByTestId("quiz-history")).not.toBeInTheDocument()
     // Workspace bumps the signal (re-select active Quiz tab) → history.
@@ -605,11 +612,11 @@ describe("QuizTab", () => {
     )
     fireEvent.click(screen.getByTestId("new-quiz"))
     await waitFor(() =>
-      expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument(),
+      expect(screen.getByTestId("quiz-wizard-topic-input")).toBeInTheDocument(),
     )
     // The mount-time signal value of 0 must not yank the user back to
     // history — they stay in the topic-input view they navigated to.
-    expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument()
+    expect(screen.getByTestId("quiz-wizard-topic-input")).toBeInTheDocument()
     expect(screen.queryByTestId("quiz-history")).not.toBeInTheDocument()
   })
 
@@ -1046,16 +1053,24 @@ describe("QuizTab", () => {
     expect(header.querySelector("[data-tch-chip]")).toBeNull()
   })
 
-  it("QuizTab_non_history_phases_omit_content_header_row", async () => {
+  // Phase 5.4 wizard supersedes Phase 4C: the content header row stays
+  // rendered through the wizard phases (per spec § Quiz Tab Wizard
+  // Content Header And Layout), but with the `+ New quiz` CTA dropped
+  // and the wizard step indicator surfaced in its place.
+  it("QuizTab_wizard_phases_keep_content_header_row_without_cta", async () => {
     render(<QuizTab vaultPath="/v" />)
     expect(await screen.findByTestId("quiz-history")).toBeInTheDocument()
     expect(screen.getByTestId("tab-content-header-quiz")).toBeInTheDocument()
+    expect(screen.getByTestId("new-quiz")).toBeInTheDocument()
 
-    // Click + New quiz to leave history → enter idle (input phase).
+    // Click + New quiz to leave history → enter wizard topic step.
     fireEvent.click(screen.getByTestId("new-quiz"))
-    await screen.findByTestId("quiz-topic-input")
-    // Content header SHALL NOT render in the idle/input phase.
-    expect(screen.queryByTestId("tab-content-header-quiz")).toBeNull()
+    await screen.findByTestId("quiz-wizard-topic-input")
+    // Content header SHALL still render (wizard chrome) but the
+    // `+ New quiz` CTA SHALL NOT (replaced by step indicator dots).
+    expect(screen.getByTestId("tab-content-header-quiz")).toBeInTheDocument()
+    expect(screen.queryByTestId("new-quiz")).toBeNull()
+    expect(screen.getByTestId("quiz-wizard-step-dots")).toBeInTheDocument()
   })
 
   it("QuizTab_content_header_cta_transitions_to_new_quiz_input", async () => {
@@ -1063,6 +1078,6 @@ describe("QuizTab", () => {
     expect(await screen.findByTestId("quiz-history")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("new-quiz"))
     // Clicking the CTA SHALL transition to the new-quiz input phase.
-    expect(await screen.findByTestId("quiz-topic-input")).toBeInTheDocument()
+    expect(await screen.findByTestId("quiz-wizard-topic-input")).toBeInTheDocument()
   })
 })

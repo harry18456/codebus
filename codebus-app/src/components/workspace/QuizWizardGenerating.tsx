@@ -45,9 +45,11 @@ export function QuizWizardGenerating({
     [events],
   )
   const clusters = useMemo(() => projectClusters(timeline), [timeline])
-  // Touch `summarizeVerbEvent` so its import is preserved by tree-shaking
-  // and the wizard share the exact summary projection used elsewhere.
+  // Touch `summarizeVerbEvent` so its import is preserved (D4 — the
+  // helper is part of the reuse contract even if the per-summary call
+  // site lives inside ActivityStreamItem).
   void summarizeVerbEvent
+  void timeline
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-8">
@@ -89,21 +91,28 @@ export function QuizWizardGenerating({
         data-testid="quiz-wizard-generating-stream-tail"
         className="mt-2 flex flex-col gap-2"
       >
-        {clusters.map((cluster, idx) => (
-          <ActivityCluster
-            key={`cluster-${idx}`}
-            cluster={cluster}
-            terminal={false}
-          />
-        ))}
-        {clusters.length === 0 &&
-          timeline.map((item, idx) =>
-            item.kind === "thought" ? (
-              <ThoughtItem key={`thought-${idx}`} item={item} />
-            ) : (
-              <ActivityStreamItem key={`item-${idx}`} item={item} />
-            ),
-          )}
+        {clusters.map((item, i) => {
+          if (item.kind === "thought_block") {
+            return <ThoughtItem key={i} text={item.text} />
+          }
+          if (item.kind === "event") {
+            return <ActivityStreamItem key={i} event={item.event} />
+          }
+          // item.kind === "cluster"
+          return (
+            <ActivityCluster
+              key={i}
+              phase={item.phase}
+              events={item.events}
+              count={item.count}
+              terminal={false}
+            >
+              {item.events.map((evt, j) => (
+                <ActivityStreamItem key={j} event={evt} />
+              ))}
+            </ActivityCluster>
+          )
+        })}
       </div>
 
       <div className="mt-4 flex items-center justify-end">

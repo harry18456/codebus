@@ -79,7 +79,12 @@ describe("TabContentHeader", () => {
     const ctaNode = row?.querySelector("[data-tch-cta]")
     expect(stepNode).not.toBeNull()
     expect(ctaNode).not.toBeNull()
-    expect(stepNode?.compareDocumentPosition(ctaNode!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0)
+    expect(stepNode).not.toBeNull()
+    expect(ctaNode).not.toBeNull()
+    const relation =
+      stepNode!.compareDocumentPosition(ctaNode!) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+    expect(relation).toBeGreaterThan(0)
   })
 
   it("renders stepIndicator alone when cta is omitted (wizard topic step)", () => {

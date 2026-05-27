@@ -138,7 +138,7 @@ describe("Workspace", () => {
     // history list is no longer shown.
     fireEvent.click(screen.getByTestId("new-quiz"))
     await waitFor(() =>
-      expect(screen.getByTestId("quiz-topic-input")).toBeInTheDocument(),
+      expect(screen.getByTestId("quiz-wizard-topic-input")).toBeInTheDocument(),
     )
     expect(screen.queryByTestId("quiz-history")).not.toBeInTheDocument()
     // Selecting the Quiz tab again while it is already active returns
