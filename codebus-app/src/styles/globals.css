@@ -108,4 +108,27 @@ button:disabled,
   }
 }
 
+/* Lobby empty-state hero idle motion — "Bumpy road / Idling in place" mood.
+ * Spec: openspec/specs/app-shell/spec.md · Requirement "Lobby Empty State Idle Motion"
+ * Two desynced axes (y 1.4s, x 1.1s) produce subtle jitter with no rotation. */
+@keyframes codebus-bus-idle-y {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes codebus-bus-idle-x {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(1px); }
+}
+.codebus-bus-idle {
+  display: inline-block;
+  animation:
+    codebus-bus-idle-y 1.4s ease-in-out infinite,
+    codebus-bus-idle-x 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .codebus-bus-idle {
+    animation: none;
+  }
+}
+
 

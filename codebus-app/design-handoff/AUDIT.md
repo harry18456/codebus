@@ -349,24 +349,24 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - **原則**：保留 instructional 路線、只換詞；`goal` 在 step2 以括號 hint 形式介紹，作為進 Workspace 看到 `Goals` tab 前的學習觸點
 - **連帶要動的英文版**（`messages.ts:37-44`）：保持對應結構，副標換成「Point at a code folder, pick a question to dig into — codebus reads it and takes notes for you.」step2 換成「Pick a goal — e.g. "how does auth work?"」（待最終確認）
 
-##### G1 · 內容垂直置中導致上下大留白 [local]
+##### G1 · 內容垂直置中導致上下大留白 [local] [archived 2026-05-27 via lobby-holistic-refresh]
 - **問題**：`Lobby.tsx:49` `items-center justify-center` 讓 hero 落在 viewport 幾何中心；設計稿是內容自然向上排、`cb-lobby-foot` 黏底
 - **影響**：04b 「沒做完」感最主要來源
 - **修法方向**（結算階段定細節）：layout 改成 `flex flex-col` + 內容上中、footer `mt-auto` 黏底；hero 跟 footer 之間的距離由內容自然撐開
 - **附驗收**：修完在常用 fullscreen 尺寸再看一次；若仍空再考慮升級成 ODI-2（背景 ambient）
 
-##### G2 · Quickstart step2 缺 amber quote pill [local]
+##### G2 · Quickstart step2 缺 amber quote pill [local] [archived 2026-05-27 via lobby-holistic-refresh]
 - **問題**：step2 example 是純 text 配中文引號；設計稿是 inline amber-tinted mono pill（`cb-qs-quote mono` + `accent-tint` 底）
 - **影響**：Quickstart card 唯一視覺重點缺失、整張卡無 accent
 - **連動 G-copy-1**：pill 包的內容會是新文案「auth 怎麼運作」（不是「搞懂這 repo 的 X」）
 - **修法方向**：JSX 內把 example 抽成 `<span>` 套用 mono + bg-accent-tint + text-accent + rounded-sm + 細 padding；i18n key 用 `{example}` placeholder 注入
 
-##### G3 · 步驟編號帶句點 `1.` `2.` `3.` [local]
+##### G3 · 步驟編號帶句點 `1.` `2.` `3.` [local] [archived 2026-05-27 via lobby-holistic-refresh]
 - **問題**：`EmptyState.tsx:48` 用 `{i + 1}.`；設計稿是 `cb-qs-num mono` 純 mono 數字、無句點、dim 色
 - **影響**：「鬆散感」來源之一
 - **修法方向**：去句點、改 mono 字體、配 `text-fg-tertiary`
 
-##### G4 · 中文 section label 視覺替代方案 [shared] [design v1.5 spec lock]
+##### G4 · 中文 section label 視覺替代方案 [shared] [design v1.5 spec lock] [Lobby 04a/04b archived 2026-05-27 via lobby-holistic-refresh; 其餘 12 處待後續 change]
 - **問題**：套了 `uppercase tracking-[0.12em]` 但中文「快速開始」沒 uppercase 概念，視覺僅剩 10px 粗體；「近期 VAULT」 中英混雜時 tracking 只對 Latin fragment 生效、看起來像 bug
 - **Token spec**（walkthrough-decisions.html §01.1 lock 2026-05-26）：
 
@@ -427,7 +427,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
   - 設計稿是 Figma 純黑底量、實際 ClearType sub-pixel anti-aliasing 會吞線；不是 calibration、是真感知 floor
 - **影響範圍**：所有用 `border-border` 做分隔線都受惠——topbar 底、footer 頂、card border、column separator、goal table row 等
 
-##### G6 · Footer 缺頂線 + sunken bg [local]
+##### G6 · Footer 缺頂線 + sunken bg [local] [archived 2026-05-27 via lobby-holistic-refresh; 樣式本體更早由 BottomStrip 落地，本 change Pre-apply 校準確認後不再動]
 - **問題**：⚙️ 設定 / v3.0.0 浮在底，沒 footer 區塊感
 - **設計稿**（已 verify `design_files/styles.css` `.cb-lobby-foot`）：
   - `flex: 0 0 32px`（固定 32px 高）
@@ -437,7 +437,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
   - `font-size: 11px`
 - **修法**：依上述 spec 套 token；連動 G5（border 對比度）統一處理
 
-##### G7 · Quickstart card padding 偏大、行距偏鬆 [local]
+##### G7 · Quickstart card padding 偏大、行距偏鬆 [local] [archived 2026-05-27 via lobby-holistic-refresh]
 - **問題**：`EmptyState.tsx:35` `p-[14px_18px]` 看似合規，但 `ol.space-y-2` + `mt-2` 累加後 card 內部偏鬆
 - **設計稿**：14/18 padding + 較緊步驟間距
 - **連動 G3**：步驟編號樣式修完視覺密度會差很多，G7 跟 G3 一起調更合理
@@ -461,7 +461,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - **G6 footer 缺頂線 + sunken bg** — 一樣浮在底
 - **G7 密度** — vault card 內 name 跟「上次開啟 剛剛」間 padding 偏鬆
 
-##### G-copy-2 · 移除 UI 層 "vault" 詞 [local]
+##### G-copy-2 · 移除 UI 層 "vault" 詞 [local] [archived 2026-05-27 via lobby-holistic-refresh]
 - **問題**：UI 層出現「Vault」三處且寫法不一致（首大寫 / 全大寫 / 全小寫）
   - topbar：`+ 新增 Vault`
   - section label：`近期 VAULT`
@@ -476,7 +476,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - **附帶解決**：原 G-04a-1（三處寫法不一致）自動消失；副標「程式碼資料夾」vs topbar「Vault」概念脫鉤也自動解決
 - **i18n key 命名不動**：`newVaultButton` / `populated.sectionLabel` 等 key 保留，只改 value——key 是技術 identifier、不是 user-facing
 
-##### G-04a-1 · Vault card 互動模型 — kebab discoverability [local]
+##### G-04a-1 · Vault card 互動模型 — kebab discoverability [local] [archived 2026-05-27 via lobby-holistic-refresh]
 - **問題**：設計稿是 hover-revealed `⋮` kebab 按鈕 → click 開 menu；現況改用 right-click context menu（`VaultCard.tsx:37` onContextMenu）、**沒可見 entry point**
 - **影響**：新 user 不知道有 Reveal in files / Remove 選項
 - **修法方向**（結算階段定細節）：補可見 kebab（hover 顯示）；保留 right-click 當 shortcut
@@ -1822,7 +1822,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 
 > 超出 design spec 但值得做的構想。每條獨立評估，跟 Gap 區分開。
 
-### ODI-1 · 04b hero 🚌 idle motion · "Bumpy road"
+### ODI-1 · 04b hero 🚌 idle motion · "Bumpy road" [archived 2026-05-27 via lobby-holistic-refresh]
 
 - **狀態**：proposed（harry 提出 2026-05-25）
 - **範疇**：只在 04b empty state 的 56px hero emoji；topbar 的小 🚌 **不**做動畫

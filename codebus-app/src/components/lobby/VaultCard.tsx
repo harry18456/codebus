@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
+import { MoreVertical } from "lucide-react"
 
 import { formatLastOpened } from "@/lib/time"
 import type { VaultEntry } from "@/lib/ipc"
@@ -21,6 +22,17 @@ export function VaultCard({
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+  const kebabRef = useRef<HTMLButtonElement | null>(null)
+
+  function openMenuFromKebab(e: React.MouseEvent | React.KeyboardEvent) {
+    e.stopPropagation()
+    const rect = kebabRef.current?.getBoundingClientRect()
+    if (rect) {
+      // anchor menu to the kebab button's bottom-left corner
+      setMenuPos({ x: rect.left, y: rect.bottom })
+    }
+    setMenuOpen(true)
+  }
 
   return (
     <div
@@ -46,7 +58,7 @@ export function VaultCard({
         vault.is_missing && "opacity-60",
       )}
     >
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex items-baseline justify-between gap-3 pr-7">
         <div className="text-sm font-semibold">{vault.display_name}</div>
         <div className="font-mono text-meta text-fg-tertiary truncate max-w-[60%]">
           {vault.path}
@@ -66,6 +78,30 @@ export function VaultCard({
           </span>
         )}
       </div>
+      <button
+        ref={kebabRef}
+        type="button"
+        data-testid={`vault-card-kebab-${vault.path}`}
+        aria-label={t("vaultCard.menu.openLabel")}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={openMenuFromKebab}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            openMenuFromKebab(e)
+          }
+        }}
+        className={cn(
+          "absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md",
+          "text-fg-tertiary hover:text-fg hover:bg-bg-hover",
+          "opacity-0 transition-opacity",
+          "group-hover:opacity-100 focus-visible:opacity-100",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring",
+        )}
+      >
+        <MoreVertical className="h-4 w-4" aria-hidden="true" />
+      </button>
       {menuOpen && (
         <div
           role="menu"

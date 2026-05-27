@@ -10,6 +10,9 @@
 //   node scripts/cdp.mjs eval "<js>"      evaluate JS in the page, print JSON result
 //   node scripts/cdp.mjs click "<sel>"    click first element matching a CSS selector
 //   node scripts/cdp.mjs html "<sel>"     print outerHTML of first match (default: body)
+//   node scripts/cdp.mjs reduced-motion <on|off>
+//                                         emulate prefers-reduced-motion via CDP
+//                                         (Emulation.setEmulatedMedia)
 //
 // Connects to the EXISTING WebView2 page — does not spawn a browser. Because it
 // attaches to the real Tauri webview, window.__TAURI_INTERNALS__ is present and
@@ -81,6 +84,19 @@ async function main() {
           return el ? el.outerHTML : null
         }, sel)
         console.log(html ?? `no element matched: ${sel}`)
+        break
+      }
+      case "reduced-motion": {
+        const value = arg === "on" ? "reduce" : "no-preference"
+        // page.emulateMedia does not propagate over connectOverCDP — we are
+        // attaching to an existing WebView2 target, not one created by
+        // Playwright. Use a raw CDP session to set the media feature
+        // directly via Emulation.setEmulatedMedia.
+        const session = await page.context().newCDPSession(page)
+        await session.send("Emulation.setEmulatedMedia", {
+          features: [{ name: "prefers-reduced-motion", value }],
+        })
+        console.log(`prefers-reduced-motion: ${value}`)
         break
       }
       default:

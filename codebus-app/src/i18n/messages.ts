@@ -25,13 +25,13 @@ const en = {
   "common.appName": "codebus",
 
   // ---- Lobby topbar ----
-  "lobby.topbar.newVaultButton": "+ New Vault",
+  "lobby.topbar.newVaultButton": "+ Add",
   "lobby.topbar.newVaultShortcutHint": "⌘N",
 
   // ---- Lobby populated state ----
-  "lobby.populated.sectionLabel": "Recent vaults",
+  "lobby.populated.sectionLabel": "Recent",
   "lobby.populated.dragTip":
-    "tip · Drag a repo folder anywhere into this window to open it as a vault.",
+    "tip · Drag a code folder anywhere into this window to add it to the list.",
 
   // ---- Lobby empty state ----
   "lobby.empty.title": "Board your first bus",
@@ -40,12 +40,14 @@ const en = {
   "lobby.empty.cta": "+ Board a new bus",
   "lobby.empty.quickstartLabel": "QUICKSTART",
   "lobby.empty.step1": "Pick a repo folder",
-  "lobby.empty.step2": 'Run a goal — e.g. "搞懂這 repo 的 X"',
+  "lobby.empty.step2": "Run a goal — e.g.",
+  "lobby.empty.step2Example": "搞懂這 repo 的 X",
   "lobby.empty.step3": "Quiz yourself to verify",
 
   // ---- Vault card ----
   "vaultCard.lastOpened": "last opened",
   "vaultCard.missingBadge": "missing",
+  "vaultCard.menu.openLabel": "Open vault actions",
   "vaultCard.menu.revealInFiles": "Open in file manager",
   "vaultCard.menu.remove": "Remove from list",
 
@@ -454,13 +456,13 @@ const zh: Record<keyof typeof en, string> = {
   "common.appName": "codebus",
 
   // ---- Lobby topbar ----
-  "lobby.topbar.newVaultButton": "+ 新增 Vault",
+  "lobby.topbar.newVaultButton": "+ 新增",
   "lobby.topbar.newVaultShortcutHint": "⌘N",
 
   // ---- Lobby populated state ----
-  "lobby.populated.sectionLabel": "近期 Vault",
+  "lobby.populated.sectionLabel": "最近",
   "lobby.populated.dragTip":
-    "提示 · 把 repo 資料夾拖進這個視窗就能開成新 vault。",
+    "提示 · 把程式碼資料夾拖進這個視窗就能加入清單。",
 
   // ---- Lobby empty state ----
   "lobby.empty.title": "來搭第一台公車吧",
@@ -469,12 +471,14 @@ const zh: Record<keyof typeof en, string> = {
   "lobby.empty.cta": "+ 搭一台新公車",
   "lobby.empty.quickstartLabel": "快速開始",
   "lobby.empty.step1": "選一個 repo 資料夾",
-  "lobby.empty.step2": '跑一個 goal — 例如「搞懂這 repo 的 X」',
+  "lobby.empty.step2": "跑一個 goal — 例如",
+  "lobby.empty.step2Example": "搞懂這 repo 的 X",
   "lobby.empty.step3": "再用 quiz 驗證自己有沒有看懂",
 
   // ---- Vault card ----
   "vaultCard.lastOpened": "上次開啟",
   "vaultCard.missingBadge": "找不到",
+  "vaultCard.menu.openLabel": "開啟動作選單",
   "vaultCard.menu.revealInFiles": "在檔案總管中開啟",
   "vaultCard.menu.remove": "從清單移除",
 

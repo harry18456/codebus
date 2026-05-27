@@ -9,6 +9,7 @@ import { useWatcherEvent } from "@/hooks/useWatcherEvent"
 import { EmptyState } from "./EmptyState"
 import { VaultCard } from "./VaultCard"
 import { Button } from "@/components/ui/button"
+import { SectionLabel } from "@/components/ui/SectionLabel"
 
 interface LobbyProps {
   onNewVault: () => void
@@ -46,7 +47,7 @@ export function Lobby({ onNewVault, onRevealInFiles }: LobbyProps) {
       className="flex h-full w-full flex-col items-center"
     >
       <Topbar empty={empty} onNewVault={onNewVault} />
-      <div className="flex flex-1 w-full items-center justify-center px-6 py-8">
+      <div className="flex flex-1 w-full flex-col items-center px-6 pt-12 pb-8">
         {empty ? (
           <EmptyState onBoard={onNewVault} />
         ) : (
@@ -105,14 +106,9 @@ function PopulatedList({ vaults, onOpen, onRemove, onRevealInFiles }: PopulatedL
   const t = useT()
   return (
     <div className="flex w-full max-w-[640px] flex-col gap-3">
-      <div className="flex items-baseline justify-between">
-        <div className="text-fg-tertiary text-micro font-semibold uppercase tracking-[0.12em]">
-          {t("lobby.populated.sectionLabel")}
-        </div>
-        <div className="font-mono text-meta text-fg-tertiary">
-          {vaults.length}
-        </div>
-      </div>
+      <SectionLabel count={vaults.length} className="w-full">
+        {t("lobby.populated.sectionLabel")}
+      </SectionLabel>
       <div className="flex flex-col gap-2">
         {vaults.map((v) => (
           <VaultCard
