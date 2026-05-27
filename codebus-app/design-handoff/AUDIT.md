@@ -1491,11 +1491,11 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 
 ### Quiz new-quiz flow Gap（按 + New quiz 之後）
 
-##### QNEW-1 · topbar `+ New quiz` 沒反映 state（持續顯示原樣）[bug]
-- 修法：走 Quiz wizard fullscreen view，topbar `+ New quiz` 進 wizard 後隱藏
+##### QNEW-1 · topbar `+ New quiz` 沒反映 state（持續顯示原樣）[bug] [archived 2026-05-27 quiz-fullscreen-wizard-view]
+- 修法：走 Quiz wizard view（content-area wizard with sidebar visible），`TabContentHeader` 進 wizard 後 `+ New quiz` CTA 隱藏、改 title + step dots
 
-##### QNEW-2 · header「Quiz history」 在 wizard state 沒更新 [bug]
-- 修法：wizard view 下 header 顯示「New quiz · Step X/N」
+##### QNEW-2 · header「Quiz history」 在 wizard state 沒更新 [bug] [archived 2026-05-27 quiz-fullscreen-wizard-view]
+- 修法：wizard view 下 `TabContentHeader` title 改顯示「New quiz」+ step dots（QC2 spec）
 
 ##### QNEW-3 · 「Start」 純英文 [i18n Cat B]
 - `QuizTab.tsx` Start button 補進 Cat B
@@ -1504,7 +1504,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 
 ##### QC1 · Header 沒反映 step [shared QNEW-2]
 
-##### QC2 · Wizard step indicator [local] [design v1 spec ack]
+##### QC2 · Wizard step indicator [local] [design v1 spec ack] [archived 2026-05-27 quiz-fullscreen-wizard-view]
 - **規格**（design v1 spec 2026-05-26）：**dots + label 並排，左對齊在 header strip**
 - **Dots**：7px 圓
   - `done` step：filled-fg-tertiary
@@ -2125,9 +2125,9 @@ Phase 4 三個 change 結束後，跨 4A (G4) + 4B (S3 drop 不算套) + 4C (GP3
 - **5.1 ODI-4 + R7-2** · ChatWidget pulse dot + Goal Cancel 搬 02a header（小、frontend、ODI-4 圓鈕右上 7px amber dot + 200ms fade-in + 跟 stream tail 同步；R7-2 解 ChatWidget 圓鈕 collision + 跟 spec 對齊）— **archived 2026-05-27 · chatwidget-pulse-and-cancel-move**
 - **5.2 GP8 running row stream tail**（中、frontend、design 強烈表態 priority）— **archived 2026-05-27 · goals-running-row-stream-tail**
 - **5.3 W4 + X1 backend contract**：codebus-goal skill emit shell event 加 `tool_kind: "read" | "inspect" | "mutation" | "other_read" | "other_write"`、frontend 2-phase cluster rendering、mono ASCII icon prefix（大、含 backend 出手）— **archived 2026-05-27 · activity-stream-2-phase-cluster**（scope 縮減：codebus-quiz prod 不存在、live tail W5 留下個 change；欄位名稱因 serde tag collision 由 `kind` 改 `tool_kind`；Codex 端 `tool_kind` 永遠 None → 全進 reading cluster 為已知限制、未來補 codex_parser heuristic）
-- **5.4 QNEW-1/2 wizard topbar hide**（state machine 改、`QuizTab.tsx` 重 layout 進 fullscreen wizard view，大、純 frontend）
+- **5.4 QNEW-1/2 wizard topbar hide**（state machine 改、`QuizTab.tsx` 重 layout 進 wizard view、純 frontend）— **archived 2026-05-27 · quiz-fullscreen-wizard-view**（apply 階段 Pre-apply 校準發現「topbar」AUDIT/mock/實機指 `TabContentHeader` + `+ New quiz` button，不是 Workspace 殼層；Workspace.tsx 完全不動、sidebar 全程顯示；Karpathy bucket 校正為 5 個；cancel reuse 既有 `cancelQuiz` IPC）
 
-→ spectra changes：`chatwidget-pulse-and-cancel-move` ✓ + `goals-running-row-stream-tail` ✓ + `activity-stream-2-phase-cluster` ✓ + `quiz-fullscreen-wizard-view` ⏳
+→ spectra changes：`chatwidget-pulse-and-cancel-move` ✓ + `goals-running-row-stream-tail` ✓ + `activity-stream-2-phase-cluster` ✓ + `quiz-fullscreen-wizard-view` ✓
 
 Phase 5 remaining work（不開 5.x、進 Phase 6 / X2 等專屬 change）：
 - **W5 live tail**（spinning + amber narration + blinking caret on currently-running cluster）— 留下個 change
@@ -2150,7 +2150,7 @@ Design v1.1 mock 已交、5 個 view 全部 spec 完成。可動：
   - spectra change：`loading-overlay-live-progress`
 - **02c Interrupted full layout**（3 變體 banner + Failed vs Interrupted 視覺差 + state machine + Retry 建立新 GoalRun）
   - spectra change：`interrupted-state-formalize`（含 rename `RunDetailCancelled` → `RunDetailInterrupted` + backend `interrupt_reason` 欄位 + **2026-05-27 補：原 Phase 5.1 純 rename 已併入本 change**，兩 component 並存需合併為單一 `RunDetailInterrupted` + state machine 統一）
-- **Quiz wizard 完整 4 步 layout**（Step 1 topic + pill / Step 3 generating + brand banner / Step 4a pending / Step 4b reviewing / Step 4c completion）
+- **Quiz wizard 完整 4 步 layout**（Step 1 topic + pill / Step 3 generating + brand banner / Step 4a pending / Step 4b reviewing / Step 4c completion）— **archived 2026-05-27 · quiz-fullscreen-wizard-view**（v1.1 細節落地與 Phase 5.4 合併 land；Step 4c completion 為 QuizWizardCompletion 標準件、現流程預設用 QuizAnswering inline summary）
   - spectra change：`quiz-fullscreen-wizard-view`（Phase 5 已列、現在 v1.1 細節落地）
 - **Wiki page reader 新版**（metadata bar + wikilink CSS + edit hint + 旅行日誌 footer slot + WP-empty-page）
   - spectra change：`wiki-page-reader-v1.1`
