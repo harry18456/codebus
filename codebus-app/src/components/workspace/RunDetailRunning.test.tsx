@@ -237,4 +237,40 @@ describe("RunDetailRunning", () => {
     // mousedown and the cancel click never fires.
     expect(wrapper?.hasAttribute("data-tauri-drag-region")).toBe(false)
   })
+
+  // Spec: app-workspace § "Activity Stream Two-Phase Cluster Rendering" —
+  // consecutive read-phase tool_use events SHALL be wrapped in a single
+  // ActivityCluster element.
+  it("activity_stream_wraps_consecutive_reads_in_cluster", () => {
+    seedActiveRun({
+      activeRun: {
+        runId: "r-cluster",
+        goal: "cluster smoke",
+        startedAt: "2026-05-27T10:00:00Z",
+        events: [
+          {
+            kind: "stream",
+            data: { kind: "tool_use", name: "Read", input: { file_path: "a.md" } },
+          },
+          {
+            kind: "stream",
+            data: { kind: "tool_use", name: "Glob", input: { pattern: "wiki/*.md" } },
+          },
+          {
+            kind: "stream",
+            data: { kind: "tool_use", name: "Grep", input: { pattern: "x" } },
+          },
+        ],
+        cancelling: false,
+      },
+      runs: [],
+    })
+    render(<RunDetailRunning onBack={() => {}} />)
+    const clusters = screen.getAllByTestId("activity-cluster")
+    expect(clusters).toHaveLength(1)
+    expect(clusters[0].getAttribute("data-phase")).toBe("reading_codebase")
+    // Running view → cluster default open → 3 child rows rendered + count=3
+    expect(screen.getByTestId("activity-cluster-count").textContent).toBe("(3)")
+    expect(screen.getAllByTestId("stream-tool-use")).toHaveLength(3)
+  })
 })

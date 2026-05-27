@@ -1,13 +1,36 @@
 import { describe, expect, it } from "vitest"
 
 import type { TFunction } from "@/i18n/useT"
-import type { VerbBanner, VerbEvent } from "@/lib/ipc"
+import type { ToolKind, VerbBanner, VerbEvent } from "@/lib/ipc"
+
+/**
+ * Compile-time guard: `ToolKind` must remain a closed union of exactly the
+ * five `snake_case` wire strings mirroring the Rust enum. If a contributor
+ * widens the union without updating frontend consumers (clusterTimeline /
+ * cluster icon helper), this exhaustive switch produces a `never` mismatch
+ * at the type level. See agent-stream-rendering § "Stream Event Tool
+ * Classification".
+ */
+function _assertToolKindExhaustive(k: ToolKind): "read" | "write" | "skip" {
+  switch (k) {
+    case "read":
+    case "other_read":
+      return "read"
+    case "mutation":
+    case "other_write":
+      return "write"
+    case "inspect":
+      return "skip"
+  }
+}
+void _assertToolKindExhaustive
 
 import {
   bannerLabel,
   extractInnerCommand,
   summarizeToolInput,
   summarizeVerbEvent,
+  toolIconPrefix,
   writeEditPath,
 } from "./streamEventSummary"
 
@@ -246,5 +269,41 @@ describe("summarizeVerbEvent", () => {
       data: { kind: "spawn_start", verb: "v" },
     }
     expect(summarizeVerbEvent(evt, tStub)).toBeNull()
+  })
+})
+
+describe("toolIconPrefix · AUDIT W4 design v1.5 mono-icon table", () => {
+  it("toolIconPrefix_returns_design_v1_5_glyph (Read)", () => {
+    expect(toolIconPrefix("Read")).toBe("📄")
+  })
+  it("toolIconPrefix_returns_design_v1_5_glyph (Glob)", () => {
+    expect(toolIconPrefix("Glob")).toBe("🗂")
+  })
+  it("toolIconPrefix_returns_design_v1_5_glyph (Grep)", () => {
+    expect(toolIconPrefix("Grep")).toBe("🔍")
+  })
+  it("toolIconPrefix_returns_design_v1_5_glyph (Write)", () => {
+    expect(toolIconPrefix("Write")).toBe("✎")
+  })
+  it("toolIconPrefix_returns_design_v1_5_glyph (Edit)", () => {
+    expect(toolIconPrefix("Edit")).toBe("✎")
+  })
+  it("toolIconPrefix_returns_design_v1_5_glyph (Shell read)", () => {
+    expect(toolIconPrefix("Shell", "read")).toBe("$_")
+  })
+  it("toolIconPrefix_returns_design_v1_5_glyph (Shell inspect)", () => {
+    expect(toolIconPrefix("Shell", "inspect")).toBe("$?")
+  })
+  it("toolIconPrefix_returns_design_v1_5_glyph (Shell mutation)", () => {
+    expect(toolIconPrefix("Shell", "mutation")).toBe("$!")
+  })
+  it("Bash without tool_kind falls back to inspect-safe $?", () => {
+    expect(toolIconPrefix("Bash")).toBe("$?")
+  })
+  it("other_read maps like read for unknown tool names", () => {
+    expect(toolIconPrefix("FutureTool", "other_read")).toBe("$_")
+  })
+  it("other_write maps like mutation for unknown tool names", () => {
+    expect(toolIconPrefix("FutureTool", "other_write")).toBe("$!")
   })
 })

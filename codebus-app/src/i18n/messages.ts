@@ -453,6 +453,20 @@ const en = {
   // pre-formatted in JS to keep the i18n template stable across the three
   // numeric branches.
   "chat.tokens.indicator": "{value} ↑",
+
+  // ---- Workspace · ActivityStream 2-phase cluster ----
+  // Spec: app-workspace § "Activity Stream Two-Phase Cluster Rendering".
+  // Cluster heading is shown both during run (expanded) and after run
+  // (collapsed); the *.summary.* variants only render in terminal states
+  // and embed counts derived from the cluster's events.
+  "workspace.activity.cluster.reading.heading": "Reading codebase",
+  "workspace.activity.cluster.writing.heading": "Writing wiki",
+  "workspace.activity.cluster.expand": "Expand cluster",
+  "workspace.activity.cluster.collapse": "Collapse cluster",
+  "workspace.activity.cluster.summary.reading":
+    "Reading codebase · {reads} reads · {shell} shell · {elapsedSeconds}s",
+  "workspace.activity.cluster.summary.writing":
+    "Writing wiki · {new} new · {updated} updated · {elapsedSeconds}s",
 } as const
 
 const zh: Record<keyof typeof en, string> = {
@@ -871,6 +885,16 @@ const zh: Record<keyof typeof en, string> = {
 
   // ---- Chat token usage header indicator ----
   "chat.tokens.indicator": "{value} ↑",
+
+  // ---- Workspace · ActivityStream 2-phase cluster ----
+  "workspace.activity.cluster.reading.heading": "讀檔案",
+  "workspace.activity.cluster.writing.heading": "寫 wiki",
+  "workspace.activity.cluster.expand": "展開 cluster",
+  "workspace.activity.cluster.collapse": "收合 cluster",
+  "workspace.activity.cluster.summary.reading":
+    "讀檔案 {reads} 次 · shell {shell} 次 · {elapsedSeconds} 秒",
+  "workspace.activity.cluster.summary.writing":
+    "新增 {new} · 更新 {updated} · {elapsedSeconds} 秒",
 }
 
 export const messages = { en, zh } as const

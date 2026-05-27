@@ -4,7 +4,7 @@
 //! Real mapping implemented in task 3.4; these are stubs so the backend
 //! compiles for the argv tests in task 3.1/3.2.
 
-use super::parser::StreamEvent;
+use super::parser::{StreamEvent, ToolKind};
 use crate::log::TokenUsage;
 use serde_json::{Value, json};
 
@@ -35,10 +35,22 @@ pub fn parse_codex_stream_line(raw: &str) -> Vec<StreamEvent> {
                         .and_then(Value::as_i64)
                         .map(|c| c != 0)
                         .unwrap_or(false);
+                    // Codex wire today does not carry `tool_kind`; the field is
+                    // read defensively so that if/when codex adds it, this
+                    // parser forwards it without further code change. Unknown
+                    // enum values cause the entire item to be skipped.
+                    let tool_kind = match item.get("tool_kind") {
+                        None | Some(Value::Null) => None,
+                        Some(v) => match serde_json::from_value::<ToolKind>(v.clone()) {
+                            Ok(k) => Some(k),
+                            Err(_) => return Vec::new(),
+                        },
+                    };
                     vec![
                         StreamEvent::ToolUse {
                             name: "Shell".to_string(),
                             input: json!({ "command": command }),
+                            tool_kind,
                         },
                         StreamEvent::ToolResult { output, is_error },
                     ]
@@ -96,9 +108,10 @@ mod tests {
         let events = parse_codex_stream_line(line);
         assert_eq!(events.len(), 2, "got {events:?}");
         match &events[0] {
-            StreamEvent::ToolUse { name, input } => {
+            StreamEvent::ToolUse { name, input, tool_kind } => {
                 assert_eq!(name, "Shell");
                 assert_eq!(input.get("command").and_then(|v| v.as_str()), Some("echo hi"));
+                assert_eq!(*tool_kind, None);
             }
             other => panic!("expected ToolUse, got {other:?}"),
         }
@@ -171,5 +184,38 @@ mod tests {
     fn malformed_json_returns_empty() {
         assert!(parse_codex_stream_line("not json").is_empty());
         assert_eq!(sniff_codex_thread_id("not json"), None);
+    }
+
+    /// Spec: when codex CLI emits a `tool_kind` on a command_execution
+    /// item, the codex parser SHALL forward it onto the resulting
+    /// ToolUse event with the same value the Claude parser would produce.
+    #[test]
+    fn codex_parser_forwards_tool_kind() {
+        let line = r#"{"type":"item.completed","item":{"type":"command_execution","command":"git commit -m x","aggregated_output":"","exit_code":0,"status":"completed","tool_kind":"mutation"}}"#;
+        let events = parse_codex_stream_line(line);
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            StreamEvent::ToolUse { tool_kind, .. } => {
+                assert_eq!(*tool_kind, Some(ToolKind::Mutation));
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    /// Spec: codex command_execution items that omit `tool_kind` (the
+    /// current production wire format) yield `tool_kind: None` and remain
+    /// valid two-event ToolUse + ToolResult pairs.
+    #[test]
+    fn codex_parser_without_tool_kind_is_none() {
+        let line = r#"{"type":"item.completed","item":{"type":"command_execution","command":"ls","aggregated_output":"","exit_code":0,"status":"completed"}}"#;
+        let events = parse_codex_stream_line(line);
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            StreamEvent::ToolUse { tool_kind, name, .. } => {
+                assert_eq!(name, "Shell");
+                assert_eq!(*tool_kind, None);
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
     }
 }

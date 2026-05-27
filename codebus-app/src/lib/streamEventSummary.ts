@@ -1,5 +1,5 @@
 import type { TFunction } from "@/i18n/useT"
-import type { VerbBanner, VerbEvent } from "@/lib/ipc"
+import type { ToolKind, VerbBanner, VerbEvent } from "@/lib/ipc"
 
 /**
  * Shared stream-event summary helpers. Extracted from `ActivityStreamItem`
@@ -113,6 +113,38 @@ export function bannerLabel(banner: VerbBanner, t: TFunction): string {
 
 function normalizePath(p: string): string {
   return p.replace(/\\/g, "/")
+}
+
+/**
+ * Mono ASCII / single-glyph icon prefix for an Activity stream cluster
+ * heading or a leaf tool row, mirroring the AUDIT W4 § Tool kind → cluster
+ * mapping table (design v1.5 spec lock 2026-05-26):
+ *
+ *   Read              → 📄
+ *   Glob              → 🗂
+ *   Grep              → 🔍
+ *   Shell tool_kind=read    → $_
+ *   Shell tool_kind=inspect → $?
+ *   Write / Edit      → ✎
+ *   Shell tool_kind=mutation → $!
+ *
+ * Unknown tool names without `tool_kind` fall back to `$?` (Inspect-safe)
+ * — same fallback policy as `classifyToolPhase` in clusterTimeline.ts.
+ *
+ * This helper is the single source of truth for the cluster-phase glyph
+ * vocabulary. The cluster heading (`ActivityCluster`) and any future
+ * per-leaf icon rendering SHALL consume it instead of inlining literals.
+ */
+export function toolIconPrefix(name: string, tool_kind?: ToolKind): string {
+  if (name === "Read") return "📄"
+  if (name === "Glob") return "🗂"
+  if (name === "Grep") return "🔍"
+  if (name === "Write" || name === "Edit") return "✎"
+  // Shell / Bash / other tool names dispatch on tool_kind.
+  if (tool_kind === "mutation" || tool_kind === "other_write") return "$!"
+  if (tool_kind === "read" || tool_kind === "other_read") return "$_"
+  // Inspect, undefined, or anything not enumerated — inspect-safe fallback.
+  return "$?"
 }
 
 /**

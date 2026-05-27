@@ -151,7 +151,7 @@ pub async fn run(
                 // future emit patterns).
                 *promote_reason.borrow_mut() = Some(reason.clone());
             }
-            VerbEvent::Stream(StreamEvent::ToolUse { name, input }) => {
+            VerbEvent::Stream(StreamEvent::ToolUse { name, input, .. }) => {
                 let prefix = tool_prefix(name, use_emoji);
                 println!("{prefix} {} {}", name, abbreviate_tool_input(input));
                 let _ = io::stdout().flush();

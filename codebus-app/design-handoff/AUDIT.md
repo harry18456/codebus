@@ -915,7 +915,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - **修法**：所有元素搬進 title row 右側、依 spec 排列；footer 整個拿掉
 - **連動 R7-2**：Cancel 搬 header 後跟 ChatWidget 圓鈕不再衝突
 
-##### W4 · Activity stream 2-phase clustering [local] [design v1.5 spec lock]
+##### W4 · Activity stream 2-phase clustering [local] [design v1.5 spec lock] [archived 2026-05-27 · activity-stream-2-phase-cluster]
 - **設計稿**：READING CODEBASE / WRITING WIKI 兩個 phase cluster + 1px-left-border guide + 8px tick marks
 - **決策**（walkthrough-decisions.html §02 lock 2026-05-26）：**2-phase semantic split**（取代我原 3-5 tool kind grouping）
   - **READING CODEBASE cluster**（intake phase）：Read / Glob / Grep + Shell kind=`read` + Shell kind=`inspect`
@@ -1063,7 +1063,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 
 ### 02 共用議題
 
-##### X1 · Codex shell wrapper extraction + Shell kind 3-level enum [shared W7 + D5] [bug] [design v1.5 backend contract]
+##### X1 · Codex shell wrapper extraction + Shell kind 3-level enum [shared W7 + D5] [bug] [design v1.5 backend contract] [archived 2026-05-27 · activity-stream-2-phase-cluster]
 - **問題（原 UI 端）**：`ActivityStreamItem.tsx:187-191` `summarizeToolInput` 對 `obj.command` 直接 80 字截斷；Codex wrapper `"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "<actual cmd>"` 吃掉 60+ 字、actual cmd 被截
 - **修法 1**（UI）：`extractInnerCommand` helper detect powershell.exe / sh -c / bash -c wrapper、抽出 inner command 後再截 80 字
 - **修法 2**（backend contract，design v1.5 lock 2026-05-26）：**Shell tool event 加 `kind` 欄位**
@@ -2122,12 +2122,17 @@ Phase 4 三個 change 結束後，跨 4A (G4) + 4B (S3 drop 不算套) + 4C (GP3
 
 **順序**（2026-05-27 重編號、原 5.1 `interrupted-rename` skip 後上移）：
 
-- **5.1 ODI-4 + R7-2** · ChatWidget pulse dot + Goal Cancel 搬 02a header（小、frontend、ODI-4 圓鈕右上 7px amber dot + 200ms fade-in + 跟 stream tail 同步；R7-2 解 ChatWidget 圓鈕 collision + 跟 spec 對齊）
-- **5.2 GP8 running row stream tail**（中、frontend、design 強烈表態 priority）
-- **5.3 W4 + X1 backend contract**：codebus-goal / codebus-quiz skill emit shell event 加 `kind: "read" | "inspect" | "mutation" | "other-*"`、frontend 2-phase cluster rendering、icon prefix、live tail 規矩（大、含 backend 出手）
+- **5.1 ODI-4 + R7-2** · ChatWidget pulse dot + Goal Cancel 搬 02a header（小、frontend、ODI-4 圓鈕右上 7px amber dot + 200ms fade-in + 跟 stream tail 同步；R7-2 解 ChatWidget 圓鈕 collision + 跟 spec 對齊）— **archived 2026-05-27 · chatwidget-pulse-and-cancel-move**
+- **5.2 GP8 running row stream tail**（中、frontend、design 強烈表態 priority）— **archived 2026-05-27 · goals-running-row-stream-tail**
+- **5.3 W4 + X1 backend contract**：codebus-goal skill emit shell event 加 `tool_kind: "read" | "inspect" | "mutation" | "other_read" | "other_write"`、frontend 2-phase cluster rendering、mono ASCII icon prefix（大、含 backend 出手）— **archived 2026-05-27 · activity-stream-2-phase-cluster**（scope 縮減：codebus-quiz prod 不存在、live tail W5 留下個 change；欄位名稱因 serde tag collision 由 `kind` 改 `tool_kind`；Codex 端 `tool_kind` 永遠 None → 全進 reading cluster 為已知限制、未來補 codex_parser heuristic）
 - **5.4 QNEW-1/2 wizard topbar hide**（state machine 改、`QuizTab.tsx` 重 layout 進 fullscreen wizard view，大、純 frontend）
 
-→ spectra changes：`chatwidget-pulse-and-cancel-move` + `goals-running-row-stream-tail` + `activity-stream-2-phase-cluster` + `quiz-fullscreen-wizard-view`
+→ spectra changes：`chatwidget-pulse-and-cancel-move` ✓ + `goals-running-row-stream-tail` ✓ + `activity-stream-2-phase-cluster` ✓ + `quiz-fullscreen-wizard-view` ⏳
+
+Phase 5 remaining work（不開 5.x、進 Phase 6 / X2 等專屬 change）：
+- **W5 live tail**（spinning + amber narration + blinking caret on currently-running cluster）— 留下個 change
+- **X2 CollapsibleStreamLog** shared component（W6 + D3 + I2/I5 三態共用 raw stream log card）— 留 X2 專屬 change
+- **Codex tool_kind 語意還原**：codex_parser.rs heuristic 推導 mutation vs read（目前全 None → reading cluster）— 留下個 follow-up change
 
 ##### ~~原 Phase 5.1 · `interrupted-rename`~~（**obsolete 2026-05-27、不開 change**）
 

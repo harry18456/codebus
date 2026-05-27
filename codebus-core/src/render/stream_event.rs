@@ -48,7 +48,7 @@ pub fn format_event(event: &StreamEvent, opts: &RenderOptions) -> String {
                 format!("{label} {text}")
             }
         }
-        StreamEvent::ToolUse { name, input } => {
+        StreamEvent::ToolUse { name, input, .. } => {
             if name == "Write" || name == "Edit" {
                 // Verbose: show the complete input JSON (incl. written /
                 // edited content) instead of only the file path.
@@ -218,6 +218,7 @@ mod tests {
             &StreamEvent::ToolUse {
                 name: "Write".into(),
                 input: json!({"file_path": "/repo/wiki/foo.md"}),
+                tool_kind: None,
             },
             &emoji_on(),
         );
@@ -230,6 +231,7 @@ mod tests {
             &StreamEvent::ToolUse {
                 name: "Write".into(),
                 input: json!({}),
+                tool_kind: None,
             },
             &emoji_on(),
         );
@@ -243,6 +245,7 @@ mod tests {
             &StreamEvent::ToolUse {
                 name: "Read".into(),
                 input: json!({"file_path": "/x"}),
+                tool_kind: None,
             },
             &emoji_on(),
         );
@@ -323,6 +326,7 @@ mod tests {
             &StreamEvent::ToolUse {
                 name: "Write".into(),
                 input: json!({"file_path": "C:\\repo\\wiki\\foo.md"}),
+                tool_kind: None,
             },
             &emoji_on(),
         );
@@ -387,6 +391,7 @@ mod tests {
             &StreamEvent::ToolUse {
                 name: "Write".into(),
                 input: json!({"file_path": "/x.md", "content": "hello world body"}),
+                tool_kind: None,
             },
             &verbose_on(),
         );
@@ -403,6 +408,7 @@ mod tests {
             &StreamEvent::ToolUse {
                 name: "Grep".into(),
                 input: json!({"pattern": "needle", "glob": ["*.rs", "*.toml"]}),
+                tool_kind: None,
             },
             &verbose_on(),
         );

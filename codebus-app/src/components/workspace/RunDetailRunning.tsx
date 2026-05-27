@@ -7,6 +7,8 @@ import { useGoalsStore } from "@/store/goals"
 import { useT } from "@/i18n/useT"
 
 import { ActivityStreamItem, ThoughtItem, foldTimeline } from "./ActivityStreamItem"
+import { ActivityCluster } from "./ActivityCluster"
+import { projectClusters } from "@/lib/clusterTimeline"
 
 /** Stable empty reference so the useMemo dep stays referentially equal
  *  on the "no activeRun" branch. */
@@ -42,6 +44,11 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
   // stays stable across renders.
   const events = activeRun?.events ?? EMPTY_EVENTS
   const timeline = useMemo(() => foldTimeline(events), [events])
+  // Project the folded timeline into 2-phase clusters
+  // (READING CODEBASE / WRITING WIKI) per app-workspace § "Activity
+  // Stream Two-Phase Cluster Rendering". Running view → clusters
+  // default-open (`terminal={false}`).
+  const clusters = useMemo(() => projectClusters(timeline), [timeline])
 
   if (!activeRun) return null
 
@@ -111,13 +118,28 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
         data-testid="activity-stream"
         className="flex flex-1 flex-col gap-0.5 overflow-auto p-3"
       >
-        {timeline.map((item, i) =>
-          item.kind === "thought_block" ? (
-            <ThoughtItem key={i} text={item.text} />
-          ) : (
-            <ActivityStreamItem key={i} event={item.event} />
-          ),
-        )}
+        {clusters.map((item, i) => {
+          if (item.kind === "thought_block") {
+            return <ThoughtItem key={i} text={item.text} />
+          }
+          if (item.kind === "event") {
+            return <ActivityStreamItem key={i} event={item.event} />
+          }
+          // item.kind === "cluster"
+          return (
+            <ActivityCluster
+              key={i}
+              phase={item.phase}
+              events={item.events}
+              count={item.count}
+              terminal={false}
+            >
+              {item.events.map((evt, j) => (
+                <ActivityStreamItem key={j} event={evt} />
+              ))}
+            </ActivityCluster>
+          )
+        })}
       </div>
     </div>
   )

@@ -10,6 +10,8 @@ import {
   ThoughtItem,
   foldTimeline,
 } from "./ActivityStreamItem"
+import { ActivityCluster } from "./ActivityCluster"
+import { projectClusters } from "@/lib/clusterTimeline"
 
 interface RunDetailDoneProps {
   detail: RunDetail
@@ -42,6 +44,14 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
     [detail.events],
   )
   const foldedTimeline = useMemo(() => foldTimeline(timeline), [timeline])
+  // Project the folded timeline into 2-phase clusters. Done view is a
+  // terminal state per app-workspace § "Cluster default open during
+  // running, collapsed when terminal" — clusters render collapsed by
+  // default (`terminal={true}`).
+  const clusters = useMemo(
+    () => projectClusters(foldedTimeline),
+    [foldedTimeline],
+  )
 
   const totalCoveredPages = phases.flatMap((p) => p.coveredPages).length
   const totalToolUses = phases.reduce(
@@ -197,13 +207,28 @@ export function RunDetailDone({ detail, onBack, onSelectPage }: RunDetailDonePro
               data-testid="run-details-block"
               className="flex flex-col gap-0.5 rounded-md border border-border bg-bg-sunken p-3"
             >
-              {foldedTimeline.map((item, i) =>
-                item.kind === "thought_block" ? (
-                  <ThoughtItem key={i} text={item.text} />
-                ) : (
-                  <ActivityStreamItem key={i} event={item.event} />
-                ),
-              )}
+              {clusters.map((item, i) => {
+                if (item.kind === "thought_block") {
+                  return <ThoughtItem key={i} text={item.text} />
+                }
+                if (item.kind === "event") {
+                  return <ActivityStreamItem key={i} event={item.event} />
+                }
+                // item.kind === "cluster"
+                return (
+                  <ActivityCluster
+                    key={i}
+                    phase={item.phase}
+                    events={item.events}
+                    count={item.count}
+                    terminal={true}
+                  >
+                    {item.events.map((evt, j) => (
+                      <ActivityStreamItem key={j} event={evt} />
+                    ))}
+                  </ActivityCluster>
+                )
+              })}
             </div>
           )}
         </section>

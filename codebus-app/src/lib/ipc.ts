@@ -612,10 +612,30 @@ export type RunOutcome =
   | "cancelled"
   | "interrupted"
 
+/**
+ * Semantic classification of a tool_use event, mirroring the Rust
+ * `ToolKind` enum on `codebus-core/src/stream/parser.rs`. Emitted by the
+ * agent skill (NOT inferred by the parser). Drives the GUI Activity stream
+ * 2-phase cluster grouping (READING CODEBASE / WRITING WIKI). When absent
+ * the consumer SHALL fall back to `inspect` (the safest unknown — see
+ * design.md decision "Fallback default 走 Inspect 不走 Mutation").
+ */
+export type ToolKind =
+  | "read"
+  | "inspect"
+  | "mutation"
+  | "other_read"
+  | "other_write"
+
 /** Tagged stream payload type matching codebus-core `StreamEvent`. */
 export type StreamEvent =
   | { kind: "thought"; text: string }
-  | { kind: "tool_use"; name: string; input: unknown }
+  | {
+      kind: "tool_use"
+      name: string
+      input: unknown
+      tool_kind?: ToolKind
+    }
   | { kind: "tool_result"; output: string; is_error: boolean }
   | ({ kind: "usage" } & TokenUsage)
 

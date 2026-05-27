@@ -38,12 +38,39 @@ use crate::log::TokenUsage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Semantic classification of a tool-use event, used by GUI 2-phase cluster
+/// rendering (READING CODEBASE / WRITING WIKI) and any future phase-aware
+/// consumer. Emitted by the agent skill, NOT inferred by the parser — see
+/// `agent-stream-rendering` spec § "Stream Event Tool Classification".
+///
+/// Field name SHALL remain `tool_kind` (not `kind`) on the `ToolUse` variant
+/// because the outer [`StreamEvent`] already uses `kind` as its serde tag.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKind {
+    Read,
+    Inspect,
+    Mutation,
+    OtherRead,
+    OtherWrite,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamEvent {
-    Thought { text: String },
-    ToolUse { name: String, input: Value },
-    ToolResult { output: String, is_error: bool },
+    Thought {
+        text: String,
+    },
+    ToolUse {
+        name: String,
+        input: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_kind: Option<ToolKind>,
+    },
+    ToolResult {
+        output: String,
+        is_error: bool,
+    },
     Usage(TokenUsage),
 }
 
@@ -131,7 +158,22 @@ fn parse_assistant_content(parsed: &Value) -> Vec<StreamEvent> {
                     .unwrap_or_default()
                     .to_string();
                 let input = item.get("input").cloned().unwrap_or(Value::Null);
-                events.push(StreamEvent::ToolUse { name, input });
+                // Extract optional `tool_kind` field; unknown enum values
+                // cause this entire content item to be skipped (per spec
+                // Failure modes — reject the event rather than silently
+                // dropping the classification).
+                let tool_kind = match item.get("tool_kind") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => match serde_json::from_value::<ToolKind>(v.clone()) {
+                        Ok(k) => Some(k),
+                        Err(_) => continue,
+                    },
+                };
+                events.push(StreamEvent::ToolUse {
+                    name,
+                    input,
+                    tool_kind,
+                });
             }
             // 'thinking' items skipped — internal reasoning, not user-facing
             _ => {}
@@ -209,7 +251,8 @@ mod tests {
             parse_claude_stream_line(&line),
             vec![StreamEvent::ToolUse {
                 name: "Read".into(),
-                input: json!({ "file_path": "/x.rs" })
+                input: json!({ "file_path": "/x.rs" }),
+                tool_kind: None,
             }]
         );
     }
@@ -348,5 +391,99 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(matches!(&events[0], StreamEvent::Thought { text } if text == "calling"));
         assert!(matches!(&events[1], StreamEvent::ToolUse { name, .. } if name == "Grep"));
+    }
+
+    /// Spec: agent-stream-rendering § Stream Event Tool Classification —
+    /// every variant round-trips through serde with snake_case wire form.
+    #[test]
+    fn tool_kind_enum_serde_round_trip() {
+        for (variant, wire) in [
+            (ToolKind::Read, "\"read\""),
+            (ToolKind::Inspect, "\"inspect\""),
+            (ToolKind::Mutation, "\"mutation\""),
+            (ToolKind::OtherRead, "\"other_read\""),
+            (ToolKind::OtherWrite, "\"other_write\""),
+        ] {
+            let serialized = serde_json::to_string(&variant).unwrap();
+            assert_eq!(serialized, wire, "serialize {variant:?}");
+            let deserialized: ToolKind = serde_json::from_str(wire).unwrap();
+            assert_eq!(deserialized, variant, "deserialize {wire}");
+        }
+    }
+
+    /// Spec: ToolUse line that omits `tool_kind` deserializes with
+    /// `tool_kind: None` and SHALL NOT log warnings or errors.
+    #[test]
+    fn tooluse_without_tool_kind_deserializes_as_none() {
+        let line = json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "Read",
+                    "input": { "file_path": "/x.rs" }
+                }]
+            }
+        })
+        .to_string();
+        let events = parse_claude_stream_line(&line);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            StreamEvent::ToolUse { tool_kind, .. } => assert_eq!(*tool_kind, None),
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    /// Spec: a `tool_kind` value present in the input SHALL be carried
+    /// through as `Some(ToolKind::...)` on the resulting ToolUse event.
+    #[test]
+    fn parse_assistant_with_tool_kind() {
+        let line = json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "Bash",
+                    "input": { "command": "git status" },
+                    "tool_kind": "inspect"
+                }]
+            }
+        })
+        .to_string();
+        let events = parse_claude_stream_line(&line);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            StreamEvent::ToolUse {
+                name,
+                tool_kind,
+                input,
+            } => {
+                assert_eq!(name, "Bash");
+                assert_eq!(*tool_kind, Some(ToolKind::Inspect));
+                assert_eq!(input.get("command").and_then(Value::as_str), Some("git status"));
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    /// Spec § Failure modes 2: an unknown `tool_kind` enum value SHALL
+    /// cause the entire content item to be skipped (rather than panicking
+    /// or silently dropping the classification).
+    #[test]
+    fn parse_assistant_unknown_tool_kind_drops_line() {
+        let line = json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "Bash",
+                    "input": { "command": "rm -rf /" },
+                    "tool_kind": "garbage"
+                }]
+            }
+        })
+        .to_string();
+        let events = parse_claude_stream_line(&line);
+        assert!(events.is_empty(), "expected zero events for unknown tool_kind, got {events:?}");
     }
 }
