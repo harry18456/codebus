@@ -100,6 +100,42 @@ pub struct RunLog {
     /// and serialized rows for goal/query/fix omit the field entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Classification of why the run did not reach the success path.
+    ///
+    /// Orthogonal to [`outcome`](Self::outcome) — `outcome` stays the closed
+    /// set `"succeeded" / "failed" / "cancelled"`; `interrupt_reason`
+    /// classifies the cause when present. Populated by:
+    /// - `AppClose`: GUI Interrupted Run Detection synthesizing a virtual
+    ///   entry from an orphan events jsonl file at next app launch.
+    /// - `UserCancel`: verb-layer cancel signal handler when the
+    ///   caller-supplied cancel flag flipped to `true` mid-run.
+    /// - `NetworkDrop`: external connection error that aborted the verb.
+    /// - `Other(String)`: free-form fallback for future classifications not
+    ///   yet promoted to a named variant.
+    ///
+    /// Serde `default + skip_serializing_if = "Option::is_none"` so legacy
+    /// jsonl rows written before this change deserialize cleanly to `None`
+    /// and rows without a reason (e.g. normal `outcome == "succeeded"` runs)
+    /// omit the field entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupt_reason: Option<InterruptReason>,
+}
+
+/// Why a run did not reach the success path. See
+/// [`RunLog::interrupt_reason`] for population rules.
+///
+/// JSON wire shape (per `#[serde(rename_all = "kebab-case")]`):
+/// - `AppClose`    → `"app-close"`
+/// - `UserCancel`  → `"user-cancel"`
+/// - `NetworkDrop` → `"network-drop"`
+/// - `Other(String)` → `{"other": "<string>"}` (untagged newtype)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InterruptReason {
+    AppClose,
+    UserCancel,
+    NetworkDrop,
+    Other(String),
 }
 
 fn default_outcome() -> String {
@@ -294,6 +330,7 @@ mod tests {
             lint_warn_count: 1,
             outcome: "succeeded".into(),
             session_id: None,
+            interrupt_reason: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         // Required fields present
@@ -351,6 +388,7 @@ mod tests {
                 lint_warn_count: 0,
                 outcome: outcome.into(),
             session_id: None,
+            interrupt_reason: None,
             };
             let json = serde_json::to_string(&entry).unwrap();
             let parsed: RunLog = serde_json::from_str(&json).unwrap();
@@ -380,6 +418,7 @@ mod tests {
             lint_warn_count: 2,
             outcome: "failed".into(),
             session_id: None,
+            interrupt_reason: None,
         };
         let json = serde_json::to_string(&original).unwrap();
         let parsed: RunLog = serde_json::from_str(&json).unwrap();
@@ -409,6 +448,7 @@ mod tests {
             lint_warn_count: 0,
             outcome: "succeeded".into(),
             session_id: None,
+            interrupt_reason: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(
@@ -459,9 +499,114 @@ mod tests {
             lint_warn_count: 0,
             outcome: "succeeded".into(),
             session_id: Some("abc-123".into()),
+            interrupt_reason: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"session_id\":\"abc-123\""));
         assert!(json.contains("\"mode\":\"chat\""));
+    }
+
+    /// Helper: minimal RunLog used by interrupt_reason tests below — only the
+    /// `interrupt_reason` field is varied per case, every other field is fixed.
+    fn fixture_run_log_with_reason(reason: Option<InterruptReason>) -> RunLog {
+        RunLog {
+            goal: "describe X".into(),
+            mode: "goal".into(),
+            model: None,
+            effort: None,
+            started_at: "2026-05-27T00:00:00Z".into(),
+            finished_at: "2026-05-27T00:00:01Z".into(),
+            tokens: TokenUsage::default(),
+            wiki_changed: false,
+            lint_error_count: 0,
+            lint_warn_count: 0,
+            outcome: "cancelled".into(),
+            session_id: None,
+            interrupt_reason: reason,
+        }
+    }
+
+    /// interrupted-state-formalize scenario:
+    /// `RunLog with interrupt_reason UserCancel serializes to kebab-case string literal`.
+    /// Each named InterruptReason variant SHALL serialize as the kebab-case
+    /// JSON string literal and round-trip back to the same variant.
+    #[test]
+    fn run_log_interrupt_reason_named_variants_serialize_kebab_case_and_round_trip() {
+        let cases = [
+            (InterruptReason::AppClose, "\"interrupt_reason\":\"app-close\""),
+            (InterruptReason::UserCancel, "\"interrupt_reason\":\"user-cancel\""),
+            (
+                InterruptReason::NetworkDrop,
+                "\"interrupt_reason\":\"network-drop\"",
+            ),
+        ];
+        for (variant, expected_substring) in cases {
+            let entry = fixture_run_log_with_reason(Some(variant.clone()));
+            let json = serde_json::to_string(&entry).unwrap();
+            assert!(
+                json.contains(expected_substring),
+                "expected {expected_substring:?} in {json}"
+            );
+            let parsed: RunLog = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed.interrupt_reason, Some(variant));
+        }
+    }
+
+    /// interrupted-state-formalize scenario:
+    /// `RunLog with interrupt_reason Other serializes to object form`.
+    /// The `Other(String)` newtype variant SHALL serialize as the untagged
+    /// object form `{"other": "<string>"}` and round-trip back to the same
+    /// value.
+    #[test]
+    fn run_log_interrupt_reason_other_variant_serializes_as_object_and_round_trips() {
+        let entry =
+            fixture_run_log_with_reason(Some(InterruptReason::Other("agent-crash".into())));
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            json.contains("\"interrupt_reason\":{\"other\":\"agent-crash\"}"),
+            "expected object-form serialization; got: {json}"
+        );
+        let parsed: RunLog = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed.interrupt_reason,
+            Some(InterruptReason::Other("agent-crash".into()))
+        );
+    }
+
+    /// interrupted-state-formalize scenario:
+    /// `interrupt_reason: None` SHALL be omitted from the serialized JSON
+    /// line so normal succeeded runs and legacy goal/query/fix rows look
+    /// identical to pre-change output.
+    #[test]
+    fn run_log_interrupt_reason_serialize_skip_when_none() {
+        let entry = fixture_run_log_with_reason(None);
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("\"interrupt_reason\""),
+            "interrupt_reason key MUST be omitted when None; got: {json}"
+        );
+    }
+
+    /// interrupted-state-formalize scenario:
+    /// `Legacy jsonl row without interrupt_reason field deserializes cleanly`.
+    /// Pre-change jsonl rows lack the `"interrupt_reason"` key and MUST
+    /// deserialize to `None` without raising an error.
+    #[test]
+    fn legacy_run_log_without_interrupt_reason_deserializes_to_none() {
+        let legacy_line = r#"{
+            "goal": "X",
+            "mode": "goal",
+            "started_at": "2026-05-10T00:00:00Z",
+            "finished_at": "2026-05-10T00:01:00Z",
+            "tokens": {"input_tokens": 0, "output_tokens": 0},
+            "wiki_changed": false,
+            "lint_error_count": 0,
+            "lint_warn_count": 0,
+            "outcome": "cancelled"
+        }"#;
+        let parsed: RunLog =
+            serde_json::from_str(legacy_line).expect("legacy row must deserialize cleanly");
+        assert_eq!(parsed.interrupt_reason, None);
+        assert_eq!(parsed.outcome, "cancelled");
     }
 }

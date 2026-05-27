@@ -2134,13 +2134,14 @@ Phase 5 remaining work（不開 5.x、進 Phase 6 / X2 等專屬 change）：
 - **X2 CollapsibleStreamLog** shared component（W6 + D3 + I2/I5 三態共用 raw stream log card）— 留 X2 專屬 change
 - **Codex tool_kind 語意還原**：codex_parser.rs heuristic 推導 mutation vs read（目前全 None → reading cluster）— 留下個 follow-up change
 
-##### ~~原 Phase 5.1 · `interrupted-rename`~~（**obsolete 2026-05-27、不開 change**）
+##### ~~原 Phase 5.1 · `interrupted-rename`~~（**obsolete 2026-05-27、不開 change**）— **archived 2026-05-27 · interrupted-state-formalize**
 
 - 原本規劃：`02c rename` `RunDetailCancelled.tsx` → `RunDetailInterrupted.tsx`（純 rename 可先做、full layout 等 v1.1 mock）
 - **2026-05-27 校準發現**：`RunDetailInterrupted` component 早於本 audit 已被 `2026-05-14-v3-app-workspace-goal` archive 加進來；當前 `RunDetailCancelled.tsx` 內**同時 export 兩個 component**（`RunDetailCancelled` 服務 outcome=cancelled/failed、`RunDetailInterrupted` 服務 outcome=interrupted），Workspace.tsx 兩者都 import 並 route
 - 「純 rename」前提 broken（命名 collision）；行為合併 = state machine 整理 + 視覺對齊 + backend `interrupt_reason` 對接，本來就是 Phase 6 `interrupted-state-formalize` 的核心
 - **決議**：skip 5.1、檔名 + export name rename 併入 Phase 6 `interrupted-state-formalize`
 - 教訓：跟 phase-3a-blind-spots-cleanup 的 5→12 校準同性質——AUDIT 寫的 site / scope 假設可能落後實機，apply 第一步 grep 校準很重要
+- **archive 補記 2026-05-27**：interrupted-state-formalize archive 時驗收：兩 component 合併為單一 `RunDetailInterrupted.tsx`、Workspace.tsx outcome switch 整併兩分流、backend `RunLog.interrupt_reason: Option<InterruptReason>` 落 sink.rs + verb cancel path 寫 `Some(UserCancel)` + ipc/goals.rs synthesizer 寫 `Some(AppClose)`；apply 階段 user 選擴 scope（design Scope Boundaries 同步 update），CDP smoke 8 截圖驗 amber/red tier + 4 reason sub-variant + en/zh 翻譯（`scripts/.interrupted-smoke/`）
 
 #### Phase 6 · v1.1 spec 落地（**已 unblock 2026-05-26**）
 
@@ -2148,8 +2149,8 @@ Design v1.1 mock 已交、5 個 view 全部 spec 完成。可動：
 
 - **LoadingOverlay live progress**（LOI-1 完整 6 phase + InitEvent 對應表 + minimum 300ms timer + 異常處理）
   - spectra change：`loading-overlay-live-progress`
-- **02c Interrupted full layout**（3 變體 banner + Failed vs Interrupted 視覺差 + state machine + Retry 建立新 GoalRun）
-  - spectra change：`interrupted-state-formalize`（含 rename `RunDetailCancelled` → `RunDetailInterrupted` + backend `interrupt_reason` 欄位 + **2026-05-27 補：原 Phase 5.1 純 rename 已併入本 change**，兩 component 並存需合併為單一 `RunDetailInterrupted` + state machine 統一）
+- **02c Interrupted full layout**（3 變體 banner + Failed vs Interrupted 視覺差 + state machine + Retry 建立新 GoalRun）— **archived 2026-05-27 · interrupted-state-formalize**
+  - spectra change：`interrupted-state-formalize`（含 rename `RunDetailCancelled` → `RunDetailInterrupted` + backend `interrupt_reason` 欄位 + **2026-05-27 補：原 Phase 5.1 純 rename 已併入本 change**，兩 component 並存合併為單一 `RunDetailInterrupted` + state machine 統一；apply 階段 user 選擴 scope 補 verb cancel path 寫 `Some(UserCancel)` + ipc/goals.rs synthesizer 寫 `Some(AppClose)`；Retry 維持 NewGoalModal pre-fill 不改、ActivityCluster reuse 留後續 change；本任務 propose 寫的「3 variant banner = user-cancelled/agent-failed/system-interrupted」於 Pre-apply 校準調整為「Failed=red 頂層 banner + Interrupted/Cancelled amber 殼層內依 4 reason sub-variant 切」對齊 mock §02c 1284-1333 行；Retry 直接 spawn 行為與既有 spec L485 衝突、本 change 不改）
 - **Quiz wizard 完整 4 步 layout**（Step 1 topic + pill / Step 3 generating + brand banner / Step 4a pending / Step 4b reviewing / Step 4c completion）— **archived 2026-05-27 · quiz-fullscreen-wizard-view**（v1.1 細節落地與 Phase 5.4 合併 land；Step 4c completion 為 QuizWizardCompletion 標準件、現流程預設用 QuizAnswering inline summary）
   - spectra change：`quiz-fullscreen-wizard-view`（Phase 5 已列、現在 v1.1 細節落地）
 - **Wiki page reader 新版**（metadata bar + wikilink CSS + edit hint + 旅行日誌 footer slot + WP-empty-page）

@@ -217,6 +217,27 @@ const en = {
   "workspace.runDetail.interruptedBadge": "⚠ Interrupted",
   "workspace.runDetail.interruptedWarning":
     "App was closed before this goal finished. Wiki state may be partial — review in terminal if needed.",
+  // ---- Run detail · banner state machine (interrupted-state-formalize) ----
+  // Red-tier (outcome="failed").
+  "workspace.runDetail.banner.failedTitle": "Run failed",
+  "workspace.runDetail.banner.failedSubtitle":
+    "Agent exited with a non-zero status. Wiki state may be partial — review in terminal if needed.",
+  // Amber-tier shell (outcome="cancelled" | "interrupted"). interruptedSubtitle
+  // is the fallback when interrupt_reason is undefined (legacy jsonl rows).
+  "workspace.runDetail.banner.interruptedTitle": "Run interrupted",
+  "workspace.runDetail.banner.interruptedSubtitle":
+    "Wiki state may be partial — review in terminal if needed.",
+  // Reason sub-variants. The kebab-case enum identifiers
+  // (app-close / user-cancel / network-drop) are schema tokens and are NOT
+  // translated; only these human-facing copy strings vary by locale.
+  "workspace.runDetail.banner.reason.appClose":
+    "App was closed before this run finished. Wiki state may be partial.",
+  "workspace.runDetail.banner.reason.userCancel":
+    "Run cancelled. Wiki has uncommitted changes — review in terminal if needed.",
+  "workspace.runDetail.banner.reason.networkDrop":
+    "Network connection dropped during this run. Wiki state may be partial.",
+  "workspace.runDetail.banner.reason.other":
+    "Run was interrupted by an unclassified condition. Wiki state may be partial.",
   "workspace.runDetail.partialTimelineLabel": "Partial timeline",
   "workspace.runDetail.retryButton": "Retry with same goal",
   "workspace.run.headerSummary": "{durationSec}s · {totalTokens} tokens",
@@ -713,6 +734,21 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.runDetail.interruptedBadge": "⚠ 中斷",
   "workspace.runDetail.interruptedWarning":
     "App 被關閉，goal 沒完成。Wiki 可能停在中間狀態 — 需要時請到 terminal 檢查。",
+  // ---- Run detail · banner state machine (interrupted-state-formalize) ----
+  "workspace.runDetail.banner.failedTitle": "Run 失敗",
+  "workspace.runDetail.banner.failedSubtitle":
+    "Agent 以非零 exit code 結束。Wiki 可能停在中間狀態 — 需要時請到 terminal 檢查。",
+  "workspace.runDetail.banner.interruptedTitle": "Run 被中斷",
+  "workspace.runDetail.banner.interruptedSubtitle":
+    "Wiki 可能停在中間狀態 — 需要時請到 terminal 檢查。",
+  "workspace.runDetail.banner.reason.appClose":
+    "App 在 run 結束前被關閉。Wiki 可能停在中間狀態。",
+  "workspace.runDetail.banner.reason.userCancel":
+    "Run 已取消。Wiki 仍有未 commit 的變更 — 需要時請到 terminal 檢查。",
+  "workspace.runDetail.banner.reason.networkDrop":
+    "Run 進行中網路斷線。Wiki 可能停在中間狀態。",
+  "workspace.runDetail.banner.reason.other":
+    "Run 被未分類的條件中斷。Wiki 可能停在中間狀態。",
   "workspace.runDetail.partialTimelineLabel": "部分時間軸",
   "workspace.runDetail.retryButton": "用相同 goal 再跑一次",
   "workspace.run.headerSummary": "{durationSec} 秒 · {totalTokens} tokens",

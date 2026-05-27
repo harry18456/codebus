@@ -31,7 +31,7 @@ use crate::config::{Verb, default_config_path};
 use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
 use crate::log::verb_log::{load_verb_log_config, resolve_sink_dir, write_run_log};
-use crate::log::{RunLog, SinkConfig, TokenUsage};
+use crate::log::{InterruptReason, RunLog, SinkConfig, TokenUsage};
 use crate::stream::StreamEvent;
 use crate::vault::layout::vault_paths;
 use crate::verb::error::VerbError;
@@ -189,6 +189,7 @@ pub fn run_query(
             lint_warn_count: 0,
             outcome: "cancelled".into(),
             session_id: None,
+            interrupt_reason: Some(InterruptReason::UserCancel),
         };
         write_run_log(sink_cfg.clone(), &cancel_run_log);
         return Err(VerbError::Cancelled);
@@ -211,6 +212,7 @@ pub fn run_query(
         lint_warn_count: 0,
         outcome: "succeeded".into(),
         session_id: None,
+        interrupt_reason: None,
     };
     write_run_log(sink_cfg, &run_log);
 

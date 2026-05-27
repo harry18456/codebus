@@ -602,6 +602,13 @@ export interface RunLogSummary {
   lint_warn_count: number
   outcome: string
   session_id?: string
+  /**
+   * Why the run did not reach the success path, mirroring the Rust
+   * `InterruptReason` enum on `codebus-core/src/log/sink.rs`. `undefined`
+   * (legacy jsonl rows and normal succeeded runs) renders the generic
+   * amber fallback subtitle in `RunDetailInterrupted`.
+   */
+  interrupt_reason?: InterruptReason
 }
 
 /** Closed set of legal RunLog outcomes the GUI distinguishes. */
@@ -611,6 +618,24 @@ export type RunOutcome =
   | "failed"
   | "cancelled"
   | "interrupted"
+
+/**
+ * Why a run did not reach the success path, mirroring the Rust
+ * `InterruptReason` enum on `codebus-core/src/log/sink.rs` (serde
+ * `rename_all = "kebab-case"`).
+ *
+ * The three string variants are kebab-case schema identifiers and SHALL
+ * NOT be translated by i18n bundles — they identify the cause class on
+ * the wire. The `{ other: string }` object form covers future
+ * classifications not yet promoted to a named variant; the inner string
+ * SHALL NOT be rendered into the UI text (it carries schema-internal
+ * tokens, not user-facing copy).
+ */
+export type InterruptReason =
+  | "app-close"
+  | "user-cancel"
+  | "network-drop"
+  | { other: string }
 
 /**
  * Semantic classification of a tool_use event, mirroring the Rust

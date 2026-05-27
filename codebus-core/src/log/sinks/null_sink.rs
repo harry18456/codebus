@@ -54,6 +54,7 @@ mod tests {
             lint_warn_count: 0,
             outcome: "succeeded".into(),
             session_id: None,
+            interrupt_reason: None,
         }
     }
 

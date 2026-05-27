@@ -478,101 +478,97 @@ tests:
 ---
 ### Requirement: Run Detail Views — Cancelled and Interrupted
 
-The system SHALL render the `Cancelled` detail view when the user navigates to a run whose corresponding `RunLog` row has `outcome="cancelled"`. The view SHALL include: a header with `← back`, the goal text, and a `⏹ Cancelled` badge; a metadata line with duration and accumulated tokens; a prominent warning block reading "Wiki has uncommitted changes — not auto-committed. Review in terminal if needed."; a `Partial timeline` section summarizing tool_use events grouped by category (reading / writing / other); and a `[Retry with same goal]` button.
+The system SHALL render a single `RunDetailInterrupted` component for any terminal run whose `RunLog` outcome is `"cancelled"`, `"failed"`, or `"interrupted"`. The component file SHALL be `codebus-app/src/components/workspace/RunDetailInterrupted.tsx` (renamed from `RunDetailCancelled.tsx`); the previous `RunDetailCancelled` component SHALL NOT exist as a separate export.
 
-The system SHALL render the `Interrupted` detail view for virtual-outcome `"interrupted"` entries (RunLog row missing for an existing events-*.jsonl file). The Interrupted view SHALL share the same layout as Cancelled but with the header badge changed to `⚠ Interrupted` and the warning text replaced with "App was closed before this goal finished. Wiki state may be partial — review in terminal if needed." The `[Retry with same goal]` button SHALL behave identically.
+The component SHALL implement an explicit two-stage state machine driven by two inputs:
 
-The `[Retry with same goal]` button SHALL extract the goal text from the run's RunLog row (Cancelled) or the events.jsonl first user-prompt event (Interrupted), pre-fill the New Goal modal with that text, and open the modal. The user SHALL still confirm the run by clicking `Run` in the modal — Retry SHALL NOT spawn a new goal directly.
+1. **Banner tier** (color and visual language), derived from `RunLog.outcome`:
+   - `outcome === "failed"` → banner tier `"red"` (Failed visual language).
+   - `outcome === "cancelled"` OR `outcome === "interrupted"` → banner tier `"amber"` (Interrupted visual language).
+2. **Reason sub-variant** (banner subtitle copy), derived from `RunLog.interrupt_reason`:
+   - When `interrupt_reason === "app-close"` → subtitle key `workspace.runDetail.banner.reason.appClose`.
+   - When `interrupt_reason === "user-cancel"` → subtitle key `workspace.runDetail.banner.reason.userCancel`.
+   - When `interrupt_reason === "network-drop"` → subtitle key `workspace.runDetail.banner.reason.networkDrop`.
+   - When `interrupt_reason` is the `{ other: string }` variant → subtitle key `workspace.runDetail.banner.reason.other`. The free-form `other` string SHALL NOT be rendered into the UI text.
+   - When `interrupt_reason` is `undefined` (legacy RunLog) AND `outcome === "cancelled" | "interrupted"` → subtitle key `workspace.runDetail.banner.interruptedSubtitle` (generic amber fallback).
+   - When banner tier is `"red"` (`outcome === "failed"`) → title key `workspace.runDetail.banner.failedTitle` AND subtitle key `workspace.runDetail.banner.failedSubtitle` (the failed branch ignores `interrupt_reason`).
 
-#### Scenario: Cancelled detail shows uncommitted warning
+The component SHALL include: a header with `← back`, the goal text, and a status badge whose icon and tier follow the banner tier above; a banner block with title + subtitle keyed per the state machine above; a `Partial timeline` section summarizing tool_use events grouped by category (reading / writing / other); and a `[Retry with same goal]` button.
 
-- **WHEN** the user navigates to a run with `outcome="cancelled"`
-- **THEN** the detail view renders a prominent warning block containing the exact substring "Wiki has uncommitted changes — not auto-committed"
+The `[Retry with same goal]` button SHALL extract the goal text from the run's RunLog row (when present) or the events.jsonl first user-prompt event (for virtual interrupted entries with no RunLog row), pre-fill the New Goal modal with that text, and open the modal. The user SHALL still confirm the run by clicking `Run` in the modal — Retry SHALL NOT spawn a new goal directly.
 
-#### Scenario: Interrupted virtual entry renders Interrupted view
+Routing in `codebus-app/src/components/workspace/Workspace.tsx` SHALL dispatch every non-running terminal outcome that is not `"succeeded"` to `RunDetailInterrupted`. The previous outcome switch case for `RunDetailCancelled` SHALL be removed.
 
-- **WHEN** the vault contains `events-2026-05-13T03-00-00Z.jsonl` AND no corresponding row exists in `runs-*.jsonl` with `started_at` equal to `2026-05-13T03:00:00Z`
-- **THEN** the Goals overview list contains a virtual entry with `⚠` icon AND clicking it navigates to the Interrupted detail view AND the warning block contains "App was closed before this goal finished"
+The i18n keys `workspace.runDetail.cancelledBadge`, `workspace.runDetail.cancelledWarning`, `workspace.runDetail.interruptedBadge`, `workspace.runDetail.interruptedWarning`, and `workspace.runDetail.retryButton` SHALL remain registered with their existing key names; the system SHALL NOT rename them. New banner keys SHALL be added without removing the legacy keys.
 
-#### Scenario: Retry pre-fills modal without spawning
+#### Scenario: Cancelled run renders amber banner with userCancel subtitle
 
-- **WHEN** the user clicks `[Retry with same goal]` in a Cancelled detail view for run with `goal="describe auth flow"`
-- **THEN** the New Goal modal opens AND the textarea contains exactly the text `"describe auth flow"` AND no `spawn_goal` invocation occurs until the user clicks `Run`
+- **WHEN** the user navigates to a run with `RunLog.outcome === "cancelled"` AND `RunLog.interrupt_reason === "user-cancel"`
+- **THEN** the detail view renders `RunDetailInterrupted` AND the banner uses the amber tier AND the banner subtitle is sourced from the i18n key `workspace.runDetail.banner.reason.userCancel`
+
+#### Scenario: Failed run renders red banner
+
+- **WHEN** the user navigates to a run with `RunLog.outcome === "failed"`
+- **THEN** the detail view renders `RunDetailInterrupted` AND the banner uses the red tier AND the banner title is sourced from `workspace.runDetail.banner.failedTitle` AND the banner subtitle is sourced from `workspace.runDetail.banner.failedSubtitle` AND the banner SHALL NOT use any `reason.*` subtitle key
+
+#### Scenario: Interrupted virtual entry with app-close reason renders appClose subtitle
+
+- **WHEN** the vault contains `events-2026-05-13T03-00-00Z.jsonl` AND no corresponding RunLog row exists for `started_at === "2026-05-13T03:00:00Z"` AND the synthesized virtual entry carries `interrupt_reason === "app-close"`
+- **THEN** the Goals overview list contains a virtual entry with `⚠` icon AND clicking it navigates to the `RunDetailInterrupted` view AND the banner uses the amber tier AND the banner subtitle is sourced from `workspace.runDetail.banner.reason.appClose`
+
+#### Scenario: Legacy cancelled run without interrupt_reason falls back to generic amber subtitle
+
+- **WHEN** the user navigates to a legacy run with `RunLog.outcome === "cancelled"` AND `RunLog.interrupt_reason === undefined`
+- **THEN** the detail view renders `RunDetailInterrupted` AND the banner uses the amber tier AND the banner subtitle is sourced from `workspace.runDetail.banner.interruptedSubtitle` AND no JavaScript error is thrown
+
+#### Scenario: Unknown interrupt_reason maps to generic reason subtitle
+
+- **WHEN** the user navigates to a run whose `RunLog.interrupt_reason` deserializes to the `{ other: "agent-crash" }` variant
+- **THEN** the detail view renders `RunDetailInterrupted` AND the banner subtitle is sourced from `workspace.runDetail.banner.reason.other` AND the raw `"agent-crash"` string SHALL NOT be rendered into the UI text
+
+#### Scenario: Retry pre-fills modal without spawning across all three terminal outcomes
+
+- **WHEN** the user clicks `[Retry with same goal]` in `RunDetailInterrupted` for a run with `goal === "describe auth flow"` AND the run's outcome is any of `"cancelled" | "failed" | "interrupted"`
+- **THEN** the New Goal modal opens AND the textarea contains exactly the text `"describe auth flow"` AND no `spawn_goal` IPC invocation occurs until the user clicks `Run` in the modal
+
+##### Example: state machine inputs to banner outputs
+
+| outcome     | interrupt_reason            | banner tier | title key              | subtitle key                                  |
+| ----------- | --------------------------- | ----------- | ---------------------- | --------------------------------------------- |
+| cancelled   | undefined                   | amber       | interruptedTitle       | interruptedSubtitle                           |
+| cancelled   | "user-cancel"               | amber       | interruptedTitle       | reason.userCancel                             |
+| failed      | undefined                   | red         | failedTitle            | failedSubtitle                                |
+| failed      | "user-cancel"               | red         | failedTitle            | failedSubtitle (reason ignored on red tier)   |
+| interrupted | "app-close"                 | amber       | interruptedTitle       | reason.appClose                               |
+| interrupted | "network-drop"              | amber       | interruptedTitle       | reason.networkDrop                            |
+| interrupted | { other: "agent-crash" }    | amber       | interruptedTitle       | reason.other                                  |
+| interrupted | undefined                   | amber       | interruptedTitle       | interruptedSubtitle                           |
 
 
 <!-- @trace
-source: v3-app-workspace-goal
-updated: 2026-05-14
+source: interrupted-state-formalize
+updated: 2026-05-27
 code:
-  - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-core/src/render/banner.rs
-  - codebus-app/src-tauri/gen/schemas/acl-manifests.json
-  - codebus-app/src/components/LoadingOverlay.tsx
-  - codebus-app/src/components/workspace/WikiTree.tsx
-  - codebus-app/src/lib/ipc.ts
-  - docs/2026-05-14-skill-bundles-vault-only-backlog.md
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/capabilities/default.json
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - codebus-app/src/store/route.ts
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - codebus-app/src/components/workspace/RunDetailRunning.tsx
-  - codebus-app/src/components/workspace/ActivityStreamItem.tsx
-  - codebus-app/src/lib/milkdown-wikilink.tsx
-  - codebus-app/src-tauri/src/state/app_state.rs
-  - codebus-app/src/App.tsx
-  - codebus-app/src/components/workspace/RunListItem.tsx
   - codebus-app/src/components/workspace/RunDetailCancelled.tsx
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/verb/goal.rs
-  - codebus-app/src/store/goals.ts
-  - codebus-app/src-tauri/gen/schemas/desktop-schema.json
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - codebus-app/src/components/workspace/RunDetailDone.tsx
-  - codebus-app/package.json
-  - codebus-app/src/store/wiki.ts
-  - docs/2026-05-14-git-context-tool-backlog.md
+  - codebus-core/src/log/sinks/jsonl_sink.rs
+  - codebus-app/src/components/workspace/RunDetailInterrupted.tsx
+  - codebus-app/src/lib/ipc.ts
   - codebus-core/src/verb/fix.rs
+  - codebus-core/src/verb/quiz.rs
+  - codebus-core/src/log/sink.rs
+  - codebus-core/src/log/mod.rs
+  - codebus-core/src/log/sinks/null_sink.rs
+  - codebus-app/design-handoff/AUDIT.md
+  - codebus-core/src/verb/chat.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
+  - codebus-core/src/verb/goal.rs
   - codebus-app/src/i18n/messages.ts
-  - codebus-app/src-tauri/gen/schemas/capabilities.json
-  - codebus-app/src-tauri/src/state/active_runs.rs
-  - codebus-app/src/components/workspace/GoalsTab.tsx
-  - codebus-app/src/components/workspace/WorkspaceStub.tsx
-  - codebus-app/src-tauri/gen/schemas/windows-schema.json
-  - codebus-app/src-tauri/src/state/mod.rs
-  - codebus-app/src-tauri/src/ipc/wiki.rs
-  - codebus-app/src/components/workspace/NewGoalModal.tsx
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src-tauri/Cargo.toml
-  - codebus-app/src-tauri/src/lib.rs
-  - docs/BACKLOG.md
-  - codebus-app/src/components/workspace/WikiTab.tsx
-  - Cargo.toml
+  - codebus-core/src/verb/query.rs
+  - codebus-core/src/log/verb_log.rs
+  - codebus-app/src/components/workspace/Workspace.tsx
 tests:
-  - codebus-app/src/hooks/useNewVaultShortcut.test.tsx
-  - codebus-app/src/components/workspace/WorkspaceStub.test.tsx
-  - codebus-app/src/lib/milkdown-wikilink.test.tsx
-  - codebus-app/src/components/workspace/RunDetailRunning.test.tsx
-  - codebus-app/src/components/workspace/RunDetailDone.test.tsx
-  - codebus-app/src/hooks/useLobbyDragDrop.test.tsx
-  - codebus-app/src/lib/ipc.test.ts
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-app/src/components/workspace/GoalsTab.test.tsx
-  - codebus-app/src/components/workspace/Workspace.test.tsx
-  - codebus-app/src/store/goals.test.ts
-  - codebus-app/src/components/workspace/RunListItem.test.tsx
-  - codebus-app/src/components/workspace/WikiTab.test.tsx
-  - codebus-app/src/store/wiki.test.ts
-  - codebus-app/src/components/workspace/NewGoalModal.test.tsx
-  - codebus-app/src/test/forbidden-behaviors.test.tsx
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-app/src/store/route.test.ts
-  - codebus-app/src/i18n/workspace.test.ts
-  - codebus-app/src/components/workspace/WikiTree.test.tsx
-  - codebus-app/src/components/lobby/Lobby.test.tsx
   - codebus-app/src/components/workspace/RunDetailCancelled.test.tsx
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
+  - codebus-app/src/components/workspace/RunDetailInterrupted.test.tsx
 -->
 
 ---

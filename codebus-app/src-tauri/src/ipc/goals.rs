@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::thread;
 
 use codebus_core::log::events::sink::EventEnvelope;
-use codebus_core::log::sink::{RunLog, TokenUsage};
+use codebus_core::log::sink::{InterruptReason, RunLog, TokenUsage};
 use codebus_core::config::{default_config_path, load_goal_config};
 use codebus_core::verb::error::VerbError;
 use codebus_core::verb::event::VerbBanner;
@@ -88,6 +88,13 @@ pub struct RunLogSummary {
     pub outcome: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Why the run did not reach the success path. Mirrors
+    /// `codebus_core::log::sink::RunLog::interrupt_reason`. Virtual
+    /// interrupted entries synthesized from orphan events jsonl files
+    /// SHALL set this to `Some(InterruptReason::AppClose)` per the
+    /// interrupted-state-formalize spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupt_reason: Option<InterruptReason>,
 }
 
 /// Full run detail: the summary plus an in-order replay of the events
@@ -397,6 +404,7 @@ pub(crate) fn list_runs_impl(
             lint_warn_count: 0,
             outcome: "interrupted".into(),
             session_id: None,
+            interrupt_reason: Some(InterruptReason::AppClose),
         });
     }
 
@@ -424,6 +432,7 @@ fn run_log_to_summary(run_id: String, rl: RunLog) -> RunLogSummary {
         lint_warn_count: rl.lint_warn_count,
         outcome: rl.outcome,
         session_id: rl.session_id,
+        interrupt_reason: rl.interrupt_reason,
     }
 }
 
@@ -555,6 +564,7 @@ mod tests {
             lint_warn_count: 0,
             outcome: outcome.into(),
             session_id: None,
+            interrupt_reason: None,
         }
     }
 

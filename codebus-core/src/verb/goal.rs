@@ -34,7 +34,7 @@ use crate::log::factory::build_events_sink;
 use crate::log::verb_log::{
     load_verb_log_config, resolve_sink_dir, wiki_changed_since_last_commit, write_run_log,
 };
-use crate::log::{RunLog, SinkConfig, TokenUsage};
+use crate::log::{InterruptReason, RunLog, SinkConfig, TokenUsage};
 use crate::pii::PiiScanner;
 use crate::pii::scanners::null_scanner::NullScanner;
 use crate::pii::scanners::regex_basic::RegexBasicScanner;
@@ -263,6 +263,7 @@ pub fn run_goal(
             lint_warn_count: fix_lint_warns,
             outcome: "cancelled".into(),
             session_id: None,
+            interrupt_reason: Some(InterruptReason::UserCancel),
         }
     };
 
@@ -606,6 +607,7 @@ pub fn run_goal(
         lint_warn_count: fix_lint_warns,
         outcome: outcome.into(),
         session_id: None,
+        interrupt_reason: None,
     };
     write_run_log(sink_cfg.clone(), &run_log);
 

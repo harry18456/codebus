@@ -27,7 +27,7 @@ import { Settings } from "lucide-react"
 import { ChatWidget } from "./ChatWidget"
 import { GoalsTab } from "./GoalsTab"
 import { QuizTab } from "./QuizTab"
-import { RunDetailCancelled, RunDetailInterrupted } from "./RunDetailCancelled"
+import { RunDetailInterrupted } from "./RunDetailInterrupted"
 import { RunDetailDone } from "./RunDetailDone"
 import { RunDetailRunning } from "./RunDetailRunning"
 import { WikiTab } from "./WikiTab"
@@ -563,14 +563,6 @@ function GoalsArea({
       )
     case "cancelled":
     case "failed":
-      return (
-        <RunDetailCancelled
-          detail={selectedDetail}
-          vaultPath={vaultPath}
-          onBack={onBack}
-          onRetrySpawned={onSelectRunId}
-        />
-      )
     case "interrupted":
       return (
         <RunDetailInterrupted

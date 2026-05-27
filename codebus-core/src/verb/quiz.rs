@@ -44,7 +44,7 @@ use crate::log::events::{EventEnvelope, EventsNullSink, EventsSink};
 use crate::log::factory::build_events_sink;
 use crate::log::sink::accumulate_token_usage;
 use crate::log::verb_log::{load_verb_log_config, resolve_sink_dir, write_run_log};
-use crate::log::{RunLog, SinkConfig, TokenUsage};
+use crate::log::{InterruptReason, RunLog, SinkConfig, TokenUsage};
 use crate::stream::StreamEvent;
 use crate::vault::layout::vault_paths;
 use crate::verb::content_verify::{
@@ -699,10 +699,12 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         None
     };
 
-    let outcome = if is_cancelled(&cancel) {
-        "cancelled"
+    let cancelled_now = is_cancelled(&cancel);
+    let outcome = if cancelled_now { "cancelled" } else { "succeeded" };
+    let interrupt_reason = if cancelled_now {
+        Some(InterruptReason::UserCancel)
     } else {
-        "succeeded"
+        None
     };
     let run_log = RunLog {
         goal: goal_text,
@@ -717,6 +719,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         lint_warn_count: 0,
         outcome: outcome.into(),
         session_id: gen_report.session_id.clone(),
+        interrupt_reason,
     };
     write_run_log(sink_cfg, &run_log);
 
