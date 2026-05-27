@@ -21,6 +21,7 @@ const WORKSPACE_KEYS = [
   "workspace.goals.headerSubtitle",
   "workspace.goals.emptyHeroTitle",
   "workspace.goals.emptyHeroSubtitle",
+  "workspace.goals.runningTailPending",
   "workspace.newGoalModal.title",
   "workspace.newGoalModal.placeholder",
   "workspace.newGoalModal.cancel",
@@ -86,4 +87,25 @@ describe("i18n_phase_4c_goals_header_keys_are_translated_not_key_literal", () =>
       expect(value).not.toBe(key)
     })
   }
+})
+
+/**
+ * `workspace.goals.runningTailPending` is the placeholder shown in the
+ * Goals-list running row tail before the first non-thought stream event
+ * arrives. The placeholder is pure punctuation (`…`, U+2026) so it
+ * SHALL be identical across locales — translators MUST NOT alter it.
+ */
+describe("i18n_workspace_goals_runningTailPending_is_ellipsis_in_both_bundles", () => {
+  it("en bundle value is exactly '…' (U+2026)", () => {
+    const value = (messages.en as Record<string, string>)[
+      "workspace.goals.runningTailPending"
+    ]
+    expect(value).toBe("…")
+  })
+  it("zh bundle value is exactly '…' (U+2026)", () => {
+    const value = (messages.zh as Record<string, string>)[
+      "workspace.goals.runningTailPending"
+    ]
+    expect(value).toBe("…")
+  })
 })

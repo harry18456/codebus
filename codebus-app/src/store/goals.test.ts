@@ -17,7 +17,7 @@ const listenMock = vi.mocked(listen)
 describe("useGoalsStore", () => {
   beforeEach(() => {
     invokeMock.mockReset()
-    useGoalsStore.setState({ runs: [], activeRun: null })
+    useGoalsStore.setState({ runs: [], activeRun: null, tailByRunId: {} })
   })
 
   afterEach(() => {
@@ -111,6 +111,173 @@ describe("useGoalsStore", () => {
     await useGoalsStore.getState().refreshRuns("/v")
     expect(useGoalsStore.getState().runs).toHaveLength(1)
     expect(useGoalsStore.getState().runs[0].mode).toBe("goal")
+  })
+
+  it("tailByRunId · stream event for active run writes tail and appends to activeRun.events", () => {
+    useGoalsStore.setState({
+      activeRun: {
+        runId: "run-A",
+        goal: "g",
+        startedAt: "2026-05-13T00:00:00Z",
+        events: [],
+        cancelling: false,
+      },
+      runs: [],
+      tailByRunId: {},
+    })
+    const toolUseEvent = {
+      kind: "stream" as const,
+      data: {
+        kind: "tool_use" as const,
+        name: "Read",
+        input: { file_path: "x" },
+      },
+    }
+    useGoalsStore.getState()._onStreamEvent({
+      run_id: "run-A",
+      event: toolUseEvent,
+    })
+    expect(useGoalsStore.getState().tailByRunId["run-A"]).toEqual(toolUseEvent)
+    expect(useGoalsStore.getState().activeRun?.events).toHaveLength(1)
+  })
+
+  it("tailByRunId · stream event for terminal-spawned goal (activeRun null) still writes tail", () => {
+    useGoalsStore.setState({
+      activeRun: null,
+      runs: [],
+      tailByRunId: {},
+    })
+    const bannerEvent = {
+      kind: "banner" as const,
+      data: { kind: "start" as const, repo_path: "/v" },
+    }
+    useGoalsStore.getState()._onStreamEvent({
+      run_id: "run-B",
+      event: bannerEvent,
+    })
+    expect(useGoalsStore.getState().tailByRunId["run-B"]).toEqual(bannerEvent)
+    expect(useGoalsStore.getState().activeRun).toBeNull()
+  })
+
+  it("tailByRunId · thought event does not write tail (prior value preserved)", () => {
+    const prior = {
+      kind: "stream" as const,
+      data: {
+        kind: "tool_use" as const,
+        name: "Read",
+        input: { file_path: "x" },
+      },
+    }
+    useGoalsStore.setState({
+      activeRun: {
+        runId: "run-A",
+        goal: "g",
+        startedAt: "2026-05-13T00:00:00Z",
+        events: [],
+        cancelling: false,
+      },
+      runs: [],
+      tailByRunId: { "run-A": prior },
+    })
+    useGoalsStore.getState()._onStreamEvent({
+      run_id: "run-A",
+      event: { kind: "stream", data: { kind: "thought", text: "..." } },
+    })
+    expect(useGoalsStore.getState().tailByRunId["run-A"]).toEqual(prior)
+  })
+
+  it("tailByRunId · _onTerminal preserves tail slot after clearing activeRun", () => {
+    const tail = {
+      kind: "stream" as const,
+      data: {
+        kind: "tool_use" as const,
+        name: "Read",
+        input: { file_path: "x" },
+      },
+    }
+    useGoalsStore.setState({
+      activeRun: {
+        runId: "run-A",
+        goal: "g",
+        startedAt: "2026-05-13T00:00:00Z",
+        events: [],
+        cancelling: false,
+      },
+      runs: [],
+      tailByRunId: { "run-A": tail },
+      _currentVaultPath: null,
+    })
+    invokeMock.mockResolvedValue([])
+    useGoalsStore.getState()._onTerminal({
+      run_id: "run-A",
+    })
+    expect(useGoalsStore.getState().activeRun).toBeNull()
+    expect(useGoalsStore.getState().tailByRunId["run-A"]).toEqual(tail)
+  })
+
+  it("tailByRunId · reset() clears tail map alongside runs and activeRun", () => {
+    const tail = {
+      kind: "banner" as const,
+      data: { kind: "sync_start" as const },
+    }
+    useGoalsStore.setState({
+      activeRun: null,
+      runs: [
+        {
+          run_id: "run-A",
+          mode: "goal",
+          goal: "g",
+          started_at: "",
+          finished_at: "",
+          tokens: { input_tokens: 0, output_tokens: 0 },
+          wiki_changed: false,
+          lint_error_count: 0,
+          lint_warn_count: 0,
+          outcome: "succeeded",
+        },
+      ],
+      tailByRunId: { "run-A": tail, "run-B": tail },
+    })
+    useGoalsStore.getState().reset()
+    const s = useGoalsStore.getState()
+    expect(s.tailByRunId).toEqual({})
+    expect(s.activeRun).toBeNull()
+    expect(s.runs).toEqual([])
+  })
+
+  it("tailByRunId · vault A→reset→vault B boundary: tail does not bleed across vault switch", () => {
+    const vaultATail = {
+      kind: "stream" as const,
+      data: {
+        kind: "tool_use" as const,
+        name: "Read",
+        input: { file_path: "vaultA/x.rs" },
+      },
+    }
+    useGoalsStore.setState({
+      activeRun: null,
+      runs: [],
+      tailByRunId: { "run-A1": vaultATail, "run-A2": vaultATail },
+    })
+    // Workspace unmount when switching vaults calls reset.
+    useGoalsStore.getState().reset()
+    // Now in vault B — fire a fresh stream event.
+    const vaultBEvent = {
+      kind: "stream" as const,
+      data: {
+        kind: "tool_use" as const,
+        name: "Write",
+        input: { file_path: "vaultB/y.md" },
+      },
+    }
+    useGoalsStore.getState()._onStreamEvent({
+      run_id: "run-B1",
+      event: vaultBEvent,
+    })
+    const s = useGoalsStore.getState()
+    expect(s.tailByRunId["run-A1"]).toBeUndefined()
+    expect(s.tailByRunId["run-A2"]).toBeUndefined()
+    expect(s.tailByRunId["run-B1"]).toEqual(vaultBEvent)
   })
 
   it("refreshRuns keeps an in-flight activeRun shown as running over a disk-derived interrupted row", async () => {

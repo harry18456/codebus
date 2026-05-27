@@ -40,6 +40,18 @@ interface GoalsState {
   runs: RunLogSummary[]
   activeRun: ActiveRunState | null
   /**
+   * Per-run "latest non-thought stream event" slot, used by the Goals
+   * list `RunListItem` running-row stream tail to project a one-line
+   * summary without subscribing to the full event timeline.
+   *
+   * Written by `_onStreamEvent` on every non-thought stream event for
+   * any `run_id` (including runs not present in `activeRun` — e.g.
+   * goals spawned from a terminal). NOT cleared by `_onTerminal` so
+   * the tail can freeze on the last event after a goal ends. Cleared
+   * in bulk by `reset()` on Workspace unmount / vault switch.
+   */
+  tailByRunId: Record<string, VerbEvent>
+  /**
    * Last vault path passed to `refreshRuns` / `spawnGoal`. Used by the
    * terminal-event handler to refresh the runs list without forcing
    * callers to thread the vault path through the channel payload.
@@ -100,6 +112,7 @@ export const useGoalsStore = create<GoalsState>((set, get) => {
   return {
     runs: [],
     activeRun: null,
+    tailByRunId: {},
     _currentVaultPath: null,
 
     async spawnGoal(vaultPath, text) {
@@ -177,19 +190,37 @@ export const useGoalsStore = create<GoalsState>((set, get) => {
     },
 
     reset() {
-      set({ runs: [], activeRun: null, _currentVaultPath: null })
+      set({
+        runs: [],
+        activeRun: null,
+        tailByRunId: {},
+        _currentVaultPath: null,
+      })
     },
 
     _onStreamEvent(payload) {
       set((state) => {
+        const isThought =
+          payload.event.kind === "stream" &&
+          payload.event.data.kind === "thought"
+        // tail slot tracks the latest non-thought event for ANY run id —
+        // including runs not present in `activeRun` (e.g. goals spawned
+        // from a terminal). Thought chunks are filtered at write time so
+        // hook consumers never need to walk history looking for the last
+        // non-thought event.
+        const nextTail = isThought
+          ? state.tailByRunId
+          : { ...state.tailByRunId, [payload.run_id]: payload.event }
+
         if (!state.activeRun || state.activeRun.runId !== payload.run_id) {
-          return {}
+          return nextTail === state.tailByRunId ? {} : { tailByRunId: nextTail }
         }
         return {
           activeRun: {
             ...state.activeRun,
             events: [...state.activeRun.events, payload.event],
           },
+          ...(nextTail === state.tailByRunId ? {} : { tailByRunId: nextTail }),
         }
       })
     },

@@ -4,9 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 vi.mock("@/hooks/useLocale", () => ({
   useLocale: vi.fn(() => "en"),
 }))
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(() => Promise.resolve(() => {})),
+}))
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}))
 
-import type { RunLogSummary } from "@/lib/ipc"
+import type { RunLogSummary, VerbEvent } from "@/lib/ipc"
 import { useLocale } from "@/hooks/useLocale"
+import { useGoalsStore } from "@/store/goals"
 
 import { RunListItem } from "./RunListItem"
 
@@ -66,6 +73,84 @@ describe("RunListItem", () => {
     const longGoal = "a".repeat(200)
     render(<RunListItem run={makeRun({ goal: longGoal })} onClick={() => {}} />)
     expect(screen.getByTestId("run-row-r1")).toHaveTextContent("…")
+  })
+
+  describe("running row stream tail", () => {
+    beforeEach(() => {
+      useGoalsStore.setState({ tailByRunId: {} })
+    })
+
+    afterEach(() => {
+      useGoalsStore.setState({ tailByRunId: {} })
+    })
+
+    const toolUseRead: VerbEvent = {
+      kind: "stream",
+      data: {
+        kind: "tool_use",
+        name: "Read",
+        input: { file_path: "raw/code/auth.rs" },
+      },
+    }
+
+    it("renders run-row-tail when outcome is running and tail slot has an event", () => {
+      useGoalsStore.setState({ tailByRunId: { r1: toolUseRead } })
+      render(
+        <RunListItem run={makeRun({ outcome: "running" })} onClick={() => {}} />,
+      )
+      const tail = screen.getByTestId("run-row-tail")
+      expect(tail).toBeDefined()
+      expect(tail.textContent).toContain("Read")
+      expect(tail.textContent).toContain("auth.rs")
+    })
+
+    it("renders placeholder when outcome is running but tail slot is empty", () => {
+      render(
+        <RunListItem run={makeRun({ outcome: "running" })} onClick={() => {}} />,
+      )
+      const tail = screen.getByTestId("run-row-tail")
+      expect(tail.textContent).toBe("…")
+    })
+
+    it("does not render run-row-tail when outcome is succeeded even if tail slot has an event", () => {
+      useGoalsStore.setState({ tailByRunId: { r1: toolUseRead } })
+      render(
+        <RunListItem
+          run={makeRun({ outcome: "succeeded" })}
+          onClick={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("run-row-tail")).toBeNull()
+    })
+
+    it.each(["cancelled", "interrupted", "failed"])(
+      "does not render run-row-tail when outcome is %s",
+      (outcome) => {
+        useGoalsStore.setState({ tailByRunId: { r1: toolUseRead } })
+        render(
+          <RunListItem run={makeRun({ outcome })} onClick={() => {}} />,
+        )
+        expect(screen.queryByTestId("run-row-tail")).toBeNull()
+      },
+    )
+
+    it("tail element has the required typography and truncate classes", () => {
+      useGoalsStore.setState({ tailByRunId: { r1: toolUseRead } })
+      render(
+        <RunListItem run={makeRun({ outcome: "running" })} onClick={() => {}} />,
+      )
+      const tail = screen.getByTestId("run-row-tail")
+      const className = tail.className
+      for (const cls of [
+        "font-mono",
+        "text-meta",
+        "text-fg-secondary",
+        "tabular-nums",
+        "truncate",
+      ]) {
+        expect(className).toContain(cls)
+      }
+    })
   })
 
   // --- i18n time-ago rendering (Pattern 5 template-literal sweep follow-up) ---

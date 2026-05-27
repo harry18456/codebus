@@ -1,7 +1,12 @@
 import { useState } from "react"
-import type { VerbBanner, VerbEvent } from "@/lib/ipc"
+import type { VerbEvent } from "@/lib/ipc"
 import { useT, type TFunction } from "@/i18n/useT"
 import type { MessageKey } from "@/i18n/messages"
+import {
+  bannerLabel,
+  summarizeToolInput,
+  writeEditPath,
+} from "@/lib/streamEventSummary"
 
 /**
  * Render one element of the Activity stream.
@@ -222,126 +227,3 @@ export function classifyLeadingMarker(
   return { kind: "suppress" }
 }
 
-/** Pretty-print `input.file_path` for Write/Edit events. */
-function writeEditPath(input: unknown): string {
-  if (input === null || typeof input !== "object") return ""
-  const fp = (input as Record<string, unknown>).file_path
-  if (typeof fp !== "string") return ""
-  return fp.replace(/\\/g, "/")
-}
-
-/**
- * Strip a Codex-style shell wrapper (`powershell.exe -Command "..."`,
- * `/bin/sh -c "..."`, `bash -c '...'`) and return the inner
- * user-authored command, with one layer of matching outer quotes
- * removed. Returns the raw input unchanged when no wrapper is
- * recognized. Pure / side-effect-free.
- *
- * Spec: app-workspace § Activity Stream Shell Command Wrapper
- * Extraction. The truncation cap in `summarizeToolInput` is applied
- * AFTER this helper, so the 80-char display budget counts inner
- * characters, not wrapper boilerplate.
- *
- * The two regexes are anchored at start-of-string and contain no
- * nested quantifiers, so they cannot catastrophically backtrack on
- * adversarial input.
- */
-export function extractInnerCommand(raw: string): string {
-  const trimmed = raw.trimStart()
-  // PowerShell wrapper: matches either a quoted absolute path ending
-  // in powershell.exe ("…\powershell.exe") or a bare powershell.exe
-  // (optionally with a non-space path prefix). Then zero or more
-  // leading switch flags (e.g. `-NoProfile`, `-NoLogo`,
-  // `-NonInteractive` — observed in real Codex sandbox invocations).
-  // Then `-Command` and the inner command up to end-of-string.
-  // `(?:\s+-\w+)*` is bounded (each iteration consumes ≥2 chars and
-  // makes progress) so it cannot catastrophically backtrack.
-  // `s` flag (dotAll): inner command MAY contain newlines (PowerShell
-  // here-strings: `-Command "@'\n...\n'@"`), so `.+` must span them.
-  const ps = trimmed.match(
-    /^(?:"[^"]*powershell\.exe"|[^\s"]*powershell\.exe)(?:\s+-\w+)*\s+-Command\s+(.+)$/is,
-  )
-  if (ps) return stripOuterQuotes(ps[1].trimEnd())
-  // POSIX sh / bash -c wrapper: optional absolute path prefix, then
-  // `sh` or `bash`, then `-c`, then the inner command (also `s`-flagged
-  // for multi-line heredoc-style payloads).
-  const sh = trimmed.match(/^(?:\/[\w./-]+\/)?(?:bash|sh)\s+-c\s+(.+)$/is)
-  if (sh) return stripOuterQuotes(sh[1].trimEnd())
-  return raw
-}
-
-/** Strip exactly one layer of matching outer `"…"` or `'…'`. */
-function stripOuterQuotes(s: string): string {
-  if (s.length < 2) return s
-  const first = s[0]
-  const last = s[s.length - 1]
-  if ((first === '"' || first === "'") && first === last) {
-    return s.slice(1, -1)
-  }
-  return s
-}
-
-/** Generic tool-input summarizer for non-Write/Edit tools. */
-function summarizeToolInput(input: unknown): string {
-  if (input === null || typeof input !== "object") return ""
-  const obj = input as Record<string, unknown>
-  if (typeof obj.file_path === "string") {
-    const parts = obj.file_path.split(/[\\/]/)
-    return parts[parts.length - 1] || obj.file_path
-  }
-  if (typeof obj.pattern === "string") return `"${obj.pattern}"`
-  if (typeof obj.command === "string") {
-    // X1: strip Codex shell wrapper before applying the 80-char cap,
-    // so the visible budget is spent on the user-authored inner
-    // command, not on `powershell.exe -Command "…"` boilerplate.
-    const inner = extractInnerCommand(obj.command)
-    return inner.length > 80 ? `${inner.slice(0, 79)}…` : inner
-  }
-  return ""
-}
-
-function bannerLabel(banner: VerbBanner, t: TFunction): string {
-  switch (banner.kind) {
-    case "start":
-      return t("workspace.activity.banner.start", {
-        path: normalizePath(banner.repo_path),
-      })
-    case "goal":
-      return t("workspace.activity.banner.goal", {
-        goalText: banner.goal_text,
-      })
-    case "sync_start":
-      return t("workspace.activity.banner.syncStart")
-    case "sync_done":
-      return t("workspace.activity.banner.syncDone", {
-        files: banner.files,
-        mib: banner.mib.toFixed(1),
-        elapsedMs: banner.elapsed_ms,
-      })
-    case "pii_summary":
-      return t("workspace.activity.banner.piiSummary", {
-        scanner: banner.scanner,
-        scanned: banner.scanned,
-        hits: banner.hits,
-        action: banner.action,
-      })
-    case "lint_start":
-      return t("workspace.activity.banner.lintStart")
-    case "lint_done":
-      return t("workspace.activity.banner.lintDone", {
-        errors: banner.errors,
-        warns: banner.warns,
-        elapsedMs: banner.elapsed_ms,
-      })
-    case "commit_done":
-      return t("workspace.activity.banner.commitDone", { sha7: banner.sha7 })
-    case "done":
-      return t("workspace.activity.banner.done")
-    case "hint":
-      return t("workspace.activity.banner.hint")
-  }
-}
-
-function normalizePath(p: string): string {
-  return p.replace(/\\/g, "/")
-}

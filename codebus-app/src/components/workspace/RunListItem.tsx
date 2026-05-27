@@ -5,6 +5,8 @@ import {
   type StatusPillStatus,
 } from "@/components/ui/StatusPill"
 import { useT, type TFunction } from "@/i18n/useT"
+import { useLatestStreamEvent } from "@/hooks/useLatestStreamEvent"
+import { summarizeVerbEvent } from "@/lib/streamEventSummary"
 
 /**
  * Map a RunLog outcome to a canonical three-state status (Phase 3B).
@@ -88,12 +90,36 @@ export function RunListItem({ run, onClick }: RunListItemProps) {
           )
         })()
       )}
-      <span className="flex-1 truncate text-body">
+      <span className="min-w-0 flex-1 truncate text-body">
         {truncate(run.goal || "(no goal text)")}
       </span>
+      {run.outcome === "running" ? <RunningRowTail runId={run.run_id} /> : null}
       <span className="text-meta text-fg-tertiary">
         {relativeTimestamp(run.started_at, t)}
       </span>
     </button>
+  )
+}
+
+/**
+ * Single-line "stream tail" rendered to the right of the goal text for
+ * running rows. Subscribes to `useLatestStreamEvent(runId)` so each row
+ * only re-renders when its own run's tail slot updates. Thought chunks
+ * are filtered at the store layer, so `summarizeVerbEvent` returning
+ * non-null is the common case once the run starts emitting tool_use or
+ * banner events; the placeholder covers the brief window before that.
+ */
+function RunningRowTail({ runId }: { runId: string }) {
+  const t = useT()
+  const tailEvent = useLatestStreamEvent(runId)
+  const summary = tailEvent ? summarizeVerbEvent(tailEvent, t) : null
+  const text = summary ?? t("workspace.goals.runningTailPending")
+  return (
+    <span
+      data-testid="run-row-tail"
+      className="hidden max-w-[40ch] truncate font-mono text-meta text-fg-secondary tabular-nums lg:block"
+    >
+      {text}
+    </span>
   )
 }

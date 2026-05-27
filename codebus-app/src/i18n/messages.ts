@@ -165,6 +165,7 @@ const en = {
   "workspace.goals.emptyHeroTitle": "No goals yet",
   "workspace.goals.emptyHeroSubtitle":
     "Start with one of the examples below, or write your own.",
+  "workspace.goals.runningTailPending": "…",
 
   // ---- Workspace · New Goal modal ----
   "workspace.newGoalModal.title": "New goal",
@@ -603,6 +604,7 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.goals.emptyHeroTitle": "還沒有任務",
   "workspace.goals.emptyHeroSubtitle":
     "從下面範例挑一個開始、或自己寫一個。",
+  "workspace.goals.runningTailPending": "…",
 
   // ---- Workspace · New Goal modal ----
   "workspace.newGoalModal.title": "新增 Goal",
