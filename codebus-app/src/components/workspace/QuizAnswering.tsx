@@ -48,6 +48,16 @@ interface QuizAnsweringProps {
    * caller persists it via `write_quiz_progress` — answering never spawns.
    */
   onPersist?: (progress: QuizProgress) => void
+  /**
+   * Phase 5.4 quiz-fullscreen-wizard-view marker: signals that this
+   * component is hosted inside the wizard chrome (back-to-history
+   * supplied by the wizard TabContentHeader). QuizAnswering currently
+   * has no back-to-history button of its own (removed by
+   * quiz-attempt-progress D6), so the prop is accepted as a marker
+   * without altering rendering; it future-proofs the contract for any
+   * additional chrome-supplied affordance.
+   */
+  embedded?: boolean
 }
 
 /**
@@ -86,6 +96,9 @@ export function QuizAnswering({
   onOpenWikiPage,
   initialProgress,
   onPersist,
+  // Phase 5.4: accept the `embedded` marker without destructuring it
+  // into a binding — there is no body-level behavior change yet.
+  embedded: _embedded,
 }: QuizAnsweringProps) {
   const t = useT()
   const questions = useMemo(() => parseQuiz(quizMd), [quizMd])

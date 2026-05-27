@@ -5,6 +5,14 @@ export interface TabContentHeaderProps {
   subtitle?: string
   cta?: ReactNode
   shortcutChipText?: string
+  /**
+   * Optional slot rendered between the title block and the cta. Used by
+   * the Quiz wizard to surface step dots / "Step X / N" labels while a
+   * wizard flow is active (see app-workspace § Quiz Tab Wizard Content
+   * Header And Layout). Existing callers that omit this prop render
+   * exactly as before.
+   */
+  stepIndicator?: ReactNode
   testId?: string
 }
 
@@ -13,6 +21,7 @@ export function TabContentHeader({
   subtitle,
   cta,
   shortcutChipText,
+  stepIndicator,
   testId,
 }: TabContentHeaderProps) {
   const showChip = Boolean(cta) && Boolean(shortcutChipText)
@@ -29,6 +38,11 @@ export function TabContentHeader({
           <p className="text-meta text-fg-secondary">{subtitle}</p>
         )}
       </div>
+      {stepIndicator && (
+        <div data-tch-step-indicator className="flex items-center gap-2">
+          {stepIndicator}
+        </div>
+      )}
       {cta && (
         <div className="flex items-center gap-2">
           <span data-tch-cta>{cta}</span>

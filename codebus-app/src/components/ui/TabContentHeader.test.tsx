@@ -56,6 +56,44 @@ describe("TabContentHeader", () => {
     expect(container.querySelector("[data-tch-chip]")).toBeNull()
   })
 
+  it("does not render stepIndicator slot when prop is omitted (existing callers unchanged)", () => {
+    const { container } = render(<TabContentHeader title="Goals" />)
+    expect(container.querySelector("[data-tch-step-indicator]")).toBeNull()
+  })
+
+  it("renders stepIndicator between title block and cta when provided", () => {
+    const { container } = render(
+      <TabContentHeader
+        title="New quiz"
+        stepIndicator={<span data-testid="step-dots">Step 1 / 4</span>}
+        cta={<button data-testid="cta-btn">x</button>}
+      />,
+    )
+    const slot = container.querySelector("[data-tch-step-indicator]")
+    expect(slot).not.toBeNull()
+    expect(screen.getByTestId("step-dots")).toBeInTheDocument()
+    expect(screen.getByTestId("cta-btn")).toBeInTheDocument()
+    // The stepIndicator slot appears before the cta within the row.
+    const row = container.firstElementChild
+    const stepNode = row?.querySelector("[data-tch-step-indicator]")
+    const ctaNode = row?.querySelector("[data-tch-cta]")
+    expect(stepNode).not.toBeNull()
+    expect(ctaNode).not.toBeNull()
+    expect(stepNode?.compareDocumentPosition(ctaNode!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0)
+  })
+
+  it("renders stepIndicator alone when cta is omitted (wizard topic step)", () => {
+    const { container } = render(
+      <TabContentHeader
+        title="New quiz"
+        stepIndicator={<span data-testid="step-dots">Step 1 / 4</span>}
+      />,
+    )
+    expect(screen.getByTestId("step-dots")).toBeInTheDocument()
+    expect(container.querySelector("[data-tch-cta]")).toBeNull()
+    expect(container.querySelector("[data-tch-chip]")).toBeNull()
+  })
+
   it("applies the given testId as data-testid on the root row element", () => {
     const { container } = render(
       <TabContentHeader title="Goals" testId="tab-content-header-goals" />,

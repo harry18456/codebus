@@ -325,4 +325,25 @@ describe("QuizAnswering", () => {
     expect(afterNext.answers).toHaveLength(1) // unchanged by Next
     expect(afterNext.status).toBe("in_progress")
   })
+
+  // Phase 5.4 quiz-fullscreen-wizard-view: the `embedded` prop is a marker
+  // that says "rendered inside the wizard". QuizAnswering already does
+  // not carry a back-to-history button (the `[← Back to wiki page]`
+  // affordance was removed by quiz-attempt-progress D6); the embedded
+  // prop must therefore (a) accept without crashing, and (b) preserve
+  // the stem / choices / progress persistence semantics.
+  it("embedded=true preserves the existing answering UI (no crash, no extra back button)", () => {
+    const { container } = render(
+      <QuizAnswering
+        quizMd={TWO_Q}
+        passThreshold={80}
+        embedded={true}
+      />,
+    )
+    expect(screen.getByTestId("quiz-answering")).toBeInTheDocument()
+    expect(screen.getByTestId("quiz-stem")).toHaveTextContent("What is auth?")
+    expect(
+      container.querySelector("[data-testid='quiz-attempt-back']"),
+    ).toBeNull()
+  })
 })

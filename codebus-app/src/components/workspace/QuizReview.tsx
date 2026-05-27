@@ -43,6 +43,13 @@ interface QuizReviewProps {
   /** Wiki page index + navigate handler for explanation citations (D6). */
   pages?: Record<string, WikiPageMeta>
   onOpenWikiPage?: (slug: string) => void
+  /**
+   * Phase 5.4 quiz-fullscreen-wizard-view: when hosted inside the
+   * wizard, the wizard `TabContentHeader` supplies the back-to-history
+   * affordance, so the standalone `[← Back to history]` button is
+   * suppressed (spec design D6 邊界).
+   */
+  embedded?: boolean
 }
 
 export function QuizReview({
@@ -55,6 +62,7 @@ export function QuizReview({
   onBack,
   pages,
   onOpenWikiPage,
+  embedded = false,
 }: QuizReviewProps) {
   const t = useT()
   const questions = useMemo(() => parseQuiz(quizMd), [quizMd])
@@ -70,9 +78,11 @@ export function QuizReview({
       className="flex flex-1 flex-col gap-3 overflow-auto"
     >
       <div className="flex items-center gap-2">
-        <Button data-testid="quiz-attempt-back" onClick={onBack}>
-          {t("workspace.quiz.review.backToHistory")}
-        </Button>
+        {!embedded && (
+          <Button data-testid="quiz-attempt-back" onClick={onBack}>
+            {t("workspace.quiz.review.backToHistory")}
+          </Button>
+        )}
         <Button
           variant="primary"
           data-testid="quiz-redo-this"

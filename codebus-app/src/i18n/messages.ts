@@ -467,6 +467,49 @@ const en = {
     "Reading codebase · {reads} reads · {shell} shell · {elapsedSeconds}s",
   "workspace.activity.cluster.summary.writing":
     "Writing wiki · {new} new · {updated} updated · {elapsedSeconds}s",
+
+  // ---- Workspace · Quiz wizard (Phase 5.4 quiz-fullscreen-wizard-view) ----
+  // Spec: app-workspace § Quiz Tab Wizard Content Header And Layout.
+  // The Karpathy 5-bucket identifiers (concepts / entities / modules /
+  // processes / synthesis) are Cat D — see the `bucketIdentifier.*`
+  // keys below; the `bucketLabel.*` keys hold the localized header
+  // prose around each identifier.
+  "workspace.quiz.wizard.step1.title": "Pick a topic",
+  "workspace.quiz.wizard.step1.subtitle":
+    "Write what you want to be quizzed on — codebus will pick wiki pages that fit.",
+  "workspace.quiz.wizard.step1.placeholder":
+    "e.g. how auth works / IM adapter system / message delivery flow",
+  "workspace.quiz.wizard.step1.examplePillHint":
+    "Click an example to fill it in. Press Enter to submit.",
+  "workspace.quiz.wizard.step2.title": "Confirm scope",
+  "workspace.quiz.wizard.step2.bucketLabel.concepts": "Concepts",
+  "workspace.quiz.wizard.step2.bucketLabel.entities": "Entities",
+  "workspace.quiz.wizard.step2.bucketLabel.modules": "Modules",
+  "workspace.quiz.wizard.step2.bucketLabel.processes": "Processes",
+  "workspace.quiz.wizard.step2.bucketLabel.synthesis": "Synthesis",
+  "workspace.quiz.wizard.step2.bucketIdentifier.concepts": "concepts",
+  "workspace.quiz.wizard.step2.bucketIdentifier.entities": "entities",
+  "workspace.quiz.wizard.step2.bucketIdentifier.modules": "modules",
+  "workspace.quiz.wizard.step2.bucketIdentifier.processes": "processes",
+  "workspace.quiz.wizard.step2.bucketIdentifier.synthesis": "synthesis",
+  "workspace.quiz.wizard.step3.title": "Generating",
+  "workspace.quiz.wizard.step3.generatingHint":
+    "CodeBus is reading the wiki pages and drafting questions…",
+  "workspace.quiz.wizard.step4.pendingTitle": "Quiz ready",
+  "workspace.quiz.wizard.step4.reviewingTitle": "Quiz: {topic}",
+  "workspace.quiz.wizard.step4.completionTitle.pass": "Passed ({percent}%)",
+  "workspace.quiz.wizard.step4.completionTitle.fail":
+    "Did not pass ({percent}%)",
+  "workspace.quiz.wizard.action.cancel": "Cancel",
+  "workspace.quiz.wizard.action.back": "Back",
+  "workspace.quiz.wizard.action.next": "Next →",
+  "workspace.quiz.wizard.action.start": "Start",
+  "workspace.quiz.wizard.action.submit": "Submit",
+  "workspace.quiz.wizard.action.retry": "Retry",
+  "workspace.quiz.wizard.action.redo": "↻ Redo this attempt",
+  "workspace.quiz.wizard.action.viewWrong": "Review wrong questions",
+  "workspace.quiz.wizard.action.viewProcess": "View generation log",
+  "workspace.quiz.wizard.header.stepLabel": "Step {n} / {total} · {name}",
 } as const
 
 const zh: Record<keyof typeof en, string> = {
@@ -895,6 +938,45 @@ const zh: Record<keyof typeof en, string> = {
     "讀檔案 {reads} 次 · shell {shell} 次 · {elapsedSeconds} 秒",
   "workspace.activity.cluster.summary.writing":
     "新增 {new} · 更新 {updated} · {elapsedSeconds} 秒",
+
+  // ---- Workspace · Quiz wizard ----
+  // 5-bucket identifier 為 Cat D（identifier 性質），bucketIdentifier.*
+  // 兩 locale 都保持英文字面；bucketLabel.* 是顯示用 prose，可在地化。
+  "workspace.quiz.wizard.step1.title": "選一個主題",
+  "workspace.quiz.wizard.step1.subtitle":
+    "寫下你想被 quiz 的範圍 — codebus 會挑相關 wiki 頁面出題。",
+  "workspace.quiz.wizard.step1.placeholder":
+    "例如：auth 怎麼運作 / IM 適配器系統 / 對話傳遞流程",
+  "workspace.quiz.wizard.step1.examplePillHint":
+    "點擊範例直接填入。按 Enter 送出。",
+  "workspace.quiz.wizard.step2.title": "確認範圍",
+  "workspace.quiz.wizard.step2.bucketLabel.concepts": "概念",
+  "workspace.quiz.wizard.step2.bucketLabel.entities": "實體",
+  "workspace.quiz.wizard.step2.bucketLabel.modules": "模組",
+  "workspace.quiz.wizard.step2.bucketLabel.processes": "流程",
+  "workspace.quiz.wizard.step2.bucketLabel.synthesis": "綜整",
+  "workspace.quiz.wizard.step2.bucketIdentifier.concepts": "concepts",
+  "workspace.quiz.wizard.step2.bucketIdentifier.entities": "entities",
+  "workspace.quiz.wizard.step2.bucketIdentifier.modules": "modules",
+  "workspace.quiz.wizard.step2.bucketIdentifier.processes": "processes",
+  "workspace.quiz.wizard.step2.bucketIdentifier.synthesis": "synthesis",
+  "workspace.quiz.wizard.step3.title": "出題中",
+  "workspace.quiz.wizard.step3.generatingHint":
+    "CodeBus 正在閱讀 wiki 頁面、撰寫題目⋯",
+  "workspace.quiz.wizard.step4.pendingTitle": "Quiz 已準備好",
+  "workspace.quiz.wizard.step4.reviewingTitle": "Quiz：{topic}",
+  "workspace.quiz.wizard.step4.completionTitle.pass": "通過了（{percent}%）",
+  "workspace.quiz.wizard.step4.completionTitle.fail": "沒通過（{percent}%）",
+  "workspace.quiz.wizard.action.cancel": "取消",
+  "workspace.quiz.wizard.action.back": "返回",
+  "workspace.quiz.wizard.action.next": "下一步 →",
+  "workspace.quiz.wizard.action.start": "開始",
+  "workspace.quiz.wizard.action.submit": "送出",
+  "workspace.quiz.wizard.action.retry": "重試",
+  "workspace.quiz.wizard.action.redo": "↻ 重做此份",
+  "workspace.quiz.wizard.action.viewWrong": "看錯題",
+  "workspace.quiz.wizard.action.viewProcess": "看過程",
+  "workspace.quiz.wizard.header.stepLabel": "Step {n} / {total} · {name}",
 }
 
 export const messages = { en, zh } as const

@@ -209,4 +209,41 @@ describe("QuizReview", () => {
     fireEvent.click(link)
     expect(onOpenWikiPage).toHaveBeenCalledWith("auth-middleware-verification")
   })
+
+  // Phase 5.4 quiz-fullscreen-wizard-view: when hosted inside the wizard
+  // (`embedded={true}`), the wizard `TabContentHeader` provides the back
+  // affordance, so QuizReview SHALL NOT render its own
+  // `[← Back to history]` button (per spec design D6 邊界).
+  it("embedded=true hides the standalone back-to-history button", () => {
+    render(
+      <QuizReview
+        quizMd={TWO_Q}
+        progress={PROGRESS}
+        passThreshold={80}
+        vaultPath="/v"
+        eventsLog={null}
+        onRedo={vi.fn()}
+        onBack={vi.fn()}
+        embedded={true}
+      />,
+    )
+    expect(screen.queryByTestId("quiz-attempt-back")).not.toBeInTheDocument()
+    // The redo control is preserved — wizard chrome doesn't supply that.
+    expect(screen.getByTestId("quiz-redo-this")).toBeInTheDocument()
+  })
+
+  it("embedded prop default (omitted) preserves the existing back button", () => {
+    render(
+      <QuizReview
+        quizMd={TWO_Q}
+        progress={PROGRESS}
+        passThreshold={80}
+        vaultPath="/v"
+        eventsLog={null}
+        onRedo={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId("quiz-attempt-back")).toBeInTheDocument()
+  })
 })
