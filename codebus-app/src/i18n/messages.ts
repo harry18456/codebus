@@ -255,6 +255,8 @@ const en = {
   "chat.token.tooltip.input": "Input",
   "chat.token.tooltip.output": "Output",
   "chat.widget.aria.openChat": "Open chat",
+  "chat.widget.aria.openChatWithActiveGoalRunning":
+    "Open chat — a goal is running",
   "chat.widget.aria.closeChat": "Close chat",
 
   // ---- Error messages (toast / inline) ----
@@ -691,6 +693,8 @@ const zh: Record<keyof typeof en, string> = {
   "chat.token.tooltip.input": "輸入",
   "chat.token.tooltip.output": "輸出",
   "chat.widget.aria.openChat": "開啟對話",
+  "chat.widget.aria.openChatWithActiveGoalRunning":
+    "開啟對話 — 有目標正在執行",
   "chat.widget.aria.closeChat": "關閉對話",
 
   // ---- Errors ----

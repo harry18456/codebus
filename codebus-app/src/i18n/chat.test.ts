@@ -31,6 +31,7 @@ const CHAT_KEYS = [
   "chat.token.tooltip.input",
   "chat.token.tooltip.output",
   "chat.widget.aria.openChat",
+  "chat.widget.aria.openChatWithActiveGoalRunning",
   "chat.widget.aria.closeChat",
 ] as const
 
@@ -56,6 +57,7 @@ const ZH_KEYS_REQUIRING_HAN = [
   "chat.token.tooltip.input",
   "chat.token.tooltip.output",
   "chat.widget.aria.openChat",
+  "chat.widget.aria.openChatWithActiveGoalRunning",
   "chat.widget.aria.closeChat",
 ] as const
 

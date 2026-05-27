@@ -297,7 +297,7 @@ tests:
 ---
 ### Requirement: Run Detail Views — Running
 
-The system SHALL render the `Running` detail view when the user navigates to a run whose state is the currently-active goal run (i.e., `useGoalsStore.activeRun.runId` equals the clicked run id and no RunLog row has been written yet for it). The view SHALL include: a header with `← back`, the goal text, and an `⏺ Running` badge; a metadata line with elapsed time (live-updated every second) and accumulated token count from Usage events received so far; an `Activity stream` block rendering received events in arrival order; and an `[⏹ Cancel]` button.
+The system SHALL render the `Running` detail view when the user navigates to a run whose state is the currently-active goal run (i.e., `useGoalsStore.activeRun.runId` equals the clicked run id and no RunLog row has been written yet for it). The view SHALL include: a header with `← back`, the goal text, an `⏺ Running` badge, AND an `[⏹ Cancel]` button placed inside the header on the right-hand side (immediately to the right of the badge AND to the left of the reserved `pr-[160px]` Windows traffic-light padding); a metadata line with elapsed time (live-updated every second) and accumulated token count from Usage events received so far; AND an `Activity stream` block rendering received events in arrival order. The view SHALL NOT render a separate bottom `<footer>` element for the Cancel button.
 
 The Activity stream SHALL render `StreamEvent::ToolUse { name, input }` events as one-line summaries with an emoji leader matching the CLI convention (`render::stream_event` `ToolUse Write/Edit specialization`):
 
@@ -308,7 +308,7 @@ The Activity stream SHALL render `StreamEvent::ToolUse { name, input }` events a
 
 `StreamEvent::ToolResult` SHALL NOT render in this view (results are an internal flow signal — the GUI is a focused viewer, not a linear log). Deep-debug access to ToolResult bodies SHALL remain available via the Done detail's `Run details` collapsible block (which replays the full events.jsonl).
 
-Clicking `[⏹ Cancel]` SHALL invoke `cancel_goal(run_id)`. The button SHALL transition to a `Cancelling…` disabled state immediately upon click and SHALL be replaced once the run transitions to a terminal state (cancelled / done / failed).
+The `[⏹ Cancel]` button SHALL carry `data-testid="cancel-button"`. The button's wrapper element inside the header SHALL NOT carry the `data-tauri-drag-region` attribute (so window-drag pointer handlers do not swallow the button's click). Clicking `[⏹ Cancel]` SHALL invoke `cancel_goal(run_id)`. The button SHALL transition to a `Cancelling…` disabled state immediately upon click AND SHALL be replaced once the run transitions to a terminal state (cancelled / done / failed).
 
 #### Scenario: Activity stream renders tool_use with emoji leaders
 
@@ -333,82 +333,25 @@ Clicking `[⏹ Cancel]` SHALL invoke `cancel_goal(run_id)`. The button SHALL tra
 #### Scenario: Cancel button invokes cancel_goal and disables
 
 - **WHEN** the user clicks `[⏹ Cancel]` in the Running detail view for run id `X`
-- **THEN** `cancel_goal("X")` is invoked AND the button transitions to a `Cancelling…` disabled state AND the button SHALL NOT be clickable a second time
+- **THEN** `cancel_goal("X")` SHALL be invoked AND the button SHALL transition to a `Cancelling…` disabled state AND the button SHALL NOT be clickable a second time
+
+#### Scenario: Cancel button renders inside header on the right
+
+- **WHEN** the user navigates to the Running detail view for an active run
+- **THEN** the element with `data-testid="cancel-button"` SHALL be a descendant of the view's `<header>` element AND SHALL appear in document order after the element with `data-testid="running-badge"` AND the cancel button's nearest ancestor element with `data-tauri-drag-region` (if any) SHALL be a different element from the cancel button's immediate wrapper (i.e., the cancel button's immediate wrapper SHALL NOT itself carry `data-tauri-drag-region`) AND the Running detail view SHALL NOT contain a `<footer>` descendant that wraps the cancel button
 
 
 <!-- @trace
-source: v3-app-workspace-goal
-updated: 2026-05-14
+source: chatwidget-pulse-and-cancel-move
+updated: 2026-05-27
 code:
-  - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-core/src/render/banner.rs
-  - codebus-app/src-tauri/gen/schemas/acl-manifests.json
-  - codebus-app/src/components/LoadingOverlay.tsx
-  - codebus-app/src/components/workspace/WikiTree.tsx
-  - codebus-app/src/lib/ipc.ts
-  - docs/2026-05-14-skill-bundles-vault-only-backlog.md
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/capabilities/default.json
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - codebus-app/src/store/route.ts
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-core/src/log/events/jsonl_sink.rs
-  - codebus-app/src/components/workspace/RunDetailRunning.tsx
-  - codebus-app/src/components/workspace/ActivityStreamItem.tsx
-  - codebus-app/src/lib/milkdown-wikilink.tsx
-  - codebus-app/src-tauri/src/state/app_state.rs
-  - codebus-app/src/App.tsx
-  - codebus-app/src/components/workspace/RunListItem.tsx
-  - codebus-app/src/components/workspace/RunDetailCancelled.tsx
-  - codebus-cli/src/commands/init.rs
-  - codebus-core/src/verb/goal.rs
-  - codebus-app/src/store/goals.ts
-  - codebus-app/src-tauri/gen/schemas/desktop-schema.json
-  - codebus-app/src/components/workspace/WikiPreview.tsx
-  - codebus-app/src/components/workspace/RunDetailDone.tsx
-  - codebus-app/package.json
-  - codebus-app/src/store/wiki.ts
-  - docs/2026-05-14-git-context-tool-backlog.md
-  - codebus-core/src/verb/fix.rs
+  - codebus-app/src/components/workspace/ChatWidget.tsx
   - codebus-app/src/i18n/messages.ts
-  - codebus-app/src-tauri/gen/schemas/capabilities.json
-  - codebus-app/src-tauri/src/state/active_runs.rs
-  - codebus-app/src/components/workspace/GoalsTab.tsx
-  - codebus-app/src/components/workspace/WorkspaceStub.tsx
-  - codebus-app/src-tauri/gen/schemas/windows-schema.json
-  - codebus-app/src-tauri/src/state/mod.rs
-  - codebus-app/src-tauri/src/ipc/wiki.rs
-  - codebus-app/src/components/workspace/NewGoalModal.tsx
-  - codebus-core/src/verb/event.rs
-  - codebus-app/src-tauri/Cargo.toml
-  - codebus-app/src-tauri/src/lib.rs
-  - docs/BACKLOG.md
-  - codebus-app/src/components/workspace/WikiTab.tsx
-  - Cargo.toml
+  - codebus-app/src/components/workspace/RunDetailRunning.tsx
 tests:
-  - codebus-app/src/hooks/useNewVaultShortcut.test.tsx
-  - codebus-app/src/components/workspace/WorkspaceStub.test.tsx
-  - codebus-app/src/lib/milkdown-wikilink.test.tsx
+  - codebus-app/src/i18n/chat.test.ts
   - codebus-app/src/components/workspace/RunDetailRunning.test.tsx
-  - codebus-app/src/components/workspace/RunDetailDone.test.tsx
-  - codebus-app/src/hooks/useLobbyDragDrop.test.tsx
-  - codebus-app/src/lib/ipc.test.ts
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-app/src/components/workspace/GoalsTab.test.tsx
-  - codebus-app/src/components/workspace/Workspace.test.tsx
-  - codebus-app/src/store/goals.test.ts
-  - codebus-app/src/components/workspace/RunListItem.test.tsx
-  - codebus-app/src/components/workspace/WikiTab.test.tsx
-  - codebus-app/src/store/wiki.test.ts
-  - codebus-app/src/components/workspace/NewGoalModal.test.tsx
-  - codebus-app/src/test/forbidden-behaviors.test.tsx
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
-  - codebus-app/src/store/route.test.ts
-  - codebus-app/src/i18n/workspace.test.ts
-  - codebus-app/src/components/workspace/WikiTree.test.tsx
-  - codebus-app/src/components/lobby/Lobby.test.tsx
-  - codebus-app/src/components/workspace/RunDetailCancelled.test.tsx
-  - codebus-app/src/components/workspace/WikiPreview.test.tsx
+  - codebus-app/src/components/workspace/ChatWidget.test.tsx
 -->
 
 ---
@@ -1046,7 +989,7 @@ tests:
 
 The Workspace SHALL render a Chat Widget overlay anchored to the bottom-right corner of the Workspace main content area. The widget's right edge SHALL sit 16px from the viewport's right edge AND its bottom edge SHALL sit above the existing `BottomStrip` footer with a 16px gap (i.e., bottom offset equals `BottomStrip height + 16px`; with the current 32px-tall `BottomStrip` that is 48px from the viewport bottom) so neither the version label nor the settings gear is ever occluded by the widget. The widget SHALL have exactly two visual states:
 
-1. **Collapsed**: a 3rem × 3rem circular bubble containing a `💬` icon. The bubble SHALL remain visible whenever the Workspace is mounted and SHALL NOT be obscured by any tab (Goals / Wiki / Quiz) content. When a `VerbLifecycleEvent::PromoteSuggestion` event is emitted while the widget is collapsed, the bubble SHALL display a small red dot badge until the next time the widget is expanded.
+1. **Collapsed**: a 3rem × 3rem circular bubble containing a `💬` icon. The bubble SHALL remain visible whenever the Workspace is mounted AND SHALL NOT be obscured by any tab (Goals / Wiki / Quiz) content. When a `VerbLifecycleEvent::PromoteSuggestion` event is emitted while the widget is collapsed, the bubble SHALL display a small red dot badge (with `data-testid="chat-widget-promote-badge"`) until the next time the widget is expanded. When `useGoalsStore.activeRun` is non-null (i.e., the current vault has an in-flight goal run), the bubble SHALL also display an `accent`-coloured pulse dot indicator (with `data-testid="chat-widget-active-goal-pulse"`) positioned in the bubble's top-right corner. The pulse dot SHALL be visually distinct from the promote badge in both colour (accent versus error) and position (further into the bubble's outer corner) so both indicators can be rendered simultaneously without visual overlap. The pulse dot SHALL fade in over approximately 200ms when `activeRun` transitions from null to non-null AND SHALL fade out over approximately 200ms when `activeRun` transitions back to null. When `prefers-reduced-motion: reduce` is active, the pulse dot SHALL appear AND disappear instantly with no transition. The pulse dot SHALL NOT be rendered while the widget is in the `expanded` state.
 
 2. **Expanded**: a `width × height` rem-sized panel positioned with its bottom-right corner aligned to the same anchor point as the collapsed bubble. The default size SHALL be `22rem × 32rem`. The panel SHALL contain three vertically stacked regions: a header bar (containing the `+ New chat` button, the token usage display, AND a `−` minimize button with `data-testid="chat-widget-minimize"` that toggles the widget back to `collapsed` when clicked), a scrollable transcript region (containing past turns and the active turn live events), and an input region (containing a textarea and a send button, or a `⏹ Stop` button while a turn is active). The top-left resize grip SHALL render a small visual affordance (e.g., a diagonal-stroke SVG icon) so the user can locate the drag handle without relying on the `nwse-resize` cursor hint alone.
 
@@ -1054,10 +997,12 @@ The widget SHALL NOT be draggable to any other corner or position. The widget SH
 
 The widget SHALL use `rem` units for `width`, `height`, and all internal fixed dimensions so a future global font-scale setting can affect the widget proportionally without rework.
 
+The collapsed bubble's `aria-label` SHALL be the localized translation of `chat.widget.aria.openChat` when `useGoalsStore.activeRun` is null. When `useGoalsStore.activeRun` is non-null, the collapsed bubble's `aria-label` SHALL instead be the localized translation of `chat.widget.aria.openChatWithActiveGoalRunning`. Both keys MUST exist in every shipped locale (currently `en` AND `zh`).
+
 #### Scenario: Collapsed widget renders as bubble in bottom-right corner
 
-- **WHEN** the user opens a vault AND the Workspace component mounts
-- **THEN** an element with `data-testid="chat-widget"` AND `data-state="collapsed"` SHALL render as a 3rem × 3rem rounded button positioned `position: fixed` with `right: 16px` AND `bottom: 48px` (== `BottomStrip height (32px) + 16px gap`) so it sits above the `BottomStrip` AND the bubble's `aria-label` SHALL contain the text `"Open chat"` (or the locale-specific translation) AND the Workspace main content area SHALL NOT have its width or layout altered by the bubble
+- **WHEN** the user opens a vault AND the Workspace component mounts AND `useGoalsStore.activeRun` is null
+- **THEN** an element with `data-testid="chat-widget"` AND `data-state="collapsed"` SHALL render as a 3rem × 3rem rounded button positioned `position: fixed` with `right: 16px` AND `bottom: 48px` (== `BottomStrip height (32px) + 16px gap`) so it sits above the `BottomStrip` AND the bubble's `aria-label` SHALL be the localized translation of `chat.widget.aria.openChat` AND the Workspace main content area SHALL NOT have its width or layout altered by the bubble
 
 #### Scenario: Toggle expands widget to default-size panel
 
@@ -1087,59 +1032,50 @@ The widget SHALL use `rem` units for `width`, `height`, and all internal fixed d
 #### Scenario: Pending promote suggestion shows badge on collapsed bubble
 
 - **WHEN** the widget state is `collapsed` AND a `VerbLifecycleEvent::PromoteSuggestion` event arrives via the `chat-stream` channel AND the user has not yet acted on the suggestion
-- **THEN** the bubble SHALL render a small red dot badge AND the badge SHALL disappear the next time the widget expands or the suggestion is dismissed
+- **THEN** the bubble SHALL render a small red dot badge with `data-testid="chat-widget-promote-badge"` AND the badge SHALL disappear the next time the widget expands or the suggestion is dismissed
+
+#### Scenario: Active goal pulse dot appears on collapsed bubble
+
+- **WHEN** the widget state is `collapsed` AND `useGoalsStore.activeRun` transitions from null to a non-null value
+- **THEN** an element with `data-testid="chat-widget-active-goal-pulse"` SHALL be rendered as a descendant of the collapsed bubble AND the dot SHALL be positioned in the bubble's top-right corner AND the dot's background colour SHALL resolve to the `--color-accent` token value AND the dot SHALL reach full opacity within approximately 200ms
+
+#### Scenario: Active goal pulse dot disappears when run ends
+
+- **WHEN** the collapsed bubble is rendering the active-goal pulse dot AND `useGoalsStore.activeRun` transitions to null
+- **THEN** the element with `data-testid="chat-widget-active-goal-pulse"` SHALL fade to opacity 0 within approximately 200ms AND SHALL either be unmounted OR remain mounted but visually hidden such that it does NOT capture pointer events
+
+#### Scenario: Pulse dot and promote badge render simultaneously without overlap
+
+- **WHEN** the widget state is `collapsed` AND `useGoalsStore.activeRun` is non-null AND `useChatStore.promoteSuggestion` is non-null
+- **THEN** both `data-testid="chat-widget-active-goal-pulse"` AND `data-testid="chat-widget-promote-badge"` SHALL be rendered as descendants of the collapsed bubble AND their rendered bounding boxes SHALL NOT overlap
+
+#### Scenario: Expanded widget does not render pulse dot
+
+- **WHEN** the widget state is `expanded` AND `useGoalsStore.activeRun` is non-null
+- **THEN** no element with `data-testid="chat-widget-active-goal-pulse"` SHALL be rendered inside the widget subtree
+
+#### Scenario: Active goal aria-label switches collapsed bubble announcement
+
+- **WHEN** the widget state is `collapsed` AND `useGoalsStore.activeRun` transitions from null to non-null
+- **THEN** the element with `data-testid="chat-widget"` SHALL have its `aria-label` attribute equal to the localized translation of `chat.widget.aria.openChatWithActiveGoalRunning` AND when `activeRun` transitions back to null the `aria-label` SHALL revert to the localized translation of `chat.widget.aria.openChat`
+
+#### Scenario: Reduced motion disables pulse dot fade transition
+
+- **WHEN** the user agent reports `prefers-reduced-motion: reduce` AND `useGoalsStore.activeRun` transitions from null to non-null
+- **THEN** the element with `data-testid="chat-widget-active-goal-pulse"` SHALL reach its visible opacity within the same frame (i.e., with no perceptible CSS transition) AND SHALL NOT animate via any keyframe loop
+
 
 <!-- @trace
-source: v3-app-chat-cmdk
-updated: 2026-05-15
--->
-
-
-<!-- @trace
-source: v3-app-chat-cmdk
-updated: 2026-05-15
+source: chatwidget-pulse-and-cancel-move
+updated: 2026-05-27
 code:
-  - docs/2026-05-14-github-repo-setup-backlog.md
-  - docs/2026-05-15-codebus-fs-watcher-backlog.md
-  - codebus-app/src/components/workspace/ChatInput.tsx
-  - codebus-app/src/hooks/useChatShortcut.ts
-  - docs/2026-05-14-rag-index-search-backlog.md
-  - codebus-app/src/components/workspace/ChatNewChatButton.tsx
-  - codebus-app/src/components/workspace/ChatUndoToast.tsx
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/2026-05-14-mcp-server-backlog.md
-  - codebus-app/src/components/workspace/ChatTokenDisplay.tsx
-  - codebus-app/src-tauri/src/ipc/chats.rs
-  - docs/2026-05-14-openai-privacy-filter-backlog.md
-  - docs/2026-05-14-mycoder-cli-backlog.md
-  - codebus-app/src/i18n/messages.ts
-  - codebus-app/src/components/workspace/ChatTranscript.tsx
-  - docs/2026-05-14-settings-chat-model-backlog.md
-  - docs/2026-05-14-pii-settings-ui-backlog.md
-  - docs/2026-05-14-ui-accessibility-backlog.md
-  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
-  - docs/2026-05-14-app-font-scale-backlog.md
-  - docs/BACKLOG.md
-  - codebus-app/src/store/chat.ts
-  - codebus-app/src/lib/ipc.ts
-  - codebus-app/src-tauri/src/state/active_runs.rs
-  - codebus-app/src-tauri/src/ipc/goals.rs
   - codebus-app/src/components/workspace/ChatWidget.tsx
+  - codebus-app/src/i18n/messages.ts
+  - codebus-app/src/components/workspace/RunDetailRunning.tsx
 tests:
-  - codebus-app/src/components/workspace/ChatNewChatButton.test.tsx
-  - codebus-app/src/components/workspace/ChatInput.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
   - codebus-app/src/i18n/chat.test.ts
-  - codebus-app/src/components/workspace/Workspace.test.tsx
-  - codebus-app/src/store/chat.test.ts
-  - codebus-app/src/lib/ipc.test.ts
-  - codebus-app/src/components/workspace/ChatUndoToast.test.tsx
-  - codebus-app/src/hooks/useChatShortcut.test.tsx
+  - codebus-app/src/components/workspace/RunDetailRunning.test.tsx
   - codebus-app/src/components/workspace/ChatWidget.test.tsx
-  - codebus-app/src/components/workspace/ChatTokenDisplay.test.tsx
-  - codebus-app/src/components/settings/EndpointSection.test.tsx
-  - codebus-app/src/components/workspace/ChatTranscript.test.tsx
 -->
 
 ---

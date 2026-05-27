@@ -11,6 +11,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }))
 
 import { useChatStore } from "@/store/chat"
+import { useGoalsStore } from "@/store/goals"
+import { messages } from "@/i18n/messages"
 
 import { ChatWidget } from "./ChatWidget"
 
@@ -29,6 +31,19 @@ function resetStore(): void {
     onboardedVaults: new Set(),
     lastTranscript: INITIAL_STATE.lastTranscript,
     lastSessionId: INITIAL_STATE.lastSessionId,
+  })
+  useGoalsStore.setState({ runs: [], activeRun: null })
+}
+
+function seedActiveRun(): void {
+  useGoalsStore.setState({
+    activeRun: {
+      runId: "r-pulse",
+      goal: "demo goal for pulse dot",
+      startedAt: "2026-05-27T10:00:00Z",
+      events: [],
+      cancelling: false,
+    },
   })
 }
 
@@ -168,5 +183,79 @@ describe("ChatWidget", () => {
     useChatStore.setState({ expanded: true })
     rerender(<ChatWidget />)
     expect(screen.queryByTestId("chat-widget-promote-badge")).not.toBeInTheDocument()
+  })
+
+  // ----- Active-goal pulse dot -----
+
+  it("renders pulse dot inside the collapsed bubble while a goal is running", () => {
+    seedActiveRun()
+    render(<ChatWidget />)
+    const widget = screen.getByTestId("chat-widget")
+    const dot = screen.getByTestId("chat-widget-active-goal-pulse")
+    expect(widget).toContainElement(dot)
+  })
+
+  it("pulse dot is not visible when no active goal exists", () => {
+    // resetStore() in beforeEach already nulls activeRun. Per spec scenario
+    // "Active goal pulse dot disappears when run ends", the dot may EITHER
+    // be unmounted OR remain mounted at opacity-0. Design picks the latter
+    // so the 200ms fade-out can play; assert the contract, not the choice.
+    render(<ChatWidget />)
+    const dot = screen.queryByTestId("chat-widget-active-goal-pulse")
+    if (dot !== null) {
+      expect(dot.className).toMatch(/\bopacity-0\b/)
+    }
+  })
+
+  it("does not render pulse dot while the widget is expanded", () => {
+    seedActiveRun()
+    useChatStore.setState({ expanded: true })
+    render(<ChatWidget />)
+    expect(
+      screen.queryByTestId("chat-widget-active-goal-pulse"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("renders pulse dot and promote badge simultaneously on the collapsed bubble", () => {
+    seedActiveRun()
+    useChatStore.setState({
+      expanded: false,
+      promoteSuggestion: { reason: "looks like a wiki topic", turnIndex: 0 },
+    })
+    render(<ChatWidget />)
+    expect(
+      screen.getByTestId("chat-widget-active-goal-pulse"),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId("chat-widget-promote-badge")).toBeInTheDocument()
+  })
+
+  it("switches collapsed bubble aria-label to the active-goal variant while a goal runs", () => {
+    seedActiveRun()
+    render(<ChatWidget />)
+    const widget = screen.getByTestId("chat-widget")
+    const expected =
+      messages.en["chat.widget.aria.openChatWithActiveGoalRunning"]
+    expect(widget.getAttribute("aria-label")).toBe(expected)
+  })
+
+  it("collapsed bubble renders without crashing when activeRun is missing from the store", () => {
+    // Simulates the Failure Modes scenario in design.md: if the goals
+    // store has been wiped (e.g. during vault unmount/remount races) the
+    // selector returns `undefined`. The bubble SHALL degrade to the
+    // no-active-goal visuals rather than crashing.
+    useGoalsStore.setState(
+      { activeRun: undefined as unknown as null },
+      false,
+    )
+    expect(() => render(<ChatWidget />)).not.toThrow()
+    const widget = screen.getByTestId("chat-widget")
+    expect(widget.getAttribute("data-state")).toBe("collapsed")
+    const dot = screen.queryByTestId("chat-widget-active-goal-pulse")
+    if (dot !== null) {
+      expect(dot.className).toMatch(/\bopacity-0\b/)
+    }
+    expect(widget.getAttribute("aria-label")).toBe(
+      messages.en["chat.widget.aria.openChat"],
+    )
   })
 })

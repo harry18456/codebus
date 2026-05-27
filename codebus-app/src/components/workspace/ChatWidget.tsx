@@ -3,6 +3,7 @@ import { useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointe
 // need to carry computed rem values (bottom offset + width/height).
 
 import { useChatStore } from "@/store/chat"
+import { useGoalsStore } from "@/store/goals"
 import { useT } from "@/i18n/useT"
 
 import { ChatInput } from "./ChatInput"
@@ -99,6 +100,13 @@ export function ChatWidget({
   const promoteSuggestion = useChatStore((s) => s.promoteSuggestion)
   const toggleExpanded = useChatStore((s) => s.toggleExpanded)
   const setSize = useChatStore((s) => s.setSize)
+  // Surface the goal-running indicator on the collapsed bubble so the user
+  // can tell from the bottom-right corner that something is in flight even
+  // without switching to the Goals tab. Selector form yields a boolean so
+  // the bubble only re-renders on null↔non-null transitions, not every
+  // stream event. Coerce `undefined` (store not initialised in some tests)
+  // to false so the dot degrades to invisible rather than crashing.
+  const hasActiveGoal = useGoalsStore((s) => s.activeRun != null)
 
   // Auto-clamp on viewport resize. Reads fresh width/height from the store
   // each tick so we never compare against stale closure values when several
@@ -122,7 +130,11 @@ export function ChatWidget({
         type="button"
         data-testid="chat-widget"
         data-state="collapsed"
-        aria-label={t("chat.widget.aria.openChat")}
+        aria-label={t(
+          hasActiveGoal
+            ? "chat.widget.aria.openChatWithActiveGoalRunning"
+            : "chat.widget.aria.openChat",
+        )}
         onClick={toggleExpanded}
         className="fixed z-50 flex h-12 w-12 items-center justify-center rounded-full border border-border bg-bg-raised text-2xl text-fg shadow-lg transition-colors hover:bg-bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
         style={{
@@ -131,6 +143,24 @@ export function ChatWidget({
         }}
       >
         <span aria-hidden="true">💬</span>
+        {/*
+          Active-goal pulse dot. Always mounted on the collapsed bubble so
+          the 200ms opacity transition can play in both directions — the
+          design rejected `unmount-on-clear` because that loses the
+          fade-out animation. Positioned further into the corner than
+          `chat-widget-promote-badge` (right-1 top-1) so both indicators
+          can coexist when a promote suggestion lands while a goal is
+          running, per the spec scenario "Pulse dot and promote badge
+          render simultaneously without overlap". `motion-reduce` variant
+          drops the transition for users who request reduced motion.
+        */}
+        <span
+          data-testid="chat-widget-active-goal-pulse"
+          aria-hidden="true"
+          className={`absolute right-0.5 top-0.5 h-[7px] w-[7px] rounded-full bg-accent transition-opacity duration-200 motion-reduce:transition-none ${
+            hasActiveGoal ? "opacity-100" : "opacity-0"
+          }`}
+        />
         {promoteSuggestion ? (
           <span
             data-testid="chat-widget-promote-badge"

@@ -78,6 +78,28 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
         <span data-tauri-drag-region data-testid="running-badge">
           <StatusPill status="running" variant="pill" />
         </span>
+        {/*
+          Cancel sits in the header right-hand action slot — NOT a
+          `<footer>` — so it never visually collides with the
+          bottom-right ChatWidget bubble. The wrapper deliberately omits
+          `data-tauri-drag-region`; otherwise Tauri's window-drag
+          handler swallows pointerdown on this region and the button
+          becomes unclickable. The neighbouring `running-badge` keeps
+          the drag attribute, so the header overall remains draggable.
+        */}
+        <span>
+          <Button
+            data-testid="cancel-button"
+            variant="danger"
+            size="sm"
+            disabled={activeRun.cancelling}
+            onClick={() => void cancelGoal(activeRun.runId)}
+          >
+            {activeRun.cancelling
+              ? t("workspace.runDetail.cancellingButton")
+              : t("workspace.runDetail.cancelButton")}
+          </Button>
+        </span>
       </header>
       <div
         data-testid="run-detail-metadata"
@@ -97,18 +119,6 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
           ),
         )}
       </div>
-      <footer className="flex justify-end border-t border-border px-3 py-2">
-        <Button
-          data-testid="cancel-button"
-          variant="danger"
-          disabled={activeRun.cancelling}
-          onClick={() => void cancelGoal(activeRun.runId)}
-        >
-          {activeRun.cancelling
-            ? t("workspace.runDetail.cancellingButton")
-            : t("workspace.runDetail.cancelButton")}
-        </Button>
-      </footer>
     </div>
   )
 }

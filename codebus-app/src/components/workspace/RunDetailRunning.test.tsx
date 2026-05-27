@@ -174,4 +174,67 @@ describe("RunDetailRunning", () => {
     const { container } = render(<RunDetailRunning onBack={() => {}} />)
     expect(container).toBeEmptyDOMElement()
   })
+
+  // ----- Cancel button moved into header right action slot -----
+
+  it("RunDetailRunning_cancel_button_lives_inside_header_after_running_badge", () => {
+    seedActiveRun({
+      activeRun: {
+        runId: "r-header",
+        goal: "place cancel in header",
+        startedAt: "2026-05-27T10:00:00Z",
+        events: [],
+        cancelling: false,
+      },
+      runs: [],
+    })
+    render(<RunDetailRunning onBack={() => {}} />)
+    const cancel = screen.getByTestId("cancel-button")
+    const badge = screen.getByTestId("running-badge")
+    const header = cancel.closest("header")
+    expect(header).not.toBeNull()
+    expect(header).toContainElement(badge)
+    // Document-order: badge SHALL precede the cancel button.
+    expect(
+      badge.compareDocumentPosition(cancel) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0)
+  })
+
+  it("RunDetailRunning_does_not_render_footer_wrapping_cancel_button", () => {
+    seedActiveRun({
+      activeRun: {
+        runId: "r-no-footer",
+        goal: "footer must be gone",
+        startedAt: "2026-05-27T10:00:00Z",
+        events: [],
+        cancelling: false,
+      },
+      runs: [],
+    })
+    render(<RunDetailRunning onBack={() => {}} />)
+    const cancel = screen.getByTestId("cancel-button")
+    expect(cancel.closest("footer")).toBeNull()
+  })
+
+  it("RunDetailRunning_cancel_button_wrapper_does_not_carry_drag_region", () => {
+    seedActiveRun({
+      activeRun: {
+        runId: "r-no-drag",
+        goal: "wrapper must not be drag region",
+        startedAt: "2026-05-27T10:00:00Z",
+        events: [],
+        cancelling: false,
+      },
+      runs: [],
+    })
+    render(<RunDetailRunning onBack={() => {}} />)
+    const cancel = screen.getByTestId("cancel-button")
+    const wrapper = cancel.parentElement
+    expect(wrapper).not.toBeNull()
+    // The button's immediate wrapper MUST NOT itself carry
+    // data-tauri-drag-region — otherwise the drag handler swallows
+    // mousedown and the cancel click never fires.
+    expect(wrapper?.hasAttribute("data-tauri-drag-region")).toBe(false)
+  })
 })
