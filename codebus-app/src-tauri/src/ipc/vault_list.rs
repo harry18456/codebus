@@ -2,11 +2,16 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
-use codebus_core::vault::init::{InitError, InitOptions, run_init};
+use codebus_core::vault::init::{InitError, InitEvent, InitOptions, run_init};
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use super::IpcResult;
+use super::vault_progress::{
+    VAULT_INIT_PROGRESS_EVENT, VaultInitProgress, init_event_label, init_event_to_phase,
+};
 use crate::error::AppError;
 use crate::state::app_state::{
     AppState, StoredVaultEntry, app_state_path, load_app_state, save_app_state,
@@ -167,12 +172,47 @@ fn path_string(p: &Path) -> String {
 }
 
 /// Internal `add_vault` implementation parameterized by the app-state file
-/// location. Tests drive this directly with a tempdir-scoped state path so
-/// the per-process `dirs::home_dir()` is never touched.
-pub(crate) fn add_vault_at(
+/// location and a `tauri::AppHandle`. The async + `AppHandle` shape is the
+/// public contract (per spec "Vault Init Progress Event"); the body
+/// delegates to [`add_vault_at_with_progress`] with an emit-bearing closure.
+///
+/// Tests SHOULD NOT call this function directly — they call the sync
+/// inner [`add_vault_at_with_progress`] which avoids dragging the
+/// Tauri runtime into the unit-test binary (Windows WebView2 loader is
+/// not present in `cargo test` deps directory). The async wrapper
+/// is exercised end-to-end via CDP smoke (see
+/// `codebus-app/scripts/.loading-overlay-smoke/`).
+pub(crate) async fn add_vault_at<R: Runtime>(
+    app: &AppHandle<R>,
     state_path: &Path,
     vault_path: &Path,
     options: &AddVaultOptions,
+) -> IpcResult<VaultEntry> {
+    let started = Instant::now();
+    add_vault_at_with_progress(state_path, vault_path, options, |event| {
+        let payload = VaultInitProgress {
+            phase: init_event_to_phase(&event),
+            init_event_kind: init_event_label(&event).to_string(),
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        };
+        if let Err(e) = app.emit(VAULT_INIT_PROGRESS_EVENT, &payload) {
+            eprintln!("vault-init-progress emit failed: {e}");
+        }
+    })
+}
+
+/// Sync core for `add_vault_at`. Tests drive this directly with a
+/// tempdir-scoped state path so the per-process `dirs::home_dir()` is
+/// never touched. The `on_event` callback is invoked once per
+/// `InitEvent` emitted by `run_init`; production wires it to the
+/// `vault-init-progress` Tauri event via [`add_vault_at`], tests pass
+/// `|_| {}` (no init) or a `Vec`-recording closure to assert the event
+/// stream.
+pub(crate) fn add_vault_at_with_progress(
+    state_path: &Path,
+    vault_path: &Path,
+    options: &AddVaultOptions,
+    mut on_event: impl FnMut(InitEvent<'_>),
 ) -> IpcResult<VaultEntry> {
     if !vault_path.is_dir() {
         return Err(AppError::VaultNotFound {
@@ -204,7 +244,7 @@ pub(crate) fn add_vault_at(
             });
         }
         (AddVaultMode::Detect, false) => {
-            run_init(&canonical, &init_opts(), |_| {}).map_err(map_init_error)?;
+            run_init(&canonical, &init_opts(), &mut on_event).map_err(map_init_error)?;
         }
         (AddVaultMode::JustBind, false) => {
             return Err(AppError::Invalid {
@@ -213,7 +253,9 @@ pub(crate) fn add_vault_at(
             });
         }
         (AddVaultMode::JustBind, true) => {
-            // Add to list without touching vault contents.
+            // Add to list without touching vault contents. Just-bind MUST NOT
+            // emit `vault-init-progress` — per spec scenario
+            // "Just-bind mode emits no progress events".
         }
         (AddVaultMode::ReInit, false) => {
             return Err(AppError::Invalid {
@@ -223,7 +265,7 @@ pub(crate) fn add_vault_at(
         }
         (AddVaultMode::ReInit, true) => {
             fs::remove_dir_all(canonical.join(".codebus"))?;
-            run_init(&canonical, &init_opts(), |_| {}).map_err(map_init_error)?;
+            run_init(&canonical, &init_opts(), &mut on_event).map_err(map_init_error)?;
         }
     }
 
@@ -259,12 +301,16 @@ fn init_opts() -> InitOptions {
 }
 
 #[tauri::command]
-pub async fn add_vault(path: String, options: AddVaultOptions) -> IpcResult<VaultEntry> {
+pub async fn add_vault(
+    app: AppHandle,
+    path: String,
+    options: AddVaultOptions,
+) -> IpcResult<VaultEntry> {
     let state_path = app_state_path().ok_or_else(|| AppError::Internal {
         message: "home directory unavailable".into(),
     })?;
     let vault_path = PathBuf::from(&path);
-    add_vault_at(&state_path, &vault_path, &options)
+    add_vault_at(&app, &state_path, &vault_path, &options).await
 }
 
 /// Internal `remove_vault` impl parameterized by the state file path.
@@ -351,6 +397,20 @@ mod tests {
         r
     }
 
+    /// Test helper: invoke the sync core `add_vault_at_with_progress`
+    /// with a noop callback, matching the production behavior except
+    /// without emitting a Tauri event. The async wrapper `add_vault_at`
+    /// is exercised end-to-end via CDP smoke. See design.md "add_vault_at
+    /// sync to async + accept AppHandle" for the rationale of the
+    /// inner-vs-wrapper split.
+    fn run_add_vault_at_in_test(
+        state_path: &Path,
+        vault_path: &Path,
+        opts: &AddVaultOptions,
+    ) -> IpcResult<VaultEntry> {
+        add_vault_at_with_progress(state_path, vault_path, opts, |_| {})
+    }
+
     #[test]
     fn add_vault_detect_on_fresh_dir_runs_init_and_appends() {
         let home = TempDir::new().unwrap();
@@ -361,7 +421,8 @@ mod tests {
         };
 
         let entry = with_codebus_home(home.path(), || {
-            add_vault_at(&state_path, repo.path(), &opts).expect("fresh init should succeed")
+            run_add_vault_at_in_test(&state_path, repo.path(), &opts)
+                .expect("fresh init should succeed")
         });
 
         assert!(!entry.is_missing);
@@ -385,7 +446,8 @@ mod tests {
         };
 
         let err = with_codebus_home(home.path(), || {
-            add_vault_at(&state_path, repo.path(), &opts).expect_err("must require mode")
+            run_add_vault_at_in_test(&state_path, repo.path(), &opts)
+                .expect_err("must require mode")
         });
 
         match err {
@@ -412,7 +474,8 @@ mod tests {
         };
 
         let entry = with_codebus_home(home.path(), || {
-            add_vault_at(&state_path, repo.path(), &opts).expect("just_bind should succeed")
+            run_add_vault_at_in_test(&state_path, repo.path(), &opts)
+                .expect("just_bind should succeed")
         });
 
         assert!(!entry.is_missing);
@@ -432,7 +495,8 @@ mod tests {
         let missing = home.path().join("does-not-exist");
 
         let err = with_codebus_home(home.path(), || {
-            add_vault_at(&state_path, &missing, &opts).expect_err("must reject missing path")
+            run_add_vault_at_in_test(&state_path, &missing, &opts)
+                .expect_err("must reject missing path")
         });
         assert!(matches!(err, AppError::VaultNotFound { .. }));
     }
@@ -447,9 +511,9 @@ mod tests {
         };
 
         with_codebus_home(home.path(), || {
-            add_vault_at(&state_path, repo.path(), &opts).expect("first add ok");
-            let err =
-                add_vault_at(&state_path, repo.path(), &opts).expect_err("second add must fail");
+            run_add_vault_at_in_test(&state_path, repo.path(), &opts).expect("first add ok");
+            let err = run_add_vault_at_in_test(&state_path, repo.path(), &opts)
+                .expect_err("second add must fail");
             assert!(matches!(err, AppError::VaultAlreadyExists { .. }));
         });
     }
@@ -466,7 +530,7 @@ mod tests {
             mode: AddVaultMode::JustBind,
         };
         with_codebus_home(home.path(), || {
-            add_vault_at(&state_path, repo.path(), &opts).expect("bind ok");
+            run_add_vault_at_in_test(&state_path, repo.path(), &opts).expect("bind ok");
 
             remove_vault_at(&state_path, repo.path()).expect("remove ok");
 
@@ -477,6 +541,82 @@ mod tests {
                 ".codebus/ MUST survive remove_vault per spec 'Remove unbinds without deletion'"
             );
         });
+    }
+
+    /// Spec scenario "Detect-mode add emits one event per InitEvent":
+    /// drive `add_vault_at_with_progress` with a recording closure and
+    /// assert the captured phase sequence is non-decreasing (1..=6) and
+    /// covers at least Start and Finished. Phase/label correctness for
+    /// each individual variant is covered by `vault_progress::tests`.
+    #[test]
+    fn detect_emits_progress_events() {
+        let home = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        let state_path = home.path().join(".codebus").join("app-state.json");
+        let opts = AddVaultOptions {
+            mode: AddVaultMode::Detect,
+        };
+
+        let mut phases: Vec<u8> = Vec::new();
+        let mut labels: Vec<String> = Vec::new();
+        with_codebus_home(home.path(), || {
+            add_vault_at_with_progress(&state_path, repo.path(), &opts, |event| {
+                phases.push(init_event_to_phase(&event));
+                labels.push(init_event_label(&event).to_string());
+            })
+            .expect("init ok");
+        });
+
+        assert!(repo.path().join(".codebus").is_dir());
+        assert!(
+            !phases.is_empty(),
+            "detect-mode add MUST emit at least one InitEvent"
+        );
+        assert!(
+            phases.iter().all(|&p| (1..=6).contains(&p)),
+            "all emitted phases MUST be 1..=6, got {phases:?}"
+        );
+        // Phase sequence MUST be non-decreasing (run_init emits in order).
+        for w in phases.windows(2) {
+            assert!(
+                w[0] <= w[1],
+                "phase regression at {w:?} in full sequence {phases:?}"
+            );
+        }
+        assert!(
+            labels.iter().any(|l| l == "Start"),
+            "expected a Start event, got {labels:?}"
+        );
+        assert!(
+            labels.iter().any(|l| l == "Finished"),
+            "expected a Finished event, got {labels:?}"
+        );
+    }
+
+    /// Spec scenario "Just-bind mode emits no progress events": the
+    /// just-bind branch MUST NOT invoke `run_init` and therefore MUST
+    /// produce zero callback invocations.
+    #[test]
+    fn just_bind_emits_no_progress_events() {
+        let home = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        std::fs::create_dir_all(repo.path().join(".codebus")).unwrap();
+        let state_path = home.path().join(".codebus").join("app-state.json");
+        let opts = AddVaultOptions {
+            mode: AddVaultMode::JustBind,
+        };
+
+        let mut event_count = 0;
+        with_codebus_home(home.path(), || {
+            add_vault_at_with_progress(&state_path, repo.path(), &opts, |_| {
+                event_count += 1;
+            })
+            .expect("just_bind ok");
+        });
+        assert_eq!(
+            event_count, 0,
+            "just_bind MUST NOT emit vault-init-progress events"
+        );
     }
 
     #[test]

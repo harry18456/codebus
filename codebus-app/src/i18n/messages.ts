@@ -68,6 +68,16 @@ const en = {
   "loading.title": "Boarding the bus…",
   "loading.subtitle":
     "Setting up vault: copying source, scanning PII, writing wiki layout, initializing nested git. Larger repos take 3–15 seconds.",
+  "loading.phase.1.title": "Preparing garage",
+  "loading.phase.2.title": "Copying source · scrubbing secrets",
+  "loading.phase.3.title": "Setting up isolated git",
+  "loading.phase.4.title": "Building wiki structure",
+  "loading.phase.5.title": "Registering with Obsidian",
+  "loading.phase.6.title": "Final checks",
+  "loading.error.title": "Got stuck",
+  "loading.error.retry": "Retry",
+  "loading.slow.hint":
+    "(This step is taking longer than usual — hang in there…)",
 
   // ---- Detection dialog (existing .codebus/) ----
   "detection.title": "This folder already has a codebus vault",
@@ -615,6 +625,15 @@ const zh: Record<keyof typeof en, string> = {
   "loading.title": "公車正在發車…",
   "loading.subtitle":
     "建立 vault 中：複製 source、掃 PII、寫 wiki 結構、建巢狀 git。大型 repo 約 3–15 秒。",
+  "loading.phase.1.title": "準備車庫",
+  "loading.phase.2.title": "複製源碼並掃過敏感資料",
+  "loading.phase.3.title": "建立獨立 git 倉庫",
+  "loading.phase.4.title": "搭起 wiki 結構",
+  "loading.phase.5.title": "註冊到 Obsidian",
+  "loading.phase.6.title": "上路前最後檢查",
+  "loading.error.title": "車子卡住了",
+  "loading.error.retry": "再試一次",
+  "loading.slow.hint": "（這步比平常久一點，再等等…）",
 
   // ---- Detection dialog ----
   "detection.title": "這個資料夾已經有 codebus vault",

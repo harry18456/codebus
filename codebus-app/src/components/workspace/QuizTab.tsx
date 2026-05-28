@@ -24,6 +24,7 @@ import type { ReactNode } from "react"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 
 import { Button } from "@/components/ui/button"
+import { PhaseDots } from "@/components/PhaseDots"
 import { TabContentHeader } from "@/components/ui/TabContentHeader"
 import { useSettingsStore } from "@/store/settings"
 import { useT } from "@/i18n/useT"
@@ -102,28 +103,21 @@ function bucketPagesByPath(pages: string[]): ScopeBuckets {
   return out
 }
 
-/** Wizard chrome step dots (Step 1/4 .. Step 4/4). */
+/**
+ * Wizard chrome step dots (Step 1/4 .. Step 4/4). Thin alias over the
+ * shared `PhaseDots` component (which also drives LoadingOverlay's
+ * 6-dot vault init indicator). Keeping the `quiz-wizard-step-dots`
+ * testid + `data-current-step` attribute lets existing QuizTab tests
+ * continue to pass unchanged.
+ */
 function StepDots({ current }: { current: 1 | 2 | 3 | 4 }) {
   return (
-    <span
-      data-testid="quiz-wizard-step-dots"
-      data-current-step={current}
-      className="flex items-center gap-1.5"
-    >
-      {[1, 2, 3, 4].map((n) => (
-        <span
-          key={n}
-          className={
-            "inline-block h-[7px] w-[7px] rounded-full " +
-            (n < current
-              ? "bg-fg-tertiary"
-              : n === current
-                ? "bg-accent ring-2 ring-accent-tint"
-                : "border border-border-strong")
-          }
-        />
-      ))}
-    </span>
+    <PhaseDots
+      total={4}
+      current={current}
+      testId="quiz-wizard-step-dots"
+      currentAttrName="current-step"
+    />
   )
 }
 

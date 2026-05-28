@@ -576,7 +576,10 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 
 ### 議題
 
-#### LOI-1 · LoadingOverlay live progress · 6 phase [design v1.1 spec lock]
+#### LOI-1 · LoadingOverlay live progress · 6 phase [design v1.1 spec lock] [archived 2026-05-28]
+
+> **Resolved** via change `2026-05-28-loading-overlay-live-progress`. The 6-phase live progress, step-through ≥300 ms pump, fallback render, failure mode (amber-warm + retry), and 20 s slow-hint all shipped. Smoke captures + phase timing in `codebus-app/scripts/.loading-overlay-smoke/`. AUDIT alignment point 1 (phase 1 / phase 6 < 500 ms) was auto-resolved by step-through pump — every phase pinned to ≥300 ms. LO-1 (副標把實作細節曝光) auto-closes per "若 LOI-1 做了、LO-1 自動消失". LO-4 wall-clock wording remains a trivial follow-up.
+
 
 - **動機**：取代 v1 的 4 行靜態副標、隨 InitEvent 換動態副標
 - **Backend 現況**：`codebus-core/src/vault/init.rs run_init` 已 emit 20+ 個 `InitEvent`；但 `codebus-app/src-tauri/src/ipc/vault_list.rs:207` 把 `on_event` 設成 noop `|_| {}`
@@ -609,12 +612,11 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
   - IPC contract：新增 `vault-init-progress` event 規格
 - **spectra change**：`loading-overlay-live-progress`
 
-#### LO-1 · 副標把實作細節曝光 [open]
+#### LO-1 · 副標把實作細節曝光 [auto-resolved 2026-05-28 via LOI-1]
 
 - **問題**：副標「建立 vault 中：複製 source、掃 PII、寫 wiki 結構、建巢狀 git」對沒做過 security / 不懂 git internals 的 user 是黑話
 - **特別敏感**：「掃 PII」可能誤導 user 以為「你掃了我的什麼資料」；實際是掃**源碼**裡是否有像 API key 的東西要 redact
-- **與 LOI-1 關係**：若 LOI-1 做了，這條自動消失（動態 progress 替代靜態枚舉）；若 LOI-1 不做，這條需獨立修文案
-- **狀態**：open；視 LOI-1 決議
+- **狀態**：closed —— LOI-1 ship 後 v1 靜態副標只在 phase 0 fallback 短暫露出（<200ms typical），實機已被 6-phase 動態副標完全替代
 
 #### LO-2 · 標題「公車正在發車…」文案 [open]
 
@@ -628,10 +630,10 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - **影響**：兩個 bus motion 用途不同但風格相關，應該有**動畫詞彙表**：行進中 = LoadingOverlay、待機怠速 = 04b hero、loading inline spinner = TBD（02 Goal Detail running 可能會有）
 - **狀態**：open，等審到 02 後一起決定
 
-#### LO-4 · 「3-15 秒」實測 [verify]
+#### LO-4 · 「3-15 秒」實測 [verify] [partially-resolved 2026-05-28]
 
 - **要驗**：副標承諾 3-15 秒，若實際常 ≥ 30s user 會以為 hang
-- **狀態**：實作 LOI-1 或修文案前要先測量
+- **狀態**：LOI-1 ship 後 v1 副標只在 phase 0 fallback 短暫露出，實際 wall-clock 量測見 `codebus-app/scripts/.loading-overlay-smoke/PHASE-TIMING.md`（空 target ~1.8s 總時間，6-phase 動態副標主導）。若未來 v1 fallback 副標 wording 重做，順手砍掉「3-15 秒」承諾即可。
 
 ---
 

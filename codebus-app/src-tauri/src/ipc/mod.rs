@@ -21,6 +21,7 @@ pub mod goals;
 pub mod keyring;
 pub mod quiz;
 pub mod vault_list;
+pub mod vault_progress;
 pub mod wiki;
 
 pub use chats::{cancel_chat_turn, spawn_chat_turn};

@@ -39,7 +39,6 @@ function AppShell() {
   const route = useRouteStore((s) => s.route)
   const openRoute = useRouteStore((s) => s.open)
   const addVault = useVaultsStore((s) => s.addVault)
-  const initInProgress = useVaultsStore((s) => s.initInProgress)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pendingDetection, setPendingDetection] = useState<string | null>(null)
@@ -126,7 +125,8 @@ function AppShell() {
       <WindowControls />
       <Toast />
       {isDragOver && <DropTargetOverlay />}
-      {initInProgress && <LoadingOverlay />}
+      <LoadingOverlay />
+
       <DetectionDialog
         open={pendingDetection !== null}
         path={pendingDetection ?? ""}
