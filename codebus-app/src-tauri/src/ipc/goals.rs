@@ -210,11 +210,14 @@ where
         + Send
         + 'static,
 {
-    // Spec: app-workspace § One Active Goal Run At A Time — backend layer.
-    // Chat turns (keyed `chat-<slug>`) SHALL NOT block goal spawn — chat
-    // is read-only and cannot conflict with goal's writes, so the two
-    // can coexist in `active_runs`. Only another goal-mode entry blocks.
-    if active_runs.has_goal_run() {
+    // Spec: app-workspace § One Active Goal Run At A Time + § Cross-Vault
+    // Goal Spawn Permitted — backend layer. Chat turns (keyed `chat-<slug>`)
+    // SHALL NOT block goal spawn — chat is read-only and cannot conflict
+    // with goal's writes, so the two can coexist in `active_runs`. Other
+    // vaults' goal entries SHALL NOT block either — only another goal-mode
+    // entry under the SAME vault blocks.
+    let vault_str = vault_path.to_string_lossy();
+    if active_runs.has_goal_run_for_vault(&vault_str) {
         return Err(AppError::Invalid {
             field: "active_runs".into(),
             message: "another goal run is already active".into(),
@@ -228,7 +231,7 @@ where
     let run_id = started_at.replace(':', "-");
 
     let cancel = Arc::new(AtomicBool::new(false));
-    active_runs.insert(run_id.clone(), cancel.clone());
+    active_runs.insert(&vault_str, run_id.clone(), cancel.clone());
 
     let active_runs_thread = active_runs.clone();
     let run_id_thread = run_id.clone();
@@ -303,24 +306,29 @@ pub(crate) fn cancel_goal_impl(active_runs: &ActiveRuns, run_id: &str) -> Result
 /// `<vault>/.codebus/log/{runs-*.jsonl, events-*.jsonl}`.
 #[tauri::command]
 pub async fn list_runs(
+    runtime: State<'_, AppRuntimeState>,
     vault_path: String,
     mode_filter: ModeFilter,
 ) -> IpcResult<Vec<RunLogSummary>> {
     let log_dir = Path::new(&vault_path).join(".codebus").join("log");
-    list_runs_impl(&log_dir, mode_filter)
+    list_runs_impl(&log_dir, mode_filter, &runtime.active_runs)
 }
 
 /// Implementation-side `list_runs`. Scans `log_dir` for both
 /// `runs-*.jsonl` (per-run summaries) and `events-*.jsonl` (per-event
 /// timelines). Real rows are projected as `RunLogSummary`; orphan
-/// events files (no matching `RunLog` row) are synthesized as virtual
-/// `outcome="interrupted"` entries (per design
-/// `Interrupted run 偵測 — events 有 / RunLog 無`).
+/// events files (no matching `RunLog` row) are projected as either
+/// `outcome="running"` (when the slug is currently in `active_runs`,
+/// per Decision 6 of `vault-switch-goal-regression`) or
+/// `outcome="interrupted"` (the legacy synthesis, used when the events
+/// file is genuinely abandoned — process exited mid-run, no live
+/// `active_runs` entry to claim it).
 ///
 /// Sorted by `started_at` descending so the freshest run appears first.
 pub(crate) fn list_runs_impl(
     log_dir: &Path,
     mode_filter: ModeFilter,
+    active_runs: &ActiveRuns,
 ) -> Result<Vec<RunLogSummary>, AppError> {
     if !log_dir.exists() {
         return Ok(Vec::new());
@@ -390,6 +398,14 @@ pub(crate) fn list_runs_impl(
             None => continue,
         };
         let started_at = unslug_started_at(slug);
+        // Decision 6 of vault-switch-goal-regression: a slug currently
+        // present in `active_runs` is an IN-FLIGHT goal whose RunLog
+        // has not been written yet — surface it as `running` so the
+        // GUI matches backend reality and users don't think the goal
+        // was interrupted just because they navigated away briefly.
+        // Only when the slug is truly orphaned (no live entry) do we
+        // synthesize the legacy `interrupted` projection.
+        let is_live = active_runs.get(slug).is_some();
         summaries.push(RunLogSummary {
             run_id: slug.clone(),
             mode: "goal".into(),
@@ -402,9 +418,13 @@ pub(crate) fn list_runs_impl(
             wiki_changed: false,
             lint_error_count: 0,
             lint_warn_count: 0,
-            outcome: "interrupted".into(),
+            outcome: if is_live { "running" } else { "interrupted" }.into(),
             session_id: None,
-            interrupt_reason: Some(InterruptReason::AppClose),
+            interrupt_reason: if is_live {
+                None
+            } else {
+                Some(InterruptReason::AppClose)
+            },
         });
     }
 
@@ -482,16 +502,21 @@ fn first_goal_text_in_events(events_file: &Path) -> Option<String> {
 // ---- get_run_detail -------------------------------------------------------
 
 #[tauri::command]
-pub async fn get_run_detail(vault_path: String, run_id: String) -> IpcResult<RunDetail> {
+pub async fn get_run_detail(
+    runtime: State<'_, AppRuntimeState>,
+    vault_path: String,
+    run_id: String,
+) -> IpcResult<RunDetail> {
     let log_dir = Path::new(&vault_path).join(".codebus").join("log");
-    get_run_detail_impl(&log_dir, &run_id)
+    get_run_detail_impl(&log_dir, &run_id, &runtime.active_runs)
 }
 
 pub(crate) fn get_run_detail_impl(
     log_dir: &Path,
     run_id: &str,
+    active_runs: &ActiveRuns,
 ) -> Result<RunDetail, AppError> {
-    let summaries = list_runs_impl(log_dir, ModeFilter::All)?;
+    let summaries = list_runs_impl(log_dir, ModeFilter::All, active_runs)?;
     let summary = summaries
         .into_iter()
         .find(|s| s.run_id == run_id)
@@ -717,9 +742,12 @@ mod tests {
     fn spawn_goal_rejects_when_another_run_is_active() {
         let runtime = AppRuntimeState::new();
         let active_runs = runtime.active_runs.clone();
-        active_runs.insert("existing".into(), Arc::new(AtomicBool::new(false)));
-
         let temp = tempfile::TempDir::new().unwrap();
+        let vault_str = temp.path().to_string_lossy().into_owned();
+        // existing goal entry under THE SAME vault as the upcoming spawn,
+        // so the per-vault guard SHALL still reject the second spawn.
+        active_runs.insert(&vault_str, "existing".into(), Arc::new(AtomicBool::new(false)));
+
         let err = spawn_goal_with_runner(
             active_runs.clone(),
             temp.path().to_path_buf(),
@@ -749,13 +777,16 @@ mod tests {
     fn spawn_goal_succeeds_with_concurrent_chat_turn() {
         let runtime = AppRuntimeState::new();
         let active_runs = runtime.active_runs.clone();
-        // Simulate an active chat turn already running.
+        let temp = tempfile::TempDir::new().unwrap();
+        let vault_str = temp.path().to_string_lossy().into_owned();
+        // Simulate an active chat turn already running under the same vault
+        // — per-vault scope still excludes chat- prefix from goal counting.
         active_runs.insert(
+            &vault_str,
             "chat-2026-05-14T10-20-30Z".into(),
             Arc::new(AtomicBool::new(false)),
         );
 
-        let temp = tempfile::TempDir::new().unwrap();
         let run_id = spawn_goal_with_runner(
             active_runs.clone(),
             temp.path().to_path_buf(),
@@ -768,7 +799,10 @@ mod tests {
         .expect("goal spawn MUST succeed when only a chat turn is active");
 
         // Both entries SHALL coexist in active_runs.
-        assert!(active_runs.has_chat_turn(), "chat entry preserved");
+        assert!(
+            active_runs.has_chat_turn_for_vault(&vault_str),
+            "chat entry preserved"
+        );
         // Wait for the runner thread to complete so the goal entry gets
         // cleaned up; meanwhile the chat entry stays.
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -779,7 +813,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(
-            active_runs.has_chat_turn(),
+            active_runs.has_chat_turn_for_vault(&vault_str),
             "chat entry SHALL persist after goal completes"
         );
     }
@@ -797,12 +831,103 @@ mod tests {
     fn cancel_goal_flips_existing_flag() {
         let runtime = AppRuntimeState::new();
         let flag = Arc::new(AtomicBool::new(false));
-        runtime.active_runs.insert("run-x".into(), flag.clone());
+        runtime
+            .active_runs
+            .insert("/vault/test", "run-x".into(), flag.clone());
 
         cancel_goal_impl(&runtime.active_runs, "run-x").expect("ok");
         assert!(
             flag.load(std::sync::atomic::Ordering::Relaxed),
             "cancel flag must be set after cancel_goal"
+        );
+    }
+
+    /// Spec: app-workspace § Cross-Vault Goal Spawn Permitted scenario 1.
+    /// A goal active under vault A SHALL NOT block spawn_goal under
+    /// vault B; both entries SHALL coexist in active_runs.
+    #[test]
+    fn spawn_goal_cross_vault_allowed() {
+        let runtime = AppRuntimeState::new();
+        let active_runs = runtime.active_runs.clone();
+
+        // Pre-seed a goal-mode entry under vault A. We do NOT spin up a
+        // real spawn thread for vault A — directly inserting captures the
+        // "goal active under vault A" state without needing concurrent
+        // runner threads. The pre-spawn guard for vault B reads the same
+        // map so this is a valid representation of the spec scenario.
+        let vault_a = "/vault/a";
+        active_runs.insert(
+            vault_a,
+            "2026-05-28T10-00-00Z".into(),
+            Arc::new(AtomicBool::new(false)),
+        );
+        assert!(
+            active_runs.has_goal_run_for_vault(vault_a),
+            "vault A precondition: has goal active"
+        );
+
+        // Spawn against vault B — SHALL succeed despite vault A entry.
+        let temp_b = tempfile::TempDir::new().unwrap();
+        let vault_b_str = temp_b.path().to_string_lossy().into_owned();
+        assert_ne!(
+            vault_a, vault_b_str,
+            "test precondition: vault A and vault B paths differ"
+        );
+
+        let (start_tx, start_rx) = mpsc::sync_channel::<()>(0);
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(0);
+
+        let runner = move |_repo: &Path,
+                           _opts: GoalOptions,
+                           _on_event: Box<dyn FnMut(VerbEvent) + Send>,
+                           _cancel: Option<Arc<AtomicBool>>| {
+            start_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(fake_report())
+        };
+
+        let run_id_b = spawn_goal_with_runner(
+            active_runs.clone(),
+            temp_b.path().to_path_buf(),
+            "vault B goal".into(),
+            |_p| {},
+            |_terminal| {},
+            false,
+            runner,
+        )
+        .expect("spawn_goal under vault B MUST succeed when only vault A has an active goal");
+
+        start_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("runner SHALL reach start signal");
+
+        // Both vault A and vault B goal entries SHALL coexist.
+        assert!(
+            active_runs.has_goal_run_for_vault(vault_a),
+            "vault A goal entry SHALL persist"
+        );
+        assert!(
+            active_runs.has_goal_run_for_vault(&vault_b_str),
+            "vault B goal entry SHALL be present after spawn"
+        );
+        assert!(
+            active_runs.get(&run_id_b).is_some(),
+            "vault B run_id SHALL be retrievable from active_runs"
+        );
+
+        // Release runner so the test cleans up.
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while active_runs.get(&run_id_b).is_some() {
+            if Instant::now() > deadline {
+                panic!("vault B goal entry not removed after runner completed");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Vault A entry SHALL still be present after vault B's runner ends.
+        assert!(
+            active_runs.has_goal_run_for_vault(vault_a),
+            "vault A entry SHALL outlive vault B's runner termination"
         );
     }
 
@@ -847,11 +972,11 @@ mod tests {
             ],
         );
 
-        let goal_only = list_runs_impl(&log_dir, ModeFilter::Goal).unwrap();
+        let goal_only = list_runs_impl(&log_dir, ModeFilter::Goal, &ActiveRuns::new()).unwrap();
         assert_eq!(goal_only.len(), 3, "expected 3 goal rows: {goal_only:?}");
         assert!(goal_only.iter().all(|s| s.mode == "goal"));
 
-        let all = list_runs_impl(&log_dir, ModeFilter::All).unwrap();
+        let all = list_runs_impl(&log_dir, ModeFilter::All, &ActiveRuns::new()).unwrap();
         assert_eq!(all.len(), 6, "All filter should return 6 rows");
         // Sort descending check
         let starts: Vec<&str> = all.iter().map(|s| s.started_at.as_str()).collect();
@@ -881,7 +1006,7 @@ mod tests {
             ],
         );
 
-        let entries = list_runs_impl(&log_dir, ModeFilter::Goal).unwrap();
+        let entries = list_runs_impl(&log_dir, ModeFilter::Goal, &ActiveRuns::new()).unwrap();
         let virt = entries
             .iter()
             .find(|s| s.outcome == "interrupted")
@@ -903,7 +1028,7 @@ mod tests {
                 "describe auth flow",
             )],
         );
-        let entries = list_runs_impl(&log_dir, ModeFilter::Goal).unwrap();
+        let entries = list_runs_impl(&log_dir, ModeFilter::Goal, &ActiveRuns::new()).unwrap();
         let same_slug = entries
             .iter()
             .find(|s| s.run_id == "2026-05-13T03-00-00Z")
@@ -916,6 +1041,73 @@ mod tests {
             !entries.iter().any(|s| s.outcome == "interrupted"),
             "no interrupted entry should remain once RunLog row exists"
         );
+    }
+
+    /// vault-switch-goal-regression Decision 6: an orphan events file
+    /// (no RunLog row yet) whose RunId is currently present in
+    /// `active_runs` SHALL surface as `outcome="running"` not
+    /// `"interrupted"`. This is the UI-lie fix — frontend `refreshRuns`
+    /// after vault re-open MUST see the goal as still alive so the New
+    /// Goal modal's Run button stays correctly enabled / disabled.
+    #[test]
+    fn list_runs_marks_in_flight_goal_as_running_when_active_runs_has_it() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let log_dir = tmp.path().to_path_buf();
+        let slug = "2026-05-28T07-39-26Z";
+
+        // Mimic an in-flight goal: events file has a Goal banner but no
+        // RunLog row has been written yet.
+        write_events_jsonl(
+            &log_dir,
+            slug,
+            &[
+                VerbEvent::Banner(VerbBanner::Start {
+                    repo_path: PathBuf::from("/some/repo"),
+                }),
+                VerbEvent::Banner(VerbBanner::Goal {
+                    goal_text: "smoke probe goal".into(),
+                }),
+            ],
+        );
+
+        // Without an active_runs entry: legacy synthesis kicks in.
+        let entries_orphan = list_runs_impl(&log_dir, ModeFilter::Goal, &ActiveRuns::new()).unwrap();
+        let orphan = entries_orphan
+            .iter()
+            .find(|s| s.run_id == slug)
+            .expect("orphan events file SHALL still synthesize an entry");
+        assert_eq!(
+            orphan.outcome, "interrupted",
+            "no active_runs entry → legacy `interrupted` synthesis"
+        );
+        assert_eq!(
+            orphan.interrupt_reason,
+            Some(InterruptReason::AppClose),
+            "interrupted synthesis SHALL preserve AppClose reason"
+        );
+
+        // With matching active_runs entry: Decision 6 kicks in.
+        let active = ActiveRuns::new();
+        active.insert(
+            "/some/repo",
+            slug.into(),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let entries_live = list_runs_impl(&log_dir, ModeFilter::Goal, &active).unwrap();
+        let live = entries_live
+            .iter()
+            .find(|s| s.run_id == slug)
+            .expect("in-flight goal SHALL still appear in list");
+        assert_eq!(
+            live.outcome, "running",
+            "active_runs has the slug → outcome SHALL be `running`, not `interrupted`"
+        );
+        assert!(
+            live.interrupt_reason.is_none(),
+            "`running` entry SHALL NOT carry an interrupt reason"
+        );
+        assert_eq!(live.goal, "smoke probe goal");
+        assert_eq!(live.finished_at, "", "running entries have no finished_at");
     }
 
     /// Interrupted detection is goal-only: an orphan events file that does
@@ -941,7 +1133,7 @@ mod tests {
         );
 
         for filter in [ModeFilter::Goal, ModeFilter::All] {
-            let entries = list_runs_impl(&log_dir, filter).unwrap();
+            let entries = list_runs_impl(&log_dir, filter, &ActiveRuns::new()).unwrap();
             assert!(
                 !entries.iter().any(|s| s.run_id == "2026-05-13T04-00-00Z"),
                 "non-goal orphan events file MUST NOT produce any entry \
@@ -982,7 +1174,7 @@ mod tests {
             })],
         );
 
-        let entries = list_runs_impl(&log_dir, ModeFilter::Goal).unwrap();
+        let entries = list_runs_impl(&log_dir, ModeFilter::Goal, &ActiveRuns::new()).unwrap();
         let goal_entry = entries
             .iter()
             .find(|s| s.run_id == "2026-05-13T05-00-00Z")
@@ -1032,7 +1224,7 @@ mod tests {
             ],
         );
 
-        let detail = get_run_detail_impl(&log_dir, &slug).unwrap();
+        let detail = get_run_detail_impl(&log_dir, &slug, &ActiveRuns::new()).unwrap();
         assert_eq!(detail.events.len(), 5);
         assert_eq!(detail.summary.run_id, slug);
         assert_eq!(detail.summary.goal, "describe X");
@@ -1042,7 +1234,7 @@ mod tests {
     #[test]
     fn get_run_detail_returns_invalid_for_unknown_run_id() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let err = get_run_detail_impl(tmp.path(), "no-such-run").expect_err("must fail");
+        let err = get_run_detail_impl(tmp.path(), "no-such-run", &ActiveRuns::new()).expect_err("must fail");
         match err {
             AppError::Invalid { field, .. } => assert_eq!(field, "run_id"),
             other => panic!("expected Invalid{{field=run_id}}, got {other:?}"),
@@ -1065,7 +1257,7 @@ mod tests {
     fn list_runs_returns_empty_for_missing_log_dir() {
         let tmp = tempfile::TempDir::new().unwrap();
         let missing = tmp.path().join("does-not-exist");
-        let entries = list_runs_impl(&missing, ModeFilter::All).unwrap();
+        let entries = list_runs_impl(&missing, ModeFilter::All, &ActiveRuns::new()).unwrap();
         assert!(entries.is_empty());
     }
 }

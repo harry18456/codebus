@@ -170,11 +170,14 @@ where
         + Send
         + 'static,
 {
-    // quiz-double-spawn-guard: reject a second concurrent quiz spawn while
-    // any quiz run (plan or generate) is active, mirroring goal/chat. A
+    // quiz-double-spawn-guard: reject a second concurrent quiz spawn under
+    // the SAME vault while any quiz run (plan or generate) is active,
+    // mirroring goal/chat. Other vaults' quiz entries SHALL NOT block per
+    // spec § Cross-Vault Goal Spawn Permitted (symmetric for quiz). A
     // single user trigger that double-fires (e.g. StrictMode) thus produces
-    // at most one quiz run.
-    if active_runs.has_quiz_run() {
+    // at most one quiz run per vault.
+    let vault_str = vault_path.to_string_lossy();
+    if active_runs.has_quiz_run_for_vault(&vault_str) {
         return Err(AppError::Invalid {
             field: "active_runs".into(),
             message: "a quiz run is already active".into(),
@@ -182,7 +185,7 @@ where
     }
     let run_id = quiz_run_id("plan");
     let cancel = Arc::new(AtomicBool::new(false));
-    active_runs.insert(run_id.clone(), cancel.clone());
+    active_runs.insert(&vault_str, run_id.clone(), cancel.clone());
 
     let active_runs_thread = active_runs.clone();
     let run_id_thread = run_id.clone();
@@ -309,9 +312,12 @@ where
         + Send
         + 'static,
 {
-    // quiz-double-spawn-guard: reject a second concurrent quiz spawn while
-    // any quiz run (plan or generate) is active, mirroring goal/chat.
-    if active_runs.has_quiz_run() {
+    // quiz-double-spawn-guard: reject a second concurrent quiz spawn under
+    // the SAME vault while any quiz run (plan or generate) is active,
+    // mirroring goal/chat. Other vaults' quiz entries SHALL NOT block per
+    // spec § Cross-Vault Goal Spawn Permitted (symmetric for quiz).
+    let vault_str = vault_path.to_string_lossy();
+    if active_runs.has_quiz_run_for_vault(&vault_str) {
         return Err(AppError::Invalid {
             field: "active_runs".into(),
             message: "a quiz run is already active".into(),
@@ -319,7 +325,7 @@ where
     }
     let run_id = quiz_run_id("generate");
     let cancel = Arc::new(AtomicBool::new(false));
-    active_runs.insert(run_id.clone(), cancel.clone());
+    active_runs.insert(&vault_str, run_id.clone(), cancel.clone());
 
     let active_runs_thread = active_runs.clone();
     let run_id_thread = run_id.clone();
@@ -731,8 +737,10 @@ mod tests {
     #[test]
     fn generate_rejected_when_quiz_run_already_active() {
         let active = Arc::new(ActiveRuns::default());
-        // Simulate a quiz run already in flight.
+        // Simulate a quiz run already in flight under the SAME vault the
+        // upcoming spawn targets — per-vault scope SHALL still reject.
         active.insert(
+            "/tmp/v",
             "quiz-generate-2026-05-21T05-37-14.000Z".into(),
             Arc::new(AtomicBool::new(false)),
         );

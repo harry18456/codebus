@@ -19,7 +19,7 @@
 //! - Two chat turns in the same vault MUST NOT coexist; `spawn_chat_turn`
 //!   rejects with `AppError::Invalid { field: "active_runs", message: "...
 //!   another chat turn is already active in this session" }` when
-//!   `active_runs.has_chat_turn()` returns true.
+//!   `active_runs.has_chat_turn_for_vault(vault)` returns true.
 //! - A chat turn CAN coexist with an active goal run because chat is
 //!   read-only (`CHAT_TOOLSET` excludes Write/Edit at the binary layer).
 //!
@@ -156,9 +156,13 @@ where
         + Send
         + 'static,
 {
-    // Spec: app-workspace § Tauri IPC Commands for Chat Turn Lifecycle —
-    // one active chat turn per session. Goal-mode entries DO NOT block.
-    if active_runs.has_chat_turn() {
+    // Spec: app-workspace § Tauri IPC Commands for Chat Turn Lifecycle +
+    // § Cross-Vault Goal Spawn Permitted (symmetric vault scope for chat) —
+    // one active chat turn per (session, vault). Goal-mode entries under
+    // the same vault DO NOT block; chat entries under other vaults DO NOT
+    // block either.
+    let vault_str = vault_path.to_string_lossy();
+    if active_runs.has_chat_turn_for_vault(&vault_str) {
         return Err(AppError::Invalid {
             field: "active_runs".into(),
             message: "another chat turn is already active in this session".into(),
@@ -171,7 +175,7 @@ where
     let run_id = format!("chat-{}", started_at.replace(':', "-"));
 
     let cancel = Arc::new(AtomicBool::new(false));
-    active_runs.insert(run_id.clone(), cancel.clone());
+    active_runs.insert(&vault_str, run_id.clone(), cancel.clone());
 
     let active_runs_thread = active_runs.clone();
     let run_id_thread = run_id.clone();
@@ -290,8 +294,9 @@ mod tests {
             run_id.starts_with("chat-"),
             "run_id MUST be `chat-` prefixed; got {run_id}"
         );
+        let vault_str = temp.path().to_string_lossy().into_owned();
         assert!(
-            active_runs.has_chat_turn(),
+            active_runs.has_chat_turn_for_vault(&vault_str),
             "active_runs SHALL contain the chat entry while the thread runs"
         );
         // Wait for terminal emit.
@@ -301,7 +306,7 @@ mod tests {
         assert_eq!(terminal_id, run_id);
         // Active_runs cleared.
         let deadline = Instant::now() + Duration::from_secs(2);
-        while active_runs.has_chat_turn() {
+        while active_runs.has_chat_turn_for_vault(&vault_str) {
             if Instant::now() > deadline {
                 panic!("active_runs entry not removed after runner completed");
             }
@@ -314,12 +319,14 @@ mod tests {
     fn spawn_chat_turn_rejects_when_chat_already_active() {
         let runtime = AppRuntimeState::new();
         let active_runs = runtime.active_runs.clone();
+        let temp = tempfile::TempDir::new().unwrap();
+        let vault_str = temp.path().to_string_lossy().into_owned();
         active_runs.insert(
+            &vault_str,
             "chat-existing".into(),
             Arc::new(AtomicBool::new(false)),
         );
 
-        let temp = tempfile::TempDir::new().unwrap();
         let err = spawn_chat_turn_with_runner(
             active_runs.clone(),
             temp.path().to_path_buf(),
@@ -376,8 +383,9 @@ mod tests {
 
         // Wait until the runner thread reaches completion (active_runs
         // cleanup is the most reliable signal).
+        let vault_str = temp.path().to_string_lossy().into_owned();
         let deadline = Instant::now() + Duration::from_secs(2);
-        while active_runs.has_chat_turn() {
+        while active_runs.has_chat_turn_for_vault(&vault_str) {
             if Instant::now() > deadline {
                 panic!("runner thread did not finish");
             }
@@ -413,7 +421,7 @@ mod tests {
         let flag = Arc::new(AtomicBool::new(false));
         runtime
             .active_runs
-            .insert("chat-run-x".into(), flag.clone());
+            .insert("/vault/test", "chat-run-x".into(), flag.clone());
 
         cancel_chat_turn_impl(&runtime.active_runs, "chat-run-x").expect("ok");
         assert!(
@@ -427,7 +435,7 @@ mod tests {
     /// in goals.rs `spawn_goal_succeeds_with_concurrent_chat_turn`.)
     /// Here we confirm that spawning a chat turn does not register as a
     /// goal run, so the symmetric goal spawn that runs concurrently is
-    /// not rejected by `has_goal_run`.
+    /// not rejected by `has_goal_run_for_vault`.
     #[test]
     fn chat_turn_does_not_register_as_goal_run() {
         let runtime = AppRuntimeState::new();
@@ -461,18 +469,20 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("runner SHALL reach start signal");
 
-        // Critical assertion: chat is active, but `has_goal_run()` is false
-        // so a concurrent `spawn_goal` would succeed.
-        assert!(active_runs.has_chat_turn());
+        // Critical assertion: chat is active, but `has_goal_run_for_vault`
+        // is false so a concurrent `spawn_goal` under the same vault would
+        // succeed.
+        let vault_str = temp.path().to_string_lossy().into_owned();
+        assert!(active_runs.has_chat_turn_for_vault(&vault_str));
         assert!(
-            !active_runs.has_goal_run(),
+            !active_runs.has_goal_run_for_vault(&vault_str),
             "chat entry MUST NOT register as a goal run"
         );
 
         release_tx.send(()).unwrap();
         // Wait for cleanup.
         let deadline = Instant::now() + Duration::from_secs(2);
-        while active_runs.has_chat_turn() {
+        while active_runs.has_chat_turn_for_vault(&vault_str) {
             if Instant::now() > deadline {
                 panic!("chat entry not removed after runner completed");
             }

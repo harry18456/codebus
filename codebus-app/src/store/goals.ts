@@ -3,6 +3,7 @@ import { create } from "zustand"
 
 import {
   cancelGoal as cancelGoalIpc,
+  getRunDetail,
   listRuns,
   spawnGoal as spawnGoalIpc,
   type GoalStreamPayload,
@@ -164,14 +165,23 @@ export const useGoalsStore = create<GoalsState>((set, get) => {
     async refreshRuns(vaultPath) {
       set({ _currentVaultPath: vaultPath })
       const runs = await listRuns(vaultPath, { kind: "goal" })
-      // An in-flight goal has no terminal RunLog row yet, so `list_runs`
-      // synthesizes a virtual `interrupted` row for it (events present,
-      // RunLog absent). Let the optimistic `running` state from `activeRun`
-      // win over that disk-derived row so the in-progress goal keeps its
-      // 🚌 running indicator instead of flipping to ⚠ interrupted.
-      set((state) => {
-        const ar = state.activeRun
-        if (!ar) return { runs }
+      // An in-flight goal has no terminal RunLog row yet. Backend
+      // `list_runs` (per vault-switch-goal-regression Decision 6)
+      // surfaces it as `outcome: "running"` when `active_runs` still
+      // holds the entry, or `outcome: "interrupted"` when the events
+      // file is genuinely orphaned. Two consumers care:
+      //
+      // 1. Optimistic activeRun (set by spawnGoal in this session) —
+      //    its in-memory events buffer is the source of truth; the
+      //    backend "running" row would otherwise duplicate it.
+      // 2. RunDetail navigation onto a backend-reported "running" row
+      //    whose activeRun was cleared (e.g. by Workspace unmount when
+      //    the user navigated to Lobby and back). Without restoration
+      //    the detail view stays blank because it reads from
+      //    `activeRun.events` rather than re-fetching disk per render.
+      const state = get()
+      const ar = state.activeRun
+      if (ar) {
         const runningSummary: RunLogSummary = {
           run_id: ar.runId,
           mode: "goal",
@@ -185,8 +195,42 @@ export const useGoalsStore = create<GoalsState>((set, get) => {
           outcome: "running",
         }
         const withoutActive = runs.filter((r) => r.run_id !== ar.runId)
-        return { runs: [runningSummary, ...withoutActive] }
-      })
+        set({ runs: [runningSummary, ...withoutActive] })
+        return
+      }
+      // vault-switch-goal-regression Decision 8: no in-memory activeRun
+      // but backend says a goal is still running for this vault — likely
+      // we just re-mounted Workspace after a Lobby round trip. Restore
+      // activeRun from get_run_detail so RunDetail renders past events
+      // and the live stream continues appending via _onStreamEvent.
+      const backendRunning = runs.find((r) => r.outcome === "running")
+      if (!backendRunning) {
+        set({ runs })
+        return
+      }
+      try {
+        const detail = await getRunDetail(vaultPath, backendRunning.run_id)
+        set((current) => {
+          // Race guard: a fresh spawnGoal between our list_runs and the
+          // detail fetch could have set activeRun first. Don't overwrite.
+          if (current.activeRun) return { runs }
+          return {
+            runs,
+            activeRun: {
+              runId: backendRunning.run_id,
+              goal: backendRunning.goal,
+              startedAt: backendRunning.started_at,
+              events: detail.events.map((env) => env.event),
+              cancelling: false,
+            },
+          }
+        })
+      } catch {
+        // get_run_detail failed (events file gone, run terminated
+        // between calls, IPC error). Fall back to just publishing the
+        // runs list — the RunDetail view will surface its own error.
+        set({ runs })
+      }
     },
 
     reset() {

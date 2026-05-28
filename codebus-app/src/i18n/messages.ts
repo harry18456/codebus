@@ -184,6 +184,9 @@ const en = {
   "workspace.newGoalModal.run": "Run",
   "workspace.newGoalModal.blockedHint":
     "Wait for current run to finish or cancel it before starting a new one.",
+  "workspace.newGoalModal.errorAlreadyActive":
+    "Another goal is still running in the background. Cancel it or wait for it to finish before starting a new one.",
+  "workspace.newGoalModal.errorSpawnFailed": "Failed to start goal: {message}",
 
   // ---- Workspace · Status pill labels (Phase 3B three-state) ----
   "workspace.status.done": "Done",
@@ -736,6 +739,9 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.newGoalModal.run": "執行",
   "workspace.newGoalModal.blockedHint":
     "請等目前的 goal 結束或先取消，再啟動新的 goal。",
+  "workspace.newGoalModal.errorAlreadyActive":
+    "上一個 goal 還在背景跑，請先取消或等它完成再起新的。",
+  "workspace.newGoalModal.errorSpawnFailed": "無法起新 goal：{message}",
 
   // ---- Workspace · Status pill labels (Phase 3B three-state) ----
   "workspace.status.done": "完成",

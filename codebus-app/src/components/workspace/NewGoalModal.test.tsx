@@ -92,4 +92,42 @@ describe("NewGoalModal", () => {
     expect(onClose).toHaveBeenCalled()
     expect(invokeMock).not.toHaveBeenCalledWith("spawn_goal", expect.anything())
   })
+
+  // vault-switch-goal-regression Decision 7
+  it("NewGoalModal_shows_friendly_error_when_backend_rejects_already_active", async () => {
+    invokeMock.mockRejectedValueOnce({
+      kind: "invalid",
+      field: "active_runs",
+      message: "another goal run is already active",
+    })
+    const onClose = vi.fn()
+    render(
+      <NewGoalModal open vaultPath="/v" initialText="describe X" onClose={onClose} />,
+    )
+    fireEvent.click(screen.getByTestId("new-goal-run"))
+    await waitFor(() => {
+      expect(screen.getByTestId("new-goal-spawn-error")).toHaveTextContent(
+        "Another goal is still running in the background. Cancel it or wait for it to finish before starting a new one.",
+      )
+    })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("NewGoalModal_shows_generic_error_for_unknown_spawn_failure", async () => {
+    invokeMock.mockRejectedValueOnce({
+      kind: "internal",
+      message: "tauri channel hung up",
+    })
+    const onClose = vi.fn()
+    render(
+      <NewGoalModal open vaultPath="/v" initialText="describe X" onClose={onClose} />,
+    )
+    fireEvent.click(screen.getByTestId("new-goal-run"))
+    await waitFor(() => {
+      expect(screen.getByTestId("new-goal-spawn-error")).toHaveTextContent(
+        "Failed to start goal: tauri channel hung up",
+      )
+    })
+    expect(onClose).not.toHaveBeenCalled()
+  })
 })

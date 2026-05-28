@@ -320,4 +320,125 @@ describe("useGoalsStore", () => {
     expect(row?.goal).toBe("test goal")
     expect(row?.started_at).toBe("2026-05-13T14:56:21Z")
   })
+
+  // vault-switch-goal-regression Decision 8
+  it("refreshRuns restores activeRun from get_run_detail when backend reports running and frontend forgot", async () => {
+    // Simulate the user-reported flow: previously spawned a goal in this
+    // vault; navigated back to Lobby (Workspace unmount → reset cleared
+    // activeRun); now opened the vault again — refreshRuns sees backend
+    // still reports outcome="running" (per Decision 6) AND activeRun is
+    // null, so it must re-hydrate activeRun from get_run_detail so the
+    // RunDetail view can render past events instead of going blank.
+    useGoalsStore.setState({ activeRun: null, runs: [] })
+    const runningRunId = "2026-05-28T07-39-26Z"
+    invokeMock
+      // first call: list_runs returns the in-flight running row
+      .mockResolvedValueOnce([
+        {
+          run_id: runningRunId,
+          mode: "goal",
+          goal: "in-flight goal text",
+          started_at: "2026-05-28T07:39:26Z",
+          finished_at: "",
+          tokens: { input_tokens: 0, output_tokens: 0 },
+          wiki_changed: false,
+          lint_error_count: 0,
+          lint_warn_count: 0,
+          outcome: "running",
+        },
+      ])
+      // second call: get_run_detail returns the past events from disk
+      .mockResolvedValueOnce({
+        summary: {
+          run_id: runningRunId,
+          mode: "goal",
+          goal: "in-flight goal text",
+          started_at: "2026-05-28T07:39:26Z",
+          finished_at: "",
+          tokens: { input_tokens: 0, output_tokens: 0 },
+          wiki_changed: false,
+          lint_error_count: 0,
+          lint_warn_count: 0,
+          outcome: "running",
+        },
+        events: [
+          {
+            ts: "2026-05-28T07:39:26.100Z",
+            event: {
+              kind: "banner",
+              data: { kind: "start", repo_path: "/v" },
+            },
+          },
+          {
+            ts: "2026-05-28T07:39:26.200Z",
+            event: {
+              kind: "banner",
+              data: { kind: "goal", goal_text: "in-flight goal text" },
+            },
+          },
+        ],
+      })
+
+    await useGoalsStore.getState().refreshRuns("/v")
+
+    const state = useGoalsStore.getState()
+    expect(state.activeRun).not.toBeNull()
+    expect(state.activeRun?.runId).toBe(runningRunId)
+    expect(state.activeRun?.goal).toBe("in-flight goal text")
+    expect(state.activeRun?.events).toHaveLength(2)
+    expect(state.activeRun?.cancelling).toBe(false)
+    expect(state.runs).toHaveLength(1)
+  })
+
+  it("refreshRuns does NOT restore activeRun when backend has no running row", async () => {
+    useGoalsStore.setState({ activeRun: null, runs: [] })
+    invokeMock.mockResolvedValueOnce([
+      {
+        run_id: "old",
+        mode: "goal",
+        goal: "done",
+        started_at: "2026-05-28T07:00:00Z",
+        finished_at: "2026-05-28T07:00:30Z",
+        tokens: { input_tokens: 0, output_tokens: 0 },
+        wiki_changed: false,
+        lint_error_count: 0,
+        lint_warn_count: 0,
+        outcome: "succeeded",
+      },
+    ])
+
+    await useGoalsStore.getState().refreshRuns("/v")
+
+    expect(useGoalsStore.getState().activeRun).toBeNull()
+    expect(useGoalsStore.getState().runs).toHaveLength(1)
+    // get_run_detail SHALL NOT have been called when no running row.
+    expect(invokeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("refreshRuns falls back gracefully when get_run_detail rejects", async () => {
+    useGoalsStore.setState({ activeRun: null, runs: [] })
+    const runningRunId = "2026-05-28T07-39-26Z"
+    invokeMock
+      .mockResolvedValueOnce([
+        {
+          run_id: runningRunId,
+          mode: "goal",
+          goal: "in-flight",
+          started_at: "2026-05-28T07:39:26Z",
+          finished_at: "",
+          tokens: { input_tokens: 0, output_tokens: 0 },
+          wiki_changed: false,
+          lint_error_count: 0,
+          lint_warn_count: 0,
+          outcome: "running",
+        },
+      ])
+      .mockRejectedValueOnce(new Error("events file gone"))
+
+    await useGoalsStore.getState().refreshRuns("/v")
+
+    // activeRun stays null, runs list still published.
+    expect(useGoalsStore.getState().activeRun).toBeNull()
+    expect(useGoalsStore.getState().runs).toHaveLength(1)
+  })
 })
