@@ -492,7 +492,10 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<QuizReport, VerbError> {
     let paths = vault_paths(repo);
-    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    // Millis precision: matches the IPC `active_runs` key precision so
+    // the orphan-detection invariant (events-file slug ↔ active_runs
+    // key) holds. See app-workspace § Interrupted Run Detection NOTE.
+    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
 
     if !paths.root.exists() {
         return Err(VerbError::VaultMissing {

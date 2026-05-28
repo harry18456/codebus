@@ -114,6 +114,14 @@ impl AgentBackend for CodexBackend {
         // docs/2026-05-25-codex-skill-trigger-diagnose.md. On non-Windows
         // hosts the unknown-platform table is a no-op per codex's TOML
         // schema tolerance; cross-platform follow-up tracked separately.
+        // `-c web_search=disabled`: codex's hosted web_search tool is enabled
+        // by default and lets the agent fetch arbitrary URLs at runtime, which
+        // violates the codebus offline / sandbox-bounded contract. `--disable`
+        // only accepts built-in sub-feature ids (apps / image_generation /
+        // ...), so `web_search` has to be turned off via a config-key
+        // override. Verified by docs/2026-05-28-codex-hook-hard-gate-spike.md
+        // E11 (codex returns "Web search is unavailable." after the override).
+        // Image generation is intentionally left enabled.
         cmd.arg("--json")
             .arg("--ignore-user-config")
             .arg("--disable")
@@ -123,7 +131,9 @@ impl AgentBackend for CodexBackend {
             .arg("-c")
             .arg(format!("project_root_markers=['{CODEX_VAULT_MARKER}']"))
             .arg("-c")
-            .arg("windows.sandbox=unelevated");
+            .arg("windows.sandbox=unelevated")
+            .arg("-c")
+            .arg("web_search=disabled");
 
         // Session persistence: `chat` is a multi-turn conversation — each turn
         // MUST persist its session rollout so the next turn can `exec resume
@@ -410,6 +420,11 @@ mod tests {
             args.iter().any(|a| a.contains("project_root_markers")),
             "project_root_markers override present; got {args:?}"
         );
+        // Hosted web search must be turned off so the agent cannot fetch
+        // external URLs at runtime. `--disable` accepts only built-in
+        // sub-feature ids (apps / image_generation / ...), so this is a
+        // `-c` config override instead.
+        assert_pair_present(&args, "-c", "web_search=disabled");
     }
 
     /// Model and effort are passed as CLI flags (config.toml is trust-gated).

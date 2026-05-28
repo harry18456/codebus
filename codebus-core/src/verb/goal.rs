@@ -136,8 +136,13 @@ pub fn run_goal(
 ) -> Result<GoalReport, VerbError> {
     let paths = vault_paths(repo);
 
-    // Capture run started_at early — events.jsonl filename slug + RunLog row.
-    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    // Capture run started_at early — events.jsonl filename slug + RunLog
+    // row. Millisecond precision is REQUIRED so the slug matches the IPC
+    // layer's `active_runs` key (also Millis): the orphan-detection
+    // invariant in `list_runs_impl` joins events-file slug ↔ active_runs
+    // key, and a precision mismatch would mis-label a live goal as
+    // `interrupted`. See app-workspace § Interrupted Run Detection NOTE.
+    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
 
     // Step 1: vault precondition — auto-init if missing. No banners
     // yet — events sink needs vault dir to exist; we emit Start +

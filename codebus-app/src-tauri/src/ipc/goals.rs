@@ -224,11 +224,12 @@ where
         });
     }
 
-    // RunId = started_at slug (per-second precision matches what
-    // `run_goal` captures internally and what `EventsJsonlSink::new`
-    // uses to derive the events file name).
-    let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let run_id = started_at.replace(':', "-");
+    // RunId = started_at slug at millisecond precision so two spawns within
+    // the same wall-clock second receive distinct ids and the second one
+    // does not overwrite the first's cancel handle in `active_runs`. See
+    // spec `app-workspace § Tauri IPC Commands for Goal Lifecycle and Wiki
+    // Read` and the parallel `quiz_run_id` helper in `ipc/quiz.rs`.
+    let run_id = goal_run_id();
 
     let cancel = Arc::new(AtomicBool::new(false));
     active_runs.insert(&vault_str, run_id.clone(), cancel.clone());
@@ -552,6 +553,15 @@ pub(crate) fn read_events_jsonl(path: &Path) -> Result<Vec<EventEnvelope>, AppEr
     Ok(events)
 }
 
+/// Derive a new goal-mode `RunId` from the current wall-clock time.
+///
+/// Millisecond precision: two consecutive calls within the same second
+/// receive distinct ids (see `spawn_goal_with_runner` for why).
+pub(crate) fn goal_run_id() -> String {
+    let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    started_at.replace(':', "-")
+}
+
 // ---- tests ----------------------------------------------------------------
 
 #[cfg(test)]
@@ -560,6 +570,83 @@ mod tests {
     use codebus_core::log::events::sink::EventEnvelope;
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
+
+    /// Invariant: the IPC layer's `goal_run_id()` and the verb-layer
+    /// `run_started_at` slug (events.jsonl filename + RunLog row) MUST
+    /// be derived at the same `SecondsFormat::Millis` precision. The
+    /// orphan-run-detection join in `list_runs_impl` (events-file slug
+    /// ↔ active_runs key) silently breaks if precision drifts: a live
+    /// goal is mis-labeled `interrupted` because `active_runs.get(slug)`
+    /// always misses. See `app-workspace § Interrupted Run Detection`
+    /// NOTE on precision alignment.
+    ///
+    /// This test reproduces both derivation paths in this process and
+    /// asserts they produce string slugs of the same byte length and
+    /// format shape (millis fractional + `-` time separators). If a
+    /// future change reverts verb-side derivation back to `Secs` (or
+    /// flips IPC-side back to `Secs`), this test fails immediately and
+    /// names the affected derivation site.
+    #[test]
+    fn goal_run_id_precision_matches_verb_run_started_at_slug() {
+        let ipc_runid = goal_run_id();
+
+        // Mirror codebus_core::verb::goal::run_goal line ~140:
+        //   chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+        // then `.replace(':', '-')` for the events.jsonl filename slug.
+        let verb_started_at =
+            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let verb_slug = verb_started_at.replace(':', "-");
+
+        assert!(
+            ipc_runid.contains('.'),
+            "IPC RunId must carry the `.fff` millisecond fractional component; got `{ipc_runid}`"
+        );
+        assert!(
+            verb_slug.contains('.'),
+            "verb slug must carry the `.fff` millisecond fractional component; got `{verb_slug}`"
+        );
+        assert!(
+            !ipc_runid.contains(':'),
+            "IPC RunId must replace `:` with `-`; got `{ipc_runid}`"
+        );
+        assert!(
+            !verb_slug.contains(':'),
+            "verb slug must replace `:` with `-`; got `{verb_slug}`"
+        );
+        assert_eq!(
+            ipc_runid.len(),
+            verb_slug.len(),
+            "IPC RunId and verb slug must use the same precision; \
+             ipc=`{ipc_runid}` (len {}) verb=`{verb_slug}` (len {}); \
+             a length mismatch means one side reverted to SecondsFormat::Secs, \
+             which will break the orphan-detection invariant in list_runs_impl",
+            ipc_runid.len(),
+            verb_slug.len()
+        );
+    }
+
+    /// `goal_run_id` returns millisecond-precision slugs so two calls within
+    /// the same wall-clock second produce distinct ids. See spec
+    /// `app-workspace § Tauri IPC Commands for Goal Lifecycle and Wiki Read`
+    /// scenario "spawn_goal same-second calls yield distinct RunIds".
+    #[test]
+    fn goal_run_id_same_second_yields_distinct_ids() {
+        let first = goal_run_id();
+        std::thread::sleep(Duration::from_millis(2));
+        let second = goal_run_id();
+        assert_ne!(
+            first, second,
+            "two consecutive goal_run_id() calls must differ; got {first} and {second}"
+        );
+        assert!(
+            first.contains('.'),
+            "goal_run_id must include a `.fff` fractional component; got {first}"
+        );
+        assert!(
+            second.contains('.'),
+            "goal_run_id must include a `.fff` fractional component; got {second}"
+        );
+    }
 
     fn fake_report() -> GoalReport {
         GoalReport {

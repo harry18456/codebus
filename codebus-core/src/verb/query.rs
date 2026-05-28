@@ -77,7 +77,10 @@ pub fn run_query(
     // Capture run started_at early — used for both events.jsonl filename
     // slug AND the final RunLog.started_at value, so events file name
     // matches the RunLog row's started_at (GUI joins on this).
-    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    // Millis precision: matches the IPC `active_runs` key precision so
+    // the orphan-detection invariant (events-file slug ↔ active_runs
+    // key) holds. See app-workspace § Interrupted Run Detection NOTE.
+    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
 
     // Step 1: strict vault precondition. Emitted before any banner so
     // that the early-return path on VaultMissing does not produce a

@@ -120,7 +120,11 @@ pub fn run_chat_turn(
 ) -> Result<ChatTurnReport, VerbError> {
     let paths = vault_paths(repo);
 
-    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    // Millis precision: matches the IPC `active_runs` key precision so
+    // the orphan-detection invariant in `list_runs_impl` (events-file
+    // slug ↔ active_runs key) holds. See app-workspace § Interrupted
+    // Run Detection NOTE.
+    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
 
     // Step 1: strict vault precondition. Chat is a wiki reader, not a
     // producer — missing vault is a user input error.

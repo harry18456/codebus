@@ -8,11 +8,13 @@ TBD - created by archiving change 'codex-backend'. Update Purpose after archive.
 
 ### Requirement: Codex Backend Argv Composition
 
-`CodexBackend` SHALL implement `AgentBackend::build_command` by translating the provider-neutral `SpawnSpec` into a `codex exec` invocation. The composed command SHALL always include the per-spawn isolation flags verified by the 2026-05-22 spike: `--json`, `--ignore-user-config`, `--disable apps`, `--ignore-rules`, `--skip-git-repo-check`, `--ephemeral`, and a `-c project_root_markers=['<vault-marker>']` override naming a vault-unique marker file so the codex project root is pinned to the `.codebus/` vault directory. The codex binary path SHALL be resolvable via a `CODEBUS_CODEX_BIN` environment override defaulting to `codex`.
+`CodexBackend` SHALL implement `AgentBackend::build_command` by translating the provider-neutral `SpawnSpec` into a `codex exec` invocation. The composed command SHALL always include the per-spawn isolation flags verified by the 2026-05-22 spike: `--json`, `--ignore-user-config`, `--disable apps`, `--ignore-rules`, `--skip-git-repo-check`, `--ephemeral`, a `-c project_root_markers=['<vault-marker>']` override naming a vault-unique marker file so the codex project root is pinned to the `.codebus/` vault directory, AND a `-c web_search=disabled` config override that turns off codex's hosted web search tool so the agent cannot fetch external URLs at runtime. The codex binary path SHALL be resolvable via a `CODEBUS_CODEX_BIN` environment override defaulting to `codex`.
 
 `SpawnSpec.permission` SHALL map to the codex sandbox flag `-s`: `Permission::ReadOnly` SHALL map to `read-only` and `Permission::Workspace` SHALL map to `workspace-write`. The resolved per-verb model SHALL be passed as `-m <model>` and the resolved per-verb effort SHALL be passed as `-c model_reasoning_effort=<effort>` (codex's `.codex/config.toml` is trust-gated and SHALL NOT be relied on for these values). When `SpawnSpec.resume_session_id` is `Some(id)`, the command SHALL use the `codex exec resume <id>` subcommand form. The fully-composed prompt string SHALL be passed as the exec prompt argument, and the child process stdin SHALL be closed or fed empty input so `codex exec` does not block waiting on stdin.
 
 `SpawnSpec.command_allowance` has no codex equivalent (codex gates command execution by sandbox, not by a per-command allowlist). When `command_allowance` is `Some(...)`, `CodexBackend` SHALL proceed without a per-command gate and SHALL emit a single warning rather than failing the spawn (no hard gate).
+
+The `-c web_search=disabled` override is required because codex's `--disable` flag accepts only built-in sub-feature IDs (`apps`, `image_generation`, etc.) and does NOT accept `web_search`; the hosted web search tool can only be turned off through a config-key override. Without this override the agent retains the ability to fetch arbitrary URLs at runtime, which violates the codebus offline / sandbox-bounded contract. Image generation is intentionally NOT disabled by this requirement.
 
 #### Scenario: Read-only permission maps to read-only sandbox
 
@@ -27,7 +29,7 @@ TBD - created by archiving change 'codex-backend'. Update Purpose after archive.
 #### Scenario: Isolation flags always present
 
 - **WHEN** `build_command` is called with any `SpawnSpec`
-- **THEN** the composed argv SHALL contain all of `--ignore-user-config`, `--disable apps`, `--ignore-rules`, and a `project_root_markers` override pinning the project root to the vault directory
+- **THEN** the composed argv SHALL contain all of `--ignore-user-config`, `--disable apps`, `--ignore-rules`, a `project_root_markers` override pinning the project root to the vault directory, AND a `-c web_search=disabled` pair that turns off codex's hosted web search tool
 
 #### Scenario: Model and effort passed as CLI flags
 
@@ -46,53 +48,26 @@ TBD - created by archiving change 'codex-backend'. Update Purpose after archive.
 
 
 <!-- @trace
-source: codex-backend
-updated: 2026-05-23
+source: backend-cleanup-codex-websearch-and-runid-millis
+updated: 2026-05-28
 code:
-  - codebus-cli/src/commands/config.rs
-  - codebus-core/src/verb/quiz.rs
-  - codebus-app/src/components/settings/CodexEndpointSection.tsx
-  - codebus-core/src/vault/init.rs
-  - codebus-app/src-tauri/src/ipc/keyring.rs
-  - codebus-app/src/lib/providers.ts
-  - codebus-app/src/store/chat.ts
-  - codebus-core/src/agent/codex_backend.rs
-  - codebus-core/src/config/codex.rs
   - codebus-core/src/verb/chat.rs
-  - codebus-core/src/stream/mod.rs
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-app/src/components/settings/EndpointSection.tsx
-  - codebus-core/src/stream/codex_parser.rs
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - codebus-app/src/components/workspace/ChatTranscript.tsx
-  - codebus-core/src/verb/error.rs
-  - codebus-core/src/agent/claude_backend.rs
-  - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-core/src/agent/mod.rs
-  - codebus-core/src/verb/query.rs
-  - codebus-app/src/store/settings.ts
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
-  - codebus-app/src/components/settings/SetKeyDialog.tsx
-  - codebus-app/src/lib/ipc.ts
-  - codebus-app/src-tauri/src/ipc/cli_status.rs
-  - codebus-app/src/store/goals.ts
   - codebus-core/src/verb/fix.rs
-  - codebus-core/src/config/claude_code.rs
-  - codebus-core/src/agent/dispatch.rs
   - codebus-core/src/verb/goal.rs
-  - codebus-core/src/config/endpoint.rs
-tests:
-  - codebus-app/src/store/chat.test.ts
-  - codebus-app/src/lib/providers.test.ts
-  - codebus-app/src/components/settings/CodexEndpointSection.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-app/src/components/settings/EndpointSection.test.tsx
-  - codebus-app/src/store/goals.test.ts
-  - codebus-app/src/lib/codex-validation.test.ts
-  - codebus-app/src/components/settings/SettingsModal.codex.test.tsx
-  - codebus-cli/tests/parse_error_aborts_all_verbs.rs
+  - docs/2026-05-28-four-bugs-backlog.md
+  - codebus-app/src-tauri/src/ipc/chats.rs
+  - codebus-core/src/agent/codex_backend.rs
+  - docs/2026-05-28-run-id-collision-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-en.png
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-28-runid-source-of-truth-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-zh-clean.png
+  - docs/2026-05-28-goal-token-display-streaming-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-lobby-bus-motion-frame.png
+  - codebus-app/src-tauri/src/ipc/goals.rs
+  - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
+  - docs/2026-05-28-cancelling-stuck-todo.md
+  - codebus-core/src/verb/query.rs
 -->
 
 ---

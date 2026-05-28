@@ -779,7 +779,7 @@ tests:
 
 The system SHALL register Tauri commands beyond the foundation's nine commands, covering goal-mode lifecycle, chat-turn lifecycle, and wiki read paths. The full added set is:
 
-- `spawn_goal(vault_path: String, goal_text: String) -> Result<String, AppError>` — spawn a background thread that invokes `codebus_core::verb::goal::run_goal` with the given vault and goal text. The function SHALL allocate an `Arc<AtomicBool>` cancel flag, store it in `AppState.active_runs` keyed by the new `RunId` (where `RunId` equals the run's `started_at` slug), and emit each `VerbEvent` produced by the closure to a Tauri event channel named `"goal-stream"` with payload `{ run_id: String, event: VerbEvent }`. On thread completion (success, failure, or panic), the entry SHALL be removed from `active_runs`.
+- `spawn_goal(vault_path: String, goal_text: String) -> Result<String, AppError>` — spawn a background thread that invokes `codebus_core::verb::goal::run_goal` with the given vault and goal text. The function SHALL allocate an `Arc<AtomicBool>` cancel flag, store it in `AppState.active_runs` keyed by the new `RunId` (where `RunId` equals the run's `started_at` slug derived from `chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)` with `:` replaced by `-`), and emit each `VerbEvent` produced by the closure to a Tauri event channel named `"goal-stream"` with payload `{ run_id: String, event: VerbEvent }`. On thread completion (success, failure, or panic), the entry SHALL be removed from `active_runs`.
 
 - `cancel_goal(run_id: String) -> Result<(), AppError>` — look up the cancel flag in `active_runs` by `run_id`; if found, `store(true, Ordering::Relaxed)` and return `Ok(())`. If not found (run already terminated), return `Ok(())` (idempotent).
 
@@ -797,10 +797,17 @@ The chat-turn lifecycle commands (`spawn_chat_turn`, `cancel_chat_turn`) are def
 
 `AppError` SHALL be the same discriminated union used by the foundation's commands — no new variants added by this change.
 
+The goal `RunId` SHALL be derived using `chrono::SecondsFormat::Millis` precision so that two `spawn_goal` invocations occurring within the same wall-clock second receive distinct `active_runs` keys and the second invocation does not overwrite the first invocation's cancel handle.
+
 #### Scenario: spawn_goal returns run id derived from started_at
 
-- **WHEN** the frontend calls `invoke("spawn_goal", { vault_path: "/some/vault", goal_text: "X" })` AND the spawned `run_goal` invocation's first stream event timestamps the run at `2026-05-13T14:56:21Z`
-- **THEN** the IPC call resolves with `"2026-05-13T14-56-21Z"` AND a corresponding entry exists in `AppState.active_runs` keyed by that string
+- **WHEN** the frontend calls `invoke("spawn_goal", { vault_path: "/some/vault", goal_text: "X" })` AND the spawned `run_goal` invocation's first stream event timestamps the run at `2026-05-13T14:56:21.123Z`
+- **THEN** the IPC call resolves with `"2026-05-13T14-56-21.123Z"` AND a corresponding entry exists in `AppState.active_runs` keyed by that string
+
+#### Scenario: spawn_goal same-second calls yield distinct RunIds
+
+- **WHEN** the frontend calls `invoke("spawn_goal", ...)` twice in rapid succession AND both calls land within the same wall-clock second but on distinct wall-clock milliseconds
+- **THEN** the two IPC calls SHALL resolve with two distinct `RunId` strings differing in the `.fff` fractional component AND `AppState.active_runs` SHALL contain two entries simultaneously, each with its own cancel handle
 
 #### Scenario: cancel_goal idempotent on unknown run
 
@@ -819,50 +826,26 @@ The chat-turn lifecycle commands (`spawn_chat_turn`, `cancel_chat_turn`) are def
 
 
 <!-- @trace
-source: v3-app-chat-cmdk
-updated: 2026-05-15
+source: backend-cleanup-codex-websearch-and-runid-millis
+updated: 2026-05-28
 code:
-  - docs/2026-05-14-github-repo-setup-backlog.md
-  - docs/2026-05-15-codebus-fs-watcher-backlog.md
-  - codebus-app/src/components/workspace/ChatInput.tsx
-  - codebus-app/src/hooks/useChatShortcut.ts
-  - docs/2026-05-14-rag-index-search-backlog.md
-  - codebus-app/src/components/workspace/ChatNewChatButton.tsx
-  - codebus-app/src/components/workspace/ChatUndoToast.tsx
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/2026-05-14-mcp-server-backlog.md
-  - codebus-app/src/components/workspace/ChatTokenDisplay.tsx
+  - codebus-core/src/verb/chat.rs
+  - codebus-core/src/verb/fix.rs
+  - codebus-core/src/verb/goal.rs
+  - docs/2026-05-28-four-bugs-backlog.md
   - codebus-app/src-tauri/src/ipc/chats.rs
-  - docs/2026-05-14-openai-privacy-filter-backlog.md
-  - docs/2026-05-14-mycoder-cli-backlog.md
-  - codebus-app/src/i18n/messages.ts
-  - codebus-app/src/components/workspace/ChatTranscript.tsx
-  - docs/2026-05-14-settings-chat-model-backlog.md
-  - docs/2026-05-14-pii-settings-ui-backlog.md
-  - docs/2026-05-14-ui-accessibility-backlog.md
-  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
-  - docs/2026-05-14-app-font-scale-backlog.md
-  - docs/BACKLOG.md
-  - codebus-app/src/store/chat.ts
-  - codebus-app/src/lib/ipc.ts
-  - codebus-app/src-tauri/src/state/active_runs.rs
+  - codebus-core/src/agent/codex_backend.rs
+  - docs/2026-05-28-run-id-collision-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-en.png
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-28-runid-source-of-truth-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-zh-clean.png
+  - docs/2026-05-28-goal-token-display-streaming-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-lobby-bus-motion-frame.png
   - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-app/src/components/workspace/ChatWidget.tsx
-tests:
-  - codebus-app/src/components/workspace/ChatNewChatButton.test.tsx
-  - codebus-app/src/components/workspace/ChatInput.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-app/src/i18n/chat.test.ts
-  - codebus-app/src/components/workspace/Workspace.test.tsx
-  - codebus-app/src/store/chat.test.ts
-  - codebus-app/src/lib/ipc.test.ts
-  - codebus-app/src/components/workspace/ChatUndoToast.test.tsx
-  - codebus-app/src/hooks/useChatShortcut.test.tsx
-  - codebus-app/src/components/workspace/ChatWidget.test.tsx
-  - codebus-app/src/components/workspace/ChatTokenDisplay.test.tsx
-  - codebus-app/src/components/settings/EndpointSection.test.tsx
-  - codebus-app/src/components/workspace/ChatTranscript.test.tsx
+  - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
+  - docs/2026-05-28-cancelling-stuck-todo.md
+  - codebus-core/src/verb/query.rs
 -->
 
 ---
@@ -878,46 +861,45 @@ The virtual entry SHALL NOT be written back to any `runs-*.jsonl` file — it ex
 
 If the same events file later gains a matching RunLog row (e.g., because the original `run_goal` process recovered and wrote its terminal RunLog late), the virtual entry SHALL no longer appear in `list_runs` output — the real row supersedes it.
 
+**NOTE — Precision Alignment Invariant:** The `active_runs` map key (set by `spawn_goal` / `spawn_chat_turn` in the IPC layer), the `events-<slug>.jsonl` filename slug (set by the verb function's `run_started_at` capture), AND the `RunLog.started_at` value persisted in `runs-*.jsonl` (also set from the verb function's `run_started_at`) SHALL all be derived at the SAME `chrono::SecondsFormat::Millis` precision. The orphan-detection join in `list_runs` joins these three values as strings; if a future change reverts any one of them to `SecondsFormat::Secs` (or upgrades to a higher precision asymmetrically), the join silently breaks and live goals are mis-labeled `"interrupted"` because `active_runs.get(events_slug)` always misses. This invariant is enforced by the `goal_run_id_precision_matches_verb_run_started_at_slug` unit test in `codebus-app/src-tauri/src/ipc/goals.rs`; that test SHALL fail loudly the moment the precisions drift apart.
+
 #### Scenario: Orphan goal events file with no active_runs entry produces interrupted virtual entry
 
-- **WHEN** `list_runs` is invoked AND the vault contains `events-2026-05-13T03-00-00Z.jsonl` whose leading events include a `VerbBanner::Goal` event with `goal_text="describe auth flow"` AND no `runs-*.jsonl` row has `started_at == "2026-05-13T03:00:00Z"` AND `active_runs` does NOT contain the slug
-- **THEN** the returned list contains a virtual entry with `outcome == "interrupted"` AND `mode == "goal"` AND `goal == "describe auth flow"` AND `started_at == "2026-05-13T03:00:00Z"` AND `interrupt_reason == "app_close"` AND no row is appended to any `runs-*.jsonl` file on disk
+- **WHEN** `list_runs` is invoked AND the vault contains `events-2026-05-13T03-00-00.000Z.jsonl` whose leading events include a `VerbBanner::Goal` event with `goal_text="describe auth flow"` AND no `runs-*.jsonl` row has `started_at == "2026-05-13T03:00:00.000Z"` AND `active_runs` does NOT contain the slug
+- **THEN** the returned list contains a virtual entry with `outcome == "interrupted"` AND `mode == "goal"` AND `goal == "describe auth flow"` AND `started_at == "2026-05-13T03:00:00.000Z"` AND `interrupt_reason == "app_close"` AND no row is appended to any `runs-*.jsonl` file on disk
 
 #### Scenario: Orphan goal events file with live active_runs entry produces running virtual entry
 
-- **WHEN** `list_runs` is invoked AND the vault contains `events-2026-05-28T07-39-26Z.jsonl` whose leading events include a `VerbBanner::Goal` event with `goal_text="smoke probe goal"` AND no `runs-*.jsonl` row matches its slug AND `active_runs` currently contains an entry keyed by `"2026-05-28T07-39-26Z"` (the in-flight spawn from the current app session)
-- **THEN** the returned list contains a virtual entry with `outcome == "running"` AND `mode == "goal"` AND `goal == "smoke probe goal"` AND `started_at == "2026-05-28T07:39:26Z"` AND `interrupt_reason` absent AND `finished_at` empty
+- **WHEN** `list_runs` is invoked AND the vault contains `events-2026-05-28T07-39-26.123Z.jsonl` whose leading events include a `VerbBanner::Goal` event with `goal_text="smoke probe goal"` AND no `runs-*.jsonl` row matches its slug AND `active_runs` currently contains an entry keyed by `"2026-05-28T07-39-26.123Z"` (the in-flight spawn from the current app session, with millisecond precision matching the events file slug)
+- **THEN** the returned list contains a virtual entry with `outcome == "running"` AND `mode == "goal"` AND `goal == "smoke probe goal"` AND `started_at == "2026-05-28T07:39:26.123Z"` AND `interrupt_reason` absent AND `finished_at` empty
 
-#### Scenario: Orphan non-goal events file produces no virtual entry
+#### Scenario: Precision drift between active_runs key and events file slug breaks orphan detection
 
-- **WHEN** `list_runs` is invoked AND the vault contains an orphan `events-2026-05-13T04-00-00Z.jsonl` whose leading events contain NO `VerbBanner::Goal` event (e.g., an in-progress chat / query / fix / quiz run) AND no `runs-*.jsonl` row matches its slug
-- **THEN** the returned list contains NO entry for `started_at == "2026-05-13T04:00:00Z"` — neither a virtual `interrupted` entry, a `running` entry, nor a row with empty goal text
-
-#### Scenario: Real RunLog row supersedes virtual interrupted
-
-- **WHEN** `events-2026-05-13T03-00-00Z.jsonl` exists AND a `runs-2026-05-13.jsonl` row is appended with `started_at == "2026-05-13T03:00:00Z"` and `outcome == "cancelled"` AND `list_runs` is invoked
-- **THEN** the returned list contains the real row (`outcome="cancelled"`) AND does NOT contain a virtual `outcome="interrupted"` or `outcome="running"` entry for the same started_at
+- **WHEN** the IPC layer's `active_runs` map keys are derived at `SecondsFormat::Millis` precision (e.g., `"2026-05-28T09-50-42.322Z"`) AND a verb function reverts to `SecondsFormat::Secs` so its `events-<slug>.jsonl` filename and `RunLog.started_at` use second precision (e.g., `"2026-05-28T09-50-42Z"`)
+- **THEN** `list_runs` SHALL mis-label the still-running goal as `"interrupted"` because the events-file slug (Secs) cannot match any `active_runs` key (Millis), violating this requirement; the `goal_run_id_precision_matches_verb_run_started_at_slug` unit test SHALL fail and name the offending derivation site
 
 
 <!-- @trace
-source: vault-switch-goal-regression
+source: backend-cleanup-codex-websearch-and-runid-millis
 updated: 2026-05-28
 code:
-  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-en.png
-  - codebus-app/src-tauri/src/ipc/chats.rs
+  - codebus-core/src/verb/chat.rs
+  - codebus-core/src/verb/fix.rs
+  - codebus-core/src/verb/goal.rs
   - docs/2026-05-28-four-bugs-backlog.md
-  - codebus-app/src/components/workspace/NewGoalModal.tsx
-  - codebus-app/scripts/.v11-acceptance/01-lobby-bus-motion-frame.png
-  - codebus-app/src-tauri/src/state/active_runs.rs
-  - codebus-app/src-tauri/src/ipc/quiz.rs
-  - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
-  - codebus-app/src/i18n/messages.ts
+  - codebus-app/src-tauri/src/ipc/chats.rs
+  - codebus-core/src/agent/codex_backend.rs
+  - docs/2026-05-28-run-id-collision-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-en.png
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-28-runid-source-of-truth-todo.md
   - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-zh-clean.png
+  - docs/2026-05-28-goal-token-display-streaming-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-lobby-bus-motion-frame.png
   - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-app/src/store/goals.ts
-tests:
-  - codebus-app/src/components/workspace/NewGoalModal.test.tsx
-  - codebus-app/src/store/goals.test.ts
+  - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
+  - docs/2026-05-28-cancelling-stuck-todo.md
+  - codebus-core/src/verb/query.rs
 -->
 
 ---
@@ -1376,16 +1358,23 @@ tests:
 
 The system SHALL register two new Tauri commands for chat turn lifecycle, extending the goal lifecycle IPC surface:
 
-- `spawn_chat_turn(vault_path: String, text: String, session_id: Option<String>) -> Result<String, AppError>` — spawn a background thread that invokes `codebus_core::verb::chat::run_chat_turn` with `ChatTurnOptions { text, session_id }`. The function SHALL allocate an `Arc<AtomicBool>` cancel flag, store it in `AppState.active_runs` keyed by the new `RunId` (where `RunId` = `chat-<started_at_slug>`), and emit each `VerbEvent` produced by the closure to a Tauri event channel named `"chat-stream"` with payload `{ run_id: String, event: VerbEvent }`. The chat-stream channel SHALL be separate from the existing `goal-stream` channel. On thread completion (success, failure, cancel, or panic), the entry SHALL be removed from `active_runs`.
+- `spawn_chat_turn(vault_path: String, text: String, session_id: Option<String>) -> Result<String, AppError>` — spawn a background thread that invokes `codebus_core::verb::chat::run_chat_turn` with `ChatTurnOptions { text, session_id }`. The function SHALL allocate an `Arc<AtomicBool>` cancel flag, store it in `AppState.active_runs` keyed by the new `RunId` (where `RunId` = `chat-<started_at_slug>` and the slug is derived from `chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)` with `:` replaced by `-`), and emit each `VerbEvent` produced by the closure to a Tauri event channel named `"chat-stream"` with payload `{ run_id: String, event: VerbEvent }`. The chat-stream channel SHALL be separate from the existing `goal-stream` channel. On thread completion (success, failure, cancel, or panic), the entry SHALL be removed from `active_runs`.
 
 - `cancel_chat_turn(run_id: String) -> Result<(), AppError>` — look up the cancel flag in `active_runs` by `run_id`; if found, `store(true, Ordering::Relaxed)` and return `Ok(())`. If not found (turn already terminated), return `Ok(())` (idempotent).
 
 `spawn_chat_turn` SHALL return `AppError::Invalid { field: "active_runs", message: "another chat turn is already active in this session" }` when invoked while `active_runs` already contains a `chat-*` keyed entry for the same vault. Goal-mode entries SHALL NOT block chat spawn AND vice versa (see `One Active Goal Run At A Time` modification).
 
+The chat `RunId` SHALL be derived using `chrono::SecondsFormat::Millis` precision so that two `spawn_chat_turn` invocations occurring within the same wall-clock second (necessarily across distinct vault paths, since per-vault concurrency is bounded to one) receive distinct `active_runs` keys and the second invocation does not overwrite the first invocation's cancel handle.
+
 #### Scenario: spawn_chat_turn returns chat run id
 
-- **WHEN** the frontend calls `invoke("spawn_chat_turn", { vault_path: "/some/vault", text: "X", session_id: null })` AND the spawned `run_chat_turn` invocation's first stream event timestamps the turn at `2026-05-14T10:20:30Z`
-- **THEN** the IPC call resolves with `"chat-2026-05-14T10-20-30Z"` AND a corresponding entry exists in `AppState.active_runs` keyed by that string
+- **WHEN** the frontend calls `invoke("spawn_chat_turn", { vault_path: "/some/vault", text: "X", session_id: null })` AND the spawned `run_chat_turn` invocation's first stream event timestamps the turn at `2026-05-14T10:20:30.456Z`
+- **THEN** the IPC call resolves with `"chat-2026-05-14T10-20-30.456Z"` AND a corresponding entry exists in `AppState.active_runs` keyed by that string
+
+#### Scenario: spawn_chat_turn same-second calls across vaults yield distinct RunIds
+
+- **WHEN** the frontend calls `invoke("spawn_chat_turn", { vault_path: "V1", ... })` AND then `invoke("spawn_chat_turn", { vault_path: "V2", ... })` in rapid succession AND both calls land within the same wall-clock second but on distinct wall-clock milliseconds
+- **THEN** the two IPC calls SHALL resolve with two distinct `chat-<slug>` `RunId` strings differing in the `.fff` fractional component AND `AppState.active_runs` SHALL contain two entries simultaneously, one for each vault, each with its own cancel handle
 
 #### Scenario: spawn_chat_turn rejects when chat turn already active
 
@@ -1402,62 +1391,28 @@ The system SHALL register two new Tauri commands for chat turn lifecycle, extend
 - **WHEN** the frontend calls `invoke("cancel_chat_turn", { run_id: "chat-nonexistent" })` AND `active_runs` contains no such key
 - **THEN** the IPC call resolves with `Ok(())` without error
 
-#### Scenario: Cancelled chat turn preserves session id for next turn
-
-- **WHEN** a chat turn with `sessionId = "abc-123"` is active AND the user clicks `⏹ Stop` AND the cancel flag flips AND `run_chat_turn` returns `Err(VerbError::Cancelled)`
-- **THEN** the `useChatStore.sessionId` SHALL still equal `"abc-123"` AND a subsequent `spawn_chat_turn` call SHALL pass `session_id: "abc-123"` so the backend issues `--resume abc-123`
 
 <!-- @trace
-source: v3-app-chat-cmdk
-updated: 2026-05-15
--->
-
-
-<!-- @trace
-source: v3-app-chat-cmdk
-updated: 2026-05-15
+source: backend-cleanup-codex-websearch-and-runid-millis
+updated: 2026-05-28
 code:
-  - docs/2026-05-14-github-repo-setup-backlog.md
-  - docs/2026-05-15-codebus-fs-watcher-backlog.md
-  - codebus-app/src/components/workspace/ChatInput.tsx
-  - codebus-app/src/hooks/useChatShortcut.ts
-  - docs/2026-05-14-rag-index-search-backlog.md
-  - codebus-app/src/components/workspace/ChatNewChatButton.tsx
-  - codebus-app/src/components/workspace/ChatUndoToast.tsx
-  - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/src-tauri/src/ipc/mod.rs
-  - docs/2026-05-14-mcp-server-backlog.md
-  - codebus-app/src/components/workspace/ChatTokenDisplay.tsx
+  - codebus-core/src/verb/chat.rs
+  - codebus-core/src/verb/fix.rs
+  - codebus-core/src/verb/goal.rs
+  - docs/2026-05-28-four-bugs-backlog.md
   - codebus-app/src-tauri/src/ipc/chats.rs
-  - docs/2026-05-14-openai-privacy-filter-backlog.md
-  - docs/2026-05-14-mycoder-cli-backlog.md
-  - codebus-app/src/i18n/messages.ts
-  - codebus-app/src/components/workspace/ChatTranscript.tsx
-  - docs/2026-05-14-settings-chat-model-backlog.md
-  - docs/2026-05-14-pii-settings-ui-backlog.md
-  - docs/2026-05-14-ui-accessibility-backlog.md
-  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
-  - docs/2026-05-14-app-font-scale-backlog.md
-  - docs/BACKLOG.md
-  - codebus-app/src/store/chat.ts
-  - codebus-app/src/lib/ipc.ts
-  - codebus-app/src-tauri/src/state/active_runs.rs
+  - codebus-core/src/agent/codex_backend.rs
+  - docs/2026-05-28-run-id-collision-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-en.png
+  - codebus-core/src/verb/quiz.rs
+  - docs/2026-05-28-runid-source-of-truth-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-zh-clean.png
+  - docs/2026-05-28-goal-token-display-streaming-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-lobby-bus-motion-frame.png
   - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-app/src/components/workspace/ChatWidget.tsx
-tests:
-  - codebus-app/src/components/workspace/ChatNewChatButton.test.tsx
-  - codebus-app/src/components/workspace/ChatInput.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
-  - codebus-app/src/i18n/chat.test.ts
-  - codebus-app/src/components/workspace/Workspace.test.tsx
-  - codebus-app/src/store/chat.test.ts
-  - codebus-app/src/lib/ipc.test.ts
-  - codebus-app/src/components/workspace/ChatUndoToast.test.tsx
-  - codebus-app/src/hooks/useChatShortcut.test.tsx
-  - codebus-app/src/components/workspace/ChatWidget.test.tsx
-  - codebus-app/src/components/workspace/ChatTokenDisplay.test.tsx
-  - codebus-app/src/components/settings/EndpointSection.test.tsx
-  - codebus-app/src/components/workspace/ChatTranscript.test.tsx
+  - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
+  - docs/2026-05-28-cancelling-stuck-todo.md
+  - codebus-core/src/verb/query.rs
 -->
 
 ---

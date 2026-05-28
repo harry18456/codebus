@@ -170,9 +170,11 @@ where
     }
 
     // RunId = `chat-<started_at slug>` per spec scenario "spawn_chat_turn
-    // returns chat run id" (e.g., "chat-2026-05-14T10-20-30Z").
-    let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let run_id = format!("chat-{}", started_at.replace(':', "-"));
+    // returns chat run id" (e.g., "chat-2026-05-14T10-20-30.456Z").
+    // Millisecond precision so two spawns within the same wall-clock second
+    // (across distinct vault paths) receive distinct ids and the second one
+    // does not overwrite the first's cancel handle in `active_runs`.
+    let run_id = chat_run_id();
 
     let cancel = Arc::new(AtomicBool::new(false));
     active_runs.insert(&vault_str, run_id.clone(), cancel.clone());
@@ -251,6 +253,14 @@ pub(crate) fn cancel_chat_turn_impl(
     Ok(())
 }
 
+/// Derive a new chat-mode `RunId` (prefixed `chat-`) from the current
+/// wall-clock time. Millisecond precision: two consecutive calls within
+/// the same second receive distinct ids.
+pub(crate) fn chat_run_id() -> String {
+    let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    format!("chat-{}", started_at.replace(':', "-"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,6 +268,34 @@ mod tests {
     use std::sync::mpsc;
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
+
+    /// `chat_run_id` returns millisecond-precision slugs so two calls within
+    /// the same wall-clock second produce distinct ids. See spec
+    /// `app-workspace § Tauri IPC Commands for Chat Turn Lifecycle` scenario
+    /// "spawn_chat_turn same-second calls across vaults yield distinct
+    /// RunIds".
+    #[test]
+    fn chat_run_id_same_second_yields_distinct_ids() {
+        let first = chat_run_id();
+        std::thread::sleep(Duration::from_millis(2));
+        let second = chat_run_id();
+        assert_ne!(
+            first, second,
+            "two consecutive chat_run_id() calls must differ; got {first} and {second}"
+        );
+        assert!(
+            first.starts_with("chat-"),
+            "chat_run_id must carry the `chat-` prefix; got {first}"
+        );
+        assert!(
+            first.contains('.'),
+            "chat_run_id must include a `.fff` fractional component; got {first}"
+        );
+        assert!(
+            second.contains('.'),
+            "chat_run_id must include a `.fff` fractional component; got {second}"
+        );
+    }
 
     fn fake_report() -> ChatTurnReport {
         ChatTurnReport {

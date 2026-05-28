@@ -102,7 +102,10 @@ pub fn run_fix(
     let paths = vault_paths(repo);
 
     // Capture run started_at early for events.jsonl slug + RunLog row.
-    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    // Millis precision: matches the IPC `active_runs` key precision so
+    // the orphan-detection invariant (events-file slug ↔ active_runs
+    // key) holds. See app-workspace § Interrupted Run Detection NOTE.
+    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
 
     // Step 1: strict vault precondition (before any banner so a missing
     // vault doesn't produce a half-state events file).
