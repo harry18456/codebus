@@ -41,7 +41,7 @@ const en = {
   "lobby.empty.quickstartLabel": "QUICKSTART",
   "lobby.empty.step1": "Pick a repo folder",
   "lobby.empty.step2": "Run a goal — e.g.",
-  "lobby.empty.step2Example": "搞懂這 repo 的 X",
+  "lobby.empty.step2Example": "Understand X in this codebase",
   "lobby.empty.step3": "Quiz yourself to verify",
 
   // ---- Vault card ----

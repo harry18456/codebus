@@ -4,6 +4,14 @@
 
 ## Bug 1 · 「搞懂這 repo」missing i18n
 
+> **Status: archived 2026-05-28** — fix landed; see
+> `git log codebus-app/src/i18n/messages.ts`.
+> 實際 site 是 `codebus-app/src/i18n/messages.ts:44`（en bundle 的
+> `lobby.empty.step2Example` value 被 zh literal copy-paste）。
+> en bundle value 從 `"搞懂這 repo 的 X"` 改為 `"Understand X in this codebase"`、
+> zh bundle 不動；同步更新 `EmptyState.test.tsx:35` assertion 對齊新 en wording。
+> 4-bugs backlog 全收尾。
+
 **現象**：UI 某處顯示「搞懂這 repo」字面、應該走 i18n bundle 但 hard-code 中文。
 
 **狀態**：site 位置未指、apply 第一步 grep 校準。

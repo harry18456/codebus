@@ -32,7 +32,7 @@ describe("EmptyState", () => {
     render(<EmptyState onBoard={() => {}} localeOverride="en" />)
     // The example wording lives in lobby.empty.step2Example, rendered as a
     // distinct <span> with the amber-tinted pill class set.
-    const exampleNode = screen.getByText("搞懂這 repo 的 X")
+    const exampleNode = screen.getByText("Understand X in this codebase")
     expect(exampleNode).toBeInTheDocument()
     expect(exampleNode.tagName).toBe("SPAN")
     expect(exampleNode.className).toContain("bg-accent-tint")
