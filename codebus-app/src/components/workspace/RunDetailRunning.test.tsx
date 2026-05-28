@@ -273,4 +273,53 @@ describe("RunDetailRunning", () => {
     expect(screen.getByTestId("activity-cluster-count").textContent).toBe("(3)")
     expect(screen.getAllByTestId("stream-tool-use")).toHaveLength(3)
   })
+
+  it("RunDetailRunning_token_slot_renders_placeholder_before_first_usage_event", () => {
+    seedActiveRun({
+      activeRun: {
+        runId: "r-tokens-empty",
+        goal: "no usage yet",
+        startedAt: "2026-05-13T10:00:00Z",
+        events: [
+          {
+            kind: "stream",
+            data: {
+              kind: "tool_use",
+              name: "Read",
+              input: { file_path: "x.rs" },
+            },
+          },
+        ],
+        cancelling: false,
+      },
+      runs: [],
+    })
+    render(<RunDetailRunning onBack={() => {}} />)
+    const metadata = screen.getByTestId("run-detail-metadata")
+    // SHALL render localized placeholder; SHALL NOT render literal "0 tokens"
+    expect(metadata.textContent).toContain("—")
+    expect(metadata.textContent).not.toContain("0 tokens")
+  })
+
+  it("RunDetailRunning_token_slot_renders_real_sum_after_first_usage_event", () => {
+    seedActiveRun({
+      activeRun: {
+        runId: "r-tokens-real",
+        goal: "first usage arrived",
+        startedAt: "2026-05-13T10:00:00Z",
+        events: [
+          {
+            kind: "stream",
+            data: { kind: "usage", input_tokens: 120, output_tokens: 80 },
+          },
+        ],
+        cancelling: false,
+      },
+      runs: [],
+    })
+    render(<RunDetailRunning onBack={() => {}} />)
+    const metadata = screen.getByTestId("run-detail-metadata")
+    expect(metadata.textContent).toContain("200 tokens")
+    expect(metadata.textContent).not.toContain("—")
+  })
 })

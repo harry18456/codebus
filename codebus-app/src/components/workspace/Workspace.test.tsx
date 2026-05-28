@@ -155,6 +155,59 @@ describe("Workspace", () => {
     expect(main).toContainElement(screen.getByTestId("goals-tab"))
   })
 
+  it("Goals tab ambient pulse SHALL hide while no goal is running (path b: ODI-4 relocated indicator)", () => {
+    render(<Workspace vault={VAULT} />)
+    const dot = screen.getByTestId("workspace-tab-goals-active-pulse")
+    expect(dot.className).toMatch(/\bopacity-0\b/)
+    // Hidden state SHALL not carry an aria-label that pollutes the
+    // accessibility tree — the dot is purely decorative when inactive.
+    expect(dot.getAttribute("aria-label")).toBeNull()
+  })
+
+  it("Goals tab ambient pulse SHALL appear with accent fill while `useGoalsStore.activeRun` is non-null", () => {
+    useGoalsStore.setState({
+      activeRun: {
+        runId: "r-active",
+        goal: "demo",
+        startedAt: "2026-05-28T10:00:00Z",
+        events: [],
+        cancelling: false,
+      },
+    })
+    render(<Workspace vault={VAULT} />)
+    const dot = screen.getByTestId("workspace-tab-goals-active-pulse")
+    expect(dot.className).toMatch(/\bopacity-100\b/)
+    expect(dot.className).toMatch(/\bbg-accent\b/)
+    // Active state SHALL carry a screen-reader-readable label sourced
+    // from the `workspace.tab.goals.activeRunPulse` i18n key.
+    expect(dot.getAttribute("aria-label")).toBeTruthy()
+  })
+
+  it("Goals tab ambient pulse SHALL fade with motion-reduce variant so reduced-motion users get instant switches", () => {
+    render(<Workspace vault={VAULT} />)
+    const dot = screen.getByTestId("workspace-tab-goals-active-pulse")
+    expect(dot.className).toMatch(/transition-opacity/)
+    expect(dot.className).toMatch(/duration-200/)
+    expect(dot.className).toMatch(/motion-reduce:transition-none/)
+  })
+
+  it("Wiki and Quiz tabs SHALL NOT carry an active pulse dot (only Goals tab signals goal-running)", () => {
+    useGoalsStore.setState({
+      activeRun: {
+        runId: "r-active-2",
+        goal: "demo",
+        startedAt: "2026-05-28T10:00:00Z",
+        events: [],
+        cancelling: false,
+      },
+    })
+    render(<Workspace vault={VAULT} />)
+    const wikiPulse = screen.getByTestId("workspace-tab-wiki-active-pulse")
+    const quizPulse = screen.getByTestId("workspace-tab-quiz-active-pulse")
+    expect(wikiPulse.className).toMatch(/\bopacity-0\b/)
+    expect(quizPulse.className).toMatch(/\bopacity-0\b/)
+  })
+
   it("loads quiz history attempts on mount and resets them on unmount", async () => {
     const attempt = {
       slug: "session-vs-token",

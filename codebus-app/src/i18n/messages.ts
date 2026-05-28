@@ -151,6 +151,7 @@ const en = {
   // ---- Workspace shell ----
   "workspace.backToLobby": "← Back to Lobby",
   "workspace.tab.goals": "Goals",
+  "workspace.tab.goals.activeRunPulse": "Active goal running",
   "workspace.tab.wiki": "Wiki",
   "workspace.tab.quiz": "Quiz",
   "workspace.sidebar.vaultPathHint":
@@ -253,6 +254,7 @@ const en = {
     "Run was interrupted by an unclassified condition. Wiki state may be partial.",
   "workspace.runDetail.partialTimelineLabel": "Partial timeline",
   "workspace.runDetail.retryButton": "Retry with same goal",
+  "workspace.runDetail.tokensRunningPlaceholder": "—",
   "workspace.run.headerSummary": "{durationSec}s · {totalTokens} tokens",
   "workspace.run.lintSummary": "{errors} errors · {warnings} warnings",
 
@@ -308,8 +310,6 @@ const en = {
   "chat.token.tooltip.input": "Input",
   "chat.token.tooltip.output": "Output",
   "chat.widget.aria.openChat": "Open chat",
-  "chat.widget.aria.openChatWithActiveGoalRunning":
-    "Open chat — a goal is running",
   "chat.widget.aria.closeChat": "Close chat",
 
   // ---- Error messages (toast / inline) ----
@@ -707,6 +707,7 @@ const zh: Record<keyof typeof en, string> = {
   // ---- Workspace shell ----
   "workspace.backToLobby": "← 回到 Lobby",
   "workspace.tab.goals": "Goals",
+  "workspace.tab.goals.activeRunPulse": "目前有 goal 在跑",
   "workspace.tab.wiki": "Wiki",
   "workspace.tab.quiz": "Quiz",
   "workspace.sidebar.vaultPathHint": "{path}\n\n點一下用檔案總管開啟",
@@ -802,6 +803,7 @@ const zh: Record<keyof typeof en, string> = {
     "Run 被未分類的條件中斷。Wiki 可能停在中間狀態。",
   "workspace.runDetail.partialTimelineLabel": "部分時間軸",
   "workspace.runDetail.retryButton": "用相同 goal 再跑一次",
+  "workspace.runDetail.tokensRunningPlaceholder": "—",
   "workspace.run.headerSummary": "{durationSec} 秒 · {totalTokens} tokens",
   "workspace.run.lintSummary": "{errors} 個錯誤 · {warnings} 個警告",
 
@@ -856,8 +858,6 @@ const zh: Record<keyof typeof en, string> = {
   "chat.token.tooltip.input": "輸入",
   "chat.token.tooltip.output": "輸出",
   "chat.widget.aria.openChat": "開啟對話",
-  "chat.widget.aria.openChatWithActiveGoalRunning":
-    "開啟對話 — 有目標正在執行",
   "chat.widget.aria.closeChat": "關閉對話",
 
   // ---- Errors ----

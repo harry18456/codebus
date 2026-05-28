@@ -299,6 +299,8 @@ tests:
 
 The system SHALL render the `Running` detail view when the user navigates to a run whose state is the currently-active goal run (i.e., `useGoalsStore.activeRun.runId` equals the clicked run id and no RunLog row has been written yet for it). The view SHALL include: a header with `← back`, the goal text, an `⏺ Running` badge, AND an `[⏹ Cancel]` button placed inside the header on the right-hand side (immediately to the right of the badge AND to the left of the reserved `pr-[160px]` Windows traffic-light padding); a metadata line with elapsed time (live-updated every second) and accumulated token count from Usage events received so far; AND an `Activity stream` block rendering received events in arrival order. The view SHALL NOT render a separate bottom `<footer>` element for the Cancel button.
 
+The metadata line's token-count slot SHALL NOT render the literal string `0` (nor `0 tokens`, nor any other literal-zero rendering) while the running run has produced no `StreamEvent::Usage` events yet. Instead, the slot SHALL render the localized translation of `workspace.runDetail.tokensRunningPlaceholder` (the placeholder MUST exist in every shipped locale, currently `en` AND `zh`). As soon as the first `StreamEvent::Usage` event is observed for the active run, the slot SHALL switch to rendering the real accumulated token count (input + output tokens summed across all Usage events received so far). The placeholder semantic is "no Usage event has arrived yet" — it is NOT a generic loading affordance and SHALL NOT be shown after a non-zero accumulated sum has been displayed (i.e., the slot SHALL NOT flicker back to the placeholder if a subsequent stream tick re-evaluates the sum mid-run).
+
 The Activity stream SHALL render `StreamEvent::ToolUse { name, input }` events as one-line summaries with an emoji leader matching the CLI convention (`render::stream_event` `ToolUse Write/Edit specialization`):
 
 - `ToolUse { name: "Write" | "Edit" }` SHALL render as `✍️ <file_path>` where `<file_path>` is the value of `input.file_path` normalized to forward slashes (e.g., `wiki/modules/auth.md`). The `input` dict shape SHALL NOT leak — only the path renders.
@@ -340,18 +342,45 @@ The `[⏹ Cancel]` button SHALL carry `data-testid="cancel-button"`. The button'
 - **WHEN** the user navigates to the Running detail view for an active run
 - **THEN** the element with `data-testid="cancel-button"` SHALL be a descendant of the view's `<header>` element AND SHALL appear in document order after the element with `data-testid="running-badge"` AND the cancel button's nearest ancestor element with `data-tauri-drag-region` (if any) SHALL be a different element from the cancel button's immediate wrapper (i.e., the cancel button's immediate wrapper SHALL NOT itself carry `data-tauri-drag-region`) AND the Running detail view SHALL NOT contain a `<footer>` descendant that wraps the cancel button
 
+#### Scenario: Token slot renders placeholder before first Usage event
+
+- **WHEN** the user navigates to the Running detail view for an active goal run AND zero `StreamEvent::Usage` events have been observed for that run since the spawn started
+- **THEN** the metadata line's token-count slot SHALL render the localized translation of `workspace.runDetail.tokensRunningPlaceholder` AND SHALL NOT contain the substring `0 tokens` AND SHALL NOT contain a bare numeric `0` followed by a token-count label
+
+#### Scenario: Token slot switches to real count after first Usage event
+
+- **WHEN** the Running detail view receives its first `StreamEvent::Usage { input_tokens: 120, output_tokens: 80 }` event for the active run
+- **THEN** the metadata line's token-count slot SHALL render an integer rendering of `200` (input + output) AND SHALL NOT continue to render the placeholder string
+
+##### Example: token slot transitions
+
+| Stream history so far | Token slot rendering | Notes |
+| --- | --- | --- |
+| no Usage events | localized `tokensRunningPlaceholder` (e.g., `—` / `計算中…`) | initial state |
+| one Usage event with input=120 output=80 | `200` (rendered with existing token-count formatter) | first real value |
+| two Usage events totalling input=240 output=160 | `400` | accumulated sum |
+| run ended (transitioned to Done view) | not applicable — Done view uses RunLog summary | not Running view |
+
 
 <!-- @trace
-source: chatwidget-pulse-and-cancel-move
-updated: 2026-05-27
+source: chatwidget-pulse-and-goal-token-display
+updated: 2026-05-28
 code:
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-en.png
+  - codebus-app/src/components/workspace/Workspace.tsx
+  - docs/2026-05-28-goal-token-display-streaming-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-lobby-bus-motion-frame.png
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-zh-clean.png
+  - docs/2026-05-28-four-bugs-backlog.md
   - codebus-app/src/components/workspace/ChatWidget.tsx
   - codebus-app/src/i18n/messages.ts
   - codebus-app/src/components/workspace/RunDetailRunning.tsx
+  - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
 tests:
-  - codebus-app/src/i18n/chat.test.ts
-  - codebus-app/src/components/workspace/RunDetailRunning.test.tsx
   - codebus-app/src/components/workspace/ChatWidget.test.tsx
+  - codebus-app/src/i18n/chat.test.ts
+  - codebus-app/src/components/workspace/Workspace.test.tsx
+  - codebus-app/src/components/workspace/RunDetailRunning.test.tsx
 -->
 
 ---
@@ -1044,7 +1073,7 @@ tests:
 
 The Workspace SHALL render a Chat Widget anchored to the bottom-right corner of the Workspace main content area (for the `bubble` and `floating` modes) or as a centered modal overlay (for the `modal` mode). The widget SHALL have exactly three visual modes, modeled in `useChatStore` by `mode: "bubble" | "floating" | "modal"` (replacing the previous `expanded: boolean` field) and `modalReturnMode: "bubble" | "floating" | null` (recording the mode the user came from when `mode === "modal"`, so Esc / backdrop click can restore it).
 
-1. **Bubble mode**: a 44px × 44px circular bubble pinned to the viewport bottom-right corner. The bubble's right edge SHALL sit 16px from the viewport's right edge AND its bottom edge SHALL sit above the existing `BottomStrip` footer with a 16px gap (i.e., bottom offset equals `BottomStrip height + 16px`; with the current 32px-tall `BottomStrip` that is 48px from the viewport bottom). The bubble SHALL contain a `💬` emoji icon. The bubble SHALL remain visible whenever the Workspace is mounted AND SHALL NOT be obscured by any tab (Goals / Wiki / Quiz) content. When a `VerbLifecycleEvent::PromoteSuggestion` event is emitted while the widget is in bubble mode, the bubble SHALL display a small red dot badge (with `data-testid="chat-widget-promote-badge"`) until the next time the widget transitions to `floating` or `modal`. When `useGoalsStore.activeRun` is non-null (i.e., the current vault has an in-flight goal run), the bubble SHALL also display an `accent`-coloured pulse dot indicator (with `data-testid="chat-widget-active-goal-pulse"`) positioned in the bubble's top-right corner. The pulse dot SHALL be visually distinct from the promote badge in both colour (accent versus error) and position (further into the bubble's outer corner) so both indicators can be rendered simultaneously without visual overlap. The pulse dot SHALL fade in over approximately 200ms when `activeRun` transitions from null to non-null AND SHALL fade out over approximately 200ms when `activeRun` transitions back to null. When `prefers-reduced-motion: reduce` is active, the pulse dot SHALL appear AND disappear instantly with no transition. The pulse dot SHALL NOT be rendered while the widget is in `floating` or `modal` mode.
+1. **Bubble mode**: a 44px × 44px circular bubble pinned to the viewport bottom-right corner. The bubble's right edge SHALL sit 16px from the viewport's right edge AND its bottom edge SHALL sit above the existing `BottomStrip` footer with a 16px gap (i.e., bottom offset equals `BottomStrip height + 16px`; with the current 32px-tall `BottomStrip` that is 48px from the viewport bottom). The bubble SHALL contain a `💬` emoji icon. The bubble SHALL remain visible whenever the Workspace is mounted AND SHALL NOT be obscured by any tab (Goals / Wiki / Quiz) content. When a `VerbLifecycleEvent::PromoteSuggestion` event is emitted while the widget is in bubble mode, the bubble SHALL display a small red dot badge (with `data-testid="chat-widget-promote-badge"`) until the next time the widget transitions to `floating` or `modal`. The bubble SHALL NOT render any indicator tied to `useGoalsStore.activeRun` — the active-goal ambient signal is rendered on the Goals tab sidebar row instead (see the `Workspace Sidebar Nav Row Visual Contract` requirement). The bubble SHALL NOT render any element with `data-testid="chat-widget-active-goal-pulse"` in any of the three modes.
 
 2. **Floating mode**: a fixed-size panel of exactly `360px × 460px` positioned with its bottom-right corner aligned to the same anchor point as the bubble (right: 16px, bottom: `BottomStrip height + 16px`). The panel SHALL contain four vertically stacked regions: a header bar (containing the `💬` emoji, a localized title from `chat.widget.aria.floating.title`, a `⤢` expand-to-modal button with `data-testid="chat-widget-expand-to-modal"` whose `aria-label` resolves to `chat.widget.aria.floating.expandToModal`, AND a `▿` minimize button with `data-testid="chat-widget-minimize"` whose `aria-label` resolves to `chat.widget.aria.floating.minimize`), an undo toast region, a scrollable transcript region (containing past turns and the active turn live events), and an input region (containing a textarea and a send button, or a `⏹ Stop` button while a turn is active). The floating panel SHALL NOT be resizable; no resize handle SHALL be rendered. Pressing `Esc` while in floating mode SHALL NOT close the widget (the floating mode is "sticky"; the user must click the `▿` minimize button to return to bubble mode).
 
@@ -1054,7 +1083,7 @@ All three modes SHALL share a single chat session via `useChatStore` (`sessionId
 
 The widget SHALL use logical pixel values for fixed dimensions (`44px`, `360px`, `460px`, `640px`, `480px`, `60px`) AND SHALL NOT expose any user-configurable size preference. Bubble and floating modes anchor to the viewport bottom-right corner; the widget SHALL NOT be draggable to any other position. Mode preference SHALL NOT be persisted: every Workspace mount SHALL initialize with `mode = "bubble"` AND `modalReturnMode = null`.
 
-The bubble mode bubble's `aria-label` SHALL be the localized translation of `chat.widget.aria.openChat` when `useGoalsStore.activeRun` is null. When `useGoalsStore.activeRun` is non-null, the bubble's `aria-label` SHALL instead be the localized translation of `chat.widget.aria.openChatWithActiveGoalRunning`. Both keys MUST exist in every shipped locale (currently `en` AND `zh`). The floating mode panel title SHALL render the localized translation of `chat.widget.aria.floating.title`; the modal mode dialog title SHALL render the localized translation of `chat.widget.aria.modal.title`. Both new keys MUST exist in every shipped locale.
+The bubble mode bubble's `aria-label` SHALL be the localized translation of `chat.widget.aria.openChat` regardless of the value of `useGoalsStore.activeRun`. The previous conditional aria-label that switched to `chat.widget.aria.openChatWithActiveGoalRunning` while a goal was running SHALL be removed — the active-goal signal is no longer announced on the chat bubble (it is announced via the Goals sidebar row's pulse dot aria-label sourced from `workspace.tab.goals.activeRunPulse`). The i18n key `chat.widget.aria.openChatWithActiveGoalRunning` SHALL be removed from every shipped locale bundle. The floating mode panel title SHALL render the localized translation of `chat.widget.aria.floating.title`; the modal mode dialog title SHALL render the localized translation of `chat.widget.aria.modal.title`. Both modal/floating title keys MUST exist in every shipped locale.
 
 `useChatStore` SHALL expose the following actions in place of the removed `toggleExpanded()` AND `setSize(width, height)` actions:
 
@@ -1165,40 +1194,15 @@ The root `data-testid="chat-widget"` element's `data-state` attribute SHALL refl
 - **WHEN** `mode === "bubble"` AND a `VerbLifecycleEvent::PromoteSuggestion` event arrives via the `chat-stream` channel AND the user has not yet acted on the suggestion
 - **THEN** the bubble SHALL render a small red dot badge with `data-testid="chat-widget-promote-badge"` AND the badge SHALL disappear the next time `mode` transitions to `"floating"` or `"modal"` or the suggestion is dismissed
 
-#### Scenario: Active goal pulse dot appears on bubble
+#### Scenario: Chat bubble SHALL NOT render the active-goal pulse dot in any mode
 
-- **WHEN** `mode === "bubble"` AND `useGoalsStore.activeRun` transitions from null to a non-null value
-- **THEN** an element with `data-testid="chat-widget-active-goal-pulse"` SHALL be rendered as a descendant of the bubble AND the dot SHALL be positioned in the bubble's top-right corner AND the dot's background colour SHALL resolve to the `--color-accent` token value AND the dot SHALL reach full opacity within approximately 200ms
+- **WHEN** `useGoalsStore.activeRun` is non-null (a goal is running) AND `mode` is any of `"bubble"` / `"floating"` / `"modal"`
+- **THEN** no element with `data-testid="chat-widget-active-goal-pulse"` SHALL be rendered anywhere in the chat widget's subtree (the active-goal ambient indicator lives on the Goals sidebar row instead)
 
-#### Scenario: Active goal pulse dot disappears when run ends
-
-- **WHEN** the bubble is rendering the active-goal pulse dot AND `useGoalsStore.activeRun` transitions to null
-- **THEN** the element with `data-testid="chat-widget-active-goal-pulse"` SHALL fade to opacity 0 within approximately 200ms AND SHALL either be unmounted OR remain mounted but visually hidden such that it does NOT capture pointer events
-
-#### Scenario: Pulse dot and promote badge render simultaneously without overlap
-
-- **WHEN** `mode === "bubble"` AND `useGoalsStore.activeRun` is non-null AND `useChatStore.promoteSuggestion` is non-null
-- **THEN** both `data-testid="chat-widget-active-goal-pulse"` AND `data-testid="chat-widget-promote-badge"` SHALL be rendered as descendants of the bubble AND their rendered bounding boxes SHALL NOT overlap
-
-#### Scenario: Floating mode does not render pulse dot
-
-- **WHEN** `mode === "floating"` AND `useGoalsStore.activeRun` is non-null
-- **THEN** no element with `data-testid="chat-widget-active-goal-pulse"` SHALL be rendered inside the widget subtree
-
-#### Scenario: Modal mode does not render pulse dot
-
-- **WHEN** `mode === "modal"` AND `useGoalsStore.activeRun` is non-null
-- **THEN** no element with `data-testid="chat-widget-active-goal-pulse"` SHALL be rendered inside the widget or modal portal subtree
-
-#### Scenario: Active goal aria-label switches bubble announcement
+#### Scenario: Bubble aria-label SHALL remain `openChat` regardless of active-goal state
 
 - **WHEN** `mode === "bubble"` AND `useGoalsStore.activeRun` transitions from null to non-null
-- **THEN** the element with `data-testid="chat-widget"` SHALL have its `aria-label` attribute equal to the localized translation of `chat.widget.aria.openChatWithActiveGoalRunning` AND when `activeRun` transitions back to null the `aria-label` SHALL revert to the localized translation of `chat.widget.aria.openChat`
-
-#### Scenario: Reduced motion disables pulse dot fade transition
-
-- **WHEN** the user agent reports `prefers-reduced-motion: reduce` AND `useGoalsStore.activeRun` transitions from null to non-null
-- **THEN** the element with `data-testid="chat-widget-active-goal-pulse"` SHALL reach its visible opacity within the same frame (i.e., with no perceptible CSS transition) AND SHALL NOT animate via any keyframe loop
+- **THEN** the element with `data-testid="chat-widget"` SHALL keep its `aria-label` attribute equal to the localized translation of `chat.widget.aria.openChat` AND SHALL NOT switch to any other key (the previously-used `chat.widget.aria.openChatWithActiveGoalRunning` key is removed)
 
 #### Scenario: Reduced motion disables modal open animation
 
@@ -1212,27 +1216,24 @@ The root `data-testid="chat-widget"` element's `data-state` attribute SHALL refl
 
 
 <!-- @trace
-source: chatwidget-three-modes
-updated: 2026-05-27
+source: chatwidget-pulse-and-goal-token-display
+updated: 2026-05-28
 code:
-  - codebus-app/src/i18n/messages.ts
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-en.png
   - codebus-app/src/components/workspace/Workspace.tsx
-  - codebus-app/scripts/focus-trap-probe.mjs
+  - docs/2026-05-28-goal-token-display-streaming-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-lobby-bus-motion-frame.png
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-zh-clean.png
+  - docs/2026-05-28-four-bugs-backlog.md
   - codebus-app/src/components/workspace/ChatWidget.tsx
-  - codebus-app/src/components/workspace/ChatTranscript.tsx
-  - codebus-app/src/hooks/useChatShortcut.ts
-  - codebus-app/src/store/chat.ts
-  - codebus-app/design-handoff/AUDIT.md
+  - codebus-app/src/i18n/messages.ts
+  - codebus-app/src/components/workspace/RunDetailRunning.tsx
+  - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
 tests:
-  - codebus-app/src/components/workspace/ChatTranscript.test.tsx
-  - codebus-app/src/components/workspace/ChatNewChatButton.test.tsx
-  - codebus-app/src/components/workspace/ChatTokenDisplay.test.tsx
-  - codebus-app/src/components/workspace/Workspace.test.tsx
-  - codebus-app/src/store/chat.test.ts
-  - codebus-app/src/components/workspace/ChatUndoToast.test.tsx
-  - codebus-app/src/i18n/chat.test.ts
   - codebus-app/src/components/workspace/ChatWidget.test.tsx
-  - codebus-app/src/hooks/useChatShortcut.test.tsx
+  - codebus-app/src/i18n/chat.test.ts
+  - codebus-app/src/components/workspace/Workspace.test.tsx
+  - codebus-app/src/components/workspace/RunDetailRunning.test.tsx
 -->
 
 ---
@@ -2811,8 +2812,9 @@ tests:
 The Workspace sidebar SHALL render each of its three tab navigation rows (`Goals`, `Wiki`, `Quiz`) as a single horizontal row composed, in order, of:
 
 1. an inline emoji prefix rendered inside `<span aria-hidden="true">` (🚏 for `Goals`, 📂 for `Wiki`, 🎓 for `Quiz`),
-2. the localized tab label, and
-3. a right-aligned mono-numeric count rendered in a tabular-nums monospace style with tertiary foreground color.
+2. the localized tab label,
+3. a right-aligned mono-numeric count rendered in a tabular-nums monospace style with tertiary foreground color, and
+4. an ambient `active-pulse` dot element rendered immediately after the count, anchored to the row's right edge.
 
 The emoji prefix SHALL be encoded directly in the component source, SHALL NOT be sourced from an i18n message value, and SHALL be visually separated from the label by a fixed gap (not by a literal whitespace character inside the label string).
 
@@ -2822,20 +2824,28 @@ The count source for each row SHALL be read from a global store via a selector. 
 
 The currently active nav row SHALL display a 2px-wide vertical accent-color bar at its left edge as the primary "you are here" indicator. Non-active rows SHALL NOT render this bar (zero-opacity placeholders are not permitted). The active row's prior whole-row accent-tint fill (`bg-accent/20 text-accent`) SHALL be removed or weakened so the left bar is the dominant active-state signal; any residual active-label emphasis (color, weight, or tint) SHALL remain subtle enough that it does not compete with the left bar.
 
+Each nav row SHALL render an `active-pulse` element with `data-testid="workspace-tab-<id>-active-pulse"` (e.g., `workspace-tab-goals-active-pulse`). The element SHALL be a 7px round accent-coloured dot, always mounted (so its 200ms opacity transition can play in both directions), and SHALL toggle between `opacity-100` (active) and `opacity-0` (inactive) via a CSS class change. The element SHALL carry the Tailwind classes `transition-opacity duration-200 motion-reduce:transition-none` so reduced-motion users see an instant transition rather than a fade.
+
+The `Goals` row's `active-pulse` SHALL be opacity-100 (visible) if and only if `useGoalsStore.activeRun != null`. The `Wiki` row's `active-pulse` AND the `Quiz` row's `active-pulse` SHALL remain opacity-0 at all times in the current spec — those rows do not yet have a cross-tab activity signal wired (they SHALL exist in the DOM purely as a layout-stable placeholder so future activity signals can be added without re-architecting the row). The `Wiki` AND `Quiz` pulse dots SHALL carry `aria-hidden="true"` while inactive AND SHALL NOT carry an `aria-label` attribute.
+
+When a row's `active-pulse` is visible (opacity-100), the dot SHALL carry `role="status"` AND an `aria-label` resolving to a localized message tied to that row's activity. For the `Goals` row this label SHALL resolve to the `workspace.tab.goals.activeRunPulse` i18n key (which MUST exist in every shipped locale, currently `en` AND `zh`). When the row's `active-pulse` is hidden (opacity-0), the dot SHALL carry `aria-hidden="true"` AND SHALL NOT carry an `aria-label` so screen readers do not announce a non-existent activity.
+
+The `Goals` row's `active-pulse` SHALL be the relocated home for the ODI-4 active-goal ambient indicator, which previously lived on the Chat Widget's bubble surface. The previous chat-bubble pulse dot (`data-testid="chat-widget-active-goal-pulse"`) SHALL no longer be rendered in any chat widget mode — the chat surface is reserved for chat-state signals (promote badge, transcript content) so users do not misread a chat-located indicator as a chat-state signal.
+
 Keyboard focus rings, hover affordances, and the existing `data-testid="workspace-tab-<id>"` and `data-active` attributes on each row SHALL be preserved.
 
-#### Scenario: Each nav row renders emoji prefix, label, and right-aligned count
+#### Scenario: Each nav row renders emoji prefix, label, right-aligned count, and active-pulse placeholder
 
 - **WHEN** the user opens a vault and the Workspace sidebar renders
-- **THEN** each of the three nav rows displays its emoji prefix (🚏 / 📂 / 🎓) inside an `aria-hidden` span, followed by the localized label, followed by a right-aligned mono-numeric count whose value matches the corresponding store length
+- **THEN** each of the three nav rows displays its emoji prefix (🚏 / 📂 / 🎓) inside an `aria-hidden` span, followed by the localized label, followed by a right-aligned mono-numeric count whose value matches the corresponding store length, followed by an `active-pulse` dot element whose `data-testid` is `workspace-tab-<id>-active-pulse`
 
 ##### Example: row composition
 
-| Tab id | Emoji | Label (en) | Count source |
-| ------ | ----- | ---------- | ------------ |
-| `goals` | 🚏 | `Goals` | `useGoalsStore().runs.length` |
-| `wiki` | 📂 | `Wiki` | `useWikiStore().pages.length` |
-| `quiz` | 🎓 | `Quiz` | `useQuizHistoryStore().attempts.length` |
+| Tab id | Emoji | Label (en) | Count source | Active-pulse source |
+| ------ | ----- | ---------- | ------------ | ------------------- |
+| `goals` | 🚏 | `Goals` | `useGoalsStore().runs.length` | `useGoalsStore().activeRun != null` |
+| `wiki` | 📂 | `Wiki` | `useWikiStore().pages.length` | always opacity-0 (placeholder for future signal) |
+| `quiz` | 🎓 | `Quiz` | `useQuizHistoryStore().attempts.length` | always opacity-0 (placeholder for future signal) |
 
 #### Scenario: Active row shows a left amber bar and inactive rows do not
 
@@ -2864,19 +2874,46 @@ Keyboard focus rings, hover affordances, and the existing `data-testid="workspac
 - **WHEN** the i18n message catalog is inspected for `workspace.tab.goals`, `workspace.tab.wiki`, and `workspace.tab.quiz`
 - **THEN** none of the three message values contain the emoji characters 🚏, 📂, or 🎓; the emoji characters appear only in the sidebar component source
 
+#### Scenario: Goals row active-pulse appears while a goal run is in flight
+
+- **WHEN** `useGoalsStore.activeRun` transitions from null to a non-null value
+- **THEN** the element with `data-testid="workspace-tab-goals-active-pulse"` SHALL carry the Tailwind class `opacity-100` AND `bg-accent` AND its `aria-label` SHALL resolve to the localized translation of `workspace.tab.goals.activeRunPulse` AND its `role` SHALL be `"status"`
+
+#### Scenario: Goals row active-pulse disappears when the run ends
+
+- **WHEN** `useGoalsStore.activeRun` transitions from a non-null value back to null
+- **THEN** the element with `data-testid="workspace-tab-goals-active-pulse"` SHALL keep its place in the DOM (always-mounted contract) AND SHALL carry the Tailwind class `opacity-0` AND SHALL carry `aria-hidden="true"` AND SHALL NOT carry an `aria-label`
+
+#### Scenario: Active-pulse fade uses motion-reduce variant
+
+- **WHEN** the user agent reports `prefers-reduced-motion: reduce` AND `useGoalsStore.activeRun` transitions between null and non-null
+- **THEN** the `workspace-tab-goals-active-pulse` element SHALL reach its target opacity within the same frame (no perceptible CSS transition) because the rendered class list includes `motion-reduce:transition-none`
+
+#### Scenario: Wiki and Quiz rows keep active-pulse as a hidden placeholder
+
+- **WHEN** the Workspace sidebar renders AND any goal run is active
+- **THEN** the elements with `data-testid="workspace-tab-wiki-active-pulse"` AND `data-testid="workspace-tab-quiz-active-pulse"` SHALL exist in the DOM AND SHALL both carry the Tailwind class `opacity-0` AND SHALL both carry `aria-hidden="true"` AND SHALL NOT carry an `aria-label`
+
 
 <!-- @trace
-source: workspace-sidebar-rework
-updated: 2026-05-27
+source: chatwidget-pulse-and-goal-token-display
+updated: 2026-05-28
 code:
-  - codebus-app/src/store/quiz-history.ts
-  - codebus-app/src/App.tsx
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-en.png
   - codebus-app/src/components/workspace/Workspace.tsx
+  - docs/2026-05-28-goal-token-display-streaming-todo.md
+  - codebus-app/scripts/.v11-acceptance/01-lobby-bus-motion-frame.png
+  - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-zh-clean.png
+  - docs/2026-05-28-four-bugs-backlog.md
+  - codebus-app/src/components/workspace/ChatWidget.tsx
+  - codebus-app/src/i18n/messages.ts
+  - codebus-app/src/components/workspace/RunDetailRunning.tsx
+  - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
 tests:
+  - codebus-app/src/components/workspace/ChatWidget.test.tsx
+  - codebus-app/src/i18n/chat.test.ts
   - codebus-app/src/components/workspace/Workspace.test.tsx
-  - codebus-app/src/App.test.tsx
-  - codebus-app/src/test/forbidden-behaviors.test.tsx
-  - codebus-app/src/store/quiz-history.test.ts
+  - codebus-app/src/components/workspace/RunDetailRunning.test.tsx
 -->
 
 ---

@@ -31,7 +31,6 @@ const CHAT_KEYS = [
   "chat.token.tooltip.input",
   "chat.token.tooltip.output",
   "chat.widget.aria.openChat",
-  "chat.widget.aria.openChatWithActiveGoalRunning",
   "chat.widget.aria.closeChat",
   // chatwidget-three-modes: mode-aware aria-label keys (per spec
   // "Chat Widget Layout and Two-State Toggle" i18n section).
@@ -66,7 +65,6 @@ const ZH_KEYS_REQUIRING_HAN = [
   "chat.token.tooltip.input",
   "chat.token.tooltip.output",
   "chat.widget.aria.openChat",
-  "chat.widget.aria.openChatWithActiveGoalRunning",
   "chat.widget.aria.closeChat",
   // chatwidget-three-modes: zh bundle for mode-aware aria-labels must
   // contain at least one CJK ideograph.

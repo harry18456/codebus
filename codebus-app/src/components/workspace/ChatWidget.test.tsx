@@ -83,21 +83,12 @@ describe("ChatWidget — bubble mode", () => {
     )
   })
 
-  it("renders pulse dot inside the bubble while a goal is running", () => {
+  it("does NOT render the active-goal pulse dot on the chat bubble even while a goal is running (path b: indicator moved to Goals tab nav)", () => {
     seedActiveRun()
     render(<ChatWidget />)
-    const widget = screen.getByTestId("chat-widget")
-    const dot = screen.getByTestId("chat-widget-active-goal-pulse")
-    expect(widget).toContainElement(dot)
-  })
-
-  it("pulse dot stays mounted but hidden when no active goal exists", () => {
-    render(<ChatWidget />)
-    const dot = screen.queryByTestId("chat-widget-active-goal-pulse")
-    // Either unmounted OR mounted-but-opacity-0; the contract from spec.
-    if (dot !== null) {
-      expect(dot.className).toMatch(/\bopacity-0\b/)
-    }
+    expect(
+      screen.queryByTestId("chat-widget-active-goal-pulse"),
+    ).not.toBeInTheDocument()
   })
 
   it("renders red promote badge on bubble when a promote suggestion is pending", () => {
@@ -111,24 +102,12 @@ describe("ChatWidget — bubble mode", () => {
     expect(screen.getByTestId("chat-widget-promote-badge")).toBeInTheDocument()
   })
 
-  it("renders pulse dot and promote badge simultaneously on bubble", () => {
-    seedActiveRun()
-    useChatStore.setState({
-      promoteSuggestion: { reason: "wiki topic candidate", turnIndex: 0 },
-    })
-    render(<ChatWidget />)
-    expect(
-      screen.getByTestId("chat-widget-active-goal-pulse"),
-    ).toBeInTheDocument()
-    expect(screen.getByTestId("chat-widget-promote-badge")).toBeInTheDocument()
-  })
-
-  it("active-goal aria-label switches when a goal starts running", () => {
+  it("bubble aria-label SHALL remain the plain `openChat` translation even when a goal is running (path b: indicator no longer signals via the chat bubble)", () => {
     seedActiveRun()
     render(<ChatWidget />)
     const widget = screen.getByTestId("chat-widget")
     expect(widget.getAttribute("aria-label")).toBe(
-      messages.en["chat.widget.aria.openChatWithActiveGoalRunning"],
+      messages.en["chat.widget.aria.openChat"],
     )
   })
 })

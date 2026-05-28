@@ -23,23 +23,37 @@ grep -rn "搞懂這 repo\|搞懂這" codebus-app/src/
 
 ## Bug 2 · ChatWidget bubble 小橘點觸發條件錯
 
-**現象**：ChatWidget bubble 在「chat 回應時」就顯示橘點、user 認為應該是「設計上 chat 回應完成才有」。
+> **Status: archived 2026-05-28** — fix landed in
+> `openspec/changes/archive/2026-05-28-chatwidget-pulse-and-goal-token-display/`.
+> Apply 階段 disambiguation 後判定原 root-cause 描述（「cross-wiring confirmed」）**不準確**：
+> 實作 wire (`hasActiveGoal = useGoalsStore(s => s.activeRun != null)`) 跟 5.1 archive
+> ODI-4 spec 完全一致、沒有跟 chat state cross-wire；user 體感「錯」其實是視覺位置語意
+> mismatch（chat bubble 上的 dot 直覺=chat 狀態、實際=goal 狀態）。Fix shape = **path b**：把
+> ambient goal indicator 從 chat bubble 搬到 Goals tab nav row。
 
-**Spec 對照**（Phase 5.1 `chatwidget-pulse-and-cancel-move`）：
-- ODI-4 spec：pulse dot = **active goal running** ambient signal、跟 chat session 無關
-- 不是「chat 回應完成」、是「goal 在跑」
+**現象**：ChatWidget bubble 在「chat 回應時」就顯示橘點。
 
-**可能成因**（猜、待 verify）：
-- a. user 預期錯（pulse dot 本意就是 goal running、跟 chat 無關）—— 純文件 / 教學問題
-- b. 實作 wire 錯：pulse dot 接到 chat in-progress state、不是 goal running state
-- c. user 看到的「橘點」其實是別的 visual（如 token usage indicator？streaming caret？）—— misidentified
+**2026-05-28 user 確認 root cause**：
+
+> 跑 goal 就會觸發 chat 的橘色點。之前有修復類似的問題（使用 chat、UI 會顯示有 goal 正在跑）。
+
+→ **cross-wiring confirmed**：goal running state 跟 chat session in-progress state 互相 leak。Pulse dot 本來該只反映「active goal running」、但實作上跟 chat 也綁定。
+
+之前有類似 fix 修了反向（chat 觸發 goal indicator）、現在這個是 goal 觸發 chat pulse、屬於對稱的另一半。
+
+**對應 Phase 5.1 spec**（`chatwidget-pulse-and-cancel-move`）：
+- ODI-4 spec：pulse dot = active goal running ambient signal
+- 不該因為 chat in-progress 就觸發、也不該因為 goal in-progress 就把 chat pulse 也亮起來
 
 **Pre-apply 起手**：
-1. CDP smoke 重現：開 chat、發訊息、看 bubble 上的橘點時機
-2. Grep `pulse-dot` / `useActiveGoal` / chat session in-progress state 看 wire
-3. 對照 Phase 5.1 archive design.md 看 spec 原意
+1. Grep 之前 fix「chat 觸發 goal indicator」的 commit / change（archive 找 chat-vs-goal signal wiring）
+2. Grep `pulse-dot` / `useActiveGoal*` / `useChatRunning` 等 hook、找 pulse dot 條件 wire
+3. CDP smoke 重現：跑 goal → 看 ChatWidget bubble 橘點是否亮（user reproduce 已確認）
+4. 對稱性 check：chat in-progress 時 ChatWidget bubble 是否也錯亮（hypothesis：之前修了反向、可能還有殘留）
 
 **Severity**：中（signal correctness、user 看了會誤判 codebus 狀態）
+
+**狀態**：root cause 已確認、等 `cancelling-stuck-fix` archive 後處理
 
 ---
 

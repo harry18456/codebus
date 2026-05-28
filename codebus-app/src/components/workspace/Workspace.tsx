@@ -332,6 +332,8 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
               setSelectedRunId(null)
               setSelectedDetail(null)
             }}
+            activePulse={activeRun != null}
+            activePulseAriaLabel={t("workspace.tab.goals.activeRunPulse")}
           />
           <TabButton
             id="wiki"
@@ -474,6 +476,20 @@ interface TabButtonProps {
   count: number
   activeTab: TabId
   onSelect: (tab: TabId) => void
+  /**
+   * Ambient activity pulse — accent-coloured 7px dot anchored to the
+   * row's right edge to signal cross-tab activity (currently only the
+   * Goals tab uses it: `useGoalsStore.activeRun != null` flips it on
+   * while a goal run is in flight). The dot fades in / out over 200ms;
+   * `motion-reduce:` drops the transition for reduced-motion users.
+   * Spec: app-workspace § Chat Widget Layout and Two-State Toggle
+   * (ODI-4 indicator relocated from the chat bubble to the Goals tab
+   * row — users read the chat-bubble dot as a chat-state signal
+   * rather than a goal-state signal).
+   */
+  activePulse?: boolean
+  /** Localized accessible label for the pulse dot (screen readers). */
+  activePulseAriaLabel?: string
 }
 
 /**
@@ -490,6 +506,8 @@ function TabButton({
   count,
   activeTab,
   onSelect,
+  activePulse = false,
+  activePulseAriaLabel,
 }: TabButtonProps) {
   const active = activeTab === id
   return (
@@ -521,6 +539,23 @@ function TabButton({
       >
         {count}
       </span>
+      {/*
+        Active-pulse dot. Always mounted so the 200ms fade plays in
+        both directions (unmount-on-clear would drop the fade-out).
+        `motion-reduce:` drops the transition for reduced-motion
+        users. The dot lives outside `data-tauri-drag-region` regions
+        in the sidebar, so it does not interfere with window drag.
+      */}
+      <span
+        data-testid={`workspace-tab-${id}-active-pulse`}
+        role={activePulse && activePulseAriaLabel ? "status" : undefined}
+        aria-label={activePulse ? activePulseAriaLabel : undefined}
+        aria-hidden={activePulse ? undefined : true}
+        className={cn(
+          "ml-1 h-[7px] w-[7px] shrink-0 rounded-full bg-accent transition-opacity duration-200 motion-reduce:transition-none",
+          activePulse ? "opacity-100" : "opacity-0",
+        )}
+      />
     </button>
   )
 }

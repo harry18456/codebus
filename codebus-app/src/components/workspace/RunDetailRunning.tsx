@@ -57,7 +57,7 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
     ? Math.max(0, Math.floor((now - startedMs) / 1000))
     : 0
 
-  const accumulatedTokens = collectTokens(activeRun.events)
+  const tokenSummary = summarizeTokens(activeRun.events)
 
   return (
     <div
@@ -112,7 +112,10 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
         data-testid="run-detail-metadata"
         className="border-b border-border px-3 py-1.5 text-meta text-fg-tertiary"
       >
-        {elapsedSec}s elapsed · {accumulatedTokens} tokens
+        {elapsedSec}s elapsed ·{" "}
+        {tokenSummary.sawUsage
+          ? `${tokenSummary.total} tokens`
+          : t("workspace.runDetail.tokensRunningPlaceholder")}
       </div>
       <div
         data-testid="activity-stream"
@@ -145,11 +148,32 @@ export function RunDetailRunning({ onBack }: RunDetailRunningProps) {
   )
 }
 
-function collectTokens(events: VerbEvent[]): number {
-  return events.reduce((acc, e) => {
+/**
+ * Spec: app-workspace § Run Detail Views — Running (token-slot NOTE).
+ *
+ * Returns `sawUsage = true` iff at least one `StreamEvent::Usage` event
+ * has been observed. Claude's stream-json wire format only emits a
+ * single Usage event at the final `result` step, so during a running
+ * Claude spawn the sum is structurally 0 and rendering "0 tokens"
+ * misleads the user into thinking no tokens have been spent. The
+ * Running detail view branches on `sawUsage` (not `total === 0`) so the
+ * placeholder semantic is "no Usage event has arrived yet", not "sum
+ * is zero" — the slot SHALL NOT regress back to the placeholder if a
+ * later Usage event arrives with a zero delta after a non-zero sum was
+ * already displayed (the events list is append-only, so once
+ * `sawUsage` flips true on a re-render it stays true).
+ */
+function summarizeTokens(events: VerbEvent[]): {
+  sawUsage: boolean
+  total: number
+} {
+  let sawUsage = false
+  let total = 0
+  for (const e of events) {
     if (e.kind === "stream" && e.data.kind === "usage") {
-      return acc + e.data.input_tokens + e.data.output_tokens
+      sawUsage = true
+      total += e.data.input_tokens + e.data.output_tokens
     }
-    return acc
-  }, 0)
+  }
+  return { sawUsage, total }
 }

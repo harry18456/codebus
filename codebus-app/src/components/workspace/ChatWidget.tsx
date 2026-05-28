@@ -1,7 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 
 import { useChatStore } from "@/store/chat"
-import { useGoalsStore } from "@/store/goals"
 import { useT } from "@/i18n/useT"
 
 import { ChatInput } from "./ChatInput"
@@ -18,8 +17,11 @@ import { ChatUndoToast } from "./ChatUndoToast"
  *  - **bubble**   — 44×44 circular `💬` bubble pinned to viewport
  *    bottom-right (16px from each edge, above the 32px `BottomStrip`).
  *    Shows a small red `chat-widget-promote-badge` while a pending
- *    PromoteSuggestion exists, plus a 7px amber active-goal pulse dot
- *    when `useGoalsStore.activeRun` is non-null.
+ *    PromoteSuggestion exists. The active-goal ambient indicator was
+ *    moved off the chat bubble to the Goals tab nav row (see
+ *    `Workspace.tsx`'s TabButton `workspace-tab-goals-active-pulse`)
+ *    because users read the chat-bubble dot as a chat-state signal
+ *    rather than a goal-state signal.
  *  - **floating** — 360×460 fixed-size panel anchored to the same
  *    bottom-right point. Header carries `⤢` expand-to-modal + `▿`
  *    minimize buttons. Esc is intentionally a no-op (per design
@@ -75,11 +77,6 @@ export function ChatWidget({
   const mode = useChatStore((s) => s.mode)
   const promoteSuggestion = useChatStore((s) => s.promoteSuggestion)
   const openFloating = useChatStore((s) => s.openFloating)
-  // Selector form yields a boolean so the bubble only re-renders on
-  // null↔non-null transitions, not every stream event. Coerce
-  // `undefined` (store wiped in some test races) to false so the dot
-  // degrades to invisible rather than crashing.
-  const hasActiveGoal = useGoalsStore((s) => s.activeRun != null)
   const t = useT()
 
   if (mode === "bubble") {
@@ -88,11 +85,7 @@ export function ChatWidget({
         type="button"
         data-testid="chat-widget"
         data-state="bubble"
-        aria-label={t(
-          hasActiveGoal
-            ? "chat.widget.aria.openChatWithActiveGoalRunning"
-            : "chat.widget.aria.openChat",
-        )}
+        aria-label={t("chat.widget.aria.openChat")}
         onClick={openFloating}
         className="fixed z-50 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-bg-raised text-2xl text-fg shadow-lg transition-colors hover:bg-bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
         style={{
@@ -101,23 +94,6 @@ export function ChatWidget({
         }}
       >
         <span aria-hidden="true">💬</span>
-        {/*
-          Active-goal pulse dot. Always mounted on the bubble so the
-          200ms opacity transition can play in both directions — the
-          design rejected `unmount-on-clear` because that loses the
-          fade-out animation. Positioned further into the corner than
-          `chat-widget-promote-badge` so both indicators can coexist
-          when a promote suggestion lands while a goal is running.
-          `motion-reduce` variant drops the transition for users who
-          request reduced motion.
-        */}
-        <span
-          data-testid="chat-widget-active-goal-pulse"
-          aria-hidden="true"
-          className={`absolute right-0.5 top-0.5 h-[7px] w-[7px] rounded-full bg-accent transition-opacity duration-200 motion-reduce:transition-none ${
-            hasActiveGoal ? "opacity-100" : "opacity-0"
-          }`}
-        />
         {promoteSuggestion ? (
           <span
             data-testid="chat-widget-promote-badge"
