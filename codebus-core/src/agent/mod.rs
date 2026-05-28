@@ -16,6 +16,7 @@ pub mod claude_cli;
 pub mod codex_backend;
 pub mod dispatch;
 pub mod env_overrides;
+pub(crate) mod process_kill;
 pub mod spawn_spec;
 
 pub use backend::AgentBackend;

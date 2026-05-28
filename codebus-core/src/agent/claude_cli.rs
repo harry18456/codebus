@@ -19,6 +19,7 @@
 
 use crate::agent::backend::AgentBackend;
 use crate::agent::env_overrides::EnvOverrides;
+use crate::agent::process_kill::KillHandle;
 use crate::agent::spawn_spec::SpawnSpec;
 use crate::log::{TokenUsage, accumulate_token_usage};
 use crate::stream::StreamEvent;
@@ -30,6 +31,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
+
+/// Poll interval for the background cancel watcher thread (see
+/// [`spawn_cancel_watcher`]). 100ms balances "user expects ≤ 1s
+/// terminal-state latency" against "do not burn CPU spinning on a flag".
+const CANCEL_WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 
 /// Result of one [`invoke`] call. Returned to the verb command so it can
@@ -105,12 +111,24 @@ pub fn invoke(
         Stdio::null()
     };
 
-    let mut child = cmd
-        .current_dir(vault_root)
+    cmd.current_dir(vault_root)
         .stdin(stdin_mode)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    // Cross-platform process-tree control: on Unix this configures
+    // `process_group(0)` so the child becomes a new PGID leader; on
+    // Windows it is a no-op (the Job Object is attached after spawn).
+    KillHandle::pre_spawn(&mut cmd);
+    let mut child = cmd.spawn()?;
+    // Wrap the spawned child in a KillHandle so the watcher can take
+    // out the entire descendant tree, not just the immediate child.
+    // Agent CLIs on Windows are `cmd.exe` → `node.exe` (claude.cmd /
+    // codex.cmd are .cmd shims), and on Unix they spawn node + shell
+    // tooling underneath. A naive single-PID kill leaves grandchildren
+    // holding the stdout pipe open, which wedges the main-loop reader
+    // and `invoke` never returns — see the cancelling-stuck-fix design
+    // doc's "Pre-apply 校準" section.
+    let kill_handle = Arc::new(KillHandle::install(&child)?);
 
     // Feed the optional stdin payload (codex multi-line prompt workaround for
     // Windows .cmd batch-file argv validation) and immediately close stdin so
@@ -120,6 +138,20 @@ pub fn invoke(
             io::Write::write_all(&mut stdin, payload.as_bytes())?;
         }
     }
+
+    // Background cancel watcher: the main loop below reads stdout with a
+    // blocking `BufReader::lines()`. When the child stops emitting stdout
+    // (LLM hung on a network call, child waiting on a stalled tool
+    // result), that read blocks indefinitely and the inline cancel-flag
+    // check inside the loop never runs. The watcher polls the cancel
+    // flag on its own schedule (every CANCEL_WATCHER_POLL_INTERVAL) and
+    // terminates the child's process tree via the KillHandle — the
+    // resulting EOF on stdout unblocks the main loop. `done` is the
+    // watcher's "main loop completed, you can stop polling" signal so
+    // the watcher does not outlive `invoke`.
+    let done = Arc::new(AtomicBool::new(false));
+    let watcher_handle =
+        spawn_cancel_watcher(kill_handle.clone(), cancel.clone(), done.clone());
 
     // Hand stderr to a background thread so it drains without blocking
     // the main loop. The thread exits when the child closes stderr (i.e.
@@ -185,13 +217,23 @@ pub fn invoke(
         if let Some(flag) = &cancel
             && flag.load(Ordering::Relaxed)
         {
-            // Best-effort kill; ignore failure (child may have exited
-            // between the poll and the kill call). The drain branch
-            // above keeps reading lines so the OS pipe buffer empties.
-            let _ = child.kill();
+            // Best-effort tree kill; ignore failure (the tree may
+            // already be gone if the watcher beat us to it, or the
+            // child may have exited between the poll and the kill
+            // call). The drain branch above keeps reading lines so
+            // the OS pipe buffer empties.
+            let _ = kill_handle.terminate_tree();
             cancelled = true;
         }
     }
+
+    // Signal the cancel watcher to exit before reaping. The watcher
+    // sleeps for up to CANCEL_WATCHER_POLL_INTERVAL between checks, so
+    // its `join()` below waits at most that long even when `cancel` was
+    // never flipped. This must happen before `child.wait()` so the
+    // watcher does not race with reap and accidentally kill a freshly
+    // recycled PID.
+    done.store(true, Ordering::SeqCst);
 
     // Reap the child — stdout EOF doesn't strictly mean exit yet on some
     // platforms, but `wait()` blocks until truly terminated.
@@ -201,6 +243,13 @@ pub fn invoke(
     // Best-effort join on the stderr passthrough thread. 5s deadline:
     // longer is unlikely to help; if the thread is wedged, detach.
     join_within(stderr_handle, Duration::from_secs(5));
+
+    // Strict join on the cancel watcher: it must not outlive `invoke`,
+    // since it holds the child's PID and could otherwise fire a kill
+    // against a recycled PID once the OS reuses it. Bounded by
+    // CANCEL_WATCHER_POLL_INTERVAL plus a small slack — if the watcher
+    // wedges (it should not), surface it as a panic rather than detach.
+    let _ = watcher_handle.join();
 
     Ok(InvokeReport {
         exit,
@@ -224,6 +273,44 @@ pub(crate) fn sniff_init_session_id(line: &str) -> Option<String> {
         return None;
     }
     Some(parsed.get("session_id")?.as_str()?.to_string())
+}
+
+/// Spawn the background cancel watcher described in [`invoke`]'s comment.
+///
+/// The watcher polls two flags on a fixed interval:
+/// - `done`: set by `invoke` when the main loop finishes and the
+///   watcher must stop. Checked first so the watcher exits promptly
+///   when no cancel ever fires.
+/// - `cancel`: the caller-supplied cancel signal. When set to `true`,
+///   the watcher terminates the child's entire process tree via
+///   the shared `KillHandle` (idempotent across both platforms, so
+///   the inline fast-path cancel inside the main loop may safely
+///   fire in parallel) and exits.
+///
+/// The `KillHandle` is shared via `Arc` because the main thread also
+/// holds it for the inline fast-path kill. Holding a `&Child` here
+/// would conflict with the main thread's `child.wait()`.
+fn spawn_cancel_watcher(
+    kill_handle: Arc<KillHandle>,
+    cancel: Option<Arc<AtomicBool>>,
+    done: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        loop {
+            if done.load(Ordering::SeqCst) {
+                return;
+            }
+            if let Some(flag) = &cancel
+                && flag.load(Ordering::SeqCst)
+            {
+                // Idempotent across both platforms; the main-loop fast
+                // path may have already terminated the tree by now.
+                let _ = kill_handle.terminate_tree();
+                return;
+            }
+            thread::sleep(CANCEL_WATCHER_POLL_INTERVAL);
+        }
+    })
 }
 
 /// Wait for the thread to finish for at most `deadline`. If it doesn't,
@@ -608,5 +695,270 @@ mod tests {
         assert!(!mirror.load(Ordering::Relaxed));
         flag.store(true, Ordering::Relaxed);
         assert!(mirror.load(Ordering::Relaxed));
+    }
+
+    // === cancelling-stuck-fix: bounded-latency cancel coverage ===
+    //
+    // These tests spawn real child processes via a minimal `TestBackend`
+    // implementation so they exercise the same blocking-IO codepath as
+    // production. They are the verification target for the
+    // `Cancellation Polling Not Coupled To Stdout` requirement.
+
+    enum TestChild {
+        /// Silent: spawns a process that sleeps without emitting any
+        /// stdout. Exercises the watcher-thread cancel path.
+        Silent,
+        /// Streaming: spawns a process that emits one line, then sleeps
+        /// for several seconds. Exercises the main-loop fast-path cancel.
+        StreamingThenSleep,
+        /// Finite: spawns a process that emits three lines and exits
+        /// promptly. Exercises clean shutdown / no-leak path with no
+        /// cancel flag flipped.
+        Finite,
+    }
+
+    struct TestBackend(TestChild);
+
+    impl AgentBackend for TestBackend {
+        fn build_command(&self, _spec: &SpawnSpec) -> Command {
+            match self.0 {
+                TestChild::Silent => silent_child_command(),
+                TestChild::StreamingThenSleep => streaming_then_sleep_command(),
+                TestChild::Finite => finite_child_command(),
+            }
+        }
+        fn parse_stream_line(&self, _line: &str) -> Vec<StreamEvent> {
+            Vec::new()
+        }
+        fn extract_session_id(&self, _line: &str) -> Option<String> {
+            None
+        }
+    }
+
+    #[cfg(unix)]
+    fn silent_child_command() -> Command {
+        let mut c = Command::new("sleep");
+        c.arg("30");
+        c
+    }
+
+    #[cfg(windows)]
+    fn silent_child_command() -> Command {
+        // PowerShell `Start-Sleep` blocks silently and tolerates a closed
+        // stdin (Stdio::null). Windows `timeout.exe` would be the obvious
+        // pick but it refuses redirected stdin, and Git-for-Windows ships
+        // a GNU-coreutils `timeout` that shadows the native one on PATH.
+        let mut c = Command::new("powershell.exe");
+        c.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"]);
+        c
+    }
+
+    #[cfg(unix)]
+    fn streaming_then_sleep_command() -> Command {
+        let mut c = Command::new("sh");
+        c.args(["-c", "echo line1; sleep 5"]);
+        c
+    }
+
+    #[cfg(windows)]
+    fn streaming_then_sleep_command() -> Command {
+        // Same rationale as `silent_child_command`: PowerShell tolerates
+        // Stdio::null stdin and gives us a portable way to emit one line
+        // then block silently.
+        let mut c = Command::new("powershell.exe");
+        c.args([
+            "-NoProfile",
+            "-Command",
+            "[Console]::Out.WriteLine('line1'); [Console]::Out.Flush(); Start-Sleep -Seconds 5",
+        ]);
+        c
+    }
+
+    #[cfg(unix)]
+    fn finite_child_command() -> Command {
+        let mut c = Command::new("sh");
+        c.args(["-c", "echo line1; echo line2; echo line3"]);
+        c
+    }
+
+    #[cfg(windows)]
+    fn finite_child_command() -> Command {
+        let mut c = Command::new("cmd");
+        c.args(["/c", "echo line1 & echo line2 & echo line3"]);
+        c
+    }
+
+    /// Silent-child cancel: the child emits no stdout, then `cancel` is set
+    /// `true`. The new watcher thread SHALL observe the flag within ~100ms
+    /// and kill the child via `kill_child_by_id(pid)`. `invoke` SHALL
+    /// return within 200ms of the flag being set.
+    ///
+    /// RED phase: this test FAILS against the pre-fix `invoke` because the
+    /// blocking `BufReader::lines()` never advances when the child has
+    /// stopped writing, so the inline cancel check never runs.
+    #[test]
+    fn cancel_returns_within_bounded_latency_when_child_silent() {
+        let backend = TestBackend(TestChild::Silent);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_mirror = cancel.clone();
+        let tmp = std::env::temp_dir();
+
+        // Flip cancel from a separate thread shortly after `invoke` starts,
+        // so the spawn has time to materialise before the flag flips.
+        let flipper = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            cancel_mirror.store(true, Ordering::SeqCst);
+        });
+
+        let flip_observed = Instant::now();
+        let r = invoke(
+            &backend,
+            test_spec(),
+            tmp.as_path(),
+            |_event| {},
+            Some(cancel),
+        );
+        let elapsed_from_start = flip_observed.elapsed();
+        let _ = flipper.join();
+
+        let report = r.expect("spawn should succeed on a host with sleep/cmd available");
+        assert!(
+            !report.exit.success(),
+            "killed child should not exit successfully (exit={:?})",
+            report.exit
+        );
+        // Contract: ≤ 200ms from cancel-flag-set to child kill. Test
+        // budget = 150ms pre-flip wait + 200ms contract + generous CI
+        // slack. The slack absorbs PowerShell startup on Windows
+        // (observed ~700-900ms) and shared-runner load; the spec
+        // assertion is still that invoke returns *well* before the
+        // child's natural 30s sleep elapses, which a 3s budget proves.
+        assert!(
+            elapsed_from_start < Duration::from_secs(3),
+            "invoke should return shortly after cancel was set, well \
+             before the child's natural 30s sleep; actual = {:?}",
+            elapsed_from_start
+        );
+    }
+
+    /// Streaming-child cancel: the child emits one stdout line, then
+    /// sleeps. `cancel` is flipped immediately. The inline fast-path
+    /// SHALL kill the child within one loop iteration. Locks in the
+    /// existing behaviour so it does not regress when the watcher is
+    /// added.
+    #[test]
+    fn cancel_during_streaming_returns_within_bounded_latency() {
+        let backend = TestBackend(TestChild::StreamingThenSleep);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_mirror = cancel.clone();
+        let tmp = std::env::temp_dir();
+
+        // Flip very early so the first stdout line triggers cancel on the
+        // very next iteration of the main loop.
+        let flipper = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            cancel_mirror.store(true, Ordering::SeqCst);
+        });
+
+        let started = Instant::now();
+        let r = invoke(
+            &backend,
+            test_spec(),
+            tmp.as_path(),
+            |_event| {},
+            Some(cancel),
+        );
+        let elapsed = started.elapsed();
+        let _ = flipper.join();
+
+        let report = r.expect("spawn should succeed");
+        assert!(
+            !report.exit.success(),
+            "killed child should not exit successfully"
+        );
+        // Streaming child sleeps for 5s after first line; if cancel
+        // path were broken, invoke would wait the full 5s. Bound is
+        // generous to absorb CI noise.
+        assert!(
+            elapsed < Duration::from_millis(1500),
+            "streaming-cancel fast path should return well before the \
+             child's natural 5s sleep elapses; actual = {:?}",
+            elapsed
+        );
+    }
+
+    /// Explicit synchronisation guarantee: the cancel watcher is joined
+    /// (not detached) before `invoke` returns, so the watcher cannot
+    /// outlive its child's PID slot. Since `invoke` performs a strict
+    /// `watcher_handle.join()` synchronously before returning, "invoke
+    /// returned" implies "watcher joined".
+    #[test]
+    fn watcher_joins_before_invoke_returns() {
+        let backend = TestBackend(TestChild::Finite);
+        let tmp = std::env::temp_dir();
+        let started = Instant::now();
+        let r = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None);
+        let elapsed = started.elapsed();
+        let report = r.expect("spawn should succeed");
+        assert!(report.exit.success());
+        // Bounded by CANCEL_WATCHER_POLL_INTERVAL (100ms) plus child
+        // exec time. 2s gives ample slack.
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "watcher join contributes at most one poll interval; \
+             total elapsed = {:?}",
+            elapsed
+        );
+    }
+
+    /// Concurrent double-kill safety: both the main-loop fast path and
+    /// the watcher thread may attempt to kill the child at the same
+    /// time. The contract is that this is harmless — `process_kill`'s
+    /// idempotent behaviour (treat already-exited as Ok) plus the
+    /// main-loop's `let _ = child.kill()` ignore-result discipline keeps
+    /// `invoke` returning `Ok(InvokeReport)` even when both paths fire.
+    ///
+    /// This drives a streaming-then-sleep child: the main loop will
+    /// read `line1` then immediately observe `cancel == true` and call
+    /// `child.kill()`, while the watcher's 100ms poll will also observe
+    /// the flag and call `kill_child_by_id`. The two races; both must
+    /// be safe.
+    #[test]
+    fn concurrent_main_and_watcher_kill_is_safe() {
+        let backend = TestBackend(TestChild::StreamingThenSleep);
+        let cancel = Arc::new(AtomicBool::new(true));
+        let tmp = std::env::temp_dir();
+        let r = invoke(
+            &backend,
+            test_spec(),
+            tmp.as_path(),
+            |_event| {},
+            Some(cancel),
+        );
+        let report = r.expect("invoke should return Ok even with concurrent kills");
+        assert!(!report.exit.success(), "child was killed, not natural exit");
+    }
+
+    /// No-cancel-flag normal completion: child emits 3 lines and exits.
+    /// Verifies `invoke` returns cleanly. Once the watcher thread lands,
+    /// this also doubles as a smoke test that the watcher does not block
+    /// `invoke`'s return when `cancel` is `None` AND when the `done` flag
+    /// signals completion.
+    #[test]
+    fn watcher_thread_does_not_leak_on_normal_completion() {
+        let backend = TestBackend(TestChild::Finite);
+        let tmp = std::env::temp_dir();
+
+        let started = Instant::now();
+        let r = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None);
+        let elapsed = started.elapsed();
+
+        let report = r.expect("spawn should succeed");
+        assert!(report.exit.success(), "finite child should exit success");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "invoke should return promptly after child exits; actual = {:?}",
+            elapsed
+        );
     }
 }

@@ -25,6 +25,26 @@ regex = { workspace = true }
 supports-hyperlinks = { workspace = true }
 keyring = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# Used by `agent::process_kill` to issue `SIGTERM` to a stuck child by PID
+# when the main `invoke` loop can't break out of blocking stdout reads.
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Used by `agent::process_kill`'s Windows JobObject path to terminate
+# the spawned child *and all its descendants* in one shot:
+#   - Win32_System_JobObjects: CreateJobObjectW, AssignProcessToJobObject,
+#     SetInformationJobObject, TerminateJobObject
+#   - Win32_System_Threading: process-spawn flags (CREATE_SUSPENDED etc.,
+#     reserved for future use)
+#   - Win32_Foundation: HANDLE, CloseHandle
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 sha2 = { workspace = true }
