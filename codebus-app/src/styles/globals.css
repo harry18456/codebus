@@ -108,22 +108,22 @@ button:disabled,
   }
 }
 
-/* Lobby empty-state hero idle motion — "Bumpy road / Idling in place" mood.
- * Spec: openspec/specs/app-shell/spec.md · Requirement "Lobby Empty State Idle Motion"
- * Two desynced axes (y 1.4s, x 1.1s) produce subtle jitter with no rotation. */
-@keyframes codebus-bus-idle-y {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-2px); }
-}
-@keyframes codebus-bus-idle-x {
-  0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(1px); }
+/* Lobby empty-state hero motion — "Moving forward · cyclic" variant.
+ * Spec: openspec/specs/app-shell/spec.md · Requirement "Lobby Empty State Hero Motion".
+ * Mirrored bus (scaleX(-1)) travels across ±50px range with bumpy Y (-3px)
+ * and rotation ±2°, dwells briefly at the far endpoint, then returns to
+ * the start. 2.5s loop. Gated on prefers-reduced-motion: reduce. */
+@keyframes codebus-bus-roll-mirrored {
+  0%   { transform: translateX(-50px) rotate(-2deg) scaleX(-1); }
+  20%  { transform: translateX(-25px) translateY(-3px) rotate(0deg) scaleX(-1); }
+  45%  { transform: translateX(15px) rotate(2deg) scaleX(-1); }
+  65%  { transform: translateX(50px) translateY(-3px) rotate(0deg) scaleX(-1); }
+  75%  { transform: translateX(50px) translateY(0) rotate(-1deg) scaleX(-1); }
+  100% { transform: translateX(-50px) rotate(-2deg) scaleX(-1); }
 }
 .codebus-bus-idle {
   display: inline-block;
-  animation:
-    codebus-bus-idle-y 1.4s ease-in-out infinite,
-    codebus-bus-idle-x 1.1s ease-in-out infinite;
+  animation: codebus-bus-roll-mirrored 2.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .codebus-bus-idle {

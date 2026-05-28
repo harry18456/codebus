@@ -536,29 +536,31 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 
 ---
 
-## Cross-cutting · Motion Vocabulary（design v1 reply 確認 2026-05-26）
+## Cross-cutting · Motion Vocabulary（design v1 reply 確認 2026-05-26；2026-05-28 lobby-hero-motion-revise 改 family + variant 架構）
 
-> codebus brand motion 鎖定 **2 個 mood**，新動畫提案必須 map 到其中一個、否則直接 reject。
+> codebus brand motion 鎖定 **單一 `Moving forward` 家族 + 2 個 variant**，新動畫提案必須 map 到其中一個 variant、或主張新 variant 並通過 review；否則直接 reject。
 
-### 2 個合法 mood
+### Moving forward family · 2 variants
 
-| Mood | 動作 | 用在 | 概念 |
+| Variant | Keyframe | 用在 | 概念差異 |
 |---|---|---|---|
-| **Moving forward** | `codebus-bus-roll`（translate -26→12px + ±2° rotate + slight Y bob, 1.8s loop）| LoadingOverlay (vault init) | 「codebus 正在做有終點的工作」 |
-| **Idling in place** | 垂直 2px bob + 水平 1px jitter, 1.4s loop, **無 rotation** | 04b Lobby empty hero | 「codebus 在等你」 |
+| **loading**（單向 → 終點） | `codebus-bus-roll`（translate -26→12px + ±2° rotate + slight Y bob, 1.8s loop） | LoadingOverlay (vault init) | 有起點、有終點、做完就停 |
+| **cyclic**（mirrored 巡迴） | `codebus-bus-roll-mirrored`（translate ±50px + ±2° rotate + Y -3px bumpy + dwell-return, 2.5s loop, `scaleX(-1)` 朝左） | 04b Lobby empty hero | ambient 巡迴、無終點、user 沒動作就一直在 |
+
+兩 variant 共用「公車移動」核心隱喻、共用 prefers-reduced-motion fallback 約束、共用以下 Hard Nos。
 
 ### Hard Nos
 
 | ❌ 禁止 | 原因 |
 |---|---|
 | Goal Running 加 bus 動畫 | 已有 amber pulsing dot + stream-tail caret——再加 bus motion 會競爭注意力。**pulsing dot 就是 「codebus 正在開車」 的 affordance**（don't compete） |
-| Quiz generation 加 bus 動畫 | 同上理由；且會稀釋 LoadingOverlay 的 「moving forward」 mood 獨佔感 |
+| Quiz generation 加 bus 動畫 | 同上理由；且會稀釋 LoadingOverlay 的 `loading` variant 獨佔感 |
 | Wordmark 🚌 動畫 | 靜態 glyph + 2 個 deliberate motion moment = 對的 cadence；3+ 隻動畫 bus 會 tip 到 mascot-overuse |
 
 ### 必加約束
 
 - 所有 bus motion **必須 gate on `@media (prefers-reduced-motion: reduce)`**，fallback 完全靜態 🚌（無 transform）
-- ODI-1 Bumpy road 就是 「Idling in place」 mood 的具體規格——locked，不另開
+- ODI-1 Bumpy road（archived 2026-05-27）是 `cyclic` variant 的 design origin；具體規格已 land 為 spec requirement `Lobby Empty State Hero Motion`（`openspec/specs/app-shell/spec.md`）
 - ODI-4 ChatWidget collapsed amber pulse dot 是「Running ambient」 的官方 affordance、不是 bus motion 議題
 
 ---
@@ -624,11 +626,14 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - **候選方向**（未收斂）：「準備出發…」 / 「上車中…」 / 「公車進站中…」 / 「司機暖車中…」 / 維持
 - **狀態**：open，待 harry 確認方向
 
-#### LO-3 · 動畫詞彙表一致性 [shared] [open]
+#### LO-3 · 動畫詞彙表一致性 [shared] [resolved 2026-05-28 via lobby-hero-motion-revise]
 
-- **問題**：`codebus-bus-roll` 是「位移 + 旋轉 + 上下顛簸」**真在前進**動畫；ODI-1 是「Bumpy road **原地** 顛簸前進」
-- **影響**：兩個 bus motion 用途不同但風格相關，應該有**動畫詞彙表**：行進中 = LoadingOverlay、待機怠速 = 04b hero、loading inline spinner = TBD（02 Goal Detail running 可能會有）
-- **狀態**：open，等審到 02 後一起決定
+- **問題**：`codebus-bus-roll` 是 LoadingOverlay 用的單向動畫；04b empty hero 原 ODI-1「Bumpy road」 idle 規格實測過於 subtle、user-as-design 已重定為 mirrored cyclic
+- **詞彙表**（lobby-hero-motion-revise land 後正式 contract、對齊上方 brand motion lock 的 family + variant 結構）：
+  - `codebus-bus-roll`（loading variant、單向、1.8s）= LoadingOverlay
+  - `codebus-bus-roll-mirrored`（cyclic variant、`scaleX(-1)` 鏡像、dwell-return、2.5s）= 04b Lobby empty hero
+  - inline spinner = 仍未定（02 Goal Detail running 若採用再決定 variant 命名、不在本次 land 範圍）
+- **狀態**：resolved 對 LoadingOverlay vs 04b hero 兩個 surface；inline spinner 留 open 待 02 審到
 
 #### LO-4 · 「3-15 秒」實測 [verify] [partially-resolved 2026-05-28]
 
@@ -1835,6 +1840,8 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
   - 不影響 layout（用 `transform`，不動 box）
   - 不加任何外部依賴，純 CSS `@keyframes`
 - **不在範圍**：路面虛線、輪子動畫、進場/離場過場、其他畫面的 🚌
+
+**Revision 2026-05-28 · lobby-hero-motion-revise**: 原 spec 數值（垂直 2px bob + 水平 1px shake、無 rotation、1.2-1.6s）在 1920×1080 100% scaling 下實機驗收時接近視覺臨界、user 反饋「動的幅度太小、不像 1.1 design」。CDP probe 證實實作 verbatim 對齊 spec、HMR 套上新值都正確——問題在 spec 數值本身。經 4 輪 user-as-design-team 交互式調整（2px → 4px → 8px → ±50px mirrored dwell-return）後鎖定 mirrored cyclic 規格：`scaleX(-1)` 鏡像 + ±50px X 軸 + ±2° rotation + -3px bumpy Y + 2.5s dwell-return loop。「Idling in place」mood 整個廢除、改歸入 `Moving forward · cyclic` variant（見上方 brand motion lock）。完整動機與新 spec 紀錄存 `openspec/changes/archive/2026-05-28-lobby-hero-motion-revise/`（archive 後路徑），正式 spec 為 `openspec/specs/app-shell/spec.md` 的 `Requirement: Lobby Empty State Hero Motion`。
 
 ### ODI-2 · Fullscreen 大留白 background ambient
 
