@@ -23,6 +23,8 @@
 | 2026-05-23 | `changed_paths_under` 把刪除頁也算 changed（content-verify 對刪除頁會 Read 失敗） | 邊緣正確性 | 輕（加 `--diff-filter=d` + 測試，半天） | [core-quality-review F3](2026-05-22-core-quality-review.md) |
 | 2026-05-23 | Codex 端 hard read 隔離（`workspace-write` 設計上允許讀 workspace 外任意檔，含 `~/.ssh/` `~/.aws/` 等敏感檔；agent-hook-hardening 只給 AGENTS.md soft constraint，hard enforcement 留此條） | 安全（codex path 缺 read enforcement，僅靠 model 自律） | 重（待研究：writable_roots Mac/Linux 實機驗 → Windows ACL/chmod → container 化 / sandbox-of-sandbox） | [bash-hook-and-codex-sandbox-discussion §10](2026-05-23-bash-hook-and-codex-sandbox-discussion.md) |
 | 2026-05-23 | prompt surface deep review 後續行動（PE1/PE2 落地：拆 claude/codex SKILL + Layer 1 batch + SpawnSpec 重構 + verb 設計 fixes，5-phase 計畫） | 輸出品質 / multi-provider 完成度（PE1/PE2 接續）+ 含 4 個 🔴 CRITICAL finding | 重（5 phases × 半天-3 半天 = 約 1-2 週；分階段 propose） | [prompt-surface-review-followup](2026-05-23-prompt-surface-review-followup-backlog.md) |
+| 2026-05-28 | Claude-trace 分析 long propose prompt 的 token / cache / context 用量（每 change 200+ 行 prompt × 多 session 累積成本未量化） | workflow efficiency / 複利成本 | 半天 | [claude-trace-prompt-analysis](2026-05-28-claude-trace-prompt-analysis-todo.md) |
+| 2026-05-28 | RunId source-of-truth 統一（IPC 跟 verb 兩處獨立 `Utc::now()` 派生 RunId 跟 RunLog started_at、極端時鐘抖動下仍可能差 1ms、list_runs orphan-detection 偶誤標 interrupted；長期解需 plumb RunId 進 verb signature） | 邊緣正確性 / latent invariant | 中（5 verb signature + 5 CLI entrypoint） | [runid-source-of-truth](2026-05-28-runid-source-of-truth-todo.md) |
 
 ## 已 archived 項目
 
