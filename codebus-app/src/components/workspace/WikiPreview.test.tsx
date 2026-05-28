@@ -49,11 +49,23 @@ describe("WikiPreview", () => {
     expect(screen.getByText("item one").tagName).toBe("LI")
   })
 
-  it("WikiPreview_renders_nothing_when_body_is_null", () => {
+  it("WikiPreview_renders_unselected_hint_card_when_body_is_null", () => {
+    // WP-empty-page design v1.1: vault has pages but no page selected →
+    // render a 📂 hint card (replaces v1's bare empty div).
     render(<WikiPreview vaultPath="/v" body={null} />)
-    // Container still mounts, but no markdown content.
-    const container = screen.getByTestId("wiki-preview")
-    expect(container.textContent ?? "").toBe("")
+    const hint = screen.getByTestId("wiki-unselected-hint")
+    expect(hint).toBeInTheDocument()
+    expect(hint.textContent).toMatch(/📂/)
+    expect(hint.textContent).toMatch(
+      /Pick a page to start reading|選一頁開始讀/,
+    )
+    expect(hint.textContent).toMatch(
+      /travel log|旅行日誌/,
+    )
+    // Reader chrome (metadata bar / markdown body / edit hint footer)
+    // SHALL NOT render when no page is selected.
+    expect(screen.queryByTestId("wiki-page-metadata-bar")).toBeNull()
+    expect(screen.queryByTestId("wiki-edit-hint-footer")).toBeNull()
   })
 
   it("WikiPreview_renders_wikilinks_as_clickable_anchors_with_title_text", async () => {
@@ -65,6 +77,8 @@ describe("WikiPreview", () => {
           slug: "uv-lib",
           path: "/v/.codebus/wiki/modules/uv-lib.md",
           title: "UV Library Entry",
+          goals: [],
+          updated: "",
         },
       },
       currentPath: null,
@@ -185,6 +199,122 @@ describe("WikiPreview", () => {
     render(<WikiPreview vaultPath="/v" body={"# Index"} />)
     expect(screen.getByTestId("open-in-obsidian")).toBeInTheDocument()
     expect(screen.queryByTestId("quiz-me-on-this")).not.toBeInTheDocument()
+  })
+
+  // --- WP2 metadata bar wired into WikiPreview ---
+
+  it("renders metadata bar above markdown when page meta has goals and updated", () => {
+    useWikiStore.setState({
+      pages: {
+        "auth-middleware": {
+          slug: "auth-middleware",
+          path: "/v/.codebus/wiki/modules/auth-middleware.md",
+          title: "Auth Middleware",
+          goals: ["g-first", "g-second"],
+          updated: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+        },
+      },
+      currentPath: "auth-middleware",
+      body: "see [[other-page]] and [[third]] for more",
+      obsidianVaultId: null,
+      _bodyCache: {},
+    })
+    const onGoalClick = vi.fn()
+    render(
+      <WikiPreview
+        vaultPath="/v"
+        body={"see [[other-page]] and [[third]] for more"}
+        onGoalClick={onGoalClick}
+      />,
+    )
+    const bar = screen.getByTestId("wiki-page-metadata-bar")
+    expect(bar.textContent).toMatch(/g-second/)
+    expect(bar.textContent).toMatch(/2 sources|2 處引用/)
+    fireEvent.click(screen.getByTestId("wiki-page-metadata-goal"))
+    expect(onGoalClick).toHaveBeenCalledWith("g-second")
+  })
+
+  // --- WP5 edit hint footer ---
+
+  it("renders edit hint footer on a content page and prefills modal on click", () => {
+    useWikiStore.setState({
+      pages: {
+        "auth-middleware": {
+          slug: "auth-middleware",
+          path: "/v/.codebus/wiki/modules/auth-middleware.md",
+          title: "Auth Middleware",
+          goals: [],
+          updated: "",
+        },
+      },
+      currentPath: "auth-middleware",
+      body: "body content",
+      obsidianVaultId: null,
+      _bodyCache: {},
+    })
+    const onRequestNewGoal = vi.fn()
+    render(
+      <WikiPreview
+        vaultPath="/v"
+        body={"body content"}
+        onRequestNewGoal={onRequestNewGoal}
+      />,
+    )
+    const footer = screen.getByTestId("wiki-edit-hint-footer")
+    expect(footer).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("wiki-edit-hint-link"))
+    expect(onRequestNewGoal).toHaveBeenCalledTimes(1)
+    expect(onRequestNewGoal).toHaveBeenCalledWith(
+      "修改 wiki/modules/auth-middleware.md — ",
+    )
+  })
+
+  it("does not render edit hint footer on nav pages", () => {
+    useWikiStore.setState({
+      pages: {},
+      currentPath: "/v/.codebus/wiki/index.md",
+      body: "# Index",
+      _bodyCache: {},
+    })
+    render(<WikiPreview vaultPath="/v" body={"# Index"} />)
+    expect(screen.queryByTestId("wiki-edit-hint-footer")).toBeNull()
+  })
+
+  // --- WP10 Quiz button amber primary variant ---
+
+  it("Quiz me on this button uses amber primary variant", () => {
+    useWikiStore.setState({
+      currentPath: "uv-lib",
+      pages: {},
+      _bodyCache: {},
+    })
+    render(<WikiPreview vaultPath="/v" body={"# uv-lib"} />)
+    const quizBtn = screen.getByTestId("quiz-me-on-this")
+    // Button's primary variant applies bg-accent (codebus accent = amber).
+    expect(quizBtn.className).toMatch(/bg-accent/)
+  })
+
+  // --- WP11 resolvable wikilink uses plain-wikilink className ---
+
+  it("resolvable wikilink in body uses the plain-wikilink className", () => {
+    useWikiStore.setState({
+      pages: {
+        "uv-lib": {
+          slug: "uv-lib",
+          path: "/v/.codebus/wiki/modules/uv-lib.md",
+          title: "UV Library",
+          goals: [],
+          updated: "",
+        },
+      },
+      currentPath: null,
+      body: null,
+      _bodyCache: {},
+    })
+    render(<WikiPreview vaultPath="/v" body={"see [[uv-lib]] here"} />)
+    const link = screen.getByText("UV Library")
+    expect(link.className).toMatch(/plain-wikilink/)
+    expect(link.getAttribute("data-state")).toBe("resolvable")
   })
 
   it("hides [Open in Obsidian] entirely when vault id is null", () => {

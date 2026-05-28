@@ -81,6 +81,15 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
   // task 5.3 — when set (via wiki preview [Quiz me on this]), the Quiz
   // tab consumes it to start the Page flow (skip planning).
   const [pendingQuizPage, setPendingQuizPage] = useState<string | null>(null)
+  // wiki-page-reader-v1.1 / WP5 + WK-EMPTY: signal carried from the Wiki
+  // tab edit-hint footer ("Run a goal" link) or the Wiki empty hero CTA
+  // through to the Goals tab so the existing NewGoalModal opens (and
+  // optionally pre-fills its goal description). `nonce` lets GoalsTab
+  // distinguish "open with the same prefill again" from a stale signal.
+  const [pendingNewGoalPrefill, setPendingNewGoalPrefill] = useState<{
+    text: string
+    nonce: number
+  } | null>(null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<RunDetail | null>(null)
 
@@ -391,11 +400,21 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
             onSelectRunId={onSelectRunId}
             onBack={onBackToList}
             onSelectPage={onSelectPage}
+            pendingNewGoalPrefill={pendingNewGoalPrefill}
+            onPendingNewGoalConsumed={() => setPendingNewGoalPrefill(null)}
           />
         )}
         {activeTab === "wiki" && (
           <WikiTab
             vaultPath={vault.path}
+            onRequestNewGoal={(prefilled) => {
+              setPendingNewGoalPrefill({ text: prefilled, nonce: Date.now() })
+              setActiveTab("goals")
+            }}
+            onWikiEmptyCta={() => {
+              setPendingNewGoalPrefill({ text: "", nonce: Date.now() })
+              setActiveTab("goals")
+            }}
             onQuizMeOnThis={(path) => {
               setPendingQuizPage(path)
               setActiveTab("quiz")
@@ -516,6 +535,13 @@ interface GoalsAreaProps {
   onSelectRunId: (runId: string) => void
   onBack: () => void
   onSelectPage: (slug: string) => void
+  /**
+   * wiki-page-reader-v1.1: when the Wiki tab edit hint or empty CTA fires
+   * Workspace bumps a pending prefill signal; GoalsArea forwards it to
+   * GoalsTab which opens its NewGoalModal pre-filled (or empty).
+   */
+  pendingNewGoalPrefill?: { text: string; nonce: number } | null
+  onPendingNewGoalConsumed?: () => void
 }
 
 /**
@@ -532,6 +558,8 @@ function GoalsArea({
   onSelectRunId,
   onBack,
   onSelectPage,
+  pendingNewGoalPrefill,
+  onPendingNewGoalConsumed,
 }: GoalsAreaProps) {
   const t = useT()
   if (selectedRunId === null) {
@@ -540,6 +568,8 @@ function GoalsArea({
         vaultPath={vaultPath}
         onSelectRun={onSelectRun}
         onSpawnedRun={onSelectRunId}
+        pendingNewGoalPrefill={pendingNewGoalPrefill ?? null}
+        onPendingNewGoalConsumed={onPendingNewGoalConsumed}
       />
     )
   }

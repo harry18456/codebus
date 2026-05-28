@@ -53,8 +53,7 @@ export function ExplanationText({
             e.preventDefault()
             onOpenWikiPage?.(slug)
           }}
-          style={{ color: "#7c8cff" }}
-          className="hover:underline"
+          className="cite-link font-mono text-accent underline decoration-dashed underline-offset-[3px] hover:text-accent-hover"
         >
           {meta.title ?? slug}
         </a>,

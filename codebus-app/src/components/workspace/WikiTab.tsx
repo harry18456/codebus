@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Folder } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/cn"
 import { useWikiStore } from "@/store/wiki"
 import { useWatcherEvent } from "@/hooks/useWatcherEvent"
@@ -14,6 +15,18 @@ interface WikiTabProps {
   vaultPath: string
   /** task 5.3 — forwarded to WikiPreview's `[Quiz me on this]`. */
   onQuizMeOnThis?: (pagePath: string) => void
+  /**
+   * wiki-page-reader-v1.1 / WP5: forwarded to WikiPreview's edit hint
+   * footer. Workspace receives this and pushes the prefilled goal text
+   * into the Goals tab's NewGoalModal via pending pattern.
+   */
+  onRequestNewGoal?: (prefilledText: string) => void
+  /**
+   * wiki-page-reader-v1.1 / WK-EMPTY: forwarded to the empty-vault hero
+   * CTA. Workspace receives this and switches to the Goals tab + opens
+   * the NewGoalModal without pre-fill.
+   */
+  onWikiEmptyCta?: () => void
 }
 
 /**
@@ -26,7 +39,12 @@ interface WikiTabProps {
  * - When the vault has zero wiki pages, render the centered hint
  *   `No wiki pages yet — run a goal to start documenting`.
  */
-export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
+export function WikiTab({
+  vaultPath,
+  onQuizMeOnThis,
+  onRequestNewGoal,
+  onWikiEmptyCta,
+}: WikiTabProps) {
   const t = useT()
   const pages = useWikiStore((s) => s.pages)
   const currentPath = useWikiStore((s) => s.currentPath)
@@ -50,17 +68,35 @@ export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
     (currentPath && pages[currentPath]?.title) || currentPath || ""
 
   if (!hasPages) {
+    // WK-EMPTY-1/2/3 design v1.1 spec lock: replace the v1 single-line
+    // hint with a hero icon + title + subtitle + amber primary CTA.
     return (
       <div
         data-testid="wiki-tab"
-        className="flex h-full w-full items-center justify-center text-center"
+        className="flex h-full w-full items-center justify-center"
       >
-        <p
-          data-testid="wiki-empty"
-          className="text-body text-fg-secondary"
+        <div
+          data-testid="wiki-empty-hero"
+          className="flex flex-col items-center gap-4 px-8 text-center"
         >
-          {t("workspace.wiki.empty")}
-        </p>
+          <Folder
+            aria-hidden="true"
+            className="h-14 w-14 text-fg-quaternary"
+          />
+          <h2 className="text-h-empty font-medium text-fg-primary">
+            {t("workspace.wiki.emptyHero.title")}
+          </h2>
+          <p className="max-w-[420px] text-body text-fg-secondary">
+            {t("workspace.wiki.emptyHero.subtitle")}
+          </p>
+          <Button
+            data-testid="wiki-empty-cta"
+            variant="primary"
+            onClick={() => onWikiEmptyCta?.()}
+          >
+            {t("workspace.wiki.emptyHero.cta")}
+          </Button>
+        </div>
       </div>
     )
   }
@@ -109,6 +145,7 @@ export function WikiTab({ vaultPath, onQuizMeOnThis }: WikiTabProps) {
             vaultPath={vaultPath}
             body={body}
             onQuizMeOnThis={onQuizMeOnThis}
+            onRequestNewGoal={onRequestNewGoal}
           />
         </div>
       </div>

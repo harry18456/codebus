@@ -1201,7 +1201,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - CDP 截圖會等比縮，可能不準
 - **狀態**：實機驗；若 < 1000px 考慮 tree column 預設折疊或縮窄
 
-##### WP2 · Page metadata bar [local] [design v1.1 spec lock]
+##### WP2 · Page metadata bar [local] [design v1.1 spec lock] [archived 2026-05-28 via wiki-page-reader-v1.1]
 - **位置**：title 下方、body 上方；一行不換行（必要時 ellipsis）
 - **規格**：mono **12px**、`fg-tertiary`；底線 1px solid `--border`、下方 14px gap
 - **內容固定三段**：`Last updated by <goal>` · `<time-ago>` · `<N> sources`
@@ -1213,7 +1213,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
   - **goal name 可點 → 跳該 goal 的 detail view**（hover 加 amber dotted underline）；這是 codebus 最核心的 page ← goal 反向關係
 - **禁止加**：tags / word count / view count / authors（provenance only，多加稀釋訊息價值）
 
-##### WP5 · 缺 edit / regenerate action [design v1.1 spec lock]
+##### WP5 · 缺 edit / regenerate action [design v1.1 spec lock] [archived 2026-05-28 via wiki-page-reader-v1.1]
 - **設計判斷 by design**——codebus 哲學是「不直接編輯 wiki，起新 goal 改」（人寫 vs LLM 寫的權責分隔）
 - **位置**：page footer、上方 24px gap
 - **樣式**：`fg-tertiary` 12.5px、「跑一個 goal」是 link
@@ -1223,12 +1223,12 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
   - 只 prefill「修改 X.md —」前綴；user 自己填「描述你想改的地方」
 - **品牌教學**：hint 用「goal」這詞讓 user 學到 goal 也可用來改 wiki、不只是讀
 
-##### WP-tree-footer · Wiki tree footer slot 旅行日誌 [design v1.1 spec lock]
+##### WP-tree-footer · Wiki tree footer slot 旅行日誌 [design v1.1 spec lock] [archived 2026-05-28 via wiki-page-reader-v1.1]
 - Wiki tree 底部一個獨立區（不在任何 bucket 裡）、列「旅行日誌」當 system page entry
 - 樣式：`fg-tertiary` 字色（跟 5-bucket 區分）、上方 18px gap + 一條 hairline 分隔
 - 連動 WK2：原 OTHER bucket 解散，Wiki Index 移到 tree 最上方當 vault 入口、旅行日誌移到底部當 system slot
 
-##### WP-empty-page · Wiki tab 有 page 但未選 page [design v1.1 spec lock]
+##### WP-empty-page · Wiki tab 有 page 但未選 page [design v1.1 spec lock] [archived 2026-05-28 via wiki-page-reader-v1.1]
 - 區分 WK-EMPTY 系列（**完全沒 page**）跟這個（**有 page 但未 select**）
 - Layout：tree 左邊有內容、reader pane 顯示簡單 hint card
 - Hint card 規格：
@@ -1244,13 +1244,13 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 - sidebar | tree | preview 三 column 間看不到分隔線
 - 跟 G5 共用修法
 
-##### WP10 · 底部 action button 樣式 + i18n [local]
+##### WP10 · 底部 action button 樣式 + i18n [local] [archived 2026-05-28 via wiki-page-reader-v1.1]
 - 「Quiz me on this」純英文 → i18n Cat B 補洞
 - **翻譯**：「Quiz 這頁」（Quiz 保留 jargon、其他翻譯）
 - 「在 Obsidian 開啟」中文 ✅
 - **設計稿 02b 寫 Quiz me 該 amber tint**——現況兩 button 都 generic secondary；**修法**：Quiz me 改 amber 主色強調可測驗、Obsidian 保留 secondary
 
-##### WP11 · Wikilinks 樣式雙樣式 lock [local] [design v1.1 CSS spec]
+##### WP11 · Wikilinks 樣式雙樣式 lock [local] [design v1.1 CSS spec] [archived 2026-05-28 via wiki-page-reader-v1.1]
 - 從 walkthrough-decisions § Q7 延續、v1.1 列出完整 CSS：
 
 ```css
@@ -1293,7 +1293,7 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
 
 > `WikiTab.tsx:50-64` 顯示一行純英文 hint「No wiki pages yet — run a goal to start documenting」，全屏置中、無 hero、無 CTA、無視覺結構。
 
-##### WK-EMPTY-1 · 完全 empty state 視覺超陽春 [local]
+##### WK-EMPTY-1 · 完全 empty state 視覺超陽春 [local] [archived 2026-05-28 via wiki-page-reader-v1.1]
 - 純一行 hint，跟 04b Lobby empty / Goals empty 視覺密度落差大
 - **修法（同 R3 Y 方向）**：
   - `📂` (lucide Folder 56px) hero icon
@@ -1302,12 +1302,12 @@ apply 階段真實 grep `src/lib/ipc.ts` 找到 **12 處** hard-coded validation
   - CTA：amber **`→ 跑一個 goal 開始`** button（auto setActiveTab('goals') + 強烈建議再 open NewGoalModal）
 - **CTA label 決策（2026-05-26 update）**：原本「→ 跳到 Goals 開始」太隱晦——user 在 Wiki tab 不一定建立「wiki 由 goal 產生」的 mental model；CTA 文案要**直接揭露**這層因果關係。「→ 跑一個 goal 開始」一次完成「告訴 user 怎麼做」+「跳到 Goals 」兩件事
 
-##### WK-EMPTY-2 · 文案 i18n + 改善 [i18n Cat B]
+##### WK-EMPTY-2 · 文案 i18n + 改善 [i18n Cat B] [archived 2026-05-28 via wiki-page-reader-v1.1]
 - 現況「No wiki pages yet — run a goal to start documenting」hard-code
 - 翻譯：跟著 WK-EMPTY-1 新文案
 - en 候選：「No wiki pages yet — run a goal and codebus will start writing」
 
-##### WK-EMPTY-3 · 缺 CTA [shared with WK-EMPTY-1]
+##### WK-EMPTY-3 · 缺 CTA [shared with WK-EMPTY-1] [archived 2026-05-28 via wiki-page-reader-v1.1]
 - user 在 Wiki empty 沒接續行為的出口
 - 跟 WK-EMPTY-1 一起做，CTA = 跳 Goals tab
 
@@ -2153,8 +2153,8 @@ Design v1.1 mock 已交、5 個 view 全部 spec 完成。可動：
   - spectra change：`interrupted-state-formalize`（含 rename `RunDetailCancelled` → `RunDetailInterrupted` + backend `interrupt_reason` 欄位 + **2026-05-27 補：原 Phase 5.1 純 rename 已併入本 change**，兩 component 並存合併為單一 `RunDetailInterrupted` + state machine 統一；apply 階段 user 選擴 scope 補 verb cancel path 寫 `Some(UserCancel)` + ipc/goals.rs synthesizer 寫 `Some(AppClose)`；Retry 維持 NewGoalModal pre-fill 不改、ActivityCluster reuse 留後續 change；本任務 propose 寫的「3 variant banner = user-cancelled/agent-failed/system-interrupted」於 Pre-apply 校準調整為「Failed=red 頂層 banner + Interrupted/Cancelled amber 殼層內依 4 reason sub-variant 切」對齊 mock §02c 1284-1333 行；Retry 直接 spawn 行為與既有 spec L485 衝突、本 change 不改）
 - **Quiz wizard 完整 4 步 layout**（Step 1 topic + pill / Step 3 generating + brand banner / Step 4a pending / Step 4b reviewing / Step 4c completion）— **archived 2026-05-27 · quiz-fullscreen-wizard-view**（v1.1 細節落地與 Phase 5.4 合併 land；Step 4c completion 為 QuizWizardCompletion 標準件、現流程預設用 QuizAnswering inline summary）
   - spectra change：`quiz-fullscreen-wizard-view`（Phase 5 已列、現在 v1.1 細節落地）
-- **Wiki page reader 新版**（metadata bar + wikilink CSS + edit hint + 旅行日誌 footer slot + WP-empty-page）
-  - spectra change：`wiki-page-reader-v1.1`
+- **Wiki page reader 新版**（metadata bar + wikilink CSS + edit hint + 旅行日誌 footer slot + WP-empty-page）— **archived 2026-05-28 · wiki-page-reader-v1.1**
+  - spectra change：`wiki-page-reader-v1.1`（WP2/WP5/WP10/WP11/WP-tree-footer/WP-empty-page/WK-EMPTY-1/2/3 全落地；含 IPC `WikiPageMeta` 加 `goals` + `updated` projection、不動 `codebus-core/wiki/frontmatter.rs`）
 - **ChatWidget 3 modes**（bubble + floating 360×460 固定 + centered modal 640 wide + mode 切換矩陣 + chat session sharing） [implemented by change chatwidget-three-modes, awaiting archive]
   - spectra change：`chatwidget-three-modes`（含 ODI-3 升 spec、取代 cut 掉的 05、原 chatwidget-icon-and-pulse 合進此 change）
 - ~~**Language switcher in Settings**（ST14、純加法、~1-1.5 hr）~~ → archived 2026-05-26（`2026-05-26-settings-language-switcher`）

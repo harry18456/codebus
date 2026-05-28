@@ -790,6 +790,23 @@ export interface WikiPageMeta {
   slug: string
   path: string
   title: string
+  /**
+   * Authoring goals projected from the leading frontmatter `goals[]`.
+   * Backend always populates this (empty array when frontmatter is
+   * absent or malformed). Marked optional to keep legacy test fixtures
+   * concise; consumers SHALL fall back to `[]`. Drives the WP2 metadata
+   * bar's `Last updated by <goal>` segment (we render the **last**
+   * element — most recent authoring goal).
+   */
+  goals?: string[]
+  /**
+   * Last-update ISO timestamp projected from frontmatter `updated`.
+   * Backend always populates this (empty string when missing). Marked
+   * optional to keep legacy test fixtures concise; consumers SHALL fall
+   * back to `""`. The WP2 metadata bar suppresses its time-ago segment
+   * when this is empty or unparseable.
+   */
+  updated?: string
 }
 
 /**

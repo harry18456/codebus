@@ -33,7 +33,7 @@ function resetStore() {
 }
 
 function pageMeta(slug: string, title: string): WikiPageMeta {
-  return { slug, path: `wiki/${slug}.md`, title }
+  return { slug, path: `wiki/${slug}.md`, title, goals: [], updated: "" }
 }
 
 describe("ChatTranscript", () => {

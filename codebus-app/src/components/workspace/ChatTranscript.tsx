@@ -620,7 +620,7 @@ function renderWikiSlug({
     <button
       type="button"
       data-testid="chat-wiki-link"
-      className="text-accent underline hover:text-accent-hover focus:outline-none focus:ring-2 focus:ring-accent-ring"
+      className="cite-link font-mono text-accent underline decoration-dashed underline-offset-[3px] hover:text-accent-hover focus:outline-none focus:ring-2 focus:ring-accent-ring"
       onClick={(e) => {
         e.preventDefault()
         onWikiLinkClick?.(slug)

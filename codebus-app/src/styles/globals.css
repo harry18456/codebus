@@ -131,4 +131,41 @@ button:disabled,
   }
 }
 
+/* WP11 design v1.1 spec lock: wiki link visual variants.
+ *
+ * `.plain-wikilink` — body navigation (resolvable). Default fg with a
+ * strong-border underline; on hover the text + underline shift to accent.
+ * The CSS rules below mirror the Tailwind utility composition attached
+ * to each anchor so the literal class name carries the spec contract
+ * even when the utility stack is overridden / pruned.
+ *
+ * `.cite-link` — citation provenance (quiz citation block, chat reply
+ * citation). Monospace + accent + dashed underline; no hover transition
+ * because citations don't navigate elsewhere.
+ *
+ * Spec: openspec/specs/app-workspace/spec.md ·
+ *   Requirement "Wikilink Plain and Citation Style Variants" */
+.plain-wikilink {
+  color: var(--color-fg);
+  text-decoration: underline;
+  text-decoration-color: var(--color-border-strong);
+  text-underline-offset: 3px;
+  transition: color 120ms ease-out, text-decoration-color 120ms ease-out;
+}
+.plain-wikilink:hover {
+  color: var(--color-accent);
+  text-decoration-color: var(--color-accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .plain-wikilink {
+    transition: none;
+  }
+}
 
+.cite-link {
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+}

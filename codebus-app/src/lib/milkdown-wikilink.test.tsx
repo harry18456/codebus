@@ -19,6 +19,8 @@ function makePages(...slugs: string[]): Record<string, WikiPageMeta> {
       slug,
       path: `/v/.codebus/wiki/modules/${slug}.md`,
       title: slug,
+      goals: [],
+      updated: "",
     }
   }
   return out
@@ -37,8 +39,25 @@ describe("WikilinkLink", () => {
     const anchor = screen.getByTestId("wikilink-uv-lib")
     expect(anchor.tagName).toBe("A")
     expect(anchor.getAttribute("data-state")).toBe("resolvable")
+    // WP11 design v1.1: resolvable body wikilinks carry plain-wikilink.
+    expect(anchor.className).toMatch(/plain-wikilink/)
     fireEvent.click(anchor)
     expect(onResolve).toHaveBeenCalledWith("uv-lib")
+  })
+
+  it("wikilink_plugin_unresolvable_does_not_carry_plain_wikilink_class", () => {
+    const onResolve = vi.fn()
+    render(
+      <WikilinkLink
+        slug="missing"
+        pages={makePages("uv-lib")}
+        onResolve={onResolve}
+      />,
+    )
+    const el = screen.getByTestId("wikilink-missing")
+    // Unresolvable wikilinks keep the dimmed disabled look; the
+    // plain-wikilink visual variant only applies to resolvable links.
+    expect(el.className).not.toMatch(/plain-wikilink/)
   })
 
   it("wikilink_plugin_renders_unresolvable_disabled", () => {

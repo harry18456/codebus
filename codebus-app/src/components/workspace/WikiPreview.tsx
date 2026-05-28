@@ -10,6 +10,8 @@ import { transformBodyWikilinks } from "@/lib/milkdown-wikilink"
 import { useWikiStore } from "@/store/wiki"
 import { useWatcherEvent } from "@/hooks/useWatcherEvent"
 
+import { WikiPageMetadataBar } from "./WikiPageMetadataBar"
+
 /**
  * Extract the wiki slug from an absolute path emitted by the Rust
  * watcher. The wiki store keys pages by `path.file_stem()` (see
@@ -44,6 +46,19 @@ interface WikiPreviewProps {
    * content page path.
    */
   onQuizMeOnThis?: (pagePath: string) => void
+  /**
+   * WP2 design v1.1: invoked when the user clicks the authoring-goal
+   * token in the page metadata bar. Receives the goal id (frontmatter
+   * `goals[last]`). Workspace forwards this into the Goal Detail view.
+   */
+  onGoalClick?: (goalId: string) => void
+  /**
+   * WP5 design v1.1: invoked when the user clicks the "Run a goal"
+   * link in the edit hint footer. Receives the prefilled goal text
+   * (already in the form `修改 wiki/<rel-path> — `). Workspace forwards
+   * this into the Goals tab + opens the existing NewGoalModal pre-filled.
+   */
+  onRequestNewGoal?: (prefilledText: string) => void
 }
 
 /** Nav pages are metadata, not content to quiz on (spec §4.5). */
@@ -75,6 +90,8 @@ export function WikiPreview({
   vaultPath,
   body,
   onQuizMeOnThis,
+  onGoalClick,
+  onRequestNewGoal,
 }: WikiPreviewProps) {
   const loadPage = useWikiStore((s) => s.loadPage)
   const pages = useWikiStore((s) => s.pages)
@@ -115,17 +132,62 @@ export function WikiPreview({
     [loadPage, vaultPath, currentPath],
   )
 
-  const { transformed } = useMemo(
+  const { transformed, slugs } = useMemo(
     () => transformBodyWikilinks(body ?? ""),
     [body],
   )
 
+  // WP2 metadata bar + WP5 edit hint footer rely on the active page's
+  // frontmatter projection (`goals[]` + `updated`) and its absolute
+  // disk path (used to derive a vault-relative path for the edit-hint
+  // NewGoalModal prefill). Both default safely when the page index has
+  // not loaded yet OR the currentPath does not match an entry.
+  const currentPageMeta =
+    currentPath !== null ? pages[currentPath] : undefined
+  const goalLast =
+    currentPageMeta && (currentPageMeta.goals ?? []).length > 0
+      ? (currentPageMeta.goals as string[])[
+          (currentPageMeta.goals as string[]).length - 1
+        ]
+      : null
+  const updatedIso = currentPageMeta?.updated ?? ""
+  const wikilinkCount = slugs.length
+
+  function handleRequestNewGoal() {
+    if (!currentPageMeta || !onRequestNewGoal) return
+    const normalizedAbs = currentPageMeta.path.replace(/\\/g, "/")
+    const normalizedVault = vaultPath.replace(/\\/g, "/")
+    const wikiRoot = `${normalizedVault}/.codebus/wiki/`
+    const relPath = normalizedAbs.startsWith(wikiRoot)
+      ? normalizedAbs.slice(wikiRoot.length)
+      : `${currentPageMeta.slug}.md`
+    onRequestNewGoal(`修改 wiki/${relPath} — `)
+  }
+
   if (body === null) {
+    // WP-empty-page design v1.1: vault has pages but no page is currently
+    // selected → render a low-density hint card (📂 emoji + two text lines)
+    // instead of the bare-bones empty div the v1 preview used.
     return (
       <div
         data-testid="wiki-preview"
-        className="h-full w-full overflow-auto p-6"
-      />
+        className="flex h-full w-full items-center justify-center overflow-auto p-6"
+      >
+        <div
+          data-testid="wiki-unselected-hint"
+          className="flex flex-col items-center gap-2 text-center"
+        >
+          <span aria-hidden="true" className="text-[36px] leading-none text-fg-quaternary">
+            📂
+          </span>
+          <p className="text-body text-fg-secondary">
+            {t("workspace.wiki.unselectedHint.title")}
+          </p>
+          <p className="text-meta text-fg-tertiary">
+            {t("workspace.wiki.unselectedHint.subtitle")}
+          </p>
+        </div>
+      </div>
     )
   }
 
@@ -141,6 +203,14 @@ export function WikiPreview({
             '-apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Helvetica Neue", Arial, "Noto Sans TC", sans-serif',
         }}
       >
+        {currentPageMeta && (
+          <WikiPageMetadataBar
+            goalLast={goalLast}
+            updatedIso={updatedIso}
+            wikilinkCount={wikilinkCount}
+            onGoalClick={(g) => onGoalClick?.(g)}
+          />
+        )}
         <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         // react-markdown's default urlTransform strips custom URL
@@ -196,8 +266,7 @@ export function WikiPreview({
                       e.preventDefault()
                       void loadPage(vaultPath, slug)
                     }}
-                    style={{ color: "#7c8cff" }}
-                    className="hover:underline"
+                    className="plain-wikilink text-fg underline decoration-border-strong underline-offset-[3px] transition-colors hover:text-accent hover:decoration-accent motion-reduce:transition-none"
                   >
                     {displayText}
                   </a>
@@ -220,8 +289,7 @@ export function WikiPreview({
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ color: "#7c8cff" }}
-                className="hover:underline"
+                className="plain-wikilink text-fg underline decoration-border-strong underline-offset-[3px] transition-colors hover:text-accent hover:decoration-accent motion-reduce:transition-none"
               >
                 {children}
               </a>
@@ -300,6 +368,7 @@ export function WikiPreview({
             {!isNavPage(currentPath) && (
               <Button
                 data-testid="quiz-me-on-this"
+                variant="primary"
                 onClick={() => onQuizMeOnThis?.(currentPath)}
               >
                 {t("workspace.wiki.quizMeOnThis")}
@@ -316,7 +385,57 @@ export function WikiPreview({
             )}
           </div>
         )}
+        {currentPath && !isNavPage(currentPath) && (
+          <WikiEditHintFooter
+            disabled={!onRequestNewGoal}
+            onRunGoal={handleRequestNewGoal}
+          />
+        )}
       </div>
     </div>
+  )
+}
+
+/**
+ * Spec: app-workspace § Wiki Page Edit Hint Footer (WP5 design v1.1).
+ *
+ * Reads the localized hint template (which contains a `{linkLabel}`
+ * placeholder), splits on the placeholder, and renders the link label
+ * as an inline button that triggers the parent's `onRunGoal` handler.
+ * Splitting client-side is necessary because `useT`'s `{n}` interpolator
+ * returns a flat string and we need a clickable React node inside the
+ * sentence.
+ */
+function WikiEditHintFooter({
+  disabled,
+  onRunGoal,
+}: {
+  disabled: boolean
+  onRunGoal: () => void
+}) {
+  const t = useT()
+  const template = t("workspace.wiki.editHint.text")
+  const linkLabel = t("workspace.wiki.editHint.linkLabel")
+  const placeholder = "{linkLabel}"
+  const idx = template.indexOf(placeholder)
+  const before = idx >= 0 ? template.slice(0, idx) : template
+  const after = idx >= 0 ? template.slice(idx + placeholder.length) : ""
+  return (
+    <p
+      data-testid="wiki-edit-hint-footer"
+      className="mt-6 text-meta text-fg-tertiary"
+    >
+      {before}
+      <button
+        type="button"
+        data-testid="wiki-edit-hint-link"
+        disabled={disabled}
+        onClick={onRunGoal}
+        className="text-accent underline decoration-dotted underline-offset-[3px] hover:text-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {linkLabel}
+      </button>
+      {after}
+    </p>
   )
 }

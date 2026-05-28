@@ -40,7 +40,12 @@ export function WikilinkLink({ slug, pages, onResolve }: WikilinkLinkProps) {
         data-testid={`wikilink-${slug}`}
         data-state="resolvable"
         className={cn(
-          "text-accent hover:underline",
+          // WP11 design v1.1: body wikilinks (navigation) use the
+          // .plain-wikilink variant — fg color, strong-border underline,
+          // accent on hover. Hover transition collapses under
+          // prefers-reduced-motion.
+          "plain-wikilink text-fg underline decoration-border-strong underline-offset-[3px] transition-colors",
+          "hover:text-accent hover:decoration-accent motion-reduce:transition-none",
           "focus:outline-none focus:ring-2 focus:ring-accent-ring",
         )}
         onClick={(e) => {

@@ -32,18 +32,43 @@ interface GoalsTabProps {
    * view instead of dropping the user back into the overview list.
    */
   onSpawnedRun?: (runId: string) => void
+  /**
+   * wiki-page-reader-v1.1 / WP5 + WK-EMPTY: external trigger to open
+   * the NewGoalModal (optionally pre-filled). `nonce` keys re-opens —
+   * GoalsTab re-evaluates whenever it changes. `null` is the inert
+   * resting state.
+   */
+  pendingNewGoalPrefill?: { text: string; nonce: number } | null
+  /** Called by GoalsTab after consuming a pending prefill signal. */
+  onPendingNewGoalConsumed?: () => void
 }
 
 export function GoalsTab({
   vaultPath,
   onSelectRun,
   onSpawnedRun,
+  pendingNewGoalPrefill = null,
+  onPendingNewGoalConsumed,
 }: GoalsTabProps) {
   const t = useT()
   const runs = useGoalsStore((s) => s.runs)
   const refreshRuns = useGoalsStore((s) => s.refreshRuns)
   const [modalOpen, setModalOpen] = useState(false)
   const [prefill, setPrefill] = useState("")
+
+  // wiki-page-reader-v1.1: when Workspace sets a `pendingNewGoalPrefill`
+  // (carrying nonce), open the NewGoalModal pre-filled and immediately
+  // notify Workspace to clear the signal so re-mounts don't re-trigger.
+  useEffect(() => {
+    if (pendingNewGoalPrefill === null) return
+    setPrefill(pendingNewGoalPrefill.text)
+    setModalOpen(true)
+    onPendingNewGoalConsumed?.()
+    // Tracking nonce instead of the whole object lets repeated identical
+    // prefills still re-open the modal (e.g., user dismisses and clicks
+    // the wiki link again).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingNewGoalPrefill?.nonce])
 
   // Terminal-spawned goals appearing in `<vault>/.codebus/log/` SHALL
   // surface in the Goals list without requiring the user to switch

@@ -88,12 +88,30 @@ describe("WikiTab", () => {
     expect(screen.queryByTestId("wiki-tree")).toBeNull()
   })
 
-  it("WikiTab_empty_state_shows_hint", () => {
+  it("WikiTab_empty_state_renders_hero_with_icon_title_subtitle_and_amber_cta", () => {
     useWikiStore.setState({ pages: {} })
     render(<WikiTab vaultPath="/v" />)
-    expect(screen.getByTestId("wiki-empty")).toHaveTextContent(
-      "No wiki pages yet — run a goal to start documenting",
+    const hero = screen.getByTestId("wiki-empty-hero")
+    expect(hero).toBeInTheDocument()
+    expect(hero.textContent).toMatch(/No wiki pages yet|還沒有任何 wiki page/)
+    expect(hero.textContent).toMatch(
+      /Run a goal — codebus|跑一個 goal，codebus/,
     )
+    const cta = screen.getByTestId("wiki-empty-cta")
+    expect(cta).toBeInTheDocument()
+    expect(cta.textContent).toMatch(/Run a goal to start|跑一個 goal 開始/)
+    // CTA uses amber primary variant.
+    expect(cta.className).toMatch(/bg-accent/)
+    // The deprecated single-line hint SHALL NOT render alongside the hero.
+    expect(screen.queryByTestId("wiki-empty")).toBeNull()
+  })
+
+  it("WikiTab_empty_cta_invokes_onWikiEmptyCta", () => {
+    useWikiStore.setState({ pages: {} })
+    const onWikiEmptyCta = vi.fn()
+    render(<WikiTab vaultPath="/v" onWikiEmptyCta={onWikiEmptyCta} />)
+    fireEvent.click(screen.getByTestId("wiki-empty-cta"))
+    expect(onWikiEmptyCta).toHaveBeenCalledTimes(1)
   })
 
   // ---- Watcher integration (codebus-fs-watcher) ----

@@ -33,11 +33,22 @@ use crate::error::AppError;
 /// One row in the wiki page index. `slug` is the filename without the
 /// `.md` extension; `path` is absolute; `title` is the frontmatter
 /// title with the slug as a fallback.
+///
+/// `goals` and `updated` are projected from the leading YAML frontmatter
+/// so the Wiki page reader's WP2 metadata bar (design v1.1 spec lock)
+/// can render `Last updated by <goal>` and a time-ago string without
+/// re-parsing the page body client-side. Both default to empty values
+/// when the frontmatter is missing or malformed, so pages without
+/// frontmatter still surface in the tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WikiPageMeta {
     pub slug: String,
     pub path: String,
     pub title: String,
+    #[serde(default)]
+    pub goals: Vec<String>,
+    #[serde(default)]
+    pub updated: String,
 }
 
 // ---- list_wiki_pages ------------------------------------------------------
@@ -62,11 +73,35 @@ pub(crate) fn list_wiki_pages_impl(wiki_root: &Path) -> Result<Vec<WikiPageMeta>
             Ok(b) => b,
             Err(_) => return,
         };
-        let title = parse_title(&body).unwrap_or_else(|| slug.clone());
+        let yaml = parse_frontmatter_yaml(&body);
+        let title = yaml
+            .as_ref()
+            .and_then(|y| y.get("title"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| slug.clone());
+        let goals = yaml
+            .as_ref()
+            .and_then(|y| y.get("goals"))
+            .and_then(|v| v.as_sequence())
+            .map(|seq| {
+                seq.iter()
+                    .filter_map(|entry| entry.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let updated = yaml
+            .as_ref()
+            .and_then(|y| y.get("updated"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
         out.push(WikiPageMeta {
             slug,
             path: path.display().to_string(),
             title,
+            goals,
+            updated,
         });
     })?;
     Ok(out)
@@ -91,12 +126,17 @@ fn walk_md_files(dir: &Path, visit: &mut dyn FnMut(&Path)) -> Result<(), AppErro
     Ok(())
 }
 
-/// Extract `title` from the leading YAML frontmatter block. Returns
-/// `None` when:
+/// Parse the leading YAML frontmatter block into a `serde_yaml::Value`.
+/// Returns `None` when:
 /// - the file does not start with `---\n` / `---\r\n`
+/// - the closing delimiter is missing (function consumes lines until EOF)
 /// - the YAML cannot be parsed
-/// - the `title` key is missing or non-string
-fn parse_title(content: &str) -> Option<String> {
+///
+/// Callers project individual keys (`title`, `goals`, `updated`, ...) off
+/// the returned value; missing keys SHALL be tolerated per WP2's
+/// "graceful suppression" contract — a page without frontmatter still
+/// renders.
+fn parse_frontmatter_yaml(content: &str) -> Option<serde_yaml::Value> {
     let after_open = content
         .strip_prefix("---\n")
         .or_else(|| content.strip_prefix("---\r\n"))?;
@@ -108,11 +148,7 @@ fn parse_title(content: &str) -> Option<String> {
         }
         yaml_text.push_str(line);
     }
-    let parsed: serde_yaml::Value = serde_yaml::from_str(&yaml_text).ok()?;
-    parsed
-        .get("title")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+    serde_yaml::from_str(&yaml_text).ok()
 }
 
 // ---- read_wiki_page -------------------------------------------------------
@@ -329,6 +365,47 @@ mod tests {
         }
         fs::write(&path, content).unwrap();
         path
+    }
+
+    /// WP2 design v1.1 spec lock: list_wiki_pages also projects the
+    /// frontmatter `goals[]` and `updated` so the page metadata bar
+    /// has `Last updated by <goal>` and a time-ago value without
+    /// re-reading the page body client-side.
+    #[test]
+    fn list_wiki_pages_projects_goals_and_updated() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let wiki_root = tmp.path().to_path_buf();
+
+        write_file(
+            &wiki_root,
+            "modules/auth-middleware.md",
+            "---\ntitle: Auth Middleware\ntype: module\ngoals:\n  - g-first\n  - g-second\nupdated: '2026-05-27T11:00:00Z'\n---\n\nbody\n",
+        );
+        write_file(
+            &wiki_root,
+            "modules/no-goals.md",
+            "---\ntitle: Standalone\ntype: module\nupdated: '2026-05-26T08:00:00Z'\n---\n\nbody\n",
+        );
+        write_file(&wiki_root, "modules/raw.md", "# no frontmatter\n");
+
+        let pages = list_wiki_pages_impl(&wiki_root).unwrap();
+        let by_slug: std::collections::HashMap<&str, &WikiPageMeta> =
+            pages.iter().map(|p| (p.slug.as_str(), p)).collect();
+
+        let auth = by_slug["auth-middleware"];
+        assert_eq!(
+            auth.goals,
+            vec!["g-first".to_string(), "g-second".to_string()]
+        );
+        assert_eq!(auth.updated, "2026-05-27T11:00:00Z");
+
+        let solo = by_slug["no-goals"];
+        assert!(solo.goals.is_empty(), "missing goals → empty Vec");
+        assert_eq!(solo.updated, "2026-05-26T08:00:00Z");
+
+        let raw = by_slug["raw"];
+        assert!(raw.goals.is_empty(), "no frontmatter → empty Vec");
+        assert_eq!(raw.updated, "", "no frontmatter → empty string");
     }
 
     /// Task 3.6 acceptance: list_wiki_pages extracts the frontmatter

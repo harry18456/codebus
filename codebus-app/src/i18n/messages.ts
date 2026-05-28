@@ -249,6 +249,24 @@ const en = {
   "workspace.wiki.toggleTreeAria": "Toggle Pages tree",
   "workspace.wiki.pageNotFound": "Page not found",
   "workspace.wiki.openInObsidian": "Open in Obsidian",
+  // Page metadata bar (WP2 design v1.1 spec lock)
+  "workspace.wiki.metadata.lastUpdatedBy": "Last updated by",
+  "workspace.wiki.metadata.sourcesSuffix": "sources",
+  // Edit hint footer (WP5 design v1.1 spec lock)
+  "workspace.wiki.editHint.text":
+    "Want to edit this page? {linkLabel} and tell codebus what to change →",
+  "workspace.wiki.editHint.linkLabel": "Run a goal",
+  // Unselected hint card (WP-empty-page design v1.1 spec lock)
+  "workspace.wiki.unselectedHint.title": "Pick a page to start reading.",
+  "workspace.wiki.unselectedHint.subtitle":
+    "Or click the travel log below to see what codebus has been up to.",
+  // Vault-has-no-pages empty hero (WK-EMPTY-1/2/3)
+  "workspace.wiki.emptyHero.title": "No wiki pages yet",
+  "workspace.wiki.emptyHero.subtitle":
+    "Run a goal — codebus will read along and turn your mental model into postcards here.",
+  "workspace.wiki.emptyHero.cta": "→ Run a goal to start",
+  // Wiki tree footer slot (WP-tree-footer design v1.1 spec lock)
+  "workspace.wiki.travelLogLabel": "Travel log",
 
   // ---- Workspace · Quiz placeholder ----
   "workspace.quiz.placeholder": "Coming soon — quiz flow ships in v3-app-quiz",
@@ -768,6 +786,23 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.wiki.toggleTreeAria": "切換 Pages 樹狀結構",
   "workspace.wiki.pageNotFound": "找不到頁面",
   "workspace.wiki.openInObsidian": "在 Obsidian 開啟",
+  // Page metadata bar (WP2 design v1.1 spec lock)
+  "workspace.wiki.metadata.lastUpdatedBy": "最後更新者",
+  "workspace.wiki.metadata.sourcesSuffix": "處引用",
+  // Edit hint footer (WP5 design v1.1 spec lock)
+  "workspace.wiki.editHint.text": "想改這頁？{linkLabel} 跟 codebus 說該怎麼改 →",
+  "workspace.wiki.editHint.linkLabel": "跑一個 goal",
+  // Unselected hint card (WP-empty-page design v1.1 spec lock)
+  "workspace.wiki.unselectedHint.title": "選一頁開始讀。",
+  "workspace.wiki.unselectedHint.subtitle":
+    "或點下方旅行日誌看 codebus 跑過什麼。",
+  // Vault-has-no-pages empty hero (WK-EMPTY-1/2/3)
+  "workspace.wiki.emptyHero.title": "還沒有任何 wiki page",
+  "workspace.wiki.emptyHero.subtitle":
+    "跑一個 goal，codebus 就會邊讀邊把 mental model 整理成這裡的明信片",
+  "workspace.wiki.emptyHero.cta": "→ 跑一個 goal 開始",
+  // Wiki tree footer slot (WP-tree-footer design v1.1 spec lock)
+  "workspace.wiki.travelLogLabel": "旅行日誌",
 
   // ---- Workspace · Quiz placeholder ----
   "workspace.quiz.placeholder":
@@ -923,7 +958,7 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.quiz.headerSubtitle": "驗證自己有沒有看懂 wiki。",
 
   // ---- Workspace · WikiPreview action (residual sweep) ----
-  "workspace.wiki.quizMeOnThis": "考我這頁",
+  "workspace.wiki.quizMeOnThis": "Quiz 這頁",
 
   // ---- Workspace · Run detail loading state (residual sweep) ----
   "workspace.runDetail.loading": "載入中…",
