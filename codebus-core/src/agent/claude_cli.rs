@@ -121,15 +121,35 @@ pub fn invoke(
         }
     }
 
-    // Hand stderr to a background thread so it streams to the parent's
-    // stderr without blocking the main loop. The thread exits when the
-    // child closes stderr (i.e. on child termination).
+    // Hand stderr to a background thread so it drains without blocking
+    // the main loop. The thread exits when the child closes stderr (i.e.
+    // on child termination).
+    //
+    // Default: drop child stderr into a sink. Agent CLIs (codex in
+    // particular) print informational diagnostics to stderr — the Azure
+    // `/openai/models` capabilities JSON, init progress, model lookup
+    // — that overwhelm the dev terminal even when no error occurred.
+    // Errors that matter to the user surface through verb events
+    // (events.jsonl) and the non-zero exit code; the dev terminal does
+    // not need the raw stream.
+    //
+    // Escape hatch: set `CODEBUS_FORWARD_AGENT_STDERR=1` to forward
+    // child stderr to the parent terminal when debugging spawn / auth /
+    // init failures that do not surface elsewhere.
     let stderr = child.stderr.take().expect("stderr piped");
+    let forward_stderr = std::env::var("CODEBUS_FORWARD_AGENT_STDERR")
+        .ok()
+        .filter(|v| !v.is_empty() && v != "0")
+        .is_some();
     let stderr_handle = thread::spawn(move || {
         let mut stderr = stderr;
         // io::copy returns Err only on read/write failure; ignore — the
         // thread's job is best-effort passthrough.
-        let _ = io::copy(&mut stderr, &mut io::stderr().lock());
+        if forward_stderr {
+            let _ = io::copy(&mut stderr, &mut io::stderr().lock());
+        } else {
+            let _ = io::copy(&mut stderr, &mut io::sink());
+        }
     });
 
     // Main-thread stream loop: read lines, parse, accumulate, deliver to
