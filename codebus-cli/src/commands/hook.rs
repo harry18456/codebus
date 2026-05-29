@@ -157,10 +157,118 @@ fn is_codebus_quiz_validate_command(cmd: &str) -> bool {
 /// quote parsing is done, so a metachar inside quotes is also rejected
 /// (per spec lint-feedback-loop §Fix Bash Hook Installation).
 fn is_allowed_bash_command(cmd: &str) -> bool {
+    // quiz-heredoc-selfvalidate-unblock: the single-quoted `codebus quiz
+    // validate` here-document is the ONE allowed shape that legitimately
+    // contains the `<` and LF metacharacters (the codebus-quiz Mode B agent
+    // self-validates by piping its draft in via a heredoc). Evaluate it BEFORE
+    // the metacharacter rejection. Every other command is still screened by the
+    // unchanged char-level scan below, so non-heredoc `<`, shell chaining, and
+    // command substitution stay blocked — no F4 regression.
+    if is_quiz_validate_heredoc(cmd) {
+        return true;
+    }
     if find_shell_metacharacter(cmd).is_some() {
         return false;
     }
     is_codebus_lint_command(cmd) || is_codebus_quiz_validate_command(cmd)
+}
+
+/// `quiz-heredoc-selfvalidate-unblock` — recognise the codebus-quiz Mode B
+/// self-validation here-document so it can be allowed despite containing the
+/// `<` and LF metacharacters. This is a STRUCTURAL recognizer, not a relaxation
+/// of [`find_shell_metacharacter`] (whose semantics and
+/// [`SHELL_METACHARACTERS`] set are unchanged). Per spec `lint-feedback-loop`
+/// §Fix Bash Hook Installation, `Allow (quiz-validate heredoc)`.
+///
+/// Returns true ONLY for a command of the exact shape:
+///
+/// ```text
+/// codebus quiz validate [args] - <<'MARKER'
+/// <opaque body lines>
+/// MARKER
+/// ```
+///
+/// Invariants that make this safe to allow despite the opaque body:
+/// - The marker MUST be SINGLE-quoted (`<<'MARKER'`). An unquoted marker would
+///   let the shell expand `$(...)` / `$VAR` inside the body — the injection
+///   vector this recognizer must not reopen — so it is rejected.
+/// - The first line carries no metacharacter before the `<<` operator AND no
+///   trailing command after the closing quote of the marker (so
+///   `<<'X'; rm -rf ~` does not qualify).
+/// - The body between the first line and the closing delimiter is treated as
+///   opaque stdin and is NOT scanned (a single-quoted heredoc body cannot
+///   escape to shell execution).
+/// - A line equal to the marker MUST close the document, and only whitespace
+///   may follow it (so a command after the closing delimiter does not qualify).
+///
+/// Any deviation returns false, and the caller falls back to the metacharacter
+/// rejection / argv-tokenization paths (which block it).
+fn is_quiz_validate_heredoc(cmd: &str) -> bool {
+    // Split into logical lines on LF; strip a trailing CR so a CRLF command is
+    // handled identically to an LF command.
+    let mut lines = cmd.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l));
+
+    let Some(first) = lines.next() else {
+        return false;
+    };
+
+    // The first line must carry the heredoc operator `<<`. Split on the FIRST
+    // occurrence: `prefix` is the command, `op_rest` is the marker plus
+    // anything following it on the same line.
+    let Some((prefix, op_rest)) = first.split_once("<<") else {
+        return false;
+    };
+
+    // Marker must be single-quoted: `'MARKER'`. This rejects the unquoted
+    // `<<MARKER` form (body would undergo shell expansion) AND the here-string
+    // `<<<...` form (op_rest would start with `<`, not `'`).
+    let Some(after_open_quote) = op_rest.strip_prefix('\'') else {
+        return false;
+    };
+    let Some(close_idx) = after_open_quote.find('\'') else {
+        return false;
+    };
+    let marker = &after_open_quote[..close_idx];
+    let trailing = &after_open_quote[close_idx + 1..];
+
+    // Marker must be a non-empty run of word characters, and nothing but
+    // whitespace may follow the closing quote (no trailing command).
+    if marker.is_empty()
+        || !marker
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return false;
+    }
+    if !trailing.trim().is_empty() {
+        return false;
+    }
+
+    // The command before `<<` must be a clean `codebus quiz validate ...`
+    // invocation: no metacharacter (reuse the unchanged scan) AND the correct
+    // argv head.
+    if find_shell_metacharacter(prefix).is_some() {
+        return false;
+    }
+    if !is_codebus_quiz_validate_command(prefix) {
+        return false;
+    }
+
+    // Walk the remaining lines: the body is opaque until a line equal to the
+    // marker closes the document; after the close, only whitespace may appear.
+    let mut closed = false;
+    for line in lines {
+        if closed {
+            if !line.trim().is_empty() {
+                return false;
+            }
+        } else if line == marker {
+            closed = true;
+        }
+        // else: still inside the opaque body — deliberately not scanned.
+    }
+
+    closed
 }
 
 /// Shell metacharacter rejection set — the union of POSIX shell, Git
@@ -667,6 +775,163 @@ mod tests {
         assert!(is_allowed_bash_command(
             "codebus quiz validate draft.md --json"
         ));
+    }
+
+    // --- quiz-heredoc-selfvalidate-unblock: Quiz-Validate Heredoc Exception
+    // (spec lint-feedback-loop / Fix Bash Hook Installation, new
+    // `Allow (quiz-validate heredoc)` clause). The claude quiz Mode B agent
+    // self-validates by piping its draft into `codebus quiz validate -` via a
+    // single-quoted heredoc. The whole heredoc — including the multi-line body
+    // and its line feeds — is the raw command string, so the `<` and LF bytes
+    // would otherwise trip the metacharacter rejection. `is_allowed_bash_command`
+    // recognises the exact single-quoted heredoc shape and allows it, while the
+    // body is treated as opaque stdin (NOT scanned). Any deviation (chaining on
+    // the first line, a command after the closing delimiter, an unquoted marker,
+    // or a non-heredoc input redirection) MUST still block — guarding against an
+    // F4 shell-metacharacter bypass regression.
+
+    #[test]
+    fn allow_quiz_validate_single_quoted_heredoc() {
+        let cmd = "codebus quiz validate - <<'CBQZ'\n\
+                   ## Q1. What is a vault?\n\
+                   A) a folder\n\
+                   B) a database\n\
+                   ## Answer: A\n\
+                   ## Explanation: see [[vault]].\n\
+                   CBQZ";
+        assert!(
+            is_allowed_bash_command(cmd),
+            "well-formed single-quoted quiz-validate heredoc MUST be allowed"
+        );
+    }
+
+    #[test]
+    fn allow_quiz_validate_heredoc_with_json_flag() {
+        let cmd = "codebus quiz validate --json - <<'CBQZ'\n\
+                   ## Q1. stem\n\
+                   ## Answer: A\n\
+                   CBQZ";
+        assert!(
+            is_allowed_bash_command(cmd),
+            "the --json variant of the quiz-validate heredoc MUST be allowed"
+        );
+    }
+
+    #[test]
+    fn allow_quiz_validate_heredoc_body_containing_metacharacters() {
+        // The body is opaque stdin: line feeds plus `|`, `$`, `;`, `(`, `)`,
+        // `>`, backtick inside the body MUST NOT cause a block. This is the
+        // case a naive "scan everything but the heredoc operator" approach
+        // would wrongly reject.
+        let cmd = "codebus quiz validate - <<'CBQZ'\n\
+                   ## Q1. In bash, the `|` operator does what, and how do $vars,\n\
+                   (subshells), `;` separators, and > redirection differ?\n\
+                   A) piping; B) $(cmd) substitution; C) a () group; D) end\n\
+                   ## Answer: A\n\
+                   CBQZ";
+        assert!(
+            is_allowed_bash_command(cmd),
+            "heredoc body containing shell metacharacters MUST still be allowed (body is opaque stdin)"
+        );
+    }
+
+    #[test]
+    fn block_quiz_validate_heredoc_first_line_chaining_semicolon() {
+        // A trailing command after the heredoc operator on the FIRST line.
+        let cmd = "codebus quiz validate - <<'X'; rm -rf ~\n\
+                   ## Q1. stem\n\
+                   X";
+        assert!(
+            !is_allowed_bash_command(cmd),
+            "heredoc with first-line chaining (semicolon) MUST stay blocked (F4 guard)"
+        );
+    }
+
+    #[test]
+    fn block_quiz_validate_heredoc_first_line_chaining_and() {
+        let cmd = "codebus quiz validate - <<'X' && curl evil.example\n\
+                   ## Q1. stem\n\
+                   X";
+        assert!(
+            !is_allowed_bash_command(cmd),
+            "heredoc with first-line chaining (&&) MUST stay blocked (F4 guard)"
+        );
+    }
+
+    #[test]
+    fn block_quiz_validate_heredoc_command_after_closing_delimiter() {
+        // The heredoc is well-formed, but a further command follows the
+        // closing delimiter line.
+        let cmd = "codebus quiz validate - <<'CBQZ'\n\
+                   ## Q1. stem\n\
+                   CBQZ\n\
+                   rm -rf ~";
+        assert!(
+            !is_allowed_bash_command(cmd),
+            "command after the closing delimiter MUST stay blocked (F4 guard)"
+        );
+    }
+
+    #[test]
+    fn block_quiz_validate_heredoc_unquoted_marker() {
+        // An unquoted marker permits shell expansion inside the body — the
+        // exception MUST NOT apply.
+        let cmd = "codebus quiz validate - <<CBQZ\n\
+                   ## Q1. stem\n\
+                   CBQZ";
+        assert!(
+            !is_allowed_bash_command(cmd),
+            "unquoted heredoc marker MUST stay blocked (expansion-in-body injection guard)"
+        );
+    }
+
+    #[test]
+    fn block_non_heredoc_input_redirection() {
+        // A single `<` input redirection is not a here-document.
+        assert!(
+            !is_allowed_bash_command("codebus quiz validate < ~/.ssh/id_rsa"),
+            "non-heredoc input redirection into quiz validate MUST stay blocked"
+        );
+        assert!(
+            !is_allowed_bash_command("codebus lint < /etc/passwd"),
+            "non-heredoc input redirection into lint MUST stay blocked"
+        );
+    }
+
+    #[test]
+    fn block_here_string_not_treated_as_heredoc() {
+        // `<<<` is a here-string, not a here-document; it MUST NOT qualify.
+        let cmd = "codebus quiz validate - <<<'CBQZ'";
+        assert!(
+            !is_allowed_bash_command(cmd),
+            "here-string (<<<) MUST stay blocked"
+        );
+    }
+
+    #[test]
+    fn block_lint_heredoc_not_exempted() {
+        // The heredoc exception is scoped to `quiz validate` only; a heredoc
+        // fronted by `codebus lint` does NOT qualify and stays blocked.
+        let cmd = "codebus lint - <<'CBQZ'\n\
+                   payload\n\
+                   CBQZ";
+        assert!(
+            !is_allowed_bash_command(cmd),
+            "a `codebus lint` heredoc MUST stay blocked (exception is quiz-validate only)"
+        );
+    }
+
+    #[test]
+    fn block_unterminated_quiz_validate_heredoc() {
+        // No closing delimiter line equal to the marker — falls through to the
+        // metacharacter rejection.
+        let cmd = "codebus quiz validate - <<'CBQZ'\n\
+                   ## Q1. stem\n\
+                   NOTTHEMARKER";
+        assert!(
+            !is_allowed_bash_command(cmd),
+            "unterminated heredoc (no closing marker line) MUST stay blocked"
+        );
     }
 
     #[test]

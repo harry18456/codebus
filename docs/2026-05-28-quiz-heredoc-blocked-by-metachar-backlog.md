@@ -3,7 +3,7 @@
 **Date:** 2026-05-28
 **Surfaced during:** F4 Bash-hook adversarial re-audit（多 agent workflow）的 denylist→allowlist 評估 agent 意外發現
 **Severity:** 正確性 / capability 靜默 regression（非 correctness break）
-**Status:** open
+**Status:** archived（2026-05-29，change `quiz-heredoc-selfvalidate-unblock`）— 採 Option A 變體：結構化放行單引號 heredoc（首行/opaque body/收尾 MARKER/收尾後四段、僅 `<<'MARKER'`、body 不掃），unquoted / chaining / trailing / 非 heredoc redirect 仍擋；84/84 unit + 15/15 真實 binary + live CDP e2e（real goal→quiz、Mode B agent heredoc 跑兩次＝迴圈恢復、`cd && codebus` 形式仍被擋）確認。F4 未回退。
 **Effort:** 輕（約半天）
 
 ---
