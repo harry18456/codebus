@@ -151,15 +151,28 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 - `init` 不叫 LLM、純寫 vault layout — 也安全
 - 但 `init` 會 `auto append .codebus/` 到你 source repo 的 `.gitignore` — 這是 codebus 主動改 source repo 的**唯一**動作。
 
-### 5. codex provider 沒有檔案讀取邊界（Windows 已證實）
+### 5. codex provider 的檔案/網路隔離只是部分（Windows 已證實）
 
-上面 §多層 sandbox 的 cwd 隔離 + toolset gate **只適用 claude provider**。codex provider 走 OS-native sandbox（`-s read-only` / `workspace-write`），但 2026-05-28 在 Windows + codex-cli 0.134.0 實測（[`2026-05-28-codex-windows-sandbox-read-poc.md`](2026-05-28-codex-windows-sandbox-read-poc.md)）：
+上面 §多層 sandbox 的 cwd 隔離 + toolset gate **只適用 claude provider**。codex provider 走 OS-native sandbox（`-s read-only` / `workspace-write`）+ unelevated restricted token。Windows 實測（codex-cli **0.135.0**、Windows 11 Home non-admin、`windows.sandbox=unelevated`；讀取邊界 2026-05-28 先在 0.134.0 首證 [`2026-05-28-codex-windows-sandbox-read-poc.md`](2026-05-28-codex-windows-sandbox-read-poc.md)、寫入與 egress 為 0.135.0 PoC 重驗，raw 證據在 sibling research repo `agent-cli-research/poc/codex-sandbox/`）逐項如下：
 
-- `-s workspace-write` **和** `-s read-only` 都讀得到 workspace 外的檔，含 `~/.ssh`、`~/.aws` 等家目錄機密
-- codebus 的 isolation flags（`--ignore-user-config` / `--disable apps` / `--ignore-rules` / `project_root_markers` / `web_search=disabled`）能擋網路 / config / plugin / 網搜，但**擋不了 filesystem read**
-- codex 路徑唯一的讀取約束是 AGENTS.md 的 soft constraint（叫 agent 別讀 `~/.ssh` 等）+ model 自律
+**讀取（漏）**
 
-→ **codex 的讀取隔離是 soft/partial。敏感家目錄相關任務請用 claude provider，或自行承擔風險。** macOS / Linux 尚未實測——別從 Windows 結果推論 Seatbelt / Landlock。hard read enforcement 是 open backlog（見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」）。
+- `-s workspace-write` **和** `-s read-only` 都讀得到 workspace 外的檔；`workspace-write` 連 `%USERPROFILE%` 內的檔也讀得到（`~/.ssh`、`~/.aws` 等家目錄機密屬此類；PoC 用合成 marker 驗證、未碰真實密鑰）
+- codex 路徑唯一的讀取約束是 AGENTS.md 的 soft constraint（叫 agent 別讀 `~/.ssh` 等）+ model 自律；硬性讀取邊界要 elevated backend（需 admin）或 AppContainer / WSL2 外包
+
+**寫入（正常 ACL 有擋、Everyone-writable 例外）**
+
+- `-s workspace-write`：寫 workspace 外的**正常 ACL** 路徑被擋（實測回 `Access is denied`）、家目錄正常 ACL 同樣寫不成；但 **Everyone-writable（`*S-1-1-0`）目錄**仍寫得進去（如 `C:\Windows\Temp`、ACL 鬆的 app 目錄）——`WRITE_RESTRICTED` token 在 World 有授權的地方就能寫
+- `-s read-only`：所有寫入都被 policy 擋下
+- （這也修正了 2026-05-29 spike「write 不設防」的舊觀察——那是 world-writable 目標造成的 ACL artifact，不是 0.134→0.135 行為改變）
+
+**網路 egress（只擋一半）**
+
+- `-s workspace-write`：外部 **HTTPS/443 被擋**（連不上），但 **loopback（127.0.0.1）與外部 HTTP/80 放行**（loopback 實測收到真實 listener hit）
+- `-s read-only`：所有網路指令都被 policy 擋下
+- codebus 的 isolation flags（`--ignore-user-config` / `--disable apps` / `--ignore-rules` / `web_search=disabled`）另外擋掉 user config / plugin / 網搜功能等層（這些確實有效），但那跟「model 自己用 shell 打出去」的 raw egress 是兩回事——raw egress 只被 `-s` sandbox 擋掉一部分。所以 codex docs 的「network disabled by default」對 HTTP/80 + loopback 並不準
+
+→ **codex 在 Windows unelevated 的隔離是「讀／網路 soft-partial、寫較硬」。** 敏感家目錄「讀」相關任務請用 claude provider，或自行承擔風險。macOS / Linux 尚未實測——別從 Windows 結果推論 Seatbelt / Landlock。hard read enforcement 是 open backlog（見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」）。
 
 ---
 
