@@ -15,6 +15,7 @@ codebus 把使用者輸入餵給 LLM、再讓 LLM 寫檔到你的 repo 旁邊。
 | Agent 偷打開 WebFetch 連網 / 跑 shell | Triple-flag toolset gate，只給該 verb 該有的 tool |
 | AWS / Anthropic key 不小心被 sync 進 wiki | PII filter，Critical 強制 mask |
 | Agent 寫壞 wiki | nested git auto-commit，隨時 `git reset --hard` 還原 |
+| **codex** agent 讀 `~/.ssh` `~/.aws` 等家目錄機密 | ⚠️ **codex path 在 Windows 擋不了**（2026-05-28 PoC 實證）— 敏感家目錄任務請走 claude，見 Known limits §5 |
 
 ---
 
@@ -37,13 +38,15 @@ codebus 把使用者輸入餵給 LLM、再讓 LLM 寫檔到你的 repo 旁邊。
 
 ## 多層 sandbox（codebus 真的做的事）
 
+> ⚠️ **以下 §1–§3（cwd 隔離 + toolset gate）是 claude provider 的隔離機制。** codex provider 走另一套（OS-native sandbox `-s`），其讀取隔離在 Windows 實測為 soft/partial — 見 Known limits §5。
+
 ### 1. cwd 隔離
 
 每個 spawn agent 的子行程 **cwd 都設成 `<repo>/.codebus/`**，不是 source repo root。
 
 Claude Code 的 sandbox 不准 agent 寫 cwd 之外的路徑（沒下 `--add-dir`），所以即使 agent 被 inject 想寫 `../src/main.rs`，**Write tool 會被擋**。
 
-意思是 codebus 的 agent **物理上看不到你的 source code 本體**。Source 內容會被 PII filter 過後、複製成 `<repo>/.codebus/raw/code/` 給 agent 唯讀 — 改不到原檔。
+意思是 **claude path** 的 agent **物理上寫不到你的 source code 本體**。Source 內容會被 PII filter 過後、複製成 `<repo>/.codebus/raw/code/` 給 agent 唯讀 — 改不到原檔。（codex path 的 read boundary 是另一回事，見 Known limits §5。）
 
 ### 2. Triple-flag toolset gate
 
@@ -147,6 +150,16 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 - `lint` 不叫 LLM、純規則檢查 — 安全
 - `init` 不叫 LLM、純寫 vault layout — 也安全
 - 但 `init` 會 `auto append .codebus/` 到你 source repo 的 `.gitignore` — 這是 codebus 主動改 source repo 的**唯一**動作。
+
+### 5. codex provider 沒有檔案讀取邊界（Windows 已證實）
+
+上面 §多層 sandbox 的 cwd 隔離 + toolset gate **只適用 claude provider**。codex provider 走 OS-native sandbox（`-s read-only` / `workspace-write`），但 2026-05-28 在 Windows + codex-cli 0.134.0 實測（[`2026-05-28-codex-windows-sandbox-read-poc.md`](2026-05-28-codex-windows-sandbox-read-poc.md)）：
+
+- `-s workspace-write` **和** `-s read-only` 都讀得到 workspace 外的檔，含 `~/.ssh`、`~/.aws` 等家目錄機密
+- codebus 的 isolation flags（`--ignore-user-config` / `--disable apps` / `--ignore-rules` / `project_root_markers` / `web_search=disabled`）能擋網路 / config / plugin / 網搜，但**擋不了 filesystem read**
+- codex 路徑唯一的讀取約束是 AGENTS.md 的 soft constraint（叫 agent 別讀 `~/.ssh` 等）+ model 自律
+
+→ **codex 的讀取隔離是 soft/partial。敏感家目錄相關任務請用 claude provider，或自行承擔風險。** macOS / Linux 尚未實測——別從 Windows 結果推論 Seatbelt / Landlock。hard read enforcement 是 open backlog（見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」）。
 
 ---
 

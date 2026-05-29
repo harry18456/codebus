@@ -115,7 +115,12 @@ provider 切換、model / effort、Azure base_url / api-version 全在 app 的 S
 
 **別把不可信的內容（隨機 GitHub issue、外部網頁、Slack 訊息）整段貼進來** — 這是 prompt injection vector，會讓司機被乘客帶歪路。
 
-codebus 已內建幾層 sandbox（cwd 隔離、provider-specific 命令/工具限制——claude 走 `--tools` 白名單 + PreToolUse hook、codex 走 `-s sandbox`、PII filter、nested git 可隨時還原），但 sandbox 不是萬靈丹。完整 threat model 跟每層 sandbox 怎麼運作：[`docs/security.md`](docs/security.md)。
+codebus 已內建幾層防護（cwd 隔離、PII filter、nested git 可隨時還原，加上 provider-specific 命令/工具限制），但這些不是萬靈丹——而且**各 provider 隔離強度不同**：
+
+- **claude** 走 `--tools` 白名單 + PreToolUse hook，讀寫都有 deterministic gate（含擋讀 `~/.ssh` 等敏感路徑）
+- **codex** 走 `-s sandbox` 能限制寫入與網路，但 Windows 實測（2026-05-28 PoC）`-s workspace-write`／`read-only` 仍讀得到 workspace 外的檔（含 `~/.ssh`、`~/.aws` 等家目錄機密）——codex 的讀取隔離目前只是 soft/partial（靠 AGENTS.md 指示 + model 自律），**敏感家目錄相關任務請用 claude，或自行承擔風險**
+
+完整 threat model 跟每層防護怎麼運作：[`docs/security.md`](docs/security.md)。
 
 ---
 
