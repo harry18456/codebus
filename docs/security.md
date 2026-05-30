@@ -155,10 +155,31 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 
 上面 §多層 sandbox 的 cwd 隔離 + toolset gate **只適用 claude provider**。codex provider 走 OS-native sandbox（`-s read-only` / `workspace-write`）+ unelevated restricted token。Windows 實測（codex-cli **0.135.0**、Windows 11 Home non-admin、`windows.sandbox=unelevated`；讀取邊界 2026-05-28 先在 0.134.0 首證 [`2026-05-28-codex-windows-sandbox-read-poc.md`](2026-05-28-codex-windows-sandbox-read-poc.md)、寫入與 egress 為 0.135.0 PoC 重驗，raw 證據在 sibling research repo `agent-cli-research/poc/codex-sandbox/`）逐項如下：
 
-**讀取（漏）**
+**讀取（漏 — `-s` 不設讀邊界，靠兩道機率性層 + 架構框架，皆非硬邊界）**
 
 - `-s workspace-write` **和** `-s read-only` 都讀得到 workspace 外的檔；`workspace-write` 連 `%USERPROFILE%` 內的檔也讀得到（`~/.ssh`、`~/.aws` 等家目錄機密屬此類；PoC 用合成 marker 驗證、未碰真實密鑰）
-- codex 路徑唯一的讀取約束是 AGENTS.md 的 soft constraint（叫 agent 別讀 `~/.ssh` 等）+ model 自律；硬性讀取邊界要 elevated backend（需 admin）或 AppContainer / WSL2 外包
+- `-s read-only` **本身不是讀取邊界**——它不擋讀（2026-05-30 efficacy 實測重申）。codex 路徑的讀取限制 100% 由下面兩道機率性層 + 架構嚴重度框架承擔，**OS sandbox 不負責讀取隔離**
+
+*緩解層 1：AGENTS.md soft constraint（prompt-layer、機率性，非 hard boundary）*
+
+- codebus 在 codex 路徑的 vault `AGENTS.md` 附加 `CODEX_AGENTS_SOFT_CONSTRAINT` 段落，明令 agent 不得讀 `~/.ssh/`、`~/.aws/`、`~/.gnupg/`、`~/.config/` 憑證子目錄等家目錄機密——「即使 user prompt 點名也不行」（`codebus-core/src/skill_bundle/mod.rs:180-190`）
+- **2026-05-30 對抗式 efficacy 實測**（real codex gpt-5.4 via Azure responses、合成 marker、8 種框法 × 有/無約束）：with-constraint **leak 0/8**；唯一一組乾淨 A/B（良性檔名 `project-notes.txt`、放禁區、由 codex 自主列舉家目錄撈到）顯示**有約束時由「洩漏」翻轉成「scope 拒絕」**，但 **n=1**
+- → 這是**機率性的 prompt-layer 控制、不是硬邊界**：單一 model（gpt-5.4）、Windows-only、樣本小（非窮舉式 jailbreak 套組），model 自律行為可能隨版本改變。**不可當保證**
+
+*緩解層 2：codex 內建 credential guard（model-level，獨立於 codebus）*
+
+- 實測意外發現：gpt-5.4 對 `id_rsa` 這類**憑證樣檔名**，即使**沒有** soft constraint 也拒讀（重現 ×2，自稱保護「private SSH key」）——這是 codebus 之外的**第二道 model 層**防護
+- **但它對良性檔名不 fire**：放在禁區、命名無害的機密檔，就只剩緩解層 1 獨守（這也是上面 A/B 必須用 `project-notes.txt` 而非 `id_rsa` 才能隔離出 soft constraint 真正效力的原因）
+
+*嚴重度框架：PII raw_sync mirror 已先遮罩 source 機密*
+
+- agent 在 codebus 流程裡讀的**不是 live repo**，而是 `pii/` scanner + `raw_sync` 過濾後的 `raw/code/` 鏡像（見 §4）——AWS / Anthropic key 等 Critical 機密在進 vault 前已**強制 mask**
+- 所以 codex read-leak 真正**獨力靠 soft constraint 守的**，只剩**家目錄機密**（`~/.ssh`、`~/.aws` 等，本就不在 vault 鏡像內）；source repo 內的機密不在此風險面
+
+*硬邊界升級路徑（solo-dev 威脅模型下暫緩）*
+
+- 真正的 per-spawn 硬讀取邊界是 **AppContainer / LowBox**（或 elevated backend，需 admin / WSL2 外包）。solo-dev 威脅模型下**接受殘餘風險、暫不實作**
+- **觸發升級的條件**＝(a) 出現外部 / 不可信 prompt 來源，或 (b) 未來 probe 在**良性檔名**標的上示範繞過。見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」
 
 **寫入（正常 ACL 有擋、Everyone-writable 例外）**
 
