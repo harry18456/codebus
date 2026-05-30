@@ -133,6 +133,9 @@ pub fn spawn_quiz_plan(
     let active_runs = runtime.active_runs.clone();
     let app_stream = app.clone();
     let app_terminal = app.clone();
+    let run_timeout = super::goals::resolve_run_timeout(
+        codebus_core::config::default_config_path().as_deref(),
+    );
     spawn_quiz_plan_with_runner(
         active_runs,
         PathBuf::from(vault_path),
@@ -143,8 +146,8 @@ pub fn spawn_quiz_plan(
         move |payload| {
             let _ = app_terminal.emit("quiz-plan-terminal", payload);
         },
-        |repo, options, mut on_event, cancel| {
-            run_quiz_plan(repo, options, |e| on_event(e), cancel)
+        move |repo, options, mut on_event, cancel| {
+            run_quiz_plan(repo, options, |e| on_event(e), cancel, run_timeout)
         },
     )
 }
@@ -269,6 +272,9 @@ pub fn spawn_quiz_generate(
     // using the same core loader the CLI uses; a load error falls back
     // to false (do not silently enable extra spawns).
     let content_verify = resolve_content_verify();
+    let run_timeout = super::goals::resolve_run_timeout(
+        codebus_core::config::default_config_path().as_deref(),
+    );
     spawn_quiz_generate_with_runner(
         active_runs,
         PathBuf::from(vault_path),
@@ -282,8 +288,8 @@ pub fn spawn_quiz_generate(
         move |payload| {
             let _ = app_terminal.emit("quiz-generate-terminal", payload);
         },
-        |repo, options, mut on_event, cancel| {
-            run_quiz_generate(repo, options, |e| on_event(e), cancel)
+        move |repo, options, mut on_event, cancel| {
+            run_quiz_generate(repo, options, |e| on_event(e), cancel, run_timeout)
         },
     )
 }

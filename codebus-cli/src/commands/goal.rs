@@ -81,7 +81,8 @@ pub async fn run(
         VerbEvent::Lifecycle(_) => {}
     };
 
-    match run_goal(repo, options, on_event, None) {
+    let timeout = super::resolve_run_timeout(debug);
+    match run_goal(repo, options, on_event, None, timeout) {
         Ok(report) => {
             // Match pre-refactor stderr: when the fix loop terminated
             // with issues remaining, emit the same warning line.

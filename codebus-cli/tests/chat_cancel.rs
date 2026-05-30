@@ -70,6 +70,7 @@ fn run_chat_turn_observes_cancel_and_returns_cancelled() {
                 // the eventual Err(Cancelled) return path.
             },
             Some(cancel_for_worker),
+            None,
         )
     });
 

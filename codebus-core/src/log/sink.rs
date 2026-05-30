@@ -73,6 +73,23 @@ pub struct RunLog {
     pub wiki_changed: bool,
     pub lint_error_count: usize,
     pub lint_warn_count: usize,
+    /// run-outcome-lifecycle-integrity: best-effort observability counter
+    /// for inner tool results that both terminated non-zero
+    /// (`is_error == true`) AND carried a locale-independent sandbox /
+    /// permission-denial marker in their output, as accumulated by
+    /// `agent::invoke` (see the `verb-library` capability `Sandbox Denial
+    /// Signal Observability` requirement). Surfaces the case where a
+    /// provider (notably codex `exec`) exits zero at the top level even
+    /// though an inner shell command was blocked by the OS sandbox.
+    ///
+    /// Orthogonal to [`outcome`](Self::outcome): a non-zero count SHALL NOT
+    /// by itself change `outcome`. `0` for the overwhelmingly common case.
+    ///
+    /// Serde `default` + skip-when-zero so existing rows from non-codex or
+    /// clean runs stay byte-identical and legacy jsonl rows that predate
+    /// this change deserialize cleanly to `0`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub sandbox_denial_count: usize,
     /// Verb termination outcome. Closed set of three values:
     /// `"succeeded"` — agent exited zero + any post-spawn phases ok;
     /// `"failed"` — agent exited non-zero or fix loop reported issues;
@@ -134,6 +151,7 @@ pub struct RunLog {
 /// - `AppClose`    → `"app-close"`
 /// - `UserCancel`  → `"user-cancel"`
 /// - `NetworkDrop` → `"network-drop"`
+/// - `Timeout`     → `"timeout"`
 /// - `Other(String)` → `{"other": "<string>"}` (untagged newtype)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -141,11 +159,25 @@ pub enum InterruptReason {
     AppClose,
     UserCancel,
     NetworkDrop,
+    /// run-outcome-lifecycle-integrity: the per-run wall-clock limit
+    /// (`lifecycle.run_timeout_secs`) elapsed and `agent::invoke`
+    /// terminated the agent process tree. Set by the verb layer when
+    /// `InvokeReport.timed_out` is `true` AND the cancel signal was never
+    /// flipped (cancel takes precedence — see the `verb-library` capability
+    /// `Run Wall-Clock Timeout Safety Net` requirement).
+    Timeout,
     Other(String),
 }
 
 fn default_outcome() -> String {
     "succeeded".to_string()
+}
+
+/// `skip_serializing_if` predicate for `RunLog::sandbox_denial_count`: omit
+/// the field from serialized JSON when it is `0` (the common case) so rows
+/// from non-codex / clean runs stay byte-identical to pre-change output.
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Debug)]
@@ -336,6 +368,7 @@ mod tests {
             lint_warn_count: 1,
             outcome: "succeeded".into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
@@ -394,6 +427,7 @@ mod tests {
                 lint_warn_count: 0,
                 outcome: outcome.into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: None,
             };
             let json = serde_json::to_string(&entry).unwrap();
@@ -424,6 +458,7 @@ mod tests {
             lint_warn_count: 2,
             outcome: "failed".into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: None,
         };
         let json = serde_json::to_string(&original).unwrap();
@@ -454,6 +489,7 @@ mod tests {
             lint_warn_count: 0,
             outcome: "succeeded".into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
@@ -505,6 +541,7 @@ mod tests {
             lint_warn_count: 0,
             outcome: "succeeded".into(),
             session_id: Some("abc-123".into()),
+            sandbox_denial_count: 0,
             interrupt_reason: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
@@ -528,6 +565,7 @@ mod tests {
             lint_warn_count: 0,
             outcome: "cancelled".into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: reason,
         }
     }
@@ -545,6 +583,7 @@ mod tests {
                 InterruptReason::NetworkDrop,
                 "\"interrupt_reason\":\"network-drop\"",
             ),
+            (InterruptReason::Timeout, "\"interrupt_reason\":\"timeout\""),
         ];
         for (variant, expected_substring) in cases {
             let entry = fixture_run_log_with_reason(Some(variant.clone()));
@@ -614,5 +653,77 @@ mod tests {
             serde_json::from_str(legacy_line).expect("legacy row must deserialize cleanly");
         assert_eq!(parsed.interrupt_reason, None);
         assert_eq!(parsed.outcome, "cancelled");
+    }
+
+    /// Helper: minimal RunLog used by sandbox_denial_count tests — only the
+    /// `sandbox_denial_count` / `outcome` fields are varied per case.
+    fn fixture_run_log_with_denials(count: usize, outcome: &str) -> RunLog {
+        RunLog {
+            goal: "describe X".into(),
+            mode: "goal".into(),
+            model: None,
+            effort: None,
+            started_at: "2026-05-30T00:00:00Z".into(),
+            finished_at: "2026-05-30T00:00:01Z".into(),
+            tokens: TokenUsage::default(),
+            wiki_changed: false,
+            lint_error_count: 0,
+            lint_warn_count: 0,
+            sandbox_denial_count: count,
+            outcome: outcome.into(),
+            session_id: None,
+            interrupt_reason: None,
+        }
+    }
+
+    /// run-outcome-lifecycle-integrity scenario:
+    /// `RunLog with zero sandbox_denial_count omits the field`. The common
+    /// case (no denial observed) MUST stay byte-identical to pre-change rows.
+    #[test]
+    fn run_log_sandbox_denial_count_serialize_skip_when_zero() {
+        let entry = fixture_run_log_with_denials(0, "succeeded");
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("\"sandbox_denial_count\""),
+            "sandbox_denial_count key MUST be omitted when 0; got: {json}"
+        );
+    }
+
+    /// run-outcome-lifecycle-integrity scenario:
+    /// `RunLog with non-zero sandbox_denial_count serializes the field`. The
+    /// denial count is observable but MUST NOT alter `outcome`.
+    #[test]
+    fn run_log_sandbox_denial_count_serializes_when_nonzero_without_changing_outcome() {
+        let entry = fixture_run_log_with_denials(2, "succeeded");
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            json.contains("\"sandbox_denial_count\":2"),
+            "expected sandbox_denial_count field; got: {json}"
+        );
+        assert!(json.contains("\"outcome\":\"succeeded\""));
+        let parsed: RunLog = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.sandbox_denial_count, 2);
+        assert_eq!(parsed.outcome, "succeeded");
+    }
+
+    /// run-outcome-lifecycle-integrity scenario:
+    /// `Legacy jsonl row without sandbox_denial_count field deserializes
+    /// cleanly`. Pre-change rows lack the key and MUST default to 0.
+    #[test]
+    fn legacy_run_log_without_sandbox_denial_count_deserializes_to_zero() {
+        let legacy_line = r#"{
+            "goal": "X",
+            "mode": "goal",
+            "started_at": "2026-05-10T00:00:00Z",
+            "finished_at": "2026-05-10T00:01:00Z",
+            "tokens": {"input_tokens": 0, "output_tokens": 0},
+            "wiki_changed": false,
+            "lint_error_count": 0,
+            "lint_warn_count": 0,
+            "outcome": "succeeded"
+        }"#;
+        let parsed: RunLog =
+            serde_json::from_str(legacy_line).expect("legacy row must deserialize cleanly");
+        assert_eq!(parsed.sandbox_denial_count, 0);
     }
 }

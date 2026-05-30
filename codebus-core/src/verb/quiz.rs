@@ -365,6 +365,7 @@ fn run_spawn(
     permission: Permission,
     command_allowance: Option<CommandPrefix>,
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<(String, InvokeReport), VerbError> {
     // Lifecycle phase stays `Verb::Quiz` (UI grouping). The SKILL bundle is
     // always Quiz (cross-flow verify spawn still invokes /codebus-quiz verify:);
@@ -396,6 +397,7 @@ fn run_spawn(
                 fan_out(VerbEvent::Stream(event));
             },
             cancel,
+            timeout,
         )
         .map_err(|e| VerbError::Spawn { source: e })?
     };
@@ -420,6 +422,7 @@ pub fn run_quiz_plan<F: FnMut(VerbEvent)>(
     options: QuizPlanOptions,
     mut on_event: F,
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<QuizPlanReport, VerbError> {
     let paths = vault_paths(repo);
     let started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
@@ -448,6 +451,7 @@ pub fn run_quiz_plan<F: FnMut(VerbEvent)>(
         Permission::ReadOnly,
         None,
         cancel.clone(),
+        timeout,
     )?;
 
     if is_cancelled(&cancel) {
@@ -490,6 +494,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
     options: QuizGenerateOptions,
     mut on_event: F,
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<QuizReport, VerbError> {
     let paths = vault_paths(repo);
     // Millis precision: matches the IPC `active_runs` key precision so
@@ -555,6 +560,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         Permission::ReadOnly,
         Some(CommandPrefix::new(["codebus", "quiz", "validate"])),
         cancel.clone(),
+        timeout,
     )?;
     let mut quiz_md =
         strip_preamble_before_first_question(&strip_code_fence(&gen_text));
@@ -620,6 +626,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
                 Permission::ReadOnly,
                 None,
                 cancel.clone(),
+                timeout,
             ) {
                 Ok((t, _)) => t,
                 Err(e) => {
@@ -665,6 +672,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
                     Permission::ReadOnly,
                     Some(CommandPrefix::new(["codebus", "quiz", "validate"])),
                     cancel.clone(),
+                    timeout,
                 ) {
                     Ok((rtext, _)) => {
                         Ok(strip_preamble_before_first_question(&strip_code_fence(&rtext)))
@@ -703,12 +711,16 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
     };
 
     let cancelled_now = is_cancelled(&cancel);
-    let outcome = if cancelled_now { "cancelled" } else { "succeeded" };
-    let interrupt_reason = if cancelled_now {
-        Some(InterruptReason::UserCancel)
+    // run-outcome-lifecycle-integrity: cancel > timeout > succeeded. A
+    // wall-clock timeout on the generate spawn forces failed + Timeout.
+    let (outcome, interrupt_reason) = if cancelled_now {
+        ("cancelled", Some(InterruptReason::UserCancel))
+    } else if gen_report.timed_out {
+        ("failed", Some(InterruptReason::Timeout))
     } else {
-        None
+        ("succeeded", None)
     };
+    crate::verb::warn_sandbox_denials(gen_report.sandbox_denial_count);
     let run_log = RunLog {
         goal: goal_text,
         mode: "quiz".into(),
@@ -722,6 +734,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         lint_warn_count: 0,
         outcome: outcome.into(),
         session_id: gen_report.session_id.clone(),
+        sandbox_denial_count: gen_report.sandbox_denial_count,
         interrupt_reason,
     };
     write_run_log(sink_cfg, &run_log);
@@ -896,12 +909,14 @@ mod tests {
             QuizPlanOptions,
             fn(VerbEvent),
             Option<Arc<AtomicBool>>,
+            Option<std::time::Duration>,
         ) -> Result<QuizPlanReport, VerbError> = run_quiz_plan::<fn(VerbEvent)>;
         let _gen: fn(
             &Path,
             QuizGenerateOptions,
             fn(VerbEvent),
             Option<Arc<AtomicBool>>,
+            Option<std::time::Duration>,
         ) -> Result<QuizReport, VerbError> = run_quiz_generate::<fn(VerbEvent)>;
     }
 
@@ -1113,6 +1128,7 @@ mod tests {
             },
             |e| events.borrow_mut().push(e),
             None,
+            None,
         );
         match result {
             Err(VerbError::VaultMissing { path }) => {
@@ -1142,6 +1158,7 @@ mod tests {
                 topic: None,
             },
             |e| events.borrow_mut().push(e),
+            None,
             None,
         );
         match result {

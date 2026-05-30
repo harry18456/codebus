@@ -60,6 +60,7 @@ fn invoke_passes_env_overrides_to_command() {
         tmp.path(),
         |_event| {},
         None,
+        None,
     )
     .expect("invoke spawn-and-wait succeeds against mock-claude");
     assert!(report.exit.success(), "mock-claude should exit 0");
@@ -131,6 +132,7 @@ fn for_system_does_not_inject_env() {
         },
         tmp.path(),
         |_event| {},
+        None,
         None,
     )
     .expect("invoke spawn-and-wait succeeds");

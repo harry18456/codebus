@@ -133,6 +133,7 @@ pub fn run_goal(
     options: GoalOptions,
     mut on_event: impl FnMut(VerbEvent),
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<GoalReport, VerbError> {
     let paths = vault_paths(repo);
 
@@ -268,6 +269,7 @@ pub fn run_goal(
             lint_warn_count: fix_lint_warns,
             outcome: "cancelled".into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: Some(InterruptReason::UserCancel),
         }
     };
@@ -348,6 +350,7 @@ pub fn run_goal(
             &paths.root,
             |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
+            timeout,
         )
         .map_err(|e| VerbError::Spawn { source: e })?
     };
@@ -395,6 +398,7 @@ pub fn run_goal(
                 &*backend,
                 |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
                 cancel.clone(),
+                timeout,
             )
             .map_err(|e| match e {
                 crate::wiki::fix::FixError::Spawn(io_err) => VerbError::Spawn { source: io_err },
@@ -479,6 +483,7 @@ pub fn run_goal(
                         Some(Verb::Verify),
                         crate::agent::Permission::ReadOnly,
                         cancel.clone(),
+                        timeout,
                     ) {
                         Ok(t) => t,
                         Err(e) => {
@@ -524,6 +529,7 @@ pub fn run_goal(
                             None,
                             crate::agent::Permission::Workspace,
                             cancel.clone(),
+                            timeout,
                         ) {
                             Ok(_) => Ok(()),
                             Err(e) => {
@@ -594,11 +600,17 @@ pub fn run_goal(
         .code()
         .map(|c| c != 0)
         .unwrap_or(true);
-    let outcome = if agent_failed || fix_post_lint_issues_remain {
-        "failed"
+    // run-outcome-lifecycle-integrity: a wall-clock timeout forces
+    // outcome=failed + interrupt_reason=Timeout (cancel was already handled
+    // by the early return above, so it cannot be in play here).
+    let (outcome, interrupt_reason) = if invoke_report.timed_out {
+        ("failed", Some(InterruptReason::Timeout))
+    } else if agent_failed || fix_post_lint_issues_remain {
+        ("failed", None)
     } else {
-        "succeeded"
+        ("succeeded", None)
     };
+    crate::verb::warn_sandbox_denials(invoke_report.sandbox_denial_count);
     let run_log = RunLog {
         goal: options.text.clone(),
         mode: "goal".into(),
@@ -612,7 +624,8 @@ pub fn run_goal(
         lint_warn_count: fix_lint_warns,
         outcome: outcome.into(),
         session_id: None,
-        interrupt_reason: None,
+        sandbox_denial_count: invoke_report.sandbox_denial_count,
+        interrupt_reason,
     };
     write_run_log(sink_cfg.clone(), &run_log);
 
@@ -649,6 +662,7 @@ fn run_goal_spawn(
     resolve_as: Option<Verb>,
     permission: crate::agent::Permission,
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<String, VerbError> {
     // Lifecycle phase stays `Verb::Goal` (UI grouping). The SKILL bundle is
     // always Goal (cross-flow verify spawns invoke /codebus-goal verify: ...).
@@ -681,6 +695,7 @@ fn run_goal_spawn(
                 fan_out(VerbEvent::Stream(event));
             },
             cancel,
+            timeout,
         )
         .map_err(|e| VerbError::Spawn { source: e })?
     };

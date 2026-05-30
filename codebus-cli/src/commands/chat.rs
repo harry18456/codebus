@@ -103,6 +103,9 @@ pub async fn run(
 
     let stdin = io::stdin();
     let mut buffer = String::new();
+    // run-outcome-lifecycle-integrity: resolve the per-run wall-clock timeout
+    // once per REPL session (config is process-stable); applied to every turn.
+    let run_timeout = super::resolve_run_timeout(debug);
     print_prompt();
 
     loop {
@@ -170,7 +173,7 @@ pub async fn run(
             text: user_prompt.clone(),
             session_id: session_id.clone(),
         };
-        let result = run_chat_turn(repo, options, on_event, Some(cancel.clone()));
+        let result = run_chat_turn(repo, options, on_event, Some(cancel.clone()), run_timeout);
 
         // Cancel-during-turn path: don't propagate the error code; redisplay
         // prompt and retain session_id for next message's `--resume <id>`.

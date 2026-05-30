@@ -41,3 +41,21 @@ pub use event::{VerbBanner, VerbEvent, VerbLifecycleEvent};
 /// alongside the rest of the verb surface so downstream code can write
 /// `use codebus_core::verb::Verb;` without reaching into `config`.
 pub use crate::config::Verb;
+
+/// run-outcome-lifecycle-integrity (Part B): emit the single-line stderr
+/// observability warning when `agent::invoke` counted one or more
+/// sandbox-denied tool results during the run. No-op when `count == 0`.
+///
+/// This is the immediate-visibility surface for the codex "top-level exit 0
+/// but inner command blocked" case; the durable surface is
+/// `RunLog.sandbox_denial_count`. The warning does NOT change the run's
+/// `outcome`.
+pub(crate) fn warn_sandbox_denials(count: usize) {
+    if count > 0 {
+        eprintln!(
+            "warning: sandbox-denial: {count} blocked tool result(s) observed \
+             (top-level exit may still report success; see \
+             RunLog.sandbox_denial_count)"
+        );
+    }
+}

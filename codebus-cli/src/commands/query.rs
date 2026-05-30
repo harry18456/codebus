@@ -51,7 +51,8 @@ pub async fn run(
         VerbEvent::Lifecycle(_) => {}
     };
 
-    match run_query(repo, options, on_event, None) {
+    let timeout = super::resolve_run_timeout(debug);
+    match run_query(repo, options, on_event, None, timeout) {
         Ok(report) => {
             let exit: u8 = report
                 .agent_exit_code

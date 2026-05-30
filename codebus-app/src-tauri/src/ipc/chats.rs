@@ -103,6 +103,9 @@ pub fn spawn_chat_turn(
     let active_runs = runtime.active_runs.clone();
     let app_for_stream = app.clone();
     let app_for_terminal = app.clone();
+    let run_timeout = super::goals::resolve_run_timeout(
+        codebus_core::config::default_config_path().as_deref(),
+    );
     spawn_chat_turn_with_runner(
         active_runs,
         PathBuf::from(vault_path),
@@ -117,8 +120,8 @@ pub fn spawn_chat_turn(
         move |payload| {
             let _ = app_for_terminal.emit("chat-terminal", payload);
         },
-        |repo, options, mut on_event, cancel| {
-            run_chat_turn(repo, options, |e| on_event(e), cancel)
+        move |repo, options, mut on_event, cancel| {
+            run_chat_turn(repo, options, |e| on_event(e), cancel, run_timeout)
         },
     )
 }

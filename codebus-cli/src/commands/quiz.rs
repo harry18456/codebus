@@ -151,6 +151,10 @@ pub async fn run(
         VerbEvent::Lifecycle(_) => {}
     };
 
+    // run-outcome-lifecycle-integrity: per-run wall-clock timeout, applied to
+    // both the plan and generate spawns of this invocation.
+    let run_timeout = super::resolve_run_timeout(debug);
+
     // --- plan spawn ---
     let plan = match run_quiz_plan(
         repo,
@@ -159,6 +163,7 @@ pub async fn run(
         },
         render_stream.clone(),
         None,
+        run_timeout,
     ) {
         Ok(p) => p,
         Err(e) => return translate_error("quiz", &e, render_opts),
@@ -192,6 +197,7 @@ pub async fn run(
         },
         render_stream,
         None,
+        run_timeout,
     ) {
         Ok(report) => match persist_quiz(
             repo,

@@ -71,6 +71,7 @@ pub fn run_query(
     options: QueryOptions,
     mut on_event: impl FnMut(VerbEvent),
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<QueryReport, VerbError> {
     let paths = vault_paths(repo);
 
@@ -166,6 +167,7 @@ pub fn run_query(
             &paths.root,
             |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
+            timeout,
         )
         .map_err(|e| VerbError::Spawn { source: e })?
     };
@@ -192,6 +194,7 @@ pub fn run_query(
             lint_warn_count: 0,
             outcome: "cancelled".into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: Some(InterruptReason::UserCancel),
         };
         write_run_log(sink_cfg.clone(), &cancel_run_log);
@@ -201,7 +204,16 @@ pub fn run_query(
     // Step 7: write RunLog (success path).
     // outcome: "succeeded" — query is read-only; the verb itself
     // completed even when the agent exits non-zero (CLI propagates
-    // the agent exit via QueryReport.agent_exit_code field).
+    // the agent exit via QueryReport.agent_exit_code field). EXCEPTION
+    // (run-outcome-lifecycle-integrity): a wall-clock timeout forcibly
+    // killed the agent, so it is recorded as failed + Timeout (cancel was
+    // handled by the early return above and cannot be in play here).
+    let (outcome, interrupt_reason) = if invoke_report.timed_out {
+        ("failed", Some(InterruptReason::Timeout))
+    } else {
+        ("succeeded", None)
+    };
+    crate::verb::warn_sandbox_denials(invoke_report.sandbox_denial_count);
     let run_log = RunLog {
         goal: options.text.clone(),
         mode: "query".into(),
@@ -213,9 +225,10 @@ pub fn run_query(
         wiki_changed: false,
         lint_error_count: 0,
         lint_warn_count: 0,
-        outcome: "succeeded".into(),
+        outcome: outcome.into(),
         session_id: None,
-        interrupt_reason: None,
+        sandbox_denial_count: invoke_report.sandbox_denial_count,
+        interrupt_reason,
     };
     write_run_log(sink_cfg, &run_log);
 
@@ -245,6 +258,7 @@ mod tests {
                 text: "test query".into(),
             },
             |event| events.borrow_mut().push(event),
+            None,
             None,
         );
         match result {

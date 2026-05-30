@@ -59,6 +59,22 @@ pub struct InvokeReport {
     /// next turn; the quiz verb records it in its `RunLog` entry (for
     /// logging, not resume); goal/query/fix verbs ignore the field.
     pub session_id: Option<String>,
+    /// run-outcome-lifecycle-integrity (Part A): `true` if and only if the
+    /// per-run wall-clock `timeout` elapsed and the watcher terminated the
+    /// agent process tree. A timeout-induced kill is indistinguishable from
+    /// any other kill by exit status alone, so the verb layer reads THIS
+    /// flag (not `exit`) to classify the run as `outcome == "failed"` +
+    /// `interrupt_reason == Timeout`. Always `false` when `timeout` was
+    /// `None` or the run finished before the limit.
+    pub timed_out: bool,
+    /// run-outcome-lifecycle-integrity (Part B): count of tool results during
+    /// the run that both terminated non-zero (`is_error == true`) AND carried
+    /// a locale-independent sandbox / permission-denial marker (per
+    /// [`crate::stream::is_sandbox_denial`]). Best-effort observability for
+    /// the codex "top-level exit 0 but inner command blocked" case. The verb
+    /// copies this into `RunLog.sandbox_denial_count`; it does NOT alter
+    /// `outcome`.
+    pub sandbox_denial_count: usize,
 }
 
 /// Spawn the agent child process described by `backend` + `spec`, consume
@@ -100,11 +116,16 @@ pub fn invoke(
     vault_root: &Path,
     mut on_event: impl FnMut(StreamEvent),
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<Duration>,
 ) -> io::Result<InvokeReport> {
     let mut cmd = backend.build_command(&spec);
     let stdin_payload = backend.stdin_payload(&spec);
 
     let started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    // run-outcome-lifecycle-integrity (Part A): monotonic clock for the
+    // wall-clock timeout. The RFC 3339 `started_at` string above is for the
+    // RunLog; `Instant` is what the watcher compares `elapsed()` against.
+    let started_instant = Instant::now();
 
     let stdin_mode = if stdin_payload.is_some() {
         Stdio::piped()
@@ -151,8 +172,18 @@ pub fn invoke(
     // watcher's "main loop completed, you can stop polling" signal so
     // the watcher does not outlive `invoke`.
     let done = Arc::new(AtomicBool::new(false));
-    let watcher_handle =
-        spawn_cancel_watcher(kill_handle.clone(), cancel.clone(), done.clone());
+    // run-outcome-lifecycle-integrity (Part A): the watcher sets this when
+    // the wall-clock `timeout` elapses and it terminates the tree. Read into
+    // `InvokeReport.timed_out` after the watcher is joined.
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let watcher_handle = spawn_cancel_watcher(
+        kill_handle.clone(),
+        cancel.clone(),
+        done.clone(),
+        started_instant,
+        timeout,
+        timed_out.clone(),
+    );
 
     // Hand stderr to a background thread so it drains without blocking
     // the main loop. The thread exits when the child closes stderr (i.e.
@@ -189,6 +220,10 @@ pub fn invoke(
     // caller closure. Cancel signal polled after each line — flip true →
     // kill child + drain remaining stdout silently + break.
     let mut accumulated = TokenUsage::default();
+    // run-outcome-lifecycle-integrity (Part B): count tool results that both
+    // failed (`is_error`) AND carry a locale-independent sandbox-denial
+    // marker. Accumulated like tokens; surfaced on `InvokeReport`.
+    let mut sandbox_denial_count: usize = 0;
     let mut session_id: Option<String> = None;
     let stdout = child.stdout.take().expect("stdout piped");
     let reader = BufReader::new(stdout);
@@ -212,6 +247,15 @@ pub fn invoke(
         for event in backend.parse_stream_line(&line) {
             if let StreamEvent::Usage(u) = &event {
                 accumulate_token_usage(&mut accumulated, u);
+            }
+            // Part B: only failed tool results are denial candidates; within
+            // those, only ones carrying a curated marker count (grep-no-match
+            // exits non-zero but has no marker → not counted).
+            if let StreamEvent::ToolResult { output, is_error } = &event
+                && *is_error
+                && crate::stream::is_sandbox_denial(output)
+            {
+                sandbox_denial_count += 1;
             }
             on_event(event);
         }
@@ -258,6 +302,9 @@ pub fn invoke(
         started_at,
         finished_at,
         session_id,
+        // Read after the strict watcher join above so the flag is settled.
+        timed_out: timed_out.load(Ordering::SeqCst),
+        sandbox_denial_count,
     })
 }
 
@@ -288,6 +335,15 @@ pub(crate) fn sniff_init_session_id(line: &str) -> Option<String> {
 ///   the inline fast-path cancel inside the main loop may safely
 ///   fire in parallel) and exits.
 ///
+/// run-outcome-lifecycle-integrity (Part A): the watcher gained a third
+/// check — `timeout`. When `Some(limit)` and `started_instant.elapsed()`
+/// exceeds it, the watcher terminates the tree via the SAME
+/// `KillHandle::terminate_tree()` the cancel path uses (no second kill
+/// mechanism), sets `timed_out` so the verb layer can classify the run, and
+/// exits. The resulting stdout EOF unblocks the main loop exactly as cancel
+/// does. `done`/`cancel` keep precedence (checked first) so a user cancel or
+/// a clean finish is never mislabeled as a timeout.
+///
 /// The `KillHandle` is shared via `Arc` because the main thread also
 /// holds it for the inline fast-path kill. Holding a `&Child` here
 /// would conflict with the main thread's `child.wait()`.
@@ -295,6 +351,9 @@ fn spawn_cancel_watcher(
     kill_handle: Arc<KillHandle>,
     cancel: Option<Arc<AtomicBool>>,
     done: Arc<AtomicBool>,
+    started_instant: Instant,
+    timeout: Option<Duration>,
+    timed_out: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         loop {
@@ -307,6 +366,15 @@ fn spawn_cancel_watcher(
                 // Idempotent across both platforms; the main-loop fast
                 // path may have already terminated the tree by now.
                 let _ = kill_handle.terminate_tree();
+                return;
+            }
+            if let Some(limit) = timeout
+                && started_instant.elapsed() > limit
+            {
+                // Wall-clock limit hit. Same tree-kill as cancel; record
+                // `timed_out` so the verb derives outcome=failed + Timeout.
+                let _ = kill_handle.terminate_tree();
+                timed_out.store(true, Ordering::SeqCst);
                 return;
             }
             thread::sleep(CANCEL_WATCHER_POLL_INTERVAL);
@@ -607,7 +675,7 @@ mod tests {
         }
         let backend = ClaudeBackend::new(ClaudeCodeConfig::default(), EnvOverrides::for_system());
         let tmp = std::env::temp_dir();
-        let r = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None);
+        let r = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None, None);
         unsafe {
             std::env::remove_var("CODEBUS_CLAUDE_BIN");
         }
@@ -628,6 +696,7 @@ mod tests {
             tmp.as_path(),
             |event| events.push(event),
             None,
+            None,
         );
         unsafe {
             std::env::remove_var("CODEBUS_CLAUDE_BIN");
@@ -646,6 +715,8 @@ mod tests {
             started_at: "2026-05-10T00:00:00Z".into(),
             finished_at: "2026-05-10T00:00:01Z".into(),
             session_id: None,
+            timed_out: false,
+            sandbox_denial_count: 0,
         };
         let _: ExitStatus = report.exit;
         assert_eq!(report.accumulated_tokens.input_tokens, 0);
@@ -818,6 +889,7 @@ mod tests {
             tmp.as_path(),
             |_event| {},
             Some(cancel),
+            None,
         );
         let elapsed_from_start = flip_observed.elapsed();
         let _ = flipper.join();
@@ -868,6 +940,7 @@ mod tests {
             tmp.as_path(),
             |_event| {},
             Some(cancel),
+            None,
         );
         let elapsed = started.elapsed();
         let _ = flipper.join();
@@ -898,7 +971,7 @@ mod tests {
         let backend = TestBackend(TestChild::Finite);
         let tmp = std::env::temp_dir();
         let started = Instant::now();
-        let r = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None);
+        let r = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None, None);
         let elapsed = started.elapsed();
         let report = r.expect("spawn should succeed");
         assert!(report.exit.success());
@@ -935,6 +1008,7 @@ mod tests {
             tmp.as_path(),
             |_event| {},
             Some(cancel),
+            None,
         );
         let report = r.expect("invoke should return Ok even with concurrent kills");
         assert!(!report.exit.success(), "child was killed, not natural exit");
@@ -951,15 +1025,112 @@ mod tests {
         let tmp = std::env::temp_dir();
 
         let started = Instant::now();
-        let r = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None);
+        let r = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None, None);
         let elapsed = started.elapsed();
 
         let report = r.expect("spawn should succeed");
         assert!(report.exit.success(), "finite child should exit success");
+        assert!(!report.timed_out, "no timeout was set → timed_out is false");
+        assert_eq!(
+            report.sandbox_denial_count, 0,
+            "TestBackend emits no ToolResult → no denials"
+        );
         assert!(
             elapsed < Duration::from_secs(5),
             "invoke should return promptly after child exits; actual = {:?}",
             elapsed
+        );
+    }
+
+    // === run-outcome-lifecycle-integrity Part A: wall-clock timeout ===
+
+    /// Timeout fires: a silent 30s child with a short `timeout` SHALL be
+    /// terminated by the watcher's third branch. `invoke` returns far before
+    /// the child's natural 30s exit, with `timed_out == true` and a
+    /// non-success exit. (Verification target for the `verb-library`
+    /// `Run Wall-Clock Timeout Safety Net` "Timeout fires" scenario.)
+    #[test]
+    fn timeout_fires_terminates_tree_and_sets_timed_out() {
+        let backend = TestBackend(TestChild::Silent);
+        let tmp = std::env::temp_dir();
+        let started = Instant::now();
+        let r = invoke(
+            &backend,
+            test_spec(),
+            tmp.as_path(),
+            |_event| {},
+            None,
+            Some(Duration::from_millis(200)),
+        );
+        let elapsed = started.elapsed();
+        let report = r.expect("spawn should succeed on a host with sleep/powershell");
+        assert!(report.timed_out, "watcher should have flagged timed_out");
+        assert!(
+            !report.exit.success(),
+            "timed-out child was killed, not a clean exit (exit={:?})",
+            report.exit
+        );
+        // Generous bound: 200ms limit + poll interval + PowerShell startup
+        // slack on Windows; still far below the child's natural 30s sleep.
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "invoke should return shortly after the timeout, well before the \
+             child's natural 30s sleep; actual = {:?}",
+            elapsed
+        );
+    }
+
+    // === run-outcome-lifecycle-integrity Part B: denial accumulation ===
+
+    /// Backend that maps the `Finite` child's three lines onto ToolResults
+    /// exercising every denial-counting branch:
+    /// - `line1` → failed result WITH a denial marker  → counted
+    /// - `line2` → failed result WITHOUT a marker (grep-no-match) → NOT counted
+    /// - `line3` → SUCCESS result whose text contains a marker → NOT counted
+    struct DenialBackend;
+
+    impl AgentBackend for DenialBackend {
+        fn build_command(&self, _spec: &SpawnSpec) -> Command {
+            finite_child_command()
+        }
+        fn parse_stream_line(&self, line: &str) -> Vec<StreamEvent> {
+            if line.contains("line1") {
+                vec![StreamEvent::ToolResult {
+                    output: "Set-Content : PermissionDenied ... UnauthorizedAccessError".into(),
+                    is_error: true,
+                }]
+            } else if line.contains("line2") {
+                vec![StreamEvent::ToolResult {
+                    output: "no matches found".into(),
+                    is_error: true,
+                }]
+            } else if line.contains("line3") {
+                vec![StreamEvent::ToolResult {
+                    output: "Access is denied".into(),
+                    is_error: false,
+                }]
+            } else {
+                Vec::new()
+            }
+        }
+        fn extract_session_id(&self, _line: &str) -> Option<String> {
+            None
+        }
+    }
+
+    /// Only failed results carrying a marker are counted: one denial
+    /// (`line1`), the grep-no-match (`line2`) and the success-with-marker
+    /// (`line3`) are both excluded → `sandbox_denial_count == 1`.
+    #[test]
+    fn invoke_counts_only_failed_results_with_denial_marker() {
+        let backend = DenialBackend;
+        let tmp = std::env::temp_dir();
+        let r = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None, None);
+        let report = r.expect("spawn should succeed");
+        assert_eq!(
+            report.sandbox_denial_count, 1,
+            "exactly the failed+marker result counts; got {}",
+            report.sandbox_denial_count
         );
     }
 }

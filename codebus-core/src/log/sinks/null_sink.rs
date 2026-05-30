@@ -54,6 +54,7 @@ mod tests {
             lint_warn_count: 0,
             outcome: "succeeded".into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: None,
         }
     }

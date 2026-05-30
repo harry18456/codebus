@@ -20,6 +20,7 @@ pub mod goal;
 pub mod global_starter;
 pub mod hooks;
 pub mod keyring;
+pub mod lifecycle;
 pub mod lint_fix;
 pub mod log;
 pub mod pii;
@@ -38,6 +39,7 @@ pub use endpoint::{
 pub use global_starter::{StarterOutcome, write_starter_config_if_missing};
 pub use hooks::{HooksConfig, load_hooks_config};
 pub use keyring::KeyringError;
+pub use lifecycle::{LifecycleConfig, load_lifecycle_config};
 pub use lint_fix::{LintFixConfig, load_lint_fix_config};
 pub use log::{LogConfig, load_log_config};
 pub use goal::{GoalConfig, load_goal_config};

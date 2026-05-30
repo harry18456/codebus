@@ -60,6 +60,15 @@ fn main() -> ExitCode {
     match behavior.as_str() {
         "success-noop" => ExitCode::SUCCESS,
 
+        // run-outcome-lifecycle-integrity: sleep far longer than any test's
+        // configured `lifecycle.run_timeout_secs` so the per-run wall-clock
+        // watcher terminates the process tree first. The ExitCode below is
+        // never reached when the timeout fires (the tree is killed).
+        "hang" => {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            ExitCode::SUCCESS
+        }
+
         "success-write-page" => {
             if write_test_page("wiki/concepts/test.md", "test").is_err() {
                 return ExitCode::from(2);

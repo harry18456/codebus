@@ -46,7 +46,8 @@ pub async fn run(
         VerbEvent::Lifecycle(_) => {}
     };
 
-    match run_fix(&repo, options, on_event, None) {
+    let timeout = super::resolve_run_timeout(debug);
+    match run_fix(&repo, options, on_event, None, timeout) {
         Ok(report) => match report.status {
             FixStatus::Skipped { reason: _ } => {
                 eprintln!("fix: disabled by --no-fix or lint.fix.enabled = false");

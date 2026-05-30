@@ -98,6 +98,7 @@ pub fn run_fix(
     options: FixOptions,
     mut on_event: impl FnMut(VerbEvent),
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<FixReport, VerbError> {
     let paths = vault_paths(repo);
 
@@ -208,6 +209,7 @@ pub fn run_fix(
             &*backend,
             |event: StreamEvent| fan_out(VerbEvent::Stream(event)),
             cancel.clone(),
+            timeout,
         )
         .map_err(|e| match e {
             crate::wiki::fix::FixError::Spawn(io_err) => VerbError::Spawn { source: io_err },
@@ -253,6 +255,7 @@ pub fn run_fix(
             lint_warn_count: report.final_lint.warn_count,
             outcome: "cancelled".into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: Some(InterruptReason::UserCancel),
         };
         write_run_log(sink_cfg.clone(), &cancel_run_log);
@@ -293,6 +296,14 @@ pub fn run_fix(
     // Step 12: write RunLog (only when invoke ran — InitialClean path
     // returned earlier; cancel path also returned earlier).
     let invoke_report = report.invoke.clone();
+    // run-outcome-lifecycle-integrity: read the lifecycle signals before the
+    // InvokeReport is consumed by the match below.
+    let timed_out = report.invoke.as_ref().map(|r| r.timed_out).unwrap_or(false);
+    let sandbox_denial_count = report
+        .invoke
+        .as_ref()
+        .map(|r| r.sandbox_denial_count)
+        .unwrap_or(0);
     let (started_at_opt, finished_at, tokens) = match invoke_report {
         Some(r) => (
             Some(run_started_at.clone()),
@@ -306,12 +317,18 @@ pub fn run_fix(
         // outcome: PostLintClean → "succeeded"; PostLintIssuesRemain →
         // "failed". InitialClean / Skipped never reach this branch
         // (no agent spawn, no RunLog). Cancel path returned earlier
-        // with Cancelled before this code.
-        let outcome = match report.termination {
-            TerminationReason::PostLintClean => "succeeded",
-            TerminationReason::PostLintIssuesRemain => "failed",
-            TerminationReason::InitialClean => "succeeded", // unreachable here
+        // with Cancelled before this code. A wall-clock timeout forces
+        // failed + Timeout regardless of the lint termination.
+        let (outcome, interrupt_reason) = if timed_out {
+            ("failed", Some(InterruptReason::Timeout))
+        } else {
+            match report.termination {
+                TerminationReason::PostLintClean => ("succeeded", None),
+                TerminationReason::PostLintIssuesRemain => ("failed", None),
+                TerminationReason::InitialClean => ("succeeded", None), // unreachable here
+            }
         };
+        crate::verb::warn_sandbox_denials(sandbox_denial_count);
         let run_log = RunLog {
             goal: String::new(),
             mode: "fix".into(),
@@ -325,7 +342,8 @@ pub fn run_fix(
             lint_warn_count: report.final_lint.warn_count,
             outcome: outcome.into(),
             session_id: None,
-            interrupt_reason: None,
+            sandbox_denial_count,
+            interrupt_reason,
         };
         write_run_log(sink_cfg.clone(), &run_log);
     }
@@ -362,6 +380,7 @@ mod tests {
             tmp.path(),
             FixOptions::default(),
             |event| events.borrow_mut().push(event),
+            None,
             None,
         );
         match result {

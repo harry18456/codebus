@@ -272,3 +272,70 @@ fn query_streams_events_and_writes_jsonl_log_with_zero_wiki_changed() {
     assert_eq!(parsed["lint_warn_count"], 0);
     assert_eq!(parsed["tokens"]["input_tokens"], 100);
 }
+
+// === run-outcome-lifecycle-integrity: per-run wall-clock timeout end-to-end ===
+
+/// Full vertical: `lifecycle.run_timeout_secs` config → CLI resolves +
+/// injects into `run_query` → `agent::invoke` watcher terminates the hung
+/// mock's process tree → verb derives `outcome=failed` +
+/// `interrupt_reason=timeout` → RunLog persists it. The mock sleeps 30s; a
+/// 1s configured timeout must cut it down to a few seconds.
+#[test]
+fn query_wall_clock_timeout_records_failed_outcome_with_timeout_reason() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success(), "setup init");
+
+    // Isolated CODEBUS_HOME carrying a 1-second run timeout.
+    let home = TempDir::new().expect("isolated CODEBUS_HOME");
+    let cfg_dir = home.path().join(".codebus");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::write(
+        cfg_dir.join("config.yaml"),
+        "lifecycle:\n  run_timeout_secs: 1\n",
+    )
+    .unwrap();
+
+    let start = std::time::Instant::now();
+    let out = Command::new(BIN)
+        .args(["query", "hang please"])
+        .current_dir(tmp.path())
+        .env("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE)
+        .env("CODEBUS_HOME", home.path())
+        .env("CODEBUS_MOCK_BEHAVIOR", "hang")
+        .output()
+        .expect("run codebus query (hang)");
+    let elapsed = start.elapsed();
+
+    // The hung mock would sleep 30s; the 1s timeout + tree-kill must return
+    // far sooner. Generous bound absorbs CI noise + process startup.
+    assert!(
+        elapsed < std::time::Duration::from_secs(20),
+        "timeout should cut the 30s hang to a few seconds; elapsed = {elapsed:?}"
+    );
+    assert!(
+        !out.status.success(),
+        "a timed-out (killed) agent run must not exit success"
+    );
+
+    // RunLog records the timeout: outcome failed + interrupt_reason timeout.
+    let log_dir = tmp.path().join(".codebus/log");
+    let entries: Vec<_> = fs::read_dir(&log_dir)
+        .expect("log dir exists")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("runs-"))
+        .collect();
+    assert_eq!(entries.len(), 1, "expected 1 runs-*.jsonl, got {entries:?}");
+    let body = fs::read_to_string(entries[0].path()).unwrap();
+    let line = body.lines().last().expect("at least one RunLog line");
+    let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+    assert_eq!(parsed["mode"], "query");
+    assert_eq!(
+        parsed["outcome"], "failed",
+        "timed-out run records failed outcome; line: {line}"
+    );
+    assert_eq!(
+        parsed["interrupt_reason"], "timeout",
+        "timed-out run records timeout interrupt_reason; line: {line}"
+    );
+}

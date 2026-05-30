@@ -44,7 +44,7 @@ use std::thread;
 
 use codebus_core::log::events::sink::EventEnvelope;
 use codebus_core::log::sink::{InterruptReason, RunLog, TokenUsage};
-use codebus_core::config::{default_config_path, load_goal_config};
+use codebus_core::config::{default_config_path, load_goal_config, load_lifecycle_config};
 use codebus_core::verb::error::VerbError;
 use codebus_core::verb::event::VerbBanner;
 use codebus_core::verb::goal::{run_goal, GoalOptions, GoalReport};
@@ -140,6 +140,18 @@ pub(crate) fn resolve_goal_content_verify(cfg_path: Option<&Path>) -> bool {
     }
 }
 
+/// run-outcome-lifecycle-integrity: resolve the per-run wall-clock timeout
+/// (`lifecycle.run_timeout_secs`) for injection into a `run_*` verb. A
+/// missing file / section / field, a `0` value, OR a load error all resolve
+/// to `None` (no limit). Shared by the goal / chat / quiz IPC handlers.
+pub(crate) fn resolve_run_timeout(cfg_path: Option<&Path>) -> Option<std::time::Duration> {
+    let p = cfg_path?;
+    load_lifecycle_config(p)
+        .ok()?
+        .run_timeout_secs
+        .map(std::time::Duration::from_secs)
+}
+
 // ---- spawn_goal -----------------------------------------------------------
 
 /// Tauri command wrapper. The real cross-thread orchestration lives in
@@ -158,6 +170,7 @@ pub fn spawn_goal(
     // GUI parity with the CLI: resolve `goal.content_verify` from the
     // same shared core loader (conservative false on any error).
     let content_verify = resolve_goal_content_verify(default_config_path().as_deref());
+    let run_timeout = resolve_run_timeout(default_config_path().as_deref());
     spawn_goal_with_runner(
         active_runs,
         PathBuf::from(vault_path),
@@ -173,8 +186,8 @@ pub fn spawn_goal(
             let _ = app_for_terminal.emit("goal-terminal", payload);
         },
         content_verify,
-        |repo, options, mut on_event, cancel| {
-            run_goal(repo, options, |e| on_event(e), cancel)
+        move |repo, options, mut on_event, cancel| {
+            run_goal(repo, options, |e| on_event(e), cancel, run_timeout)
         },
     )
 }
@@ -676,6 +689,7 @@ mod tests {
             lint_warn_count: 0,
             outcome: outcome.into(),
             session_id: None,
+            sandbox_denial_count: 0,
             interrupt_reason: None,
         }
     }
@@ -764,6 +778,31 @@ mod tests {
             !resolve_goal_content_verify(Some(&p)),
             "a malformed goal config must conservatively resolve to false"
         );
+    }
+
+    /// run-outcome-lifecycle-integrity: GUI resolves the per-run timeout from
+    /// `lifecycle.run_timeout_secs`. Absent path/config → None; a positive
+    /// value → Some(Duration); a malformed config conservatively → None.
+    #[test]
+    fn resolve_run_timeout_maps_config_to_duration() {
+        use std::time::Duration;
+        // No path / absent file → None.
+        assert_eq!(resolve_run_timeout(None), None);
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert_eq!(
+            resolve_run_timeout(Some(&tmp.path().join("nonexistent.yaml"))),
+            None
+        );
+        // Positive value → Some(Duration).
+        let p = tmp.path().join("config.yaml");
+        fs::write(&p, "lifecycle:\n  run_timeout_secs: 1800\n").unwrap();
+        assert_eq!(resolve_run_timeout(Some(&p)), Some(Duration::from_secs(1800)));
+        // Zero normalizes to None (no instant-kill foot-gun).
+        fs::write(&p, "lifecycle:\n  run_timeout_secs: 0\n").unwrap();
+        assert_eq!(resolve_run_timeout(Some(&p)), None);
+        // Malformed config conservatively → None.
+        fs::write(&p, "lifecycle:\n  run_timeout_secs: not-a-number\n").unwrap();
+        assert_eq!(resolve_run_timeout(Some(&p)), None);
     }
 
     /// Task 3.1 acceptance: spawn_goal returns a run id AND the

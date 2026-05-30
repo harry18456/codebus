@@ -95,6 +95,7 @@ pub fn run_fix_loop(
     backend: &dyn AgentBackend,
     on_event: impl FnMut(StreamEvent),
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<FixReport, FixError> {
     let initial = lint_wiki(&vault_root);
     if initial.error_count == 0 && initial.warn_count == 0 {
@@ -112,7 +113,7 @@ pub fn run_fix_loop(
     // operates on that JSON. SpawnSpec.input is empty; backend assembles
     // `/codebus-fix ""` (claude) or `$codebus-fix ` (codex).
     let invoke_report =
-        invoke_fix_agent(&vault_root, String::new(), backend, on_event, cancel)
+        invoke_fix_agent(&vault_root, String::new(), backend, on_event, cancel, timeout)
             .map_err(FixError::Spawn)?;
 
     let post = lint_wiki(&vault_root);
@@ -136,6 +137,7 @@ fn invoke_fix_agent(
     backend: &dyn AgentBackend,
     on_event: impl FnMut(StreamEvent),
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> io::Result<InvokeReport> {
     let report = invoke(
         backend,
@@ -155,6 +157,7 @@ fn invoke_fix_agent(
         vault_root,
         on_event,
         cancel,
+        timeout,
     )?;
     // We don't propagate non-zero exit: the agent's "I'm done" or "I gave up"
     // signal flows back via the post-spawn lint check. Spawn-level IO errors
@@ -190,7 +193,7 @@ mod tests {
 
         let tmp = make_clean_vault();
         let backend = ClaudeBackend::new(ClaudeCodeConfig::default(), EnvOverrides::for_system());
-        let result = run_fix_loop(tmp.path().to_path_buf(), &backend, |_event| {}, None);
+        let result = run_fix_loop(tmp.path().to_path_buf(), &backend, |_event| {}, None, None);
         let report = result.expect("clean vault should not invoke agent");
         assert!(report.agent_skipped);
         assert_eq!(report.termination, TerminationReason::InitialClean);

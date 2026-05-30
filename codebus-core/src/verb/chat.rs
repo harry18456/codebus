@@ -117,6 +117,7 @@ pub fn run_chat_turn(
     options: ChatTurnOptions,
     mut on_event: impl FnMut(VerbEvent),
     cancel: Option<Arc<AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<ChatTurnReport, VerbError> {
     let paths = vault_paths(repo);
 
@@ -214,6 +215,7 @@ pub fn run_chat_turn(
                 fan_out(VerbEvent::Stream(event));
             },
             cancel.clone(),
+            timeout,
         )
         .map_err(|e| VerbError::Spawn { source: e })?
     };
@@ -249,6 +251,7 @@ pub fn run_chat_turn(
             lint_warn_count: 0,
             outcome: "cancelled".into(),
             session_id: Some(session_id_from_spawn.clone()),
+            sandbox_denial_count: 0,
             interrupt_reason: Some(InterruptReason::UserCancel),
         };
         write_run_log(sink_cfg.clone(), &cancel_run_log);
@@ -261,6 +264,16 @@ pub fn run_chat_turn(
     // logged as success and the GUI showed an empty response with no error.
     let exit_code = invoke_report.exit.code();
     let succeeded = exit_code == Some(0);
+    // run-outcome-lifecycle-integrity: a wall-clock timeout forces
+    // outcome=failed + Timeout (cancel was handled by the early return).
+    let (outcome, interrupt_reason) = if invoke_report.timed_out {
+        ("failed", Some(InterruptReason::Timeout))
+    } else if succeeded {
+        ("succeeded", None)
+    } else {
+        ("failed", None)
+    };
+    crate::verb::warn_sandbox_denials(invoke_report.sandbox_denial_count);
     let run_log = RunLog {
         goal: options.text.clone(),
         mode: "chat".into(),
@@ -272,9 +285,10 @@ pub fn run_chat_turn(
         wiki_changed: false,
         lint_error_count: 0,
         lint_warn_count: 0,
-        outcome: if succeeded { "succeeded" } else { "failed" }.into(),
+        outcome: outcome.into(),
         session_id: Some(session_id_from_spawn.clone()),
-        interrupt_reason: None,
+        sandbox_denial_count: invoke_report.sandbox_denial_count,
+        interrupt_reason,
     };
     write_run_log(sink_cfg, &run_log);
 
@@ -382,6 +396,7 @@ mod tests {
                 session_id: None,
             },
             |event| events.borrow_mut().push(event),
+            None,
             None,
         );
         match result {
