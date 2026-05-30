@@ -82,7 +82,7 @@ async fn main() -> ExitCode {
     // cli-debug-stream-detail: --debug switches the agent-stream renderer to
     // verbose (full tool input / result, no truncation). Default mode keeps
     // the compact rendering. Applies to the agent-spawning verbs that consume
-    // this snapshot (goal / query / fix / chat).
+    // this snapshot (goal / query / fix / chat / quiz).
     render_opts.verbose = cli.debug;
     match cli.command {
         None | Some(Command::Init) => {

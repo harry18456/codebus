@@ -117,6 +117,73 @@ fn quiz_goal_match_writes_file_with_caller_frontmatter() {
     assert!(body.contains("## Answer: B"));
 }
 
+/// run-log-spec-include-quiz task 2: lock the quiz RunLog contract against
+/// the code. `run_quiz_generate` (codebus-core/src/verb/quiz.rs) writes a
+/// RunLog with `mode: "quiz"`, `goal: options.pages.join(",")`, and
+/// `wiki_changed: false`. The `quiz-goal-match` mock plan resolves the scope
+/// to `wiki/concepts/jwt-token-lifecycle.md, wiki/modules/auth-middleware.md`,
+/// so the persisted RunLog `goal` is that comma-joined page list. Exactly one
+/// RunLog row is written for a `codebus quiz` invocation: the generate spawn
+/// writes it, the plan sub-step writes none (run-log capability
+/// "Quiz plan sub-step writes no RunLog").
+#[test]
+fn quiz_goal_match_runlog_has_quiz_mode_and_pages_goal() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success(), "setup init");
+
+    let (out, _log) = run_quiz(tmp.path(), "how does auth work", "quiz-goal-match", None);
+    assert!(
+        out.status.success(),
+        "quiz goal-match should exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Exactly one runs-*.jsonl file, holding exactly one RunLog row — plan
+    // writes none, generate writes one.
+    let log_dir = tmp.path().join(".codebus").join("log");
+    let entries: Vec<_> = fs::read_dir(&log_dir)
+        .expect("log dir exists after a quiz run")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .map_or(false, |n| n.starts_with("runs-") && n.ends_with(".jsonl"))
+        })
+        .collect();
+    assert_eq!(entries.len(), 1, "expected 1 runs-*.jsonl, got {entries:?}");
+
+    let body = fs::read_to_string(entries[0].path()).unwrap();
+    let rows: Vec<&str> = body.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(
+        rows.len(),
+        1,
+        "a single codebus quiz invocation must write exactly one RunLog row \
+         (generate writes one, plan writes none):\n{body}"
+    );
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(rows[0]).expect("RunLog row must be valid JSON");
+    assert_eq!(parsed["mode"], "quiz", "RunLog mode must be quiz");
+    assert_eq!(
+        parsed["wiki_changed"], false,
+        "quiz does not modify wiki pages, so wiki_changed must be false"
+    );
+    let goal = parsed["goal"].as_str().expect("RunLog goal must be a string");
+    // goal == options.pages.join(","); the quiz-goal-match plan scope includes
+    // this page (the same scope quiz_goal_match_writes_file_with_caller_frontmatter
+    // asserts in the quiz .md frontmatter).
+    assert!(
+        goal.contains("wiki/concepts/jwt-token-lifecycle.md"),
+        "RunLog goal must be the comma-joined planned pages, got: {goal:?}"
+    );
+    // session_id is intentionally NOT asserted here: whether the quiz-goal-match
+    // mock's generate spawn emits an init event carrying a session_id is an
+    // internal mock detail. The quiz `Some(session_id)` semantic is documented
+    // by the run-log capability "Quiz RunLog records pages-joined goal and quiz
+    // mode" scenario, not pinned by this test.
+}
+
 // --- quiz-content-verify task 3.1: caller-orchestrated verify→repair
 // loop (design D1/D3/D4/D6; spec quiz / Quiz Content Verification and
 // Repair). content_verify is gated by the shared config key.

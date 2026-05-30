@@ -112,7 +112,7 @@ tests:
 ---
 ### Requirement: Goals Overview List and Filter
 
-The `Goals` tab main content area SHALL render a vertical list of goal-mode runs from the active vault, sorted by `started_at` descending (newest first). The list SHALL include only `RunLog` entries whose `mode` field equals the literal string `"goal"`. Runs with `mode` equal to `"chat"`, `"query"`, or `"fix"` SHALL NOT appear in this list. Each row SHALL display: an outcome icon (`⚪` for running, `✓` for done, `⏹` for cancelled, `⚠` for interrupted), the goal text (truncated to ~80 chars with ellipsis), and a relative timestamp (e.g., "2m ago", "1h ago").
+The `Goals` tab main content area SHALL render a vertical list of goal-mode runs from the active vault, sorted by `started_at` descending (newest first). The list SHALL include only `RunLog` entries whose `mode` field equals the literal string `"goal"`. Runs with `mode` equal to `"chat"`, `"query"`, `"fix"`, or `"quiz"` SHALL NOT appear in this list. Each row SHALL display: an outcome icon (`⚪` for running, `✓` for done, `⏹` for cancelled, `⚠` for interrupted), the goal text (truncated to ~80 chars with ellipsis), and a relative timestamp (e.g., "2m ago", "1h ago").
 
 The list SHALL also include virtual `outcome="interrupted"` entries detected per the `Interrupted Run Detection` requirement. Virtual entries SHALL render with the same row shape but with the `⚠` outcome icon.
 
@@ -126,8 +126,8 @@ When the list is empty (no goal runs in the vault), the main content area MUST r
 
 #### Scenario: Goals overview filters to goal mode only
 
-- **WHEN** the active vault contains `runs-*.jsonl` rows with `mode` values of `"goal"`, `"chat"`, `"query"`, and `"fix"`
-- **THEN** the Goals overview list renders exactly the `"goal"`-mode rows AND no rows from the other three modes appear
+- **WHEN** the active vault contains `runs-*.jsonl` rows with `mode` values of `"goal"`, `"chat"`, `"query"`, `"fix"`, and `"quiz"`
+- **THEN** the Goals overview list renders exactly the `"goal"`-mode rows AND no rows whose `mode` is `"chat"`, `"query"`, `"fix"`, or `"quiz"` appear
 
 #### Scenario: Goals tab renders content header row with CTA and shortcut chip
 
@@ -176,22 +176,12 @@ When the list is empty (no goal runs in the vault), the main content area MUST r
 
 
 <!-- @trace
-source: workspace-content-header-row
-updated: 2026-05-27
+source: run-log-spec-include-quiz
+updated: 2026-05-30
 code:
-  - codebus-app/src/components/ui/TabContentHeader.tsx
-  - codebus-app/src/i18n/messages.ts
-  - codebus-app/design-handoff/AUDIT.md
-  - codebus-app/src/components/workspace/QuizTab.tsx
-  - codebus-app/src/components/workspace/GoalsTab.tsx
-  - codebus-app/src/hooks/useNewGoalShortcut.ts
+  - codebus-cli/src/main.rs
 tests:
-  - codebus-app/src/hooks/useNewGoalShortcut.test.tsx
-  - codebus-app/src/i18n/quiz.test.ts
-  - codebus-app/src/components/workspace/GoalsTab.test.tsx
-  - codebus-app/src/i18n/workspace.test.ts
-  - codebus-app/src/components/ui/TabContentHeader.test.tsx
-  - codebus-app/src/components/workspace/QuizTab.test.tsx
+  - codebus-cli/tests/quiz_flow.rs
 -->
 
 ---
