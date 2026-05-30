@@ -56,7 +56,8 @@ pub struct InvokeReport {
     /// stream-json line. `Some(id)` when the init event was observed;
     /// `None` when the spawn failed before init or the line was missing
     /// the field. Chat verb uses this to drive `--resume <id>` on the
-    /// next turn; goal/query/fix verbs ignore the field.
+    /// next turn; the quiz verb records it in its `RunLog` entry (for
+    /// logging, not resume); goal/query/fix verbs ignore the field.
     pub session_id: Option<String>,
 }
 
@@ -367,7 +368,7 @@ pub(crate) fn compose_claude_cmd(
     // v3-chat-verb: when caller supplies a session id, append `--resume <id>`
     // BEFORE the toolset flags so the spawned claude process resumes the
     // same conversation history (spike-verified: --resume + --tools 三旗 並存).
-    // For goal/query/fix this is always None → no --resume arg → byte-equivalent
+    // For goal/query/fix/quiz this is always None → no --resume arg → byte-equivalent
     // to pre-chat-verb spawn argv.
     if let Some(id) = resume_session_id {
         cmd.arg("--resume").arg(id);

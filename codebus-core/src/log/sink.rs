@@ -51,10 +51,12 @@ pub struct TokenUsage {
 pub struct RunLog {
     /// The goal / query text that triggered the run. Empty string for
     /// `fix` (which has no positional argument). For `chat`, the
-    /// per-turn user prompt text.
+    /// per-turn user prompt text. For `quiz`, the comma-joined list of
+    /// the selected page paths the quiz was generated from
+    /// (`options.pages.join(",")`).
     pub goal: String,
-    /// `"goal"` / `"query"` / `"fix"` / `"chat"`. Required because
-    /// runs.jsonl mixes modes; consumers filter on this field.
+    /// `"goal"` / `"query"` / `"fix"` / `"chat"` / `"quiz"`. Required
+    /// because runs.jsonl mixes modes; consumers filter on this field.
     pub mode: String,
     /// Model alias / id passed to the provider, if any. `None` when the
     /// caller did not configure a model (provider used its default).
@@ -94,6 +96,10 @@ pub struct RunLog {
     ///   verbs do not currently expose session resume to the user; the field
     ///   is reserved for future expansion if any of them grows multi-turn
     ///   behavior.
+    /// - `mode == "quiz"`: carries the generate spawn's session_id (typically
+    ///   `Some(<session_id>)` on a completed spawn, mirroring `chat`). Unlike
+    ///   `chat`, the quiz verb does not resume from it — it is recorded for
+    ///   logging only.
     ///
     /// Serde `default + skip_serializing_if = "Option::is_none"` so legacy
     /// jsonl rows written before v3-chat-verb deserialize cleanly to `None`
