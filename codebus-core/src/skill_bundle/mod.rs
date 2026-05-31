@@ -708,7 +708,7 @@ When this skill is activated, follow these steps:
 
 2. **Group by file**: aggregate issues by their absolute path. Reading and editing the same file once is more efficient than per-issue file reopens.
 
-3. **Apply repairs**: for each file, Read its current content, then use Edit to apply the minimum changes that resolve every issue grouped under that path. Issue `rule_id` selects the repair shape:
+3. **Apply repairs**: for each file, Read its current content, then use Edit to apply the minimum changes that resolve every issue grouped under that path. Issue `rule` selects the repair shape:
    - `frontmatter-parse` → fix YAML syntax in the `---` block.
    - `related-format` → wrap each `related[]` entry as a `[[wikilink]]`.
    - `broken-wikilink-related` → either add the missing target page or change the related entry to point at an existing slug.
@@ -1126,6 +1126,21 @@ mod tests {
                 "fix SKILL.md still contains v3-lint atomic-contract phrase `{phrase}` — should be removed in v3-fix-trust-agent"
             );
         }
+    }
+
+    /// model-and-fix-skill-drift-align Part B guard: the fix SKILL body MUST
+    /// reference the lint JSON field by its serialized key `rule`, never the
+    /// internal Rust field name `rule_id`. The agent runs `codebus lint
+    /// --format json`, whose issue field serialises as `rule` (see
+    /// `wiki::lint::output` `JsonIssue.rule` and `json_uses_rule_field_name_per_spec`);
+    /// a `rule_id` code-span in the body would point the agent at a key that
+    /// never appears in that JSON.
+    #[test]
+    fn fix_workflow_references_lint_json_field_rule_not_rule_id() {
+        assert!(
+            !FIX_WORKFLOW.contains("`rule_id`"),
+            "fix SKILL body must reference the lint JSON field `rule`, not the internal `rule_id`"
+        );
     }
 
     /// v3-fix-trust-agent Fix SKILL.md Atomic Contract scenario: body

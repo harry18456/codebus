@@ -1,10 +1,4 @@
-# claude-code-config Specification
-
-## Purpose
-
-The endpoint profile configuration and scoped environment injection that codebus uses when spawning the Claude CLI child process — the `~/.codebus/config.yaml` `claude_code` block's `active` selector plus `system` / `azure` profile shape, the free-string system `model` alias and its `--model` flag mapping (a `claude-` prefix is ensured; not a closed enum), azure profile model-string passthrough, OS keyring storage (`CODEBUS_AZURE_KEY` env fallback when keyring backend is unavailable), `Command::env`-only scoped env injection at spawn time (no parent-shell mutation), legacy schema warning without on-disk rewrite, and the `codebus config` subcommand for keyring management. Does NOT cover the verb-level spawn flags (`--tools`, `--allowedTools`, `--permission-mode`, stream-json flags) which live in `cli`'s per-verb Subcommand Behavior requirements, nor the agent stream parsing pipeline (lives in `agent-stream-rendering`).
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Endpoint Profile Schema
 
@@ -127,14 +121,6 @@ tests:
   - codebus-app/src/components/settings/EndpointSection.test.tsx
 -->
 
-
-<!-- @trace
-source: model-and-fix-skill-drift-align
-updated: 2026-05-31
-code:
-  - codebus-core/src/skill_bundle/mod.rs
--->
-
 ---
 ### Requirement: System Profile Model Aliases
 
@@ -209,14 +195,6 @@ tests:
   - codebus-cli/tests/goal_content_verify_cli.rs
 -->
 
-
-<!-- @trace
-source: model-and-fix-skill-drift-align
-updated: 2026-05-31
-code:
-  - codebus-core/src/skill_bundle/mod.rs
--->
-
 ---
 ### Requirement: Azure Profile Model String Passthrough
 
@@ -231,93 +209,3 @@ When the azure profile is active, codebus SHALL pass each verb's `model` field v
 
 - **WHEN** the azure profile is active and the goal verb's `model` is `opus-4-6`
 - **THEN** the spawned `claude` child process SHALL receive the argument pair `--model opus-4-6` AND codebus SHALL NOT translate the value to `claude-opus-4-6`
-
-
-<!-- @trace
-source: model-and-fix-skill-drift-align
-updated: 2026-05-31
-code:
-  - codebus-core/src/skill_bundle/mod.rs
--->
-
----
-### Requirement: OS Keyring Integration With Env Fallback
-
-Codebus SHALL store the Azure API key in the operating-system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service or KWallet). The keyring entry SHALL be addressed by `(service, account)` where `service` is the value of `azure.keyring_service` (default `codebus-azure`) and `account` is the fixed literal `default`. The `account` value SHALL NOT be user-configurable in this change.
-
-Before spawning any child process while the azure profile is active, codebus SHALL resolve the API key using the following fallback chain in order:
-
-1. Read the password from the keyring entry `(azure.keyring_service, "default")`.
-2. If the keyring backend is unavailable OR the entry does not exist, read the environment variable `CODEBUS_AZURE_KEY`.
-3. If both sources are absent, codebus SHALL return an `EndpointKeyMissing` error AND SHALL NOT spawn the child process.
-
-#### Scenario: Keyring read succeeds and key is injected
-
-- **WHEN** the azure profile is active, the keyring entry exists with value `sk-test`, and `codebus query` is invoked
-- **THEN** the spawned `claude` child process environment SHALL contain `ANTHROPIC_API_KEY=sk-test` AND the parent shell environment SHALL NOT be modified
-
-#### Scenario: Keyring unavailable falls back to env
-
-- **WHEN** the azure profile is active, the keyring backend is unavailable, the environment variable `CODEBUS_AZURE_KEY=sk-fallback` is set, and `codebus query` is invoked
-- **THEN** the spawned `claude` child process environment SHALL contain `ANTHROPIC_API_KEY=sk-fallback`
-
-#### Scenario: Neither source available aborts before spawn
-
-- **WHEN** the azure profile is active, the keyring entry does not exist, and `CODEBUS_AZURE_KEY` is unset
-- **THEN** `codebus query` SHALL exit with non-zero status, stderr SHALL contain an `EndpointKeyMissing` error message naming the keyring service AND the `CODEBUS_AZURE_KEY` env var, AND the `claude` child process SHALL NOT be spawned
-
----
-### Requirement: Scoped Environment Injection At Spawn
-
-The `agent::claude_cli::invoke` function SHALL spawn the `claude` child process with environment variables injected exclusively via the `Command::env` / `Command::envs` Rust API. Codebus SHALL NOT modify the parent process's environment (no `std::env::set_var` calls) at any point in the spawn pipeline. When the system profile is active, codebus SHALL inject zero additional environment variables. When the azure profile is active, codebus SHALL inject exactly three environment variables on the child process: `ANTHROPIC_BASE_URL` (from `azure.base_url`), `ANTHROPIC_API_KEY` (from the keyring fallback chain), and `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` set to the literal string `1`.
-
-#### Scenario: System profile injects no env
-
-- **WHEN** the system profile is active and `codebus query` is invoked
-- **THEN** the spawned `claude` child process SHALL inherit the parent environment unchanged AND no additional environment variables SHALL be set via `Command::env`
-
-#### Scenario: Azure profile injects exactly three env vars
-
-- **WHEN** the azure profile is active with `base_url=https://example.cognitiveservices.azure.com/anthropic`, the keyring key resolves to `sk-test`, and `codebus query` is invoked
-- **THEN** the spawned `claude` child process environment SHALL contain `ANTHROPIC_BASE_URL=https://example.cognitiveservices.azure.com/anthropic`, `ANTHROPIC_API_KEY=sk-test`, AND `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` AND no other env vars SHALL be added by codebus
-
-#### Scenario: Parent shell env is not modified
-
-- **WHEN** the azure profile is active and `codebus query` runs to completion
-- **THEN** the parent process's `ANTHROPIC_API_KEY` environment variable SHALL be observable from the parent shell as either unset OR retain its pre-invocation value
-
----
-### Requirement: Config Subcommand For Keyring Management
-
-The `codebus` binary SHALL provide a `config` subcommand that exposes three actions: `set-key <profile>`, `get-key <profile>`, and `delete-key <profile>`. The `<profile>` argument SHALL accept the literal value `azure` and SHALL reject all other values with a non-zero exit code. The `get-key` action SHALL accept an optional `--show` flag.
-
-`codebus config set-key azure` SHALL read a key from stdin without echoing, write the value to the keyring entry `(azure.keyring_service, "default")`, and exit zero on success. If the keyring backend is unavailable, the command SHALL exit non-zero with a stderr message instructing the user to set `CODEBUS_AZURE_KEY` instead.
-
-`codebus config get-key azure` SHALL print `set` if the keyring entry exists AND `unset` otherwise. When `--show` is passed AND the entry exists, the command SHALL print the key value verbatim.
-
-`codebus config delete-key azure` SHALL remove the keyring entry if present AND SHALL exit zero whether or not the entry existed (idempotent).
-
-#### Scenario: set-key stores the key
-
-- **WHEN** the user runs `codebus config set-key azure` and enters `sk-test` on stdin
-- **THEN** the keyring entry `(codebus-azure, default)` SHALL contain `sk-test` AND stdout SHALL contain `key stored` AND the command SHALL exit zero
-
-#### Scenario: get-key reports unset without revealing absence detail
-
-- **WHEN** the user runs `codebus config get-key azure` AND no keyring entry exists
-- **THEN** stdout SHALL print `unset` AND the command SHALL exit zero
-
-#### Scenario: get-key with --show prints the value
-
-- **WHEN** the user runs `codebus config get-key azure --show` AND the keyring entry holds `sk-test`
-- **THEN** stdout SHALL print `sk-test` AND the command SHALL exit zero
-
-#### Scenario: delete-key is idempotent
-
-- **WHEN** the user runs `codebus config delete-key azure` AND no keyring entry exists
-- **THEN** the command SHALL exit zero
-
-#### Scenario: Unknown profile argument rejected
-
-- **WHEN** the user runs `codebus config set-key bedrock`
-- **THEN** the command SHALL exit non-zero AND stderr SHALL contain a clap error message identifying `bedrock` as an invalid profile value
