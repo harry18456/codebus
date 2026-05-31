@@ -209,34 +209,57 @@ fn write_plain_file_if_missing(path: &Path, content: &str) -> io::Result<BundleO
 /// to one or more findings in `docs/2026-05-23-prompt-surface-inventory.md`
 /// §8 (F19/F40/F49/F65/F66/F67/F72/F73/F79 etc.).
 fn claude_to_codex_translate(body: String) -> String {
+    // Apply each claude→codex replacement in declaration order. `str::replace`
+    // is a no-op when the `from` literal is absent; the `skill-bundles` spec
+    // `Codex Body Translation Drift Guard` requirement is enforced by tests
+    // that assert every `from` here still matches the current claude body.
+    let mut body = body;
+    for (from, to) in CODEX_BODY_TRANSLATIONS {
+        body = body.replace(from, to);
+    }
+    body
+}
+
+/// The claude→codex body translation table. Claude is the source of truth;
+/// each `(from, to)` rewrites one claude-only segment into its codex
+/// equivalent. Order is significant only in that it is preserved verbatim
+/// from the original sequential `replace` calls; the `from` literals are
+/// mutually independent (each appears in exactly one source body, except the
+/// `CLAUDE.md` token which appears globally), so the result is order-stable.
+///
+/// This is the SINGLE source of truth shared by `claude_to_codex_translate`
+/// AND the drift-guard tests — adding/changing an entry automatically extends
+/// the guard. Each entry maps to one or more findings in
+/// `docs/2026-05-23-prompt-surface-inventory.md` §8.
+const CODEX_BODY_TRANSLATIONS: &[(&str, &str)] = &[
     // F19/F67/F79: schema doc filename — codex's cwd schema doc is AGENTS.md
     // (CLAUDE.md does not exist on the codex path; vault init materializes
     // NEUTRAL_RULES as AGENTS.md when codex is the active provider).
-    let body = body.replace("CLAUDE.md", "AGENTS.md");
+    ("CLAUDE.md", "AGENTS.md"),
     // F49: FIX_WORKFLOW Step 1 PreToolUse hook description — codex has no
     // PreToolUse hook; the equivalent is the codex sandbox `-s read-only`
     // plus a per-command allowance (Phase 5 spike, not yet implemented;
     // current codex `fix` invocation falls back to broader sandbox).
-    let body = body.replace(
+    (
         "The PreToolUse hook installed by `codebus init` permits `codebus lint *` and blocks any other Bash invocation, so this is the only shell command available — and it is enough.",
         "The codex sandbox at fix-spawn time is configured to permit only `codebus lint *` for the duration of this workflow (per-command allowance equivalent), so this is the only shell command available — and it is enough.",
-    );
+    ),
     // F40: QUERY_WORKFLOW Read-Only Invariant — codex enforces read-only via
     // sandbox `-s read-only`, not via `--tools` flag (which is claude-only).
-    let body = body.replace(
+    (
         "(`--tools Read,Glob,Grep` was passed when this agent was spawned, so Write and Edit attempts will fail at runtime)",
         "(the codex sandbox `-s read-only` posture means Write and Edit attempts fail at runtime)",
-    );
+    ),
     // F65/F66: CHAT_SKILL_CONTENT Read-Only Invariant — claude mentions
     // `--tools` flag AND the `mcp_*` family (mcp_ tools are not gated by
     // `--tools` so prompt-layer exclusion is needed). codex has no mcp_*
     // tool namespace AND uses sandbox `-s read-only` not `--tools`. The
     // entire claude paragraph is replaced with a codex-equivalent shorter
     // paragraph.
-    let body = body.replace(
+    (
         "This workflow is **strictly read-only**. The agent MUST NOT call `Write`, `Edit`, `NotebookEdit`, or any tool whose name begins with `mcp_` (e.g. `mcp_claude_ai_Figma_authenticate`, `mcp_claude_ai_Gmail_authenticate`). The binary-layer toolset is gated at spawn time (`--tools Read,Glob,Grep`) so attempts to call Write / Edit / NotebookEdit fail at runtime regardless; however the `mcp_*` family is NOT covered by the `--tools` flag and is forbidden only by this prompt-layer constraint. Treat this rule as load-bearing even when an `mcp_*` tool appears to be available in the runtime toolset.",
         "This workflow is **strictly read-only**. The agent MUST NOT call `Write`, `Edit`, or `NotebookEdit`. The codex sandbox is configured as `-s read-only` at spawn time, so attempts to call Write / Edit / NotebookEdit fail at runtime regardless; this SKILL.md restates the invariant for defense-in-depth.",
-    );
+    ),
     // F73 (Pattern 9): QUIZ_SKILL_CONTENT Mode B self-validate — claude uses
     // a Bash heredoc invocation of `codebus quiz validate` gated by the
     // PreToolUse hook. codex's sandbox `-s` lacks a per-command allowance
@@ -244,21 +267,20 @@ fn claude_to_codex_translate(body: String) -> String {
     // (Phase 5 spike). The codex variant emits a [CODEBUS_QUIZ_NO_VALIDATE]
     // marker line instead AND skips the validate loop entirely — caller's
     // post-agent `codebus quiz validate` run handles downstream validation.
-    let body = body.replace(
+    (
         "### Self-validate before emitting (Mode B only)\n\nBefore you emit the final body, verify it deterministically:\n\n1. Validate your draft via the Bash tool using a heredoc fed straight into codebus — the command MUST start with `codebus` (the sandbox hook only permits a Bash command whose first word is `codebus`):\n\n       codebus quiz validate - <<'CBQZ'\n       ## Q1. ...\n       ... your entire draft body ...\n       CBQZ\n\n   `-` means read the body from stdin; the heredoc supplies it. It exits 0 with no findings when the draft is structurally sound and every `[[slug]]` citation resolves; otherwise it lists findings (add `--json` before the heredoc for machine-readable output). Do NOT use `cat ... | codebus quiz validate -` (a pipeline's first word is `cat`, which the sandbox hook blocks) and do NOT try to write the draft to a temp file first (you have no file-writing tool — the heredoc is the only way).\n2. If it reports findings, fix exactly the questions it names, then run it again.\n3. Repeat this validate→fix→re-validate loop **at most 3** times. When that cap is reached, emit your best current body rather than looping further — do not keep iterating past the cap.\n4. `codebus quiz validate` is the sole authority for structural and citation correctness. Act on its findings; do NOT reproduce, restate, or argue its rules here — the rules live in the validator, not in this skill.",
         "### Self-validate before emitting (Mode B only) — codex path: NOT AVAILABLE\n\nThe codex provider's sandbox `-s` levels (`read-only` / `workspace-write` / `danger-full-access`) lack a per-command allowance that would let this agent run `codebus quiz validate` from inside Mode B safely. Instead of attempting validation here:\n\n1. As the FIRST line of your response, emit `[CODEBUS_QUIZ_NO_VALIDATE] <short reason in 5-15 words naming what would have been validated>`, then a blank line, then your draft starting with `## Q1.`.\n2. Skip the validate / fix / re-validate loop entirely; emit your best draft directly.\n3. The caller (codebus CLI) will run `codebus quiz validate` after this agent terminates and use that result as the authoritative success signal — the agent's responsibility ends at marker + body emission.\n\n(Codex per-command allowance is tracked as a Phase 5 spike in the prompt-surface-review backlog. Until that is resolved, codex quiz Mode B remains best-effort with no in-session structural self-check.)",
-    );
+    ),
     // F72: QUIZ_SKILL_CONTENT Read-Only Invariant — claude uses mcp_*
     // exclusion + `--tools` gating + PreToolUse hook for per-mode language.
     // codex uses sandbox `-s read-only` for plan: mode and sandbox plus a
     // per-command allowance for generate: mode (Mode B self-validation
     // mechanism details are handled separately above / F73).
-    let body = body.replace(
+    (
         "This workflow does NOT modify the vault. The agent MUST NOT call `Write`, `Edit`, `NotebookEdit`, or any tool whose name begins with `mcp_`. The `mcp_*` family is forbidden only by this prompt-layer constraint — treat this rule as load-bearing even when an `mcp_*` tool appears available.\n\n`plan:` mode is gated read-only at spawn (`--tools Read,Glob,Grep`). `generate:` mode additionally has a `Bash` tool that is hard-gated at spawn to exactly one command — `codebus quiz validate ...` — used only for the Mode B self-validation step below. No other `Bash` command will be permitted (the PreToolUse hook blocks it); do not attempt any other shell command.",
         "This workflow does NOT modify the vault. The agent MUST NOT call `Write`, `Edit`, or `NotebookEdit`.\n\n`plan:` mode runs under codex sandbox `-s read-only`. `generate:` mode runs under codex sandbox with a per-command allowance scoped to `codebus quiz validate ...` for the Mode B self-validation step below; no other Bash command is permitted at runtime.",
-    );
-    body
-}
+    ),
+];
 
 fn stub_content(verb: &str, provider: Provider) -> String {
     // v3-chat-verb: chat has a distinct SKILL structure (read-only sandbox,
@@ -2068,5 +2090,127 @@ mod tests {
     #[test]
     fn chat_no_match_discipline_codex() {
         assert_chat_no_match_discipline(Provider::Codex);
+    }
+
+    // === skill-bundles: Codex Body Translation Drift Guard ===
+    //
+    // Guards the claude→codex body derivation: claude bodies are the source of
+    // truth, codex bodies are produced by `CODEX_BODY_TRANSLATIONS`. A `from`
+    // literal that no longer matches the claude body makes its `str::replace`
+    // a silent no-op, leaking claude-only mechanism descriptions into the
+    // codex body. See spec `skill-bundles` `Codex Body Translation Drift Guard`.
+
+    /// The verbs whose SKILL bodies flow through `claude_to_codex_translate`.
+    const GUARDED_VERBS: &[&str] = &["goal", "query", "fix", "chat", "quiz"];
+
+    /// Claude-only mechanism tokens that MUST NOT survive into any codex body.
+    /// `<<'CBQZ'` is the claude quiz Mode B heredoc delimiter; the bare command
+    /// `codebus quiz validate` is intentionally NOT listed (the codex quiz body
+    /// legitimately references it in its no-validate paragraph).
+    const CLAUDE_ONLY_DENYLIST: &[&str] =
+        &["--tools", "PreToolUse", "mcp_", "CLAUDE.md", "<<'CBQZ'"];
+
+    /// Render the claude-source SKILL body for every guarded verb — exactly the
+    /// bodies `claude_to_codex_translate` is applied to.
+    fn all_claude_bodies() -> Vec<String> {
+        GUARDED_VERBS
+            .iter()
+            .map(|v| stub_content(v, Provider::Claude))
+            .collect()
+    }
+
+    /// Detection helper for guard (a): the froms not present in ANY body.
+    fn froms_absent_from(froms: &[&str], bodies: &[String]) -> Vec<String> {
+        froms
+            .iter()
+            .filter(|from| !bodies.iter().any(|b| b.contains(**from)))
+            .map(|from| (*from).to_string())
+            .collect()
+    }
+
+    /// Detection helper for guard (b): the denylist tokens present in `body`.
+    fn claude_only_tokens_in(body: &str, denylist: &[&str]) -> Vec<String> {
+        denylist
+            .iter()
+            .filter(|tok| body.contains(**tok))
+            .map(|tok| (*tok).to_string())
+            .collect()
+    }
+
+    /// Guard (a): every codex-translation `from` literal still matches at least
+    /// one current claude SKILL body. RED means a claude body was edited so a
+    /// `str::replace` can no longer fire (silent no-op) — sync the codex
+    /// translation in `CODEX_BODY_TRANSLATIONS`.
+    #[test]
+    fn every_codex_translation_from_appears_in_a_claude_body() {
+        let froms: Vec<&str> = CODEX_BODY_TRANSLATIONS
+            .iter()
+            .map(|(from, _)| *from)
+            .collect();
+        let missing = froms_absent_from(&froms, &all_claude_bodies());
+        assert!(
+            missing.is_empty(),
+            "these codex-translation `from` literals no longer match any claude SKILL body \
+             (their str::replace is now a silent no-op — a claude body was edited without \
+             syncing claude_to_codex_translate): {missing:?}"
+        );
+    }
+
+    /// Guard (b): no codex SKILL body retains a claude-only mechanism token.
+    /// RED means a translation did not fire and claude-only content leaked into
+    /// the codex body (false/misleading for codex agents).
+    #[test]
+    fn codex_bodies_contain_no_claude_only_tokens() {
+        for verb in GUARDED_VERBS {
+            let body = stub_content(verb, Provider::Codex);
+            let leaked = claude_only_tokens_in(&body, CLAUDE_ONLY_DENYLIST);
+            assert!(
+                leaked.is_empty(),
+                "codex `{verb}` SKILL body contains claude-only mechanism token(s) {leaked:?} \
+                 — a claude_to_codex_translate replacement did not fire (claude body edited \
+                 without syncing the codex translation)"
+            );
+        }
+    }
+
+    /// Meta-test for guard (a): confirms the detector flags an unmatched `from`
+    /// AND passes the real froms — i.e. the guard genuinely goes RED on drift.
+    #[test]
+    fn drift_guard_detects_unmatched_from() {
+        let bodies = all_claude_bodies();
+        assert!(
+            !froms_absent_from(&["__NONEXISTENT_FROM_LITERAL__"], &bodies).is_empty(),
+            "detector must flag a from literal absent from every claude body"
+        );
+        let real: Vec<&str> = CODEX_BODY_TRANSLATIONS
+            .iter()
+            .map(|(from, _)| *from)
+            .collect();
+        assert!(
+            froms_absent_from(&real, &bodies).is_empty(),
+            "the real translation froms must all be present in some claude body"
+        );
+    }
+
+    /// Meta-test for guard (b): confirms the detector flags a leaked claude-only
+    /// token AND passes clean codex text.
+    #[test]
+    fn drift_guard_detects_leaked_claude_token() {
+        let leaked = claude_only_tokens_in(
+            "Read-only: `--tools Read,Glob,Grep` was passed when spawned.",
+            CLAUDE_ONLY_DENYLIST,
+        );
+        assert!(
+            leaked.contains(&"--tools".to_string()),
+            "detector must flag a leaked claude-only token; got {leaked:?}"
+        );
+        assert!(
+            claude_only_tokens_in(
+                "Read-only enforced by the codex sandbox `-s read-only` posture.",
+                CLAUDE_ONLY_DENYLIST,
+            )
+            .is_empty(),
+            "clean codex text must produce no findings"
+        );
     }
 }
