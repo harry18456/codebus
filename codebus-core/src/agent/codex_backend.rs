@@ -485,6 +485,60 @@ mod tests {
         );
     }
 
+    /// Binding guard: the THREE coupled legs of codex chat resume must all
+    /// hold in ONE `build_command` — any single leg silently regressing
+    /// breaks multi-turn chat while the per-leg tests above might still pass
+    /// in isolation. Live round-trip verified 2026-05-31 (Windows, Azure
+    /// gpt-5.4): set `agent.active_provider: codex`, drive two `codebus chat`
+    /// turns with an IN-SCOPE continuity oracle (turn1 asks for a function
+    /// name, turn2 refers to it only as "the function you just named" — this
+    /// stays inside the vault scope guard, unlike a synthetic codeword which
+    /// the `CLAUDE.md §8 Out-of-Scope` rule makes the agent refuse). PASS
+    /// criteria: turn2 `RunLog.session_id` == turn1, `cache_read_tokens > 0`
+    /// (rollout loaded), stderr has no "no rollout found" and no
+    /// "unexpected argument '-s'".
+    #[test]
+    fn chat_resume_binds_all_three_legs_in_one_build_command() {
+        let mut s = spec(Verb::Chat, Permission::ReadOnly);
+        let thread_id = "019e7de3-b7a7-79b2-bd83-ee0a85630368";
+        s.resume_session_id = Some(thread_id.to_string());
+        let args = cmd_args(&backend().build_command(&s));
+
+        // Leg 1: chat MUST NOT be ephemeral (resume needs the persisted
+        // rollout; otherwise codex aborts "no rollout found").
+        assert!(
+            !args.iter().any(|a| a == "--ephemeral"),
+            "leg 1 broken: chat resume must NOT pass --ephemeral (rollout would be discarded); got {args:?}"
+        );
+        // Leg 2a: resume MUST NOT use `-s` (`codex exec resume` rejects it
+        // and aborts "unexpected argument '-s'").
+        assert!(
+            !args.iter().any(|a| a == "-s"),
+            "leg 2 broken: chat resume must NOT pass -s (codex exec resume rejects it); got {args:?}"
+        );
+        // Leg 2b: resume sets the sandbox via `-c sandbox_mode=<mode>` instead.
+        let sandbox = CodexBackend::sandbox_flag(Permission::ReadOnly);
+        assert_pair_present(&args, "-c", &format!("sandbox_mode={sandbox}"));
+        // Leg 3 (wiring): the resumed thread id is invoked via the
+        // `exec resume <id>` subcommand, in that order.
+        let exec = args
+            .iter()
+            .position(|a| a == "exec")
+            .unwrap_or_else(|| panic!("leg 3 broken: `exec` missing from argv; got {args:?}"));
+        let resume = args
+            .iter()
+            .position(|a| a == "resume")
+            .unwrap_or_else(|| panic!("leg 3 broken: `resume` missing from argv; got {args:?}"));
+        let id = args
+            .iter()
+            .position(|a| a == thread_id)
+            .unwrap_or_else(|| panic!("leg 3 broken: thread id `{thread_id}` missing from argv; got {args:?}"));
+        assert!(
+            exec < resume && resume < id,
+            "leg 3 broken: argv must contain `exec resume {thread_id}` in order; got {args:?}"
+        );
+    }
+
     /// `chat` is multi-turn → it MUST NOT be `--ephemeral` (resume needs the
     /// persisted rollout; otherwise codex aborts "no rollout found"). The
     /// single-shot verbs keep `--ephemeral`. Regression for the resume bug.
