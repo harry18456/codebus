@@ -193,6 +193,14 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 - `-s read-only`：所有網路指令都被 policy 擋下
 - codebus 的 isolation flags（`--ignore-user-config` / `--disable apps` / `--ignore-rules` / `web_search=disabled`）另外擋掉 user config / plugin / 網搜功能等層（這些確實有效），但那跟「model 自己用 shell 打出去」的 raw egress 是兩回事——raw egress 只被 `-s` sandbox 擋掉一部分。所以 codex docs 的「network disabled by default」對 HTTP/80 + loopback 並不準
 
+**Subagent（codex `multi_agent` / `spawn_agent`，per-spawn 保證仍成立）**
+
+- codex 0.135.0 的 `multi_agent` 是內建 feature（預設 on）、不是 user config，codebus 的 isolation flags（`--ignore-user-config` / `--disable apps` / `--ignore-rules`）**不排除**它——agent 在 codebus 確切 flags 下**仍能** `spawn_agent` 出子 agent（2026-05-31 spike：mock 攔 request 確認 `multi_agent_v1` toolset 有註冊、real Azure gpt-5.4 也實際 spawn 出 worker）
+- 但 `spawn_agent` **無 sandbox / cwd 參數**，`-s` 是 `codex exec` 的 process 級政策、子 agent 是同 process 的 thread → **子 agent 繼承 session 的 `-s` sandbox**。實證（mock 強制 worker 真跑 shell 寫、合成 marker）：session `-s read-only` → 子 agent 的寫被 `rejected: blocked by policy`；`-s workspace-write` → 子 agent 被框在 workspace 內（workspace 外正常 ACL 寫照樣被擋）——逐格吻合 session sandbox，未逃逸
+- ⚠️ **此繼承只及 `-s` 真正 enforce 的寫／命令面。** 讀取面子 agent 與 main agent **一樣 soft-partial**：`-s` 在 Windows unelevated 本就不擋讀（見上方「讀取」段）、子 agent 繼承的是**同一個 `-s`**，所以讀漏**不因 subagent 而變好或變壞**——別把「per-spawn 保證仍成立」誤讀成子 agent 連讀都 contained
+- 所以「每 spawn 單一受限 agent」的保證**透過 session 級 sandbox 繼承延伸到子 agent**（就 `-s` enforce 的寫／命令面而言），無需額外機制
+- 軟層：codex system prompt 本就限制「只有 user 明確要求 delegation 才 spawn」、codebus 的 `$codebus-<bundle>` skill prompt 不請求 delegation；要徹底移除能力面可加 `--disable multi_agent`（spike 證實能乾淨移除 toolset），但子 agent 已 bounded、非必要。PoC：`scripts/codex_subagent_*.py`
+
 → **codex 在 Windows unelevated 的隔離是「讀／網路 soft-partial、寫較硬」。** 敏感家目錄「讀」相關任務請用 claude provider，或自行承擔風險。macOS / Linux 尚未實測——別從 Windows 結果推論 Seatbelt / Landlock。hard read enforcement 是 open backlog（見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」）。
 
 ---
