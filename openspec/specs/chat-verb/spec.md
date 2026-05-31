@@ -405,3 +405,37 @@ code:
   - codebus-core/src/skill_bundle/mod.rs
   - codebus-core/src/verb/content_verify.rs
 -->
+
+---
+### Requirement: Chat Session Persistence Retained
+
+The `claude` child process spawned for a `chat` turn SHALL retain Claude CLI session persistence so that a subsequent turn can resume the same conversation via `--resume <id>`. Specifically, the chat spawn argv SHALL NOT include the `--no-session-persistence` flag that the single-shot verbs (`goal` / `query` / `fix` / `quiz`) carry per the `agent-backend` capability `Claude Backend Argv Equivalence` requirement. This guarantees that the session rollout the first turn creates remains on disk for the `--resume` path asserted by the `Subsequent turn resumes via --resume flag` scenario of this capability. The session-persistence gating SHALL be keyed on the spawn verb being `Verb::Chat`, not on the presence of `resume_session_id` (the first chat turn has no resume id yet but still must persist its session for the second turn).
+
+#### Scenario: First chat turn persists its session
+
+- **WHEN** `run_chat_turn` spawns the `claude` child for a first turn (`session_id: None`)
+- **THEN** the spawned argv SHALL NOT include `--no-session-persistence` so the Claude CLI writes a session rollout the next turn can resume
+
+#### Scenario: Resuming chat turn omits no-session-persistence and passes resume id
+
+- **WHEN** `run_chat_turn` spawns the `claude` child for a turn with `session_id: Some("abc-123")`
+- **THEN** the spawned argv SHALL NOT include `--no-session-persistence` AND SHALL include `--resume abc-123`
+
+<!-- @trace
+source: token-session-effort-hygiene
+updated: 2026-05-31
+code:
+  - codebus-core/src/log/mod.rs
+  - codebus-app/src/lib/ipc.ts
+  - codebus-core/src/agent/claude_cli.rs
+  - codebus-core/src/agent/backend.rs
+  - codebus-core/src/log/sink.rs
+  - codebus-core/src/agent/codex_backend.rs
+  - codebus-core/src/agent/claude_backend.rs
+  - codebus-core/src/config/endpoint.rs
+  - docs/BACKLOG.md
+tests:
+  - codebus-app/src/lib/ipc.effort.test.ts
+  - codebus-core/tests/endpoint_config_load.rs
+  - codebus-app/src/components/settings/EndpointSection.test.tsx
+-->

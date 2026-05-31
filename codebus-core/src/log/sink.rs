@@ -41,6 +41,24 @@ pub struct TokenUsage {
     pub extras: serde_json::Value,
 }
 
+/// How a backend's `Usage` token events combine across one invocation.
+///
+/// `Delta` — each `Usage` event reports the tokens attributable to that event
+/// alone; the per-invocation total is the field-wise sum of all events (the
+/// Claude CLI emits one `result` usage event per `-p` run, so the sum is that
+/// single event). `Cumulative` — each `Usage` event reports a running total
+/// for the invocation so far; the per-invocation total is the latest event,
+/// NOT a sum (codex `turn.completed.usage` carries a cumulative total). This
+/// is a transient combination directive used only inside `agent::invoke`; it
+/// is deliberately NOT serialized into runs.jsonl or events.jsonl. See the
+/// `agent-backend` capability `Provider-Declared Token Usage Semantics`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TokenUsageSemantics {
+    #[default]
+    Delta,
+    Cumulative,
+}
+
 /// One row in the run log. Captures everything a future analytics consumer
 /// would want without needing per-event detail.
 ///
@@ -257,10 +275,96 @@ fn combine_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
     }
 }
 
+/// Combine one `Usage` event into the accumulated [`TokenUsage`] according to
+/// the backend-declared [`TokenUsageSemantics`].
+///
+/// `Delta` field-wise sums via [`accumulate_token_usage`] (the historical
+/// behavior; correct when each event reports its own slice). `Cumulative`
+/// replaces the accumulator with the latest event (last-wins): each cumulative
+/// event already carries the running total, so the final event is the
+/// per-invocation total — summing would double-count. The provider-agnostic
+/// `agent::invoke` loop reads the semantics once from the backend and calls
+/// this for every `Usage` event, so the loop branches only on this enum and
+/// never on a provider identity.
+pub fn apply_token_usage(
+    acc: &mut TokenUsage,
+    addend: &TokenUsage,
+    semantics: TokenUsageSemantics,
+) {
+    match semantics {
+        TokenUsageSemantics::Delta => accumulate_token_usage(acc, addend),
+        TokenUsageSemantics::Cumulative => *acc = addend.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Cumulative semantics: two events carrying running totals (100 then 250)
+    /// must yield 250 (latest), NOT 350 (sum). Guards against double-counting
+    /// codex `turn.completed.usage`.
+    #[test]
+    fn apply_cumulative_takes_latest_not_sum() {
+        let mut acc = TokenUsage::default();
+        let first = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 40,
+            ..Default::default()
+        };
+        let second = TokenUsage {
+            input_tokens: 250,
+            output_tokens: 90,
+            ..Default::default()
+        };
+        apply_token_usage(&mut acc, &first, TokenUsageSemantics::Cumulative);
+        apply_token_usage(&mut acc, &second, TokenUsageSemantics::Cumulative);
+        assert_eq!(acc.input_tokens, 250, "latest cumulative wins, not the sum");
+        assert_ne!(acc.input_tokens, 350, "must not sum cumulative events");
+        assert_eq!(acc.output_tokens, 90);
+    }
+
+    /// Delta semantics: two events reporting their own slices (100 then 25)
+    /// sum to 125 — identical to the historical `accumulate_token_usage` path.
+    #[test]
+    fn apply_delta_sums_like_accumulate() {
+        let mut acc = TokenUsage::default();
+        let first = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            ..Default::default()
+        };
+        let second = TokenUsage {
+            input_tokens: 25,
+            output_tokens: 10,
+            ..Default::default()
+        };
+        apply_token_usage(&mut acc, &first, TokenUsageSemantics::Delta);
+        apply_token_usage(&mut acc, &second, TokenUsageSemantics::Delta);
+        assert_eq!(acc.input_tokens, 125);
+        assert_eq!(acc.output_tokens, 60);
+    }
+
+    /// A single cumulative event behaves the same as a single delta event
+    /// (the common codex single-shot exec case: one `turn.completed`).
+    #[test]
+    fn apply_cumulative_single_event_equals_that_event() {
+        let mut acc = TokenUsage::default();
+        let only = TokenUsage {
+            input_tokens: 382386,
+            cache_read_tokens: Some(380000),
+            ..Default::default()
+        };
+        apply_token_usage(&mut acc, &only, TokenUsageSemantics::Cumulative);
+        assert_eq!(acc.input_tokens, 382386);
+        assert_eq!(acc.cache_read_tokens, Some(380000));
+    }
+
+    #[test]
+    fn token_usage_semantics_default_is_delta() {
+        assert_eq!(TokenUsageSemantics::default(), TokenUsageSemantics::Delta);
+    }
 
     #[test]
     fn token_usage_default_is_zero_with_none_options_and_null_extras() {

@@ -177,13 +177,17 @@ export const SYSTEM_MODELS = [
 
 /**
  * Closed enum of valid `effort` values surfaced by the Settings UI
- * dropdown — mirrors the Claude Code CLI `--effort` accepted set
- * (low / medium / high / xhigh / max / auto). The Rust side keeps
- * `effort: String` for yaml backward compatibility, so this enum is
- * enforced only at the UI layer via `validateClaudeCodeBlock`. Order
- * is fixed (ascending strength, with `auto` last as the "let the
- * model decide" sentinel) and matches the option order rendered by
- * the `<select>` per spec `Settings UI Endpoint Section` scenarios.
+ * dropdown — exactly the set the Claude CLI `--effort <level>` flag
+ * accepts (confirmed via `claude --help`: low / medium / high / xhigh /
+ * max). `auto` is NOT accepted by the CLI, so it is intentionally absent:
+ * a configured `effort: auto` would be sent verbatim as `--effort auto`
+ * and fail the spawn. The Rust loader now also validates this same closed
+ * set (claude-code-config `Endpoint Profile Schema` Effort Closed-Set
+ * Validation), so an out-of-set effort is rejected at config load — this
+ * UI check (`validateClaudeCodeBlock`) is the front-line guard that keeps
+ * the dropdown from ever offering a rejected value. Order is fixed
+ * (ascending strength) and matches the option order rendered by the
+ * `<select>` per spec `Settings UI Endpoint Section` scenarios.
  */
 export const SYSTEM_EFFORTS = [
   "low",
@@ -191,7 +195,6 @@ export const SYSTEM_EFFORTS = [
   "high",
   "xhigh",
   "max",
-  "auto",
 ] as const
 export type SystemEffort = (typeof SYSTEM_EFFORTS)[number]
 

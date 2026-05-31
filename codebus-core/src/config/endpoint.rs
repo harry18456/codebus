@@ -70,7 +70,10 @@ pub fn system_model_to_cli_flag(model: &str) -> String {
 /// One verb's settings under the system profile. `model` is a free string —
 /// a short alias (`opus-4-7`, translated via [`system_model_to_cli_flag`]) or
 /// a full `claude-…` id — so newly-released Claude models need no code change;
-/// `effort` is an arbitrary string (the Claude CLI validates its values).
+/// `effort` is validated at config load against the closed set
+/// `low/medium/high/xhigh/max` (`CLAUDE_EFFORTS`, the values the Claude CLI
+/// `--effort` flag accepts) for the active profile; cold-storage profiles are
+/// preserved unvalidated.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SystemVerbConfig {
@@ -306,6 +309,31 @@ pub fn parse_codex_yaml(
     Ok(Some(super::codex::validate_codex_provider(codex)?))
 }
 
+/// The closed set of `effort` values the Claude CLI `--effort <level>` flag
+/// accepts (confirmed via `claude --help`: `low, medium, high, xhigh, max`).
+/// `auto` is deliberately absent — the CLI rejects `--effort auto`, so a
+/// configured `effort: auto` would fail the spawn; rejecting it at load gives
+/// an earlier, readable error. This mirrors the Settings UI `SYSTEM_EFFORTS`
+/// dropdown (claude-code-config `Endpoint Profile Schema`).
+const CLAUDE_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// Reject an `effort` value outside [`CLAUDE_EFFORTS`]. Applied only to the
+/// ACTIVE endpoint profile's verb sub-blocks (the non-active profile is cold
+/// storage and is not validated). `field` is the YAML path used in the error
+/// (e.g. `claude_code.system.goal.effort`).
+fn validate_effort(effort: &str, field: &str) -> Result<(), ConfigLoadError> {
+    if CLAUDE_EFFORTS.contains(&effort) {
+        Ok(())
+    } else {
+        Err(ConfigLoadError::YamlParse(serde_yaml::Error::custom(
+            format!(
+                "{field}: `{effort}` is not a valid effort; expected one of {}",
+                CLAUDE_EFFORTS.join(" / ")
+            ),
+        )))
+    }
+}
+
 fn validate_system_profile(
     active: ActiveProfile,
     raw: Option<RawSystemProfile>,
@@ -337,6 +365,11 @@ fn validate_system_profile(
                     "claude_code.system.verify: required when active=system",
                 ))
             })?;
+            // Effort closed-set validation (active profile only).
+            validate_effort(&goal.effort, "claude_code.system.goal.effort")?;
+            validate_effort(&query.effort, "claude_code.system.query.effort")?;
+            validate_effort(&fix.effort, "claude_code.system.fix.effort")?;
+            validate_effort(&verify.effort, "claude_code.system.verify.effort")?;
             Ok(SystemProfile {
                 goal,
                 query,
@@ -370,6 +403,11 @@ fn validate_azure_profile(
             let query = require_azure_verb(raw.query, "claude_code.azure.query")?;
             let fix = require_azure_verb(raw.fix, "claude_code.azure.fix")?;
             let verify = require_azure_verb(raw.verify, "claude_code.azure.verify")?;
+            // Effort closed-set validation (active profile only).
+            validate_effort(&goal.effort, "claude_code.azure.goal.effort")?;
+            validate_effort(&query.effort, "claude_code.azure.query.effort")?;
+            validate_effort(&fix.effort, "claude_code.azure.fix.effort")?;
+            validate_effort(&verify.effort, "claude_code.azure.verify.effort")?;
             Ok(Some(AzureProfile {
                 base_url,
                 keyring_service,

@@ -19,7 +19,7 @@
 //! matching the `fix` verb's correct pattern. Functionally equivalent — the
 //! quiz PreToolUse hook gates bash to `codebus` regardless.)
 
-use crate::config::ClaudeCodeConfig;
+use crate::config::{ClaudeCodeConfig, Verb};
 use crate::stream::{StreamEvent, parse_claude_stream_line};
 use std::process::Command;
 
@@ -96,10 +96,17 @@ impl AgentBackend for ClaudeBackend {
             None => format!("/codebus-{bundle} \"{}\"", spec.input),
         };
 
+        // Session persistence gating: every verb except Chat is single-shot
+        // and never resumes, so suppress the Claude session rollout. Chat keeps
+        // persistence so the next turn can `--resume`. Mirrors the codex
+        // backend's `Verb::Chat` `--ephemeral` gate.
+        let no_session_persistence = !matches!(spec.verb, Verb::Chat);
+
         compose_claude_cmd(
             &claude_bin,
             &prompt,
             spec.resume_session_id.as_deref(),
+            no_session_persistence,
             toolset,
             bash_whitelist.as_deref(),
             resolved.model.as_deref(),
@@ -149,6 +156,63 @@ mod tests {
                 .map(|toks| super::super::spawn_spec::CommandPrefix::new(toks.iter().copied())),
             resume_session_id: None,
         }
+    }
+
+    /// Claude emits one `result` usage event per `-p` run, so it uses the
+    /// default Delta semantics (sum) — distinct from codex's Cumulative.
+    #[test]
+    fn claude_declares_delta_token_usage_semantics() {
+        assert_eq!(
+            backend().token_usage_semantics(),
+            crate::log::TokenUsageSemantics::Delta
+        );
+    }
+
+    /// Single-shot verbs (goal/query/fix/quiz) never resume, so their claude
+    /// spawn carries `--no-session-persistence` (mirrors codex `--ephemeral`).
+    #[test]
+    fn single_shot_verbs_include_no_session_persistence() {
+        for verb in [Verb::Goal, Verb::Query, Verb::Fix, Verb::Quiz] {
+            let cmd = backend().build_command(&spec(verb, Permission::ReadOnly, None));
+            let args = cmd_args(&cmd);
+            assert!(
+                args.iter().any(|a| a == "--no-session-persistence"),
+                "{verb:?} argv must include --no-session-persistence: {args:?}"
+            );
+        }
+    }
+
+    /// Chat is multi-turn and resumes via `--resume`, so its spawn MUST retain
+    /// session persistence — no `--no-session-persistence` flag.
+    #[test]
+    fn chat_verb_omits_no_session_persistence() {
+        let cmd = backend().build_command(&spec(Verb::Chat, Permission::ReadOnly, None));
+        let args = cmd_args(&cmd);
+        assert!(
+            !args.iter().any(|a| a == "--no-session-persistence"),
+            "chat argv must NOT include --no-session-persistence: {args:?}"
+        );
+    }
+
+    /// Chat with a resume id keeps `--resume <id>` and still omits the flag.
+    #[test]
+    fn chat_resume_keeps_resume_flag_and_omits_no_session_persistence() {
+        let chat_spec = SpawnSpec {
+            verb: Verb::Chat,
+            resolve_as: None,
+            sub_mode: None,
+            input: "x".to_string(),
+            permission: Permission::ReadOnly,
+            command_allowance: None,
+            resume_session_id: Some("abc-123".to_string()),
+        };
+        let cmd = backend().build_command(&chat_spec);
+        let args = cmd_args(&cmd);
+        assert_eq!(arg_after(&args, "--resume"), Some("abc-123"));
+        assert!(
+            !args.iter().any(|a| a == "--no-session-persistence"),
+            "chat resume argv must NOT include --no-session-persistence: {args:?}"
+        );
     }
 
     /// `agent-backend` spec `Claude Backend Argv Equivalence`:

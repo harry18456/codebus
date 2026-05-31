@@ -8,9 +8,11 @@ The endpoint profile configuration and scoped environment injection that codebus
 
 ### Requirement: Endpoint Profile Schema
 
-The `~/.codebus/config.yaml` file SHALL accept an `agent` block with two top-level keys: `active_provider` and `providers`. `active_provider` SHALL be a string naming the active provider; the supported values SHALL be `claude` and `codex` (the `codex` provider's block shape is defined by the `codex-config` capability). An `active_provider` value outside this set SHALL be rejected with `ConfigLoadError::YamlParse`. `providers` SHALL be a map keyed by provider name. The `providers.claude` block SHALL contain three keys: `active`, `system`, and `azure`. The `active` key SHALL be a string with exactly one of two values: `system` or `azure` (the active endpoint profile for the claude provider). The `system` block SHALL contain four verb sub-blocks named `goal`, `query`, `fix`, and `verify`; each verb sub-block SHALL contain a `model` field (a `SystemModel` enum value) and an optional `effort` field (an arbitrary string). The `azure` block SHALL contain `base_url` (URL string), `keyring_service` (arbitrary string, default `codebus-azure`), and the same four verb sub-blocks (`goal`, `query`, `fix`, `verify`); in the `azure` block each verb's `model` field SHALL be an arbitrary non-empty string and `effort` SHALL be an optional arbitrary string.
+The `~/.codebus/config.yaml` file SHALL accept an `agent` block with two top-level keys: `active_provider` and `providers`. `active_provider` SHALL be a string naming the active provider; the supported values SHALL be `claude` and `codex` (the `codex` provider's block shape is defined by the `codex-config` capability). An `active_provider` value outside this set SHALL be rejected with `ConfigLoadError::YamlParse`. `providers` SHALL be a map keyed by provider name. The `providers.claude` block SHALL contain three keys: `active`, `system`, and `azure`. The `active` key SHALL be a string with exactly one of two values: `system` or `azure` (the active endpoint profile for the claude provider). The `system` block SHALL contain four verb sub-blocks named `goal`, `query`, `fix`, and `verify`; each verb sub-block SHALL contain a `model` field (a `SystemModel` enum value) and an optional `effort` field (an effort value constrained by the Effort Closed-Set Validation paragraph below). The `azure` block SHALL contain `base_url` (URL string), `keyring_service` (arbitrary string, default `codebus-azure`), and the same four verb sub-blocks (`goal`, `query`, `fix`, `verify`); in the `azure` block each verb's `model` field SHALL be an arbitrary non-empty string and `effort` SHALL be an optional effort value constrained by the Effort Closed-Set Validation paragraph below.
 
 The endpoint profile referenced by `providers.claude.active` MUST be fully populated for the load to succeed — all four verb sub-blocks (`goal`, `query`, `fix`, `verify`) are required when the profile is active. The non-active endpoint profile MAY be absent or partially populated; codebus SHALL NOT validate fields of the non-active profile. If the `agent` block is absent entirely, the system SHALL fall back to a built-in default equivalent to `active_provider: claude` with `providers.claude.active: system` and verb defaults `goal: opus-4-6` / `query: haiku-4-5` / `fix: sonnet-4-6` / `verify: opus-4-6` and per-verb default `effort` values `high` / `low` / `medium` / `high` respectively.
+
+**Effort Closed-Set Validation**: The `effort` value of each verb sub-block in the ACTIVE endpoint profile (`goal`, `query`, `fix`, `verify`) SHALL be one of the closed set `low`, `medium`, `high`, `xhigh`, `max`. This set SHALL be exactly the value set the Claude CLI `--effort <level>` flag accepts (confirmed via `claude --help`: `low, medium, high, xhigh, max`); `auto` is NOT a member, because the Claude CLI rejects `--effort auto` and a configured `effort: auto` therefore fails the spawn. A value outside this closed set (including `auto`) SHALL be rejected at load with `ConfigLoadError::YamlParse` identifying the offending field path and the allowed set. This validation SHALL apply to the active profile only, consistent with the rule that codebus SHALL NOT validate fields of the non-active profile: an out-of-set `effort` in a cold-storage (non-active) profile SHALL NOT block the load. This closed set SHALL constrain the claude provider's `effort` field only; the `model` field SHALL remain unconstrained by this requirement (no `model` closed-set is introduced or changed here), and the codex provider's effort is governed by the `codex-config` capability. The Settings UI `SYSTEM_EFFORTS` dropdown SHALL surface exactly this same five-value set (no `auto`), so the GUI cannot offer a value the loader and CLI reject.
 
 The `verify` sub-block SHALL govern the model and effort used by the independent content-verification spawn run by `quiz` and `goal` verbs after their main generation phase (see `Quiz Content Verification and Repair` in the `quiz` capability and `Goal Content Verification and Repair` in the `verb-library` capability). The `verify` sub-block SHALL NOT be referenced by any other spawn (quiz plan / quiz generate / quiz repair / goal main / goal repair / fix); those spawns continue to use their own verb's sub-block.
 
@@ -76,55 +78,49 @@ The `Verb` resolution enum SHALL include a `Verify` variant alongside the existi
 - **WHEN** the azure endpoint profile is active with `azure.verify: { model: claude-opus-deploy, effort: high }`
 - **THEN** `resolve(Verb::Verify)` SHALL return `model: claude-opus-deploy` and `effort: high` (azure deployment names pass through verbatim)
 
+#### Scenario: Invalid effort in active system profile rejected
+
+- **WHEN** `~/.codebus/config.yaml` contains `agent.providers.claude.active: system` and a complete `system` block whose `goal.effort` is `ultra`
+- **THEN** the config loader SHALL return `ConfigLoadError::YamlParse` identifying the `system.goal.effort` field as outside the allowed effort set `low / medium / high / xhigh / max / auto`
+
+#### Scenario: Invalid effort in active azure profile rejected
+
+- **WHEN** `~/.codebus/config.yaml` contains `agent.providers.claude.active: azure` and a complete `azure` block whose `fix.effort` is `ultra`
+- **THEN** the config loader SHALL return `ConfigLoadError::YamlParse` identifying the `azure.fix.effort` field as outside the allowed effort set
+
+#### Scenario: All five effort values load successfully
+
+- **WHEN** `~/.codebus/config.yaml` contains an active `system` block whose four verbs carry efforts drawn from the closed set `low`, `medium`, `high`, `xhigh`, `max`
+- **THEN** the config loader SHALL return a config with the system endpoint profile selected AND SHALL NOT reject any of the five values
+
+#### Scenario: effort auto is rejected as an invalid effort value
+
+- **WHEN** `~/.codebus/config.yaml` contains `agent.providers.claude.active: system` and a complete `system` block whose `query.effort` is `auto`
+- **THEN** the config loader SHALL return `ConfigLoadError::YamlParse` identifying the `system.query.effort` field as outside the allowed effort set `low / medium / high / xhigh / max` (the Claude CLI does not accept `--effort auto`)
+
+#### Scenario: Out-of-set effort in non-active profile does not block load
+
+- **WHEN** `~/.codebus/config.yaml` contains `agent.providers.claude.active: system` with a complete valid `system` block AND a fully-populated cold-storage `azure` block whose `goal.effort` is `ultra`
+- **THEN** the config loader SHALL return a config with the system endpoint profile selected AND SHALL NOT fail due to the out-of-set effort in the non-active azure profile
+
 
 <!-- @trace
-source: codex-backend
-updated: 2026-05-23
+source: token-session-effort-hygiene
+updated: 2026-05-31
 code:
-  - codebus-cli/src/commands/config.rs
-  - codebus-core/src/verb/quiz.rs
-  - codebus-app/src/components/settings/CodexEndpointSection.tsx
-  - codebus-core/src/vault/init.rs
-  - codebus-app/src-tauri/src/ipc/keyring.rs
-  - codebus-app/src/lib/providers.ts
-  - codebus-app/src/store/chat.ts
-  - codebus-core/src/agent/codex_backend.rs
-  - codebus-core/src/config/codex.rs
-  - codebus-core/src/verb/chat.rs
-  - codebus-core/src/stream/mod.rs
-  - codebus-core/src/config/mod.rs
-  - codebus-core/src/skill_bundle/mod.rs
-  - codebus-app/src/components/settings/EndpointSection.tsx
-  - codebus-core/src/stream/codex_parser.rs
-  - codebus-app/src-tauri/src/ipc/config.rs
-  - codebus-app/src/components/workspace/ChatTranscript.tsx
-  - codebus-core/src/verb/error.rs
-  - codebus-core/src/agent/claude_backend.rs
-  - codebus-app/src-tauri/src/ipc/goals.rs
-  - codebus-core/src/agent/mod.rs
-  - codebus-core/src/verb/query.rs
-  - codebus-app/src/store/settings.ts
-  - codebus-app/src/components/settings/SettingsModal.tsx
-  - docs/2026-05-14-multi-provider-agent-backend-backlog.md
-  - codebus-app/src/components/settings/SetKeyDialog.tsx
+  - codebus-core/src/log/mod.rs
   - codebus-app/src/lib/ipc.ts
-  - codebus-app/src-tauri/src/ipc/cli_status.rs
-  - codebus-app/src/store/goals.ts
-  - codebus-core/src/verb/fix.rs
-  - codebus-core/src/config/claude_code.rs
-  - codebus-core/src/agent/dispatch.rs
-  - codebus-core/src/verb/goal.rs
+  - codebus-core/src/agent/claude_cli.rs
+  - codebus-core/src/agent/backend.rs
+  - codebus-core/src/log/sink.rs
+  - codebus-core/src/agent/codex_backend.rs
+  - codebus-core/src/agent/claude_backend.rs
   - codebus-core/src/config/endpoint.rs
+  - docs/BACKLOG.md
 tests:
-  - codebus-app/src/store/chat.test.ts
-  - codebus-app/src/lib/providers.test.ts
-  - codebus-app/src/components/settings/CodexEndpointSection.test.tsx
-  - codebus-app/src-tauri/tests/keyring_ipc.rs
+  - codebus-app/src/lib/ipc.effort.test.ts
+  - codebus-core/tests/endpoint_config_load.rs
   - codebus-app/src/components/settings/EndpointSection.test.tsx
-  - codebus-app/src/store/goals.test.ts
-  - codebus-app/src/lib/codex-validation.test.ts
-  - codebus-app/src/components/settings/SettingsModal.codex.test.tsx
-  - codebus-cli/tests/parse_error_aborts_all_verbs.rs
 -->
 
 ---

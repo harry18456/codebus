@@ -21,7 +21,7 @@ use crate::agent::backend::AgentBackend;
 use crate::agent::env_overrides::EnvOverrides;
 use crate::agent::process_kill::KillHandle;
 use crate::agent::spawn_spec::SpawnSpec;
-use crate::log::{TokenUsage, accumulate_token_usage};
+use crate::log::{TokenUsage, apply_token_usage};
 use crate::stream::StreamEvent;
 use chrono::SecondsFormat;
 use std::io::{self, BufRead, BufReader};
@@ -220,6 +220,11 @@ pub fn invoke(
     // caller closure. Cancel signal polled after each line — flip true →
     // kill child + drain remaining stdout silently + break.
     let mut accumulated = TokenUsage::default();
+    // Provider-declared token-usage combination (provider-agnostic): read once
+    // from the backend trait, then dispatch per `Usage` event on the enum only
+    // — the loop never names a provider. Delta sums (Claude); Cumulative takes
+    // the latest snapshot (codex `turn.completed.usage`, avoiding double-count).
+    let token_semantics = backend.token_usage_semantics();
     // run-outcome-lifecycle-integrity (Part B): count tool results that both
     // failed (`is_error`) AND carry a locale-independent sandbox-denial
     // marker. Accumulated like tokens; surfaced on `InvokeReport`.
@@ -246,7 +251,7 @@ pub fn invoke(
         }
         for event in backend.parse_stream_line(&line) {
             if let StreamEvent::Usage(u) = &event {
-                accumulate_token_usage(&mut accumulated, u);
+                apply_token_usage(&mut accumulated, u, token_semantics);
             }
             // Part B: only failed tool results are denial candidates; within
             // those, only ones carrying a curated marker count (grep-no-match
@@ -415,13 +420,15 @@ fn join_within(handle: thread::JoinHandle<()>, deadline: Duration) {
 ///   5. `--permission-mode acceptEdits`
 ///   6. `--output-format stream-json`
 ///   7. `--verbose`
-///   8. `--strict-mcp-config` + `--mcp-config {"mcpServers":{}}` — MCP load-layer isolation
-///   9. `--model <m>` — optional
-///  10. `--effort <e>` — optional
+///   8. `--no-session-persistence` — appended only when `no_session_persistence` is `true` (every verb except `Chat`); suppresses the Claude session rollout for single-shot verbs. Valid only in `-p` mode, which codebus always uses.
+///   9. `--strict-mcp-config` + `--mcp-config {"mcpServers":{}}` — MCP load-layer isolation
+///  10. `--model <m>` — optional
+///  11. `--effort <e>` — optional
 pub(crate) fn compose_claude_cmd(
     claude_bin: &str,
     slash_command: &str,
     resume_session_id: Option<&str>,
+    no_session_persistence: bool,
     toolset: &[&str],
     bash_whitelist: Option<&str>,
     model: Option<&str>,
@@ -453,7 +460,17 @@ pub(crate) fn compose_claude_cmd(
         // format stays default `text` (prompt comes via `-p`).
         .arg("--output-format")
         .arg("stream-json")
-        .arg("--verbose")
+        .arg("--verbose");
+
+    // Session persistence gating (mirrors codex backend's `--ephemeral` gate):
+    // non-chat verbs never resume, so suppress the Claude session rollout to
+    // avoid orphan session files. Chat keeps persistence so `--resume` works.
+    // Valid only in `-p` mode, which codebus always uses.
+    if no_session_persistence {
+        cmd.arg("--no-session-persistence");
+    }
+
+    cmd
         // spawn-mcp-isolation: hard-isolate the MCP load layer. `--tools` /
         // `--allowedTools` only gate built-in tools — they do NOT exclude MCP
         // tools (verified 2026-05-21: ambient connector / user-scope MCP tools
@@ -520,16 +537,47 @@ mod tests {
     }
 
     fn compose(resume: Option<&str>, model: Option<&str>, effort: Option<&str>) -> Command {
+        // Goal-shaped (non-chat) → session persistence suppressed.
         compose_claude_cmd(
             "claude",
             "/codebus-goal \"x\"",
             resume,
+            true,
             &["Read", "Glob", "Grep"],
             None,
             model,
             effort,
             &EnvOverrides::for_system(),
         )
+    }
+
+    #[test]
+    fn compose_includes_no_session_persistence_after_verbose_before_mcp() {
+        let args = cmd_args_collected(&compose(None, None, None));
+        let verbose = pos(&args, "--verbose");
+        let nsp = pos(&args, "--no-session-persistence");
+        let strict = pos(&args, "--strict-mcp-config");
+        assert!(verbose < nsp, "flag follows --verbose");
+        assert!(nsp < strict, "flag precedes the MCP isolation flags");
+    }
+
+    #[test]
+    fn compose_omits_no_session_persistence_when_false() {
+        // Chat-shaped → persistence retained, flag absent.
+        let cmd = compose_claude_cmd(
+            "claude",
+            "/codebus-chat \"x\"",
+            Some("abc-123"),
+            false,
+            &["Read", "Glob", "Grep"],
+            None,
+            None,
+            None,
+            &EnvOverrides::for_system(),
+        );
+        let args = cmd_args_collected(&cmd);
+        assert!(!args.iter().any(|a| a == "--no-session-persistence"));
+        assert_eq!(args.get(pos(&args, "--resume") + 1).map(String::as_str), Some("abc-123"));
     }
 
     // === MCP isolation (compose-level; spawn-mcp-isolation invariant) ===
@@ -1132,5 +1180,56 @@ mod tests {
             "exactly the failed+marker result counts; got {}",
             report.sandbox_denial_count
         );
+    }
+
+    /// A backend declaring `Cumulative` emits two running-total `Usage` events
+    /// (100 then 250). `invoke` must report 250 (latest), NOT 350 (sum) — the
+    /// provider-agnostic loop honors the declared semantics end-to-end.
+    struct CumulativeUsageBackend;
+
+    impl AgentBackend for CumulativeUsageBackend {
+        fn build_command(&self, _spec: &SpawnSpec) -> Command {
+            finite_child_command()
+        }
+        fn parse_stream_line(&self, line: &str) -> Vec<StreamEvent> {
+            if line.contains("line1") {
+                vec![StreamEvent::Usage(TokenUsage {
+                    input_tokens: 100,
+                    output_tokens: 40,
+                    ..Default::default()
+                })]
+            } else if line.contains("line2") {
+                vec![StreamEvent::Usage(TokenUsage {
+                    input_tokens: 250,
+                    output_tokens: 90,
+                    ..Default::default()
+                })]
+            } else {
+                Vec::new()
+            }
+        }
+        fn extract_session_id(&self, _line: &str) -> Option<String> {
+            None
+        }
+        fn token_usage_semantics(&self) -> crate::log::TokenUsageSemantics {
+            crate::log::TokenUsageSemantics::Cumulative
+        }
+    }
+
+    #[test]
+    fn invoke_cumulative_backend_reports_latest_usage_not_sum() {
+        let backend = CumulativeUsageBackend;
+        let tmp = std::env::temp_dir();
+        let report = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None, None)
+            .expect("spawn should succeed");
+        assert_eq!(
+            report.accumulated_tokens.input_tokens, 250,
+            "cumulative: latest snapshot wins, not the sum"
+        );
+        assert_ne!(
+            report.accumulated_tokens.input_tokens, 350,
+            "must not double-count cumulative usage"
+        );
+        assert_eq!(report.accumulated_tokens.output_tokens, 90);
     }
 }

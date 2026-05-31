@@ -274,6 +274,12 @@ impl AgentBackend for CodexBackend {
         // delegated to the stream parser's session sniffer
         crate::stream::sniff_codex_thread_id(line)
     }
+
+    fn token_usage_semantics(&self) -> crate::log::TokenUsageSemantics {
+        // codex `turn.completed.usage` reports a cumulative running total, not
+        // a per-turn delta — `invoke` must take the latest snapshot, not sum.
+        crate::log::TokenUsageSemantics::Cumulative
+    }
 }
 
 #[cfg(test)]
@@ -322,6 +328,16 @@ mod tests {
         cmd.get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect()
+    }
+
+    /// codex declares Cumulative token usage semantics (turn.completed.usage
+    /// is a running total), so `invoke` takes the latest snapshot, not the sum.
+    #[test]
+    fn codex_declares_cumulative_token_usage_semantics() {
+        assert_eq!(
+            backend().token_usage_semantics(),
+            crate::log::TokenUsageSemantics::Cumulative
+        );
     }
 
     /// On Windows the default codex binary is `codex.cmd` (the npm shim that

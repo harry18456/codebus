@@ -167,10 +167,11 @@ describe("EndpointSection", () => {
     await waitFor(() => {
       expect(screen.getByRole("option", { name: "low" })).toBeInTheDocument()
     })
-    for (const opt of ["low", "medium", "high", "xhigh", "max", "auto"]) {
+    for (const opt of ["low", "medium", "high", "xhigh", "max"]) {
       expect(screen.getByRole("option", { name: opt })).toBeInTheDocument()
     }
-    for (const forbidden of ["super-high", "extreme", ""]) {
+    // `auto` is NOT a valid Claude CLI effort — the dropdown must not offer it.
+    for (const forbidden of ["auto", "super-high", "extreme", ""]) {
       expect(
         screen.queryByRole("option", { name: forbidden }),
       ).not.toBeInTheDocument()
@@ -224,10 +225,11 @@ describe("EndpointSection", () => {
     await waitFor(() => {
       expect(screen.getByRole("option", { name: "low" })).toBeInTheDocument()
     })
-    for (const opt of ["low", "medium", "high", "xhigh", "max", "auto"]) {
+    for (const opt of ["low", "medium", "high", "xhigh", "max"]) {
       expect(screen.getByRole("option", { name: opt })).toBeInTheDocument()
     }
-    for (const forbidden of ["super-high", "extreme", ""]) {
+    // `auto` is NOT a valid Claude CLI effort — the dropdown must not offer it.
+    for (const forbidden of ["auto", "super-high", "extreme", ""]) {
       expect(
         screen.queryByRole("option", { name: forbidden }),
       ).not.toBeInTheDocument()

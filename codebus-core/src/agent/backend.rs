@@ -13,6 +13,7 @@
 //! hands back out is the normalized cross-provider [`StreamEvent`] (plus
 //! token usage carried within it).
 
+use crate::log::TokenUsageSemantics;
 use crate::stream::StreamEvent;
 use std::process::Command;
 
@@ -54,5 +55,18 @@ pub trait AgentBackend: Send + Sync {
     /// argument (or omit it) so the CLI reads from stdin.
     fn stdin_payload(&self, _spec: &SpawnSpec) -> Option<String> {
         None
+    }
+
+    /// Optional: declare how this backend's emitted `Usage` token events
+    /// combine across one invocation. Default [`TokenUsageSemantics::Delta`]
+    /// (each event reports its own slice; sum them) — correct for the Claude
+    /// CLI, which emits one `result` usage event per `-p` run. A backend whose
+    /// CLI reports a running cumulative total per event (codex
+    /// `turn.completed.usage`) MUST override this to
+    /// [`TokenUsageSemantics::Cumulative`] so `agent::invoke` takes the latest
+    /// snapshot instead of double-counting. The invocation loop reads this once
+    /// and dispatches on the enum only — it never branches on provider identity.
+    fn token_usage_semantics(&self) -> TokenUsageSemantics {
+        TokenUsageSemantics::Delta
     }
 }

@@ -37,6 +37,7 @@
 | 2026-05-30 | codex chat resume Windows live round-trip 驗證（三件耦合 `--ephemeral`/`-c sandbox_mode=`/`thread.started` 只逐件 unit-test、無整條跑；verification task 非 fix） | 測試完整度 / regression guard | 輕（小） | [cli-applicability T2-3](2026-05-30-cli-capability-applicability-backlog.md) |
 | 2026-05-30 | claude `--bare` / `--setting-sources` 隔離 spike（目前只隔離 MCP、user 全域 CLAUDE.md / hooks / keychain 仍可注入、跟 codex `--ignore-user-config` 不對稱；`--bare` 會剝掉自家 vault hook 需先驗相容） | hardening（spawn 確定性） | 中（spike 相容性先） | [cli-applicability T2-4](2026-05-30-cli-capability-applicability-backlog.md) |
 | 2026-05-30 | 新能力候選（structured output `--json-schema`/`--output-schema` 跨 provider 對等、codex `--oss` 本地模型 profile、泛化既有 `content_verify` 多 spawn orchestrator）— 有具體需求再接、不投機抽象 | new-capability（deferred） | 中-重（各別 spike 後定） | [cli-applicability T3](2026-05-30-cli-capability-applicability-backlog.md) |
+| 2026-05-31 | claude-code-config spec ↔ code drift：spec `Requirement: System Profile Model Aliases` + scenario `Invalid SystemModel value rejected`（`claude-code-config/spec.md:64-67,131`）宣稱 `SystemModel` 是封閉 enum、`model: gpt-4` 會被 `ConfigLoadError` 拒；但 code 實際是 `model: String`（`endpoint.rs:77`，無 SystemModel enum、`system_model_to_cli_flag` 只加 `claude-` 前綴、任意字串放行）→ **spec 說會拒的值 code 其實收**。決定要嘛 spec 對齊 code 的寬鬆 forward-compat（移除假 enum claim），要嘛 code 真閉集化（不建議、會破新 model forward-compat） | spec↔code drift（誠實度；同 quiz/effort 那類） | 輕（多半 spec 對齊 code） | （無專屬 doc；`token-session-effort-hygiene` propose 旁查發現，2026-05-31） |
 
 ## 已 archived 項目
 

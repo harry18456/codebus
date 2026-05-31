@@ -16,15 +16,18 @@ import {
  * layer via `validateClaudeCodeBlock`.
  */
 describe("SYSTEM_EFFORTS constant", () => {
-  it("contains the six Claude Code effort levels in fixed order", () => {
+  it("contains the five Claude CLI effort levels in fixed order", () => {
     expect(SYSTEM_EFFORTS).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
       "max",
-      "auto",
     ])
+  })
+
+  it("does not include auto (the Claude CLI rejects --effort auto)", () => {
+    expect(SYSTEM_EFFORTS as readonly string[]).not.toContain("auto")
   })
 
   it("type narrows literal union members", () => {
@@ -33,14 +36,12 @@ describe("SYSTEM_EFFORTS constant", () => {
     const high: SystemEffort = "high"
     const xhigh: SystemEffort = "xhigh"
     const max: SystemEffort = "max"
-    const auto: SystemEffort = "auto"
-    expect([low, medium, high, xhigh, max, auto]).toEqual([
+    expect([low, medium, high, xhigh, max]).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
       "max",
-      "auto",
     ])
   })
 })
