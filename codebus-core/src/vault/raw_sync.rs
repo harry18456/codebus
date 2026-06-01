@@ -83,6 +83,17 @@ fn skip_codebus_managed(rel_path: &std::path::Path) -> bool {
 }
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
+/// Filename of the aggregated oversized-files manifest written into the
+/// mirror destination (`raw_code_dir`) when one or more files were skipped
+/// as oversized during a sync. The leading underscore keeps it visually
+/// grouped as a codebus-produced file and sorts it ahead of mirrored
+/// source in directory listings. The `.md` suffix makes it natural for an
+/// agent reading the Obsidian-compatible vault to Glob/Read. Per spec
+/// vault §Raw Mirror with PII Scanner, this manifest is an additional
+/// agent-facing structural-awareness surface — it does not alter the
+/// `oversized_skipped_files` counter or the per-skip warn line.
+const OVERSIZED_MANIFEST_NAME: &str = "_codebus-oversized.md";
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SyncSummary {
     pub files: usize,
@@ -211,6 +222,13 @@ pub fn sync_with_scanner_into<W: io::Write>(
 
     let mut summary = SyncSummary::default();
 
+    // oversized-files-manifest: collect (forward-slash relative path, byte
+    // size) for every file skipped as oversized. This is an additional
+    // agent-facing surface written once after the walk; it does NOT touch
+    // the load-bearing `oversized_skipped_files` counter or the per-skip
+    // warn line, both of which keep their existing behavior below.
+    let mut oversized_entries: Vec<(String, u64)> = Vec::new();
+
     for entry in builder.build() {
         let entry = match entry {
             Ok(e) => e,
@@ -272,6 +290,9 @@ pub fn sync_with_scanner_into<W: io::Write>(
                 meta.len()
             );
             summary.oversized_skipped_files += 1;
+            // oversized-files-manifest: record the skip for the aggregated
+            // agent-visible manifest written after the walk completes.
+            oversized_entries.push((rel_str, meta.len()));
             continue;
         }
         if let Some(parent) = dst.parent() {
@@ -361,7 +382,55 @@ pub fn sync_with_scanner_into<W: io::Write>(
         }
     }
 
+    // oversized-files-manifest: when this sync skipped one or more files as
+    // oversized, write the aggregated manifest into the mirror destination so
+    // the agent reading `.codebus/raw/code/` gains structural awareness of the
+    // omitted large files. When nothing was skipped, write nothing — and a
+    // manifest from a previous sync cannot linger because `raw_code_dir` is
+    // fully recreated at the top of this function, so no explicit deletion is
+    // needed for the from-present-to-absent case.
+    //
+    // Edge: if the source repo itself contains a root file literally named
+    // `_codebus-oversized.md`, its mirrored copy is overwritten here. This is
+    // an accepted trade-off — the name is codebus-reserved and the collision
+    // probability is negligible.
+    //
+    // Best-effort like the per-skip warn line: a failed manifest write SHALL
+    // NOT abort the sync (the skip + counter are the load-bearing behavior),
+    // so the write error is swallowed rather than propagated.
+    if !oversized_entries.is_empty() {
+        let manifest = format_oversized_manifest(&oversized_entries);
+        let _ = fs::write(raw_code_dir.join(OVERSIZED_MANIFEST_NAME), manifest);
+    }
+
     Ok(summary)
+}
+
+/// oversized-files-manifest: render the aggregated oversized-files manifest.
+///
+/// Output is a header explaining that the listed files' content is omitted
+/// because they exceed the 5 MiB limit and are listed only for structural
+/// awareness, followed by one entry line per skipped file pairing its
+/// forward-slash relative path with its size in bytes. Entries are sorted by
+/// path so the manifest is deterministic across platforms (the `ignore` crate
+/// walk order is not guaranteed stable). The manifest never contains any byte
+/// of the skipped files' content — only their paths and sizes.
+fn format_oversized_manifest(entries: &[(String, u64)]) -> String {
+    let mut sorted: Vec<&(String, u64)> = entries.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut out = String::new();
+    out.push_str("# Oversized files (content omitted)\n\n");
+    out.push_str(
+        "The following files exceeded the 5 MiB raw-mirror size limit and were \
+skipped. Their content is NOT available in this mirror; they are listed here \
+for structural awareness (e.g. large datasets or vendored assets that may \
+still matter to the architecture).\n\n",
+    );
+    for (path, bytes) in sorted {
+        out.push_str(&format!("- {path} — {bytes} bytes\n"));
+    }
+    out
 }
 
 /// Replace each match's span in `content` with `[REDACTED:<pattern_name>]`.
@@ -716,6 +785,146 @@ mod tests {
         );
         assert!(!raw.path().join("huge.bin").exists());
         assert!(raw.path().join("small.txt").exists());
+    }
+
+    // === oversized-files-manifest ===
+
+    /// Build a >5 MiB buffer filled with a recognisable `marker` pattern so
+    /// tests can assert the manifest does NOT leak skipped-file content. A
+    /// zero-filled buffer would make that assertion vacuous (zeros are not
+    /// distinguishable from any incidental bytes in the manifest text).
+    fn oversized_with_marker(marker: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::with_capacity((MAX_FILE_BYTES + marker.len() as u64 + 1) as usize);
+        while (buf.len() as u64) <= MAX_FILE_BYTES {
+            buf.extend_from_slice(marker);
+        }
+        buf
+    }
+
+    /// oversized-files-manifest: a single oversized skip writes
+    /// `_codebus-oversized.md` into the mirror destination listing the
+    /// forward-slash path AND byte count, WITHOUT leaking the skipped
+    /// file's content; the small sibling is still mirrored AND the existing
+    /// `oversized_skipped_files` counter is unchanged. Mirrors spec vault
+    /// scenario "Oversized skip writes an agent-visible manifest listing
+    /// path and size".
+    #[test]
+    fn oversized_skip_writes_manifest_with_path_and_size() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        let marker = b"OVERSIZED_CONTENT_MARKER_42_";
+        let big = oversized_with_marker(marker);
+        let big_len = big.len() as u64;
+        write(&src.path().join("dist/bundle.js"), &big);
+        write(&src.path().join("small.txt"), b"ok");
+
+        let (summary, _warn) = run_sync(src.path(), raw.path(), &null(), OnHit::Warn);
+
+        // Existing surfaces unchanged: counter still 1, oversized not
+        // mirrored, small sibling mirrored.
+        assert_eq!(summary.oversized_skipped_files, 1);
+        assert!(!raw.path().join("dist/bundle.js").exists());
+        assert!(raw.path().join("small.txt").exists());
+
+        // New surface: manifest exists with path + byte count, no content.
+        let manifest_path = raw.path().join(OVERSIZED_MANIFEST_NAME);
+        assert!(
+            manifest_path.exists(),
+            "manifest SHALL exist when a file is skipped as oversized"
+        );
+        let manifest = fs::read_to_string(&manifest_path).unwrap();
+        assert!(
+            manifest.contains("dist/bundle.js"),
+            "manifest SHALL list the forward-slash path; got: {manifest}"
+        );
+        assert!(
+            manifest.contains(&big_len.to_string()),
+            "manifest SHALL list the byte count {big_len}; got: {manifest}"
+        );
+        let marker_str = std::str::from_utf8(marker).unwrap();
+        assert!(
+            !manifest.contains(marker_str),
+            "manifest SHALL NOT contain skipped-file content; got: {manifest}"
+        );
+    }
+
+    /// oversized-files-manifest: multiple oversized files are all listed,
+    /// ordered by path (deterministic across platforms). Mirrors spec vault
+    /// example "two oversized files listed in path order".
+    #[test]
+    fn multiple_oversized_listed_sorted_by_path() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        let big = oversized_with_marker(b"X_MARKER_");
+        let big_len = big.len() as u64;
+        write(&src.path().join("vendor/big.tar"), &big);
+        write(&src.path().join("assets/dataset.csv"), &big);
+
+        let (summary, _) = run_sync(src.path(), raw.path(), &null(), OnHit::Warn);
+        assert_eq!(summary.oversized_skipped_files, 2);
+
+        let manifest = fs::read_to_string(raw.path().join(OVERSIZED_MANIFEST_NAME)).unwrap();
+        let assets_idx = manifest
+            .find("assets/dataset.csv")
+            .expect("assets entry SHALL be present");
+        let vendor_idx = manifest
+            .find("vendor/big.tar")
+            .expect("vendor entry SHALL be present");
+        assert!(
+            assets_idx < vendor_idx,
+            "entries SHALL be ordered by path (assets before vendor); got: {manifest}"
+        );
+        assert!(
+            manifest.contains(&big_len.to_string()),
+            "each entry SHALL pair the path with its byte count; got: {manifest}"
+        );
+    }
+
+    /// oversized-files-manifest: a sync with no oversized files leaves no
+    /// manifest behind. Mirrors spec vault scenario "No oversized files
+    /// leaves no manifest".
+    #[test]
+    fn no_oversized_leaves_no_manifest() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        write(&src.path().join("a.rs"), b"fn main() {}");
+        write(&src.path().join("small.txt"), b"ok");
+
+        let (summary, _) = run_sync(src.path(), raw.path(), &null(), OnHit::Warn);
+        assert_eq!(summary.oversized_skipped_files, 0);
+        assert!(
+            !raw.path().join(OVERSIZED_MANIFEST_NAME).exists(),
+            "manifest SHALL NOT exist when no file is oversized"
+        );
+    }
+
+    /// oversized-files-manifest: re-syncing the same destination after the
+    /// oversized file is gone SHALL NOT leave a stale manifest (idempotency
+    /// is guaranteed by the destination being fully recreated each sync).
+    /// Mirrors spec vault scenario "A later oversized-free sync does not
+    /// leave a stale manifest".
+    #[test]
+    fn stale_manifest_removed_on_oversized_free_resync() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        let big = oversized_with_marker(b"Y_MARKER_");
+        write(&src.path().join("huge.bin"), &big);
+        write(&src.path().join("keep.txt"), b"ok");
+
+        // First sync: oversized present -> manifest written.
+        sync_with_scanner(src.path(), raw.path(), &null(), OnHit::Warn).unwrap();
+        assert!(
+            raw.path().join(OVERSIZED_MANIFEST_NAME).exists(),
+            "manifest SHALL be written on the first (oversized) sync"
+        );
+
+        // Remove the oversized file, re-sync the SAME destination.
+        fs::remove_file(src.path().join("huge.bin")).unwrap();
+        sync_with_scanner(src.path(), raw.path(), &null(), OnHit::Warn).unwrap();
+        assert!(
+            !raw.path().join(OVERSIZED_MANIFEST_NAME).exists(),
+            "stale manifest SHALL NOT persist after an oversized-free re-sync"
+        );
     }
 
     #[test]
