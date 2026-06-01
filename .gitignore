@@ -15,6 +15,9 @@ legacy/v2-rust/node_modules/
 # Live spike transcripts may contain external repo source content
 legacy/v2-rust/docs/spikes/*/transcripts/
 
+# Tauri bundler staging dir for the codebus CLI (regenerated each `tauri build`)
+codebus-app/src-tauri/bin-staging/
+
 # spectra / superpowers working state (when re-introduced in v3)
 .spectra/
 .superpowers/
