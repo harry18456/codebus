@@ -98,9 +98,30 @@ impl AgentBackend for CodexBackend {
             cmd.arg("resume").arg(id);
         }
 
-        // Per-spawn isolation recipe (verified §4(F)): drop user config/MCP,
-        // plugins, execpolicy; pin the project root to the vault so the
-        // analyzed repo's `.codex/` and `AGENTS.md` are excluded.
+        // Per-spawn isolation recipe (verified §4(F)): `--ignore-user-config`
+        // drops the user's `config.toml` (MCP servers, personality, execpolicy,
+        // trust list); `--ignore-rules` drops per-project rule files; the
+        // `project_root_markers` override pins the project root to the vault so
+        // the analyzed repo's `.codex/` and `AGENTS.md` are excluded.
+        //
+        // Feature-surface defense-in-depth (`--disable <id>`): codex ships
+        // built-in agent capabilities that codebus never drives — `apps`,
+        // `plugins`, `hooks`, and the browser/computer-use tools (`browser_use`
+        // / `browser_use_external` / `computer_use` / `in_app_browser`).
+        // Disabling them does NOT move the sandbox / filesystem read-write
+        // boundary (that is governed by `-s` plus the OS sandbox; see
+        // docs/security.md §5) — the marginal security gain is ~0. The value is
+        // determinism (the agent cannot reach a capability we never tested) and
+        // a clean stderr (no "feature unavailable" noise). Each id was validated
+        // against `codex features list` and confirmed accepted by `--disable`
+        // on codex 0.135.0; an unknown id makes codex abort the spawn with
+        // "Unknown feature flag". `--disable plugins` does NOT break codebus's
+        // own codex skills — those are registered from the project-level
+        // `.codex/skills/` directory, which is independent of the `plugins`
+        // feature (see skill_bundle::codex_skill_bundle_path). `image_generation`
+        // is intentionally left enabled (below) and `multi_agent` is
+        // intentionally NOT disabled (subagent reach is already bounded by the
+        // session sandbox — see the codex-subagent inheritance spike).
         //
         // `windows.sandbox=unelevated`: re-enables Windows sandbox capabilities
         // that `--ignore-user-config` would otherwise strip. Without this
@@ -126,6 +147,18 @@ impl AgentBackend for CodexBackend {
             .arg("--ignore-user-config")
             .arg("--disable")
             .arg("apps")
+            .arg("--disable")
+            .arg("plugins")
+            .arg("--disable")
+            .arg("hooks")
+            .arg("--disable")
+            .arg("browser_use")
+            .arg("--disable")
+            .arg("browser_use_external")
+            .arg("--disable")
+            .arg("computer_use")
+            .arg("--disable")
+            .arg("in_app_browser")
             .arg("--ignore-rules")
             .arg("--skip-git-repo-check")
             .arg("-c")
@@ -432,6 +465,20 @@ mod tests {
         assert!(args.iter().any(|a| a == "--disable"));
         assert!(args.iter().any(|a| a == "apps"));
         assert!(args.iter().any(|a| a == "--ignore-rules"));
+        // Feature-surface defense-in-depth: capabilities codebus never drives
+        // are disabled per spawn so the agent stays on tested ground and the
+        // stderr is free of "feature unavailable" noise. These do NOT move the
+        // sandbox / filesystem boundary.
+        for feature in [
+            "plugins",
+            "hooks",
+            "browser_use",
+            "browser_use_external",
+            "computer_use",
+            "in_app_browser",
+        ] {
+            assert_pair_present(&args, "--disable", feature);
+        }
         assert!(
             args.iter().any(|a| a.contains("project_root_markers")),
             "project_root_markers override present; got {args:?}"
