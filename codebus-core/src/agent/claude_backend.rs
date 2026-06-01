@@ -305,6 +305,7 @@ mod tests {
         assert_eq!(arg_after(&args, "--permission-mode"), Some("acceptEdits"));
         assert_eq!(arg_after(&args, "--output-format"), Some("stream-json"));
         assert!(args.iter().any(|a| a == "--verbose"));
+        assert_eq!(arg_after(&args, "--setting-sources"), Some("project,local"));
         assert_eq!(arg_after(&args, "--model"), Some("claude-opus-4-6"));
         assert_eq!(arg_after(&args, "--effort"), Some("high"));
     }

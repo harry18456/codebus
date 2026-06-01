@@ -422,8 +422,9 @@ fn join_within(handle: thread::JoinHandle<()>, deadline: Duration) {
 ///   7. `--verbose`
 ///   8. `--no-session-persistence` — appended only when `no_session_persistence` is `true` (every verb except `Chat`); suppresses the Claude session rollout for single-shot verbs. Valid only in `-p` mode, which codebus always uses.
 ///   9. `--strict-mcp-config` + `--mcp-config {"mcpServers":{}}` — MCP load-layer isolation
-///  10. `--model <m>` — optional
-///  11. `--effort <e>` — optional
+///  10. `--setting-sources project,local` — user-global setting-source isolation (excludes `~/.claude` CLAUDE.md / settings / plugins)
+///  11. `--model <m>` — optional
+///  12. `--effort <e>` — optional
 pub(crate) fn compose_claude_cmd(
     claude_bin: &str,
     slash_command: &str,
@@ -480,7 +481,22 @@ pub(crate) fn compose_claude_cmd(
         // is loaded. Unconditional, no escape hatch.
         .arg("--strict-mcp-config")
         .arg("--mcp-config")
-        .arg(r#"{"mcpServers":{}}"#);
+        .arg(r#"{"mcpServers":{}}"#)
+        // claude-setting-sources-user-isolation: hard-isolate the user-global
+        // setting layer. By default claude loads the `user`, `project`, and
+        // `local` setting sources — the `user` source pulls in `~/.claude/
+        // CLAUDE.md`, `~/.claude/settings.json`, and user-global plugins, which
+        // bleed into every wiki-building spawn and bias its behaviour (e.g. a
+        // user-global "always reply in zh-tw" rule overriding the schema's
+        // "follow the prompt-context language" policy). Restricting to
+        // `project,local` excludes the user source while keeping the vault's
+        // own layers: the `.codebus/.claude/settings.json` check-bash /
+        // check-read PreToolUse hook gate and the `.codebus/CLAUDE.md` schema
+        // both remain in effect (2026-05-31 spike verified all three facets).
+        // This mirrors the codex backend's `--ignore-user-config` user
+        // isolation. Unconditional, no escape hatch.
+        .arg("--setting-sources")
+        .arg("project,local");
 
     if let Some(model) = model {
         cmd.arg("--model").arg(model);
@@ -605,6 +621,24 @@ mod tests {
         let model = pos(&args, "--model");
         assert!(verbose < strict && verbose < mcp);
         assert!(strict < model && mcp < model);
+    }
+
+    #[test]
+    fn compose_carries_setting_sources_user_isolation() {
+        let args = cmd_args_collected(&compose(None, Some("claude-opus-4-6"), Some("high")));
+        let ss = pos(&args, "--setting-sources");
+        assert_eq!(
+            args.get(ss + 1).map(String::as_str),
+            Some("project,local"),
+            "--setting-sources value must be project,local: {args:?}"
+        );
+        let strict = pos(&args, "--strict-mcp-config");
+        let model = pos(&args, "--model");
+        assert!(
+            strict < ss,
+            "--setting-sources must follow the MCP isolation flags"
+        );
+        assert!(ss < model, "--setting-sources must precede --model");
     }
 
     #[test]
