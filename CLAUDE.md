@@ -41,7 +41,7 @@ Env overrides (useful for tests / non-default setups): `CODEBUS_CLAUDE_BIN` / `C
 ## Non-obvious invariants
 
 - **Cancellation / timeout** kill the whole process tree via `KillHandle::terminate_tree()` (Windows Job Object `KILL_ON_JOB_CLOSE` / Unix `killpg`). codex on Windows is a `.cmd` → `node.exe` shim whose grandchildren hold the stdout pipe; naively draining the pipe deadlocks — agent output for ad-hoc codex probes must be redirected to a file, not piped.
-- **`docs/BACKLOG.md`** tracks open work and links to `docs/<date>-<slug>-backlog.md` detail docs; it is CRLF and table-formatted (be careful editing rows).
+- **`docs/BACKLOG.md`** tracks open work and links to `docs/<date>-<slug>-backlog.md` detail docs; it is table-formatted and Git stores it as LF (`core.autocrlf=input`, despite occasional CRLF in the working tree). Be careful editing rows — removing one can mash adjacent rows, so grep for `|| 2026` after.
 - This repo dogfoods itself: the `.codebus/` directory at the repo root is codebus's own vault, with materialized (generated) skill bundles and instruction files — not hand-authored source.
 
 <!-- SPECTRA:START v1.0.2 -->
