@@ -23,6 +23,11 @@ use codebus_core::config::{ClaudeCodeConfig, default_config_path, load_claude_co
 /// works on a fresh install before the user has edited config.yaml.
 const DEFAULT_AZURE_KEYRING_SERVICE: &str = "codebus-claude-azure";
 
+/// Default keyring service for the codex provider's azure profile, mirroring
+/// `codebus_core::config::codex`'s default. Used by `purge-keys` as the
+/// fallback when config does not specify a codex `keyring_service`.
+const DEFAULT_CODEX_AZURE_KEYRING_SERVICE: &str = "codebus-codex-azure";
+
 #[derive(Debug, Args)]
 pub struct ConfigArgs {
     #[command(subcommand)]
@@ -40,6 +45,12 @@ pub enum ConfigAction {
     /// Remove the keyring entry. Idempotent — exits 0 whether or not
     /// the entry existed.
     DeleteKey(DeleteKeyArgs),
+    /// Remove the azure keyring entries for ALL known providers (claude +
+    /// codex) in one shot. Best-effort + idempotent: a missing entry, an
+    /// unavailable keyring backend, or an absent/unparseable config never
+    /// causes a non-zero exit. Used by the Windows uninstaller's opt-in
+    /// purge so it does not need to know per-provider service names.
+    PurgeKeys,
 }
 
 #[derive(Debug, Args)]
@@ -72,6 +83,7 @@ pub async fn run(args: ConfigArgs) -> ExitCode {
         ConfigAction::SetKey(a) => run_set_key(a),
         ConfigAction::GetKey(a) => run_get_key(a),
         ConfigAction::DeleteKey(a) => run_delete_key(a),
+        ConfigAction::PurgeKeys => run_purge_keys(),
     }
 }
 
@@ -144,6 +156,64 @@ fn run_delete_key(args: DeleteKeyArgs) -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+
+/// Remove the azure keyring entries for every known provider. This backs the
+/// Windows uninstaller's opt-in purge: a single invocation clears both the
+/// claude (`codebus-claude-azure`) and codex (`codebus-codex-azure`) Azure
+/// keys without the caller needing to know the service names.
+///
+/// Best-effort by contract: an unavailable keyring backend, a missing entry,
+/// or an absent/unparseable config are all swallowed and the command still
+/// exits zero. This intentionally differs from `delete-key`, which surfaces
+/// keyring errors and config parse failures — `purge-keys` runs during
+/// uninstall, where a hard failure must never block teardown.
+fn run_purge_keys() -> ExitCode {
+    for service in resolve_purge_target_services() {
+        // Ignore the result: idempotent + best-effort. `delete_azure_key`
+        // already treats an absent entry as success; any backend error here
+        // is deliberately swallowed so uninstall is never blocked.
+        let _ = delete_azure_key(&service);
+    }
+    println!("keys purged");
+    ExitCode::SUCCESS
+}
+
+/// Resolve the set of azure keyring service names to purge — one per known
+/// provider — reading `~/.codebus/config.yaml` tolerantly.
+///
+/// Unlike the strict loaders (which drop a non-active provider's profile and
+/// abort on a parse error), this walks the raw YAML so a user-configured
+/// `keyring_service` is honored even when that provider/profile is cold
+/// storage. Any failure to read or parse the file, or a missing/empty field,
+/// falls back to the well-known default service name for that provider. The
+/// returned list is de-duplicated so a shared service is deleted once.
+fn resolve_purge_target_services() -> Vec<String> {
+    let yaml = default_config_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|body| serde_yaml::from_str::<serde_yaml::Value>(&body).ok());
+
+    let mut services = Vec::new();
+    for (provider, default) in [
+        ("claude", DEFAULT_AZURE_KEYRING_SERVICE),
+        ("codex", DEFAULT_CODEX_AZURE_KEYRING_SERVICE),
+    ] {
+        let configured = yaml.as_ref().and_then(|v| {
+            v.get("agent")?
+                .get("providers")?
+                .get(provider)?
+                .get("azure")?
+                .get("keyring_service")?
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        });
+        let service = configured.unwrap_or_else(|| default.to_string());
+        if !services.contains(&service) {
+            services.push(service);
+        }
+    }
+    services
 }
 
 // ---------------------------------------------------------------------------

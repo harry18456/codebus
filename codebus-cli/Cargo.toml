@@ -29,6 +29,10 @@ anyhow = { workspace = true }
 dirs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Tolerant raw-YAML parse for `config purge-keys` to read both providers'
+# azure keyring_service without the strict loaders dropping cold-storage /
+# non-active profiles.
+serde_yaml = { workspace = true }
 chrono = { workspace = true }
 rpassword = { workspace = true }
 # Cross-platform SIGINT/Ctrl+C trap for `codebus chat` REPL mid-turn cancel

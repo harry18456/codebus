@@ -11,6 +11,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use codebus_core::config::keyring::{probe_keyring_only, store_azure_key};
 use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_codebus");
@@ -161,9 +162,9 @@ fn unknown_profile_value_rejected_by_clap() {
     );
 }
 
-/// Spec: `codebus config --help` lists the three sub-actions.
+/// Spec: `codebus config --help` lists the four sub-actions.
 #[test]
-fn config_help_lists_three_sub_actions() {
+fn config_help_lists_four_sub_actions() {
     let out = Command::new(BIN)
         .args(["config", "--help"])
         .output()
@@ -174,10 +175,90 @@ fn config_help_lists_three_sub_actions() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    for action in ["set-key", "get-key", "delete-key"] {
+    for action in ["set-key", "get-key", "delete-key", "purge-keys"] {
         assert!(
             combined.contains(action),
             "config --help missing `{action}`:\n{combined}"
         );
     }
+}
+
+/// Seed a config carrying BOTH providers' azure `keyring_service` in cold
+/// storage (active stays `system` for claude so the strict loaders never
+/// promote either azure profile). `purge-keys` reads these tolerantly from
+/// raw YAML regardless of which provider is active.
+fn write_config_with_both_services(home: &std::path::Path, claude_service: &str, codex_service: &str) {
+    let cfg_dir = home.join(".codebus");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    let cfg_path = cfg_dir.join("config.yaml");
+    let body = format!(
+        "agent:\n  active_provider: claude\n  providers:\n    claude:\n      active: system\n      system:\n        goal:   {{ model: opus-4-6,   effort: high   }}\n        query:  {{ model: haiku-4-5,  effort: low    }}\n        fix:    {{ model: sonnet-4-6, effort: medium }}\n        verify: {{ model: opus-4-6,   effort: high   }}\n      azure:\n        base_url: https://placeholder.example.com/anthropic\n        keyring_service: {claude_service}\n        goal:   {{ model: dep-opus,   effort: high   }}\n        query:  {{ model: dep-haiku,  effort: low    }}\n        fix:    {{ model: dep-sonnet, effort: medium }}\n        verify: {{ model: dep-opus,   effort: high   }}\n    codex:\n      active: system\n      azure:\n        keyring_service: {codex_service}\n"
+    );
+    std::fs::write(cfg_path, body).unwrap();
+}
+
+/// Spec: `purge-keys` removes BOTH providers' azure keyring entries in one
+/// invocation, resolving each service from config, and exits zero.
+#[test]
+fn purge_keys_removes_both_provider_entries() {
+    let home = TempDir::new().unwrap();
+    let claude_service = format!("{}-claude", unique_service());
+    let codex_service = format!("{}-codex", unique_service());
+    write_config_with_both_services(home.path(), &claude_service, &codex_service);
+
+    // Seed both providers' entries directly via core (set-key only reaches
+    // the claude service; codex has no CLI set path).
+    store_azure_key(&claude_service, "k-claude").unwrap();
+    store_azure_key(&codex_service, "k-codex").unwrap();
+
+    let out = run_codebus(home.path(), &["config", "purge-keys"], None);
+    assert!(
+        out.status.success(),
+        "purge-keys must exit 0: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    assert_eq!(
+        probe_keyring_only(&claude_service).unwrap(),
+        None,
+        "claude azure entry must be removed"
+    );
+    assert_eq!(
+        probe_keyring_only(&codex_service).unwrap(),
+        None,
+        "codex azure entry must be removed"
+    );
+}
+
+/// Spec: `purge-keys` is idempotent — running it when no entries exist
+/// (and running it twice) exits zero without error.
+#[test]
+fn purge_keys_idempotent_on_absent_entries() {
+    let home = TempDir::new().unwrap();
+    let claude_service = format!("{}-claude", unique_service());
+    let codex_service = format!("{}-codex", unique_service());
+    write_config_with_both_services(home.path(), &claude_service, &codex_service);
+
+    let out = run_codebus(home.path(), &["config", "purge-keys"], None);
+    assert!(out.status.success(), "first purge-keys must exit 0: {out:?}");
+
+    let out = run_codebus(home.path(), &["config", "purge-keys"], None);
+    assert!(out.status.success(), "second purge-keys must exit 0: {out:?}");
+}
+
+/// Spec: with NO config file present, `purge-keys` falls back to the
+/// well-known default service names and still exits zero (best-effort).
+/// We assert only the exit code — deliberately NOT seeding the real default
+/// services (`codebus-claude-azure` / `codebus-codex-azure`), since deleting
+/// those would clobber a developer's actual stored key.
+#[test]
+fn purge_keys_exits_zero_without_config() {
+    let home = TempDir::new().unwrap();
+    // No config.yaml written under CODEBUS_HOME.
+    let out = run_codebus(home.path(), &["config", "purge-keys"], None);
+    assert!(
+        out.status.success(),
+        "purge-keys without config must exit 0: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

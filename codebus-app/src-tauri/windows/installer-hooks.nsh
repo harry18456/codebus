@@ -2,7 +2,9 @@
 ; codebus NSIS installer hooks
 ; ---------------------------------------------------------------------------
 ; Adds the bundled CLI directory ($INSTDIR\bin) to the *current user* PATH on
-; install, and removes exactly that one segment on uninstall.
+; install, and removes exactly that one segment on uninstall. Uninstall also
+; offers an OPT-IN full purge (default No) of global user data; see the
+; uninstall hook below.
 ;
 ; Referenced by tauri.conf.json -> bundle.windows.nsis.installerHooks and
 ; !included at global scope into Tauri's generated installer.nsi (which already
@@ -16,8 +18,14 @@
 ;     and never truncate the rest of the user's PATH
 ;   - REG_EXPAND_SZ via WriteRegExpandStr (preserves %VAR% expansion)
 ;   - broadcast WM_SETTINGCHANGE so already-open shells refresh
-;   - touches ONLY the PATH environment value; never reads or writes
-;     ~/.codebus or any vault .codebus directory
+;   - by default touches ONLY the PATH environment value; never reads or
+;     writes ~/.codebus or any vault .codebus directory
+;   - opt-in purge (explicit Yes only) additionally removes the three FIXED
+;     global locations ~/.codebus, %LOCALAPPDATA%\com.codebus.app, and the
+;     azure keyring entries (via `codebus config purge-keys`); it still NEVER
+;     reads, traverses, or deletes any repository's vault .codebus directory,
+;     and each step is best-effort (return code ignored, can never block
+;     uninstall). nsExec is bundled with NSIS, so the no-plugin rule holds.
 ; ===========================================================================
 
 ; Instantiate the StrFunc helpers we use. Tauri's template already includes
@@ -91,6 +99,33 @@ ${UnStrRep}   ; uninstaller: surgical segment removal
     WriteRegExpandStr HKCU "Environment" "Path" "$0"
     !insertmacro CodebusBroadcastEnv
   ${EndIf}
+
+  ; -------------------------------------------------------------------------
+  ; Opt-in full purge (default: No). Everything above this point preserves all
+  ; user data; only on an EXPLICIT Yes do we additionally remove global config,
+  ; saved credentials, and app data. /SD IDNO makes silent/unattended uninstall
+  ; default to No, so automation never deletes user data. Every step is
+  ; best-effort with its return code ignored, so a failure or a missing target
+  ; can never block or abort the uninstall. We NEVER touch any repository's
+  ; vault .codebus/ directory — only the three fixed global locations below.
+  ; -------------------------------------------------------------------------
+  MessageBox MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION \
+    "Also remove your codebus settings and saved credentials?$\n$\nYour wikis inside repositories are never touched." \
+    /SD IDNO IDYES codebus_purge_yes
+  Goto codebus_purge_done
+
+  codebus_purge_yes:
+    ; 1. Clear keyring credentials (both providers) BEFORE program files are
+    ;    removed, while $INSTDIR\bin\codebus.exe still exists. nsExec is
+    ;    bundled with NSIS (no third-party plugin) and blocks until the fast,
+    ;    non-interactive purge-keys command exits; its result is discarded.
+    nsExec::ExecToLog '"$INSTDIR\bin\codebus.exe" config purge-keys'
+    Pop $0   ; discard nsExec return code (best-effort)
+    ; 2. Tauri app data (WebView2 cache etc.) for identifier com.codebus.app.
+    RMDir /r "$LOCALAPPDATA\com.codebus.app"
+    ; 3. Global config + logs.
+    RMDir /r "$PROFILE\.codebus"
+  codebus_purge_done:
 
   Pop $1
   Pop $0
