@@ -38,7 +38,7 @@ codebus 把使用者輸入餵給 LLM、再讓 LLM 寫檔到你的 repo 旁邊。
 
 ## 多層 sandbox（codebus 真的做的事）
 
-> ⚠️ **以下 §1–§3（cwd 隔離 + toolset gate）是 claude provider 的隔離機制。** codex provider 走另一套（OS-native sandbox `-s`），其讀取隔離在 Windows 實測為 soft/partial — 見 Known limits §5。
+> ⚠️ **以下 §1–§4（cwd 隔離 + toolset gate + user-global 設定隔離）是 claude provider 的隔離機制。** codex provider 走另一套（OS-native sandbox `-s` + `--ignore-user-config`），其讀取隔離在 Windows 實測為 soft/partial — 見 Known limits §5。
 
 ### 1. cwd 隔離
 
@@ -81,6 +81,16 @@ Claude Code 的 sandbox 不准 agent 寫 cwd 之外的路徑（沒下 `--add-dir
 意思是即使 prompt injection 成功了，agent 也**沒辦法連網外傳**、**沒辦法 spawn 子 agent**、**沒辦法跑任意 shell command**。
 
 `fix` 的 Bash 是 fine-grained whitelist `Bash(codebus lint *)` — 只能跑 `codebus lint`，不能跑別的 shell。
+
+### 4. User-global 設定隔離（`--setting-sources project,local`）
+
+每次 spawn `claude -p` 無條件下 `--setting-sources project,local`（`agent/claude_cli.rs`，無 escape hatch，commit `56174cc`）。官方 CLI reference：`--setting-sources` 是「要載入哪些 setting source 的逗號清單（`user` / `project` / `local`）」。清單**不含 `user`** → 使用者全域 `~/.claude/` 那層**不載入**：
+
+- **`~/.claude/settings.json`（含其 `hooks`）→ 不載入。** Claude 的 hooks 是 settings.json 的 key、跟著 setting source 走（官方 Settings doc + CLI reference 證實），所以排除 `user` source 就排除其 hooks。意思是：**即使你之後在 `~/.claude/settings.json` 放一個會放行 Bash 的 PreToolUse hook，它也不會進到 codebus spawn 的 claude、削弱不了 vault 的閘。**（目前本機 `~/.claude/settings.json` 根本不存在，這是前瞻保證。）
+- **`~/.claude/CLAUDE.md`（個人偏好/規則）→ 不載入**（2026-05-31 spike 實測：探針答 NO-LANG-RULE）。
+- **user plugins / skills / MCP → 不載入**（搭配 §2 的 `--strict-mcp-config` + 空 `--mcp-config`）。
+
+**刻意保留的**（codebus 要的）：vault 自己 **project 層** `.codebus/.claude/settings.json` 的 PreToolUse hook（`codebus hook check-bash` / `check-read`）+ `.codebus/CLAUDE.md` schema——`project,local` 含 `project`，所以 vault 層照常生效（spike 實測：vault `check-bash` 仍 fire）。對齊 codex path 的 `--ignore-user-config`（Known limits §5）。
 
 ---
 
