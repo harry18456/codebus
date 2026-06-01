@@ -106,7 +106,7 @@ tests:
 ---
 ### Requirement: Raw Mirror with PII Scanner
 
-The system SHALL mirror source files from the repository root into `.codebus/raw/code/` preserving directory structure. The system SHALL skip the top-level entries `.codebus/` and `.env` AND SHALL skip any directory whose path segment equals `.git` at any depth (so a nested `.git/` introduced by a git submodule or an embedded repository is excluded just like the repository's own root `.git/`). The system SHALL honor `<repo>/.gitignore` patterns. The system SHALL skip files larger than 5 mebibytes (5 × 1024 × 1024 bytes); for every such oversized skip the system SHALL increment the sync summary's `oversized_skipped_files` counter by exactly one AND SHALL ATTEMPT to emit one warn line in the format `mirror skip: oversized at <relative_path> (<N> bytes > 5 MiB limit)` (the relative path SHALL be normalised to forward-slash separators so output is consistent across Windows AND Unix). Warn-line emission is best-effort observability: when the warn sink returns an I/O error (for example `BrokenPipe` / Windows `ERROR_NO_DATA` when stderr is a closed pipe under a GUI host such as Tauri), the system SHALL silently swallow the write error AND SHALL still perform the skip AND SHALL still increment the counter — a failing warn sink SHALL NOT abort the surrounding `sync_with_scanner` invocation. The counter is the load-bearing observable surface; the warn line is the convenience surface. The oversized skip warning SHALL surface only from the mirror-writer path (the user-facing sync); the drift-detection signal walk (consumed by `goal` to compute `source_signal`) SHALL continue to skip oversized files silently because that path performs no I/O on the warn sink AND its caller does not surface per-file warnings. The system SHALL invoke a configured `PiiScanner` against the contents of every mirrored regular file. When the scanner reports any match for a file under the default on-hit policy `Warn`, the system SHALL emit one stderr line per match in the format `pii warn: <pattern_name> at <relative_path>:<byte_offset>` AND SHALL include that file in the mirror with content unchanged. The system SHALL NOT include the matched substring text in the warning line. The system SHALL aggregate the total count of PII matches observed across all mirrored files AND SHALL expose that count through the raw mirror summary value returned to callers.
+The system SHALL mirror source files from the repository root into `.codebus/raw/code/` preserving directory structure. The system SHALL skip the top-level entries `.codebus/` and `.env` AND SHALL skip any directory whose path segment equals `.git` at any depth (so a nested `.git/` introduced by a git submodule or an embedded repository is excluded just like the repository's own root `.git/`). The system SHALL honor `<repo>/.gitignore` patterns. The system SHALL skip files larger than 5 mebibytes (5 × 1024 × 1024 bytes); for every such oversized skip the system SHALL increment the sync summary's `oversized_skipped_files` counter by exactly one AND SHALL ATTEMPT to emit one warn line in the format `mirror skip: oversized at <relative_path> (<N> bytes > 5 MiB limit)` (the relative path SHALL be normalised to forward-slash separators so output is consistent across Windows AND Unix). Warn-line emission is best-effort observability: when the warn sink returns an I/O error (for example `BrokenPipe` / Windows `ERROR_NO_DATA` when stderr is a closed pipe under a GUI host such as Tauri), the system SHALL silently swallow the write error AND SHALL still perform the skip AND SHALL still increment the counter — a failing warn sink SHALL NOT abort the surrounding `sync_with_scanner` invocation. The counter is the load-bearing observable surface; the warn line is the convenience surface. The oversized skip warning SHALL surface only from the mirror-writer path (the user-facing sync); the drift-detection signal walk (consumed by `goal` to compute `source_signal`) SHALL continue to skip oversized files silently because that path performs no I/O on the warn sink AND its caller does not surface per-file warnings. In addition to the per-skip counter and warn line, the mirror-writer path SHALL surface oversized skips to the agent that reads the raw mirror: after all entries have been processed, when one or more files were skipped as oversized during this sync invocation, the system SHALL write an aggregated oversized-files manifest into the mirror destination at `<raw_code_dir>/_codebus-oversized.md` (i.e. `.codebus/raw/code/_codebus-oversized.md`); when zero files were skipped as oversized during this sync invocation, the system SHALL NOT create or leave such a manifest. Because the mirror destination is fully recreated at the start of every sync, a manifest written by a previous sync SHALL NOT persist into a later sync that has no oversized files. The manifest SHALL begin with a header indicating that the listed files have content omitted because they exceed the 5 MiB limit AND are listed for structural awareness, followed by one entry line per skipped file; each entry line SHALL contain the skipped file's repository-relative path normalised to forward-slash separators AND its size in bytes. Entry lines SHALL be ordered by path so the manifest is deterministic across platforms. The manifest is an additional agent-facing structural-awareness surface; writing it SHALL NOT alter, replace, or suppress the per-skip warn line or the `oversized_skipped_files` counter, AND the manifest SHALL NOT contain any byte of the skipped files' content. The system SHALL invoke a configured `PiiScanner` against the contents of every mirrored regular file. When the scanner reports any match for a file under the default on-hit policy `Warn`, the system SHALL emit one stderr line per match in the format `pii warn: <pattern_name> at <relative_path>:<byte_offset>` AND SHALL include that file in the mirror with content unchanged. The system SHALL NOT include the matched substring text in the warning line. The system SHALL aggregate the total count of PII matches observed across all mirrored files AND SHALL expose that count through the raw mirror summary value returned to callers.
 
 #### Scenario: Mirror preserves directory structure and skips top-level dot directories
 
@@ -127,6 +127,27 @@ The system SHALL mirror source files from the repository root into `.codebus/raw
 
 - **WHEN** a single sync invocation encounters two source files `a.bin` AND `b.bin` both larger than 5 × 1024 × 1024 bytes alongside one small file `small.txt`
 - **THEN** the sync summary's `oversized_skipped_files` field SHALL equal two AND the warn sink SHALL contain exactly two `mirror skip: oversized at ...` lines (one per oversized file) AND `small.txt` SHALL be mirrored
+
+#### Scenario: Oversized skip writes an agent-visible manifest listing path and size
+
+- **WHEN** a single sync invocation skips one oversized source file `dist/bundle.js` of `N` bytes (`N` > 5 × 1024 × 1024) alongside one small file `small.txt`
+- **THEN** the file `.codebus/raw/code/_codebus-oversized.md` SHALL exist AND SHALL contain an entry line referencing the forward-slash path `dist/bundle.js` together with the byte count `N` AND SHALL contain a header indicating content is omitted because the file exceeds the 5 MiB limit AND SHALL NOT contain any content from `dist/bundle.js` AND `small.txt` SHALL be mirrored AND the sync summary's `oversized_skipped_files` field SHALL equal one
+
+##### Example: two oversized files listed in path order
+
+- **GIVEN** a sync skips `vendor/big.tar` (7340032 bytes) AND `assets/dataset.csv` (6291456 bytes)
+- **WHEN** the manifest `.codebus/raw/code/_codebus-oversized.md` is written
+- **THEN** it lists `assets/dataset.csv` before `vendor/big.tar` (entries ordered by path) AND each entry pairs the forward-slash path with its byte count
+
+#### Scenario: No oversized files leaves no manifest
+
+- **WHEN** a sync invocation encounters no source file larger than 5 × 1024 × 1024 bytes
+- **THEN** the file `.codebus/raw/code/_codebus-oversized.md` SHALL NOT exist after the sync completes
+
+#### Scenario: A later oversized-free sync does not leave a stale manifest
+
+- **WHEN** a first sync skips one oversized file (writing `.codebus/raw/code/_codebus-oversized.md`) AND a subsequent sync into the same mirror destination encounters no oversized file
+- **THEN** after the subsequent sync the file `.codebus/raw/code/_codebus-oversized.md` SHALL NOT exist (the stale manifest from the first sync SHALL NOT persist)
 
 #### Scenario: PII match emits stderr warning and still mirrors file
 
@@ -151,7 +172,7 @@ The system SHALL mirror source files from the repository root into `.codebus/raw
 #### Scenario: Source signal walk silently skips oversized files without warn
 
 - **WHEN** the source signal walk (consumed by `goal` drift detection) traverses a repository that contains a 6 MiB file
-- **THEN** the walk SHALL exclude that file from its file count AND aggregate byte total (matching the mirror writer's skip rule so `source_signal` stays consistent) AND SHALL NOT emit any stderr warning for the oversized file (the walk is an internal drift-detection helper with no warn sink AND no per-file user-facing surface)
+- **THEN** the walk SHALL exclude that file from its file count AND aggregate byte total (matching the mirror writer's skip rule so `source_signal` stays consistent) AND SHALL NOT emit any stderr warning for the oversized file (the walk is an internal drift-detection helper with no warn sink AND no per-file user-facing surface) AND SHALL NOT write an oversized-files manifest (the manifest is produced only by the mirror-writer path)
 
 #### Scenario: Sync survives a failing warn sink on oversized skip
 
@@ -160,8 +181,8 @@ The system SHALL mirror source files from the repository root into `.codebus/raw
 
 
 <!-- @trace
-source: core-quality-residuals
-updated: 2026-05-23
+source: oversized-files-manifest
+updated: 2026-06-01
 code:
   - codebus-core/src/git/nested_repo.rs
   - codebus-core/src/verb/goal.rs
