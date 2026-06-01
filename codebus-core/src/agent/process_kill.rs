@@ -42,6 +42,8 @@ use std::io;
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::{Child, Command};
 
 /// Cross-platform handle for terminating a spawned child *and all of its
@@ -72,18 +74,30 @@ unsafe impl Send for Inner {}
 unsafe impl Sync for Inner {}
 
 impl KillHandle {
-    /// Configure `cmd` to spawn into its own process group / job. Call
-    /// this BEFORE `Command::spawn`. On Unix this sets `process_group(0)`
-    /// so the child becomes a PGID leader; on Windows it is currently a
-    /// no-op (the job is attached after spawn).
-    pub(crate) fn pre_spawn(_cmd: &mut Command) {
+    /// Configure `cmd` before `Command::spawn`. On Unix this sets
+    /// `process_group(0)` so the child becomes a PGID leader. On Windows
+    /// it sets `CREATE_NO_WINDOW` so the spawned agent does not pop up its
+    /// own console; the Job Object that ties the descendant tree together
+    /// is still attached after spawn in [`install`].
+    pub(crate) fn pre_spawn(cmd: &mut Command) {
         #[cfg(unix)]
-        _cmd.process_group(0);
-        // Windows path: no pre-spawn knob is needed. We attach the
-        // Job Object after CreateProcess; there is a tiny race window
-        // where the child could fork before assignment, but the spawned
-        // CLIs do not fork instantly on startup and the race has never
-        // been observed in practice.
+        cmd.process_group(0);
+        #[cfg(windows)]
+        {
+            // The agent CLIs are always driven non-interactively (`-p`
+            // print mode) and their output is captured over the piped
+            // stdout/stderr that `invoke` reads — they never need a
+            // console of their own. Without this flag a release GUI build
+            // (windows_subsystem = "windows", no console) still spawns
+            // `claude.cmd` / `codex.cmd` → `node.exe` with a fresh console
+            // window that flashes on screen. CREATE_NO_WINDOW is inherited
+            // by the whole cmd → node descendant tree, suppressing the
+            // pop-up. It does not affect the inherited stdout/stderr pipes
+            // nor the Job Object attached after spawn, so process-tree
+            // kill on cancel/timeout is unchanged.
+            use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
     }
 
     /// Install a kill handle around an already-spawned child. On Unix
