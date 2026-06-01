@@ -106,7 +106,10 @@ pub fn changed_paths_under(
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> io::Result<()> {
-    let out = Command::new("git").current_dir(cwd).args(args).output()?;
+    let mut cmd = Command::new("git");
+    cmd.current_dir(cwd).args(args);
+    crate::win_console::hide_console(&mut cmd);
+    let out = cmd.output()?;
     if !out.status.success() {
         return Err(io::Error::other(format!(
             "git {args:?} failed: {}",
@@ -117,7 +120,10 @@ fn run_git(cwd: &Path, args: &[&str]) -> io::Result<()> {
 }
 
 fn capture_git(cwd: &Path, args: &[&str]) -> io::Result<String> {
-    let out = Command::new("git").current_dir(cwd).args(args).output()?;
+    let mut cmd = Command::new("git");
+    cmd.current_dir(cwd).args(args);
+    crate::win_console::hide_console(&mut cmd);
+    let out = cmd.output()?;
     if !out.status.success() {
         return Err(io::Error::other(format!(
             "git {args:?} failed: {}",

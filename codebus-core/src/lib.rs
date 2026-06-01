@@ -11,4 +11,5 @@ pub mod skill_bundle;
 pub mod stream;
 pub mod vault;
 pub mod verb;
+pub mod win_console;
 pub mod wiki;

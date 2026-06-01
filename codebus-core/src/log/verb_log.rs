@@ -104,12 +104,13 @@ pub fn write_run_log(sink_cfg: SinkConfig, entry: &RunLog) {
 /// vaults (where `HEAD~1` doesn't resolve) don't leak `fatal: bad revision`
 /// to the user's terminal.
 pub fn wiki_changed_since_last_commit(vault_root: &Path) -> bool {
-    let status = std::process::Command::new("git")
-        .args(["-C"])
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["-C"])
         .arg(vault_root)
         .args(["diff", "--quiet", "HEAD~1", "--", "wiki/"])
-        .stderr(std::process::Stdio::null())
-        .status();
+        .stderr(std::process::Stdio::null());
+    crate::win_console::hide_console(&mut cmd);
+    let status = cmd.status();
     matches!(status, Ok(s) if s.code() == Some(1))
 }
 
@@ -203,13 +204,14 @@ mod tests {
         // diff path is exercised by CLI integration tests goal_flow.rs
         // / fix_flow.rs which run against fully-initialized vaults.
         let tmp = TempDir::new().unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["-C"])
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(["-C"])
             .arg(tmp.path())
             .args(["init", "--quiet"])
             .stderr(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .status();
+            .stdout(std::process::Stdio::null());
+        crate::win_console::hide_console(&mut cmd);
+        let _ = cmd.status();
         // No commits → HEAD~1 unresolvable → status code != Some(1) → false.
         let result = wiki_changed_since_last_commit(tmp.path());
         assert!(!result, "fresh repo with no commits should report no diff");

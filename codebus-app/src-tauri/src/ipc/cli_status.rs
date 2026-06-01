@@ -86,6 +86,9 @@ pub(crate) fn probe_binary(binary: &str) -> CliStatus {
 fn version_command(binary: &str) -> Command {
     let mut cmd = Command::new("cmd");
     cmd.arg("/C").arg(binary).arg("--version");
+    // Suppress the console window the `cmd` shim would otherwise flash from
+    // a windowless GUI build (this probe runs on entering Settings).
+    codebus_core::win_console::hide_console(&mut cmd);
     cmd
 }
 
@@ -93,6 +96,7 @@ fn version_command(binary: &str) -> Command {
 fn version_command(binary: &str) -> Command {
     let mut cmd = Command::new(binary);
     cmd.arg("--version");
+    codebus_core::win_console::hide_console(&mut cmd);
     cmd
 }
 
