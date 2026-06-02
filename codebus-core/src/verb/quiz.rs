@@ -351,6 +351,40 @@ fn compose_verify_input(topic: &str, pages: &[String], body: &str) -> String {
     format!("topic={topic}\n\nPLANNED PAGES:\n{pages_block}\n\nQUIZ:\n{body}")
 }
 
+/// Compose the generate-spawn input payload (spec `quiz` / Quiz Generate
+/// Spawn Carries Topic Language Signal). The Page flow (`topic` = `None`)
+/// reproduces the historical `pages=[...] count=N` shape byte for byte so
+/// existing behavior is untouched; the Goal flow (`topic` = `Some`) prepends
+/// a `topic=<topic>` segment as the language signal the generate agent
+/// follows per the §0 Language Policy quiz rule. codebus does not parse this
+/// payload — the topic is free-text fed to the agent, so spaces / CJK /
+/// commas inside it are fine (quiz-output-language-follows-topic).
+fn compose_generate_input(topic: Option<&str>, pages: &[String], count: u8) -> String {
+    let core = format!("pages=[{}] count={}", pages.join(","), count);
+    match topic {
+        Some(t) => format!("topic={t}\n{core}"),
+        None => core,
+    }
+}
+
+/// Compose the content-verify repair (regenerate) spawn input. Reuses
+/// [`compose_generate_input`] for the leading `topic=`/`pages=` segment so a
+/// repair iteration carries the same topic language signal as the original
+/// generate, then appends the revise-only-flagged instructions plus the
+/// previous quiz body and the content defect lines.
+fn compose_repair_input(
+    topic: Option<&str>,
+    pages: &[String],
+    count: u8,
+    body: &str,
+    defect_lines: &str,
+) -> String {
+    format!(
+        "{}\n\nThe previous quiz had content defects. Revise ONLY the flagged questions, keep all other questions verbatim, and keep exactly {count} questions.\n\nPREVIOUS QUIZ:\n{body}\n\nCONTENT DEFECTS:\n{defect_lines}",
+        compose_generate_input(topic, pages, count),
+    )
+}
+
 /// Run one spawn, accumulating assistant `text` (Thought) into a single
 /// String while forwarding every stream event through `fan_out`. Emits
 /// `SpawnStart` before and `SpawnEnd` after.
@@ -550,10 +584,10 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         &mut fan_out,
         &*backend,
         Some("generate".to_string()),
-        format!(
-            "pages=[{}] count={}",
-            options.pages.join(","),
-            options.question_count
+        compose_generate_input(
+            options.topic.as_deref(),
+            &options.pages,
+            options.question_count,
         ),
         &paths.root,
         None,
@@ -654,13 +688,12 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
                     .join("\n");
                 // Regenerate (retry) spawn: bundle=Quiz, sub_mode=generate,
                 // resolve_as=None (uses Quiz config — generate, not verify).
-                let repair_input = format!(
-                    "pages=[{}] count={}\n\nThe previous quiz had content defects. Revise ONLY the flagged questions, keep all other questions verbatim, and keep exactly {} questions.\n\nPREVIOUS QUIZ:\n{}\n\nCONTENT DEFECTS:\n{}",
-                    options.pages.join(","),
-                    options.question_count,
+                let repair_input = compose_repair_input(
+                    options.topic.as_deref(),
+                    &options.pages,
                     options.question_count,
                     body,
-                    defect_lines
+                    &defect_lines,
                 );
                 match run_spawn(
                     &mut **fan_cell.borrow_mut(),
@@ -1326,5 +1359,72 @@ mod tests {
             input.contains("QUIZ:"),
             "QUIZ: header still required; got:\n{input}"
         );
+    }
+
+    #[test]
+    fn compose_generate_input_some_carries_topic() {
+        // quiz-output-language-follows-topic: Goal flow threads the topic so
+        // the generate agent has a language signal to follow.
+        let pages = vec!["wiki/a.md".to_string(), "wiki/b.md".to_string()];
+        let input = compose_generate_input(Some("JWT 簽發與驗證"), &pages, 5);
+        assert!(
+            input.contains("topic=JWT 簽發與驗證"),
+            "Goal-flow generate input must carry the topic segment; got:\n{input}"
+        );
+        assert!(
+            input.contains("pages=[wiki/a.md,wiki/b.md]") && input.contains("count=5"),
+            "generate input must keep the pages/count segment; got:\n{input}"
+        );
+    }
+
+    #[test]
+    fn compose_generate_input_none_omits_topic_equals_old_shape() {
+        // Page flow (topic=None) must reproduce the pre-change shape byte for
+        // byte so existing behavior is untouched.
+        let pages = vec!["wiki/a.md".to_string(), "wiki/b.md".to_string()];
+        let input = compose_generate_input(None, &pages, 5);
+        let old_shape = format!("pages=[{}] count={}", pages.join(","), 5);
+        assert_eq!(
+            input, old_shape,
+            "None must reproduce the historical generate shape exactly"
+        );
+        assert!(
+            !input.contains("topic="),
+            "Page-flow input must not carry a topic segment; got:\n{input}"
+        );
+    }
+
+    #[test]
+    fn compose_repair_input_some_carries_topic() {
+        // The content-verify repair (regenerate) spawn must carry the same
+        // topic signal so a repair iteration cannot drift the quiz language.
+        let pages = vec!["wiki/a.md".to_string()];
+        let body = "## Q1. stem";
+        let defects = "Q1 | answer-wrong | fix it";
+        let input = compose_repair_input(Some("中文主題"), &pages, 3, body, defects);
+        assert!(
+            input.contains("topic=中文主題"),
+            "repair input must carry the topic segment; got:\n{input}"
+        );
+        assert!(
+            input.contains("PREVIOUS QUIZ:") && input.contains("CONTENT DEFECTS:"),
+            "repair input must keep its previous-quiz / defects blocks; got:\n{input}"
+        );
+        assert!(
+            input.contains(body) && input.contains(defects),
+            "repair input must include the previous body and defect lines verbatim; got:\n{input}"
+        );
+    }
+
+    #[test]
+    fn compose_repair_input_none_omits_topic() {
+        // Page-flow repair keeps the topic-less prefix.
+        let pages = vec!["wiki/a.md".to_string()];
+        let input = compose_repair_input(None, &pages, 3, "## Q1. stem", "Q1 | x | y");
+        assert!(
+            !input.contains("topic="),
+            "Page-flow repair input must not carry a topic segment; got:\n{input}"
+        );
+        assert!(input.contains("pages=[wiki/a.md] count=3"), "got:\n{input}");
     }
 }

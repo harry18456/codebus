@@ -628,6 +628,8 @@ If no `wiki/` page covers the topic, emit instead and then stop:
 
 Given a fixed page list and question count, produce the quiz body. Read each listed page. You MAY also Read pages those pages wikilink to for context.
 
+The prompt MAY carry an OPTIONAL `topic=<...>` segment preceding the `pages=[...] count=<N>` segment (i.e. `topic=<...>` then `pages=[...] count=<N>`). It is present for the Goal flow and absent for the Page flow, and it is the language signal: when present, produce the quiz in the topic's language; when absent, follow the quizzed pages' language (see Language Override).
+
 Emit ONLY the question body — NO frontmatter, NO code fence, NO surrounding ``` markers. The body is exactly `<N>` question sections in this shape:
 
     ## Q1. <stem>
@@ -688,7 +690,8 @@ You MUST NOT author `quiz_id`, `topic`, `trigger`, `planned_pages`, `generation_
 ## Language Override
 
 - All markers and structural tokens are ALWAYS literal English (`[CODEBUS_QUIZ_SCOPE]`, `[CODEBUS_QUIZ_NO_MATCH]`, `[CODEBUS_QUIZ_VIOLATION]`, `## Answer:`, `## Explanation:`).
-- Question stems, choices, explanations, and the no-match reason follow the language of the quizzed wiki pages (auto-detect; if mixed, prefer the dominant language).
+- Per the §0 Language Policy in the cwd schema document: in `generate:` mode, when the prompt supplies a `topic=<...>` field, question stems, choices, and explanations follow the language of that **topic**; when no `topic=` field is supplied (the Page flow), they fall back to auto-detecting the language of the quizzed wiki pages. Do NOT default to the dominant language of the quizzed pages when a `topic=` field is present.
+- In `plan:` mode, the no-match reason follows the language of the `plan:` topic text.
 
 ## Forbidden behaviors
 
@@ -1568,9 +1571,24 @@ mod tests {
         assert!(body.contains("caller (codebus CLI / GUI) injects all frontmatter"), "provider={provider:?}");
         assert!(body.contains("NO frontmatter, NO code fence"), "provider={provider:?}");
 
-        // Language Override: markers always English, content follows page
+        // Language Override: markers always English; content follows the
+        // quiz topic when supplied, else falls back to the quizzed pages.
         assert!(body.contains("Language Override"), "provider={provider:?}");
         assert!(body.contains("ALWAYS literal English"), "provider={provider:?}");
+        // quiz-output-language-follows-topic: output follows the topic= signal
+        assert!(
+            body.contains("`topic=<...>`"),
+            "quiz body must document the `topic=<...>` language signal; provider={provider:?}"
+        );
+        assert!(
+            body.contains("follow the language of that **topic**"),
+            "quiz Language Override must state output follows the topic language; provider={provider:?}"
+        );
+        // the old wiki-page-dominant-language rule (the bug) must be gone
+        assert!(
+            !body.contains("dominant language") || body.contains("Do NOT default to the dominant language"),
+            "quiz body must not instruct following the quizzed pages' dominant language; provider={provider:?}"
+        );
 
         // read-only tool gate
         assert!(body.contains("`Write`"), "provider={provider:?}");

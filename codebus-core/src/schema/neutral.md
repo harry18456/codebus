@@ -22,6 +22,16 @@ workflows that produce and consume content under these rules.
   `[CODEBUS_*]`).
 - Frontmatter free-text values (`title:`, `goals:`) follow the prompt
   context language; the field names themselves stay English.
+- For the `quiz` verb, question stems, choices, and explanations follow
+  the **quiz topic** language when an originating topic is supplied (the
+  Goal flow); when no topic is supplied (the Page flow / wiki-preview
+  "Quiz me on this") they fall back to auto-detecting the quizzed wiki
+  pages' language. Quiz structural tokens and markers (`[CODEBUS_QUIZ_*]`,
+  `## Answer:`, `## Explanation:`) stay literal English. Quiz output does
+  NOT default to the dominant language of the quizzed pages when a topic
+  is present — technical pages mixing prose with English slugs,
+  frontmatter, code identifiers, and `[[wikilink]]` targets frequently
+  auto-detect to English even when the prose is not English.
 - This schema document is an "internal surface" — the agent does NOT
   mirror this file's language into output. The agent reads this file
   to know the rules; the output language is decided by the prompt
