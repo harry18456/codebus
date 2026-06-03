@@ -15,7 +15,7 @@ codebus 把使用者輸入餵給 LLM、再讓 LLM 寫檔到你的 repo 旁邊。
 | Agent 偷打開 WebFetch 連網 / 跑 shell | Triple-flag toolset gate，只給該 verb 該有的 tool |
 | AWS / Anthropic key 不小心被 sync 進 wiki | PII filter，Critical 強制 mask |
 | Agent 寫壞 wiki | nested git auto-commit，隨時 `git reset --hard` 還原 |
-| **codex** agent 讀 `~/.ssh` `~/.aws` 等家目錄機密 | ⚠️ **codex path 在 Windows 擋不了**（2026-05-28 PoC 實證）— 敏感家目錄任務請走 claude，見 Known limits §5 |
+| Agent 讀 `~/.ssh` `~/.aws` 等家目錄機密 / 母 repo 未遮罩原始碼 | ⚠️ **Windows 上兩個 provider 的「讀」都不是硬邊界。** codex path 完全不擋讀（2026-05-28 PoC）。claude path 的 `check-read` hook 擋掉 `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.config/gh` + key 檔名，但它是 **denylist 非 vault allowlist**——母 repo 原始檔、`~/.kube`/`~/.docker`/`~/.env` 等仍讀得到，且 `Glob`/`Grep` 沒掛 hook。見 Known limits §5（codex）/ §6（claude） |
 
 ---
 
@@ -40,13 +40,13 @@ codebus 把使用者輸入餵給 LLM、再讓 LLM 寫檔到你的 repo 旁邊。
 
 > ⚠️ **以下 §1–§4（cwd 隔離 + toolset gate + user-global 設定隔離）是 claude provider 的隔離機制。** codex provider 走另一套（OS-native sandbox `-s` + `--ignore-user-config`），其讀取隔離在 Windows 實測為 soft/partial — 見 Known limits §5。
 
-### 1. cwd 隔離
+### 1. cwd 隔離（擋寫，不擋讀）
 
 每個 spawn agent 的子行程 **cwd 都設成 `<repo>/.codebus/`**，不是 source repo root。
 
-Claude Code 的 sandbox 不准 agent 寫 cwd 之外的路徑（沒下 `--add-dir`），所以即使 agent 被 inject 想寫 `../src/main.rs`，**Write tool 會被擋**。
+**寫**：headless `-p --permission-mode acceptEdits` 下，cwd 之外的 Write/Edit **無法 auto-approve、又沒有互動使用者批准 → 被 Claude permission layer 擋下**（即使 agent 被 inject 想寫 `../src/main.rs` 也寫不成；codebus 沒下 `--add-dir`）。所以 **claude path 的 agent 寫不到你的 source code 本體**。⚠️ 注意這是 **Claude permission layer（CLI 層）行為、不是 OS/kernel sandbox**（native Windows 沒有 OS sandbox），且**版本相依** → 每次 Claude Code 升級必須重跑 sandbox spike（見 Known limits §3）。
 
-意思是 **claude path** 的 agent **物理上寫不到你的 source code 本體**。Source 內容會被 PII filter 過後、複製成 `<repo>/.codebus/raw/code/` 給 agent 唯讀 — 改不到原檔。（codex path 的 read boundary 是另一回事，見 Known limits §5。）
+**讀**：⚠️ **cwd 不擋讀。** Read/Glob/Grep 可讀 cwd 之外的絕對路徑（母 repo 原始檔、sibling repo、家目錄）。codebus 對讀只有 `check-read` 這個 **denylist**（擋特定家目錄 + key 檔名，非 vault allowlist），且 `Glob`/`Grep` 沒掛 hook。Source 雖會 PII filter 過後複製成 `<repo>/.codebus/raw/code/` 給 agent 唯讀，但 agent 仍可用絕對路徑直接讀**未遮罩的母 repo** 而繞過 mirror。詳見 Known limits §6（claude）/ §5（codex）。
 
 ### 2. Triple-flag toolset gate
 
@@ -110,6 +110,12 @@ Claude Code 的 sandbox 不准 agent 寫 cwd 之外的路徑（沒下 `--add-dir
 **Critical 是 security floor，使用者 config 不能降級**（就算你寫 `pii.on_hit: skip` 也不行；那只能影響 Warn 級）。Warn 級可以用 `pii.on_hit` 調整為 `warn` / `skip` / `mask`。
 
 實務：你的 AWS / Anthropic key 即使不小心寫死在 source，**也不會被 sync 進 raw mirror 給 LLM 看到**。
+
+⚠️ **但這個保護有三個已知缺口**（細節見 Known limits §6）：
+
+1. scanner 只認上表 4 種——**GitHub PAT / GCP key / Slack token / JWT / PEM private key body / DB 連線字串密碼都不會被遮罩**（除非企業自加 `patterns_extra`）。
+2. **非 UTF-8 檔案（如 Windows 常見的 UTF-16）整個跳過掃描**（`raw_sync.rs` 的 `read_to_string().ok()` 失敗即 byte-identical copy），連 Critical floor 都不 fire → secret 可未遮罩進 mirror。
+3. **gitignored 檔案**（含 root `.env`，`ALWAYS_SKIP_AT_ROOT`）不進 mirror 也不掃描——claude 經 mirror 讀時不暴露，但 codex 讀 live repo、claude 絕對路徑 Read 仍可直接讀到這些未掃描的檔。
 
 詳見 [`openspec/specs/pii-filter/spec.md`](../openspec/specs/pii-filter/spec.md)。
 
@@ -211,7 +217,23 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 - 所以「每 spawn 單一受限 agent」的保證**透過 session 級 sandbox 繼承延伸到子 agent**（就 `-s` enforce 的寫／命令面而言），無需額外機制
 - 軟層：codex system prompt 本就限制「只有 user 明確要求 delegation 才 spawn」、codebus 的 `$codebus-<bundle>` skill prompt 不請求 delegation；要徹底移除能力面可加 `--disable multi_agent`（spike 證實能乾淨移除 toolset），但子 agent 已 bounded、非必要。PoC：`scripts/codex_subagent_*.py`
 
-→ **codex 在 Windows unelevated 的隔離是「讀／網路 soft-partial、寫較硬」。** 敏感家目錄「讀」相關任務請用 claude provider，或自行承擔風險。macOS / Linux 尚未實測——別從 Windows 結果推論 Seatbelt / Landlock。hard read enforcement 是 open backlog（見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」）。
+→ **codex 在 Windows unelevated 的隔離是「讀／網路 soft-partial、寫較硬」。** macOS / Linux 尚未實測——別從 Windows 結果推論 Seatbelt / Landlock。hard read enforcement 是 open backlog（見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」）。⚠️ **注意：「敏感讀取改走 claude」不是保證**——claude path 的讀取也只是 denylist，見 §6。
+
+### 6. claude provider 的「讀」也不是 vault 硬邊界（Windows）
+
+§1 說明了 claude path 的**寫**被 cwd + permission layer 擋住。但**讀沒有對等的硬邊界**：
+
+- `check-read` PreToolUse hook（`codebus-cli/src/commands/hook.rs`）是 **denylist**：擋 image/binary 副檔名、`*id_rsa*`/`*.pem`/`*.key`、`~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.config/gh`。它**不是 vault allowlist** → 絕對路徑 Read 仍可讀**母 repo 未經 PII 遮罩的原始碼**、以及 `~/.kube`/`~/.docker/config.json`/`~/.env`/`~/.netrc` 等 denylist 外的憑證。
+- materialized `.codebus/.claude/settings.json` 只掛 `Bash` + `Read` 兩個 matcher → **`Glob`/`Grep` 完全沒經 check-read**，Grep 可直接讀 vault 外檔案內容。
+- native Windows 無 OS sandbox、headless `-p` 讀取工具不會被互動批准 → 上述讀取在「分析不信任的 repo」場景就是真實風險面（trusted prompt 之外）。
+
+緩解現況：分析的 source 已先 PII mirror（但見 §4 PII 三缺口）、且 toolset 無 WebFetch / MCP（讀到的東西難直接外傳，須先落地成 wiki 頁面再被你 push 出去）。修法（vault-root allowlist + Glob/Grep gate）見 [`BACKLOG.md`](BACKLOG.md)。
+
+**其他已知 codebus-side 缺口**（細節見 [`BACKLOG.md`](BACKLOG.md)）：
+
+- spawn agent **沒有 `env_clear`** → 父 shell 的機密 env（`GITHUB_TOKEN` / `AWS_*` / `KUBECONFIG`）+ codebus 自己注入的 provider key 都進 agent child env（PII filter 只掃檔案、不掃 env；codex workspace-write 的 shell / subagent 讀得到）。
+- child stderr 預設 drain 到 `io::sink()`（需 `CODEBUS_FORWARD_AGENT_STDERR=1` 才轉發）→ Windows 上只出現在 stderr 的 sandbox denial 不計入 `sandbox_denial_count`、run 可能誤標 succeeded。
+- vault 自己的 `.codebus/.claude/settings.json`（hook 註冊檔）在 workspace Write 可及範圍內 → 被 inject 的 goal/fix agent 可改寫掉自己的 check-bash/check-read hook（下一輪 spawn 才生效）。
 
 ---
 
