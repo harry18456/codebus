@@ -4,7 +4,9 @@
 //! ## Why a process tree, not just a single PID
 //!
 //! The codebus agent CLIs (`claude`, `codex`) on Windows resolve to a
-//! `.cmd` shim that spawns `node.exe` underneath. On Unix they similarly
+//! `.cmd` shim that spawns `node.exe` underneath (codex goes one
+//! level deeper: `codex.cmd` → `node.exe` → a native `codex.exe`
+//! leaf that holds the inherited stdout pipe). On Unix they similarly
 //! spawn helper processes (node, ripgrep, shell tools). When the watcher
 //! thread inside `super::claude_cli::invoke` flips on a cancel signal and
 //! kills only the immediate `Child`, the grandchildren inherit the stdout
