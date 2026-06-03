@@ -14,13 +14,16 @@ import { RunListItem } from "./RunListItem"
 import { WatcherStatusBanner } from "./WatcherStatusBanner"
 
 /**
- * i18n keys for the three empty-state pre-fill examples. Localized values
- * live in `messages.ts`; the order here is the on-screen order (1..3).
+ * i18n keys for the four quick-start pre-fill examples, shared by the
+ * empty-state pills and the persistent populated-state chips (single
+ * source — design D2). Localized values live in `messages.ts`; the order
+ * here is the on-screen order (1..4).
  */
 const GOAL_EXAMPLE_KEYS = [
   "workspace.goals.examplePlaceholder1",
   "workspace.goals.examplePlaceholder2",
   "workspace.goals.examplePlaceholder3",
+  "workspace.goals.examplePlaceholder4",
 ] as const
 
 interface GoalsTabProps {
@@ -168,6 +171,30 @@ export function GoalsTab({
         </div>
       ) : (
         <div className="flex flex-1 flex-col overflow-auto p-2">
+          <div
+            data-testid="goals-quickstart"
+            className="flex flex-col gap-1 px-1 pt-2"
+          >
+            <SectionLabel variant="caps" className="pb-1">
+              {t("workspace.goals.quickStartLabel")}
+            </SectionLabel>
+            <div className="flex flex-wrap gap-1">
+              {GOAL_EXAMPLE_KEYS.map((key, i) => {
+                const example = t(key)
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    data-testid={`goals-quickstart-chip-${i}`}
+                    onClick={() => openModalWith(example)}
+                    className="rounded-sm border border-border bg-bg-raised px-3 py-1 text-left font-mono text-meta text-fg-tertiary hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent-ring"
+                  >
+                    {example}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           <SectionLabel variant="caps" className="px-1 pb-1 pt-2">
             RECENT
           </SectionLabel>

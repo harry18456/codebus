@@ -17,6 +17,8 @@ const WORKSPACE_KEYS = [
   "workspace.goals.examplePlaceholder1",
   "workspace.goals.examplePlaceholder2",
   "workspace.goals.examplePlaceholder3",
+  "workspace.goals.examplePlaceholder4",
+  "workspace.goals.quickStartLabel",
   "workspace.goals.headerTitle",
   "workspace.goals.headerSubtitle",
   "workspace.goals.emptyHeroTitle",

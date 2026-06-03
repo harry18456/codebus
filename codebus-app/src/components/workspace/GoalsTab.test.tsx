@@ -98,6 +98,55 @@ describe("GoalsTab", () => {
     expect(recent.classList.contains("section-label--caps")).toBe(true)
   })
 
+  it("GoalsTab_populated_shows_persistent_quickstart_above_RECENT", () => {
+    useGoalsStore.setState({
+      runs: [makeRun("a", "2026-05-13T10:00:00Z")],
+      activeRun: null,
+    })
+    render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
+
+    // Quick-start region with its caps label + exactly four chips.
+    const quickstart = screen.getByTestId("goals-quickstart")
+    expect(quickstart).toBeInTheDocument()
+    expect(quickstart).toHaveTextContent("Quick start")
+    const chips = screen.getAllByTestId(/^goals-quickstart-chip-/)
+    expect(chips).toHaveLength(4)
+    expect(chips[0]).toHaveTextContent("describe what this project does")
+    expect(chips[3]).toHaveTextContent("map the project structure")
+
+    // Quick-start region renders above the RECENT section label.
+    const recent = screen.getByText("RECENT")
+    expect(
+      quickstart.compareDocumentPosition(recent) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    // Clicking a chip opens the modal pre-filled with that example.
+    fireEvent.click(chips[0])
+    expect(screen.getByTestId("new-goal-modal")).toBeInTheDocument()
+    const textarea = screen.getByTestId(
+      "new-goal-textarea",
+    ) as HTMLTextAreaElement
+    expect(textarea.value).toBe("describe what this project does")
+  })
+
+  it("GoalsTab_populated_zh_quickstart_chips_have_no_english_literal", () => {
+    mockedUseLocale.mockReturnValue("zh")
+    useGoalsStore.setState({
+      runs: [makeRun("a", "2026-05-13T10:00:00Z")],
+      activeRun: null,
+    })
+    render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
+    const chips = screen.getAllByTestId(/^goals-quickstart-chip-/)
+    expect(chips).toHaveLength(4)
+    expect(chips[0]).toHaveTextContent("說明這個專案在做什麼")
+    expect(chips[0].textContent).not.toContain(
+      "describe what this project does",
+    )
+    // The quick-start label is localized too (not the English literal).
+    expect(screen.getByTestId("goals-quickstart")).toHaveTextContent("快速開始")
+  })
+
   it("GoalsTab_empty_state_shows_three_region_layout_with_i18n_prefill_examples", () => {
     useGoalsStore.setState({ runs: [], activeRun: null })
     render(<GoalsTab vaultPath="/v" onSelectRun={() => {}} />)
@@ -112,17 +161,20 @@ describe("GoalsTab", () => {
       "Start with one of the examples below, or write your own.",
     )
 
-    // Region 3: three pre-fill pills sourced from i18n keys (en values).
+    // Region 3: exactly four pre-fill pills sourced from i18n keys (en values).
+    expect(screen.getAllByTestId(/^goals-empty-prefill-/)).toHaveLength(4)
     const prefills = [
       screen.getByTestId("goals-empty-prefill-0"),
       screen.getByTestId("goals-empty-prefill-1"),
       screen.getByTestId("goals-empty-prefill-2"),
+      screen.getByTestId("goals-empty-prefill-3"),
     ]
-    expect(prefills[0]).toHaveTextContent("describe the authentication flow")
+    expect(prefills[0]).toHaveTextContent("describe what this project does")
     expect(prefills[1]).toHaveTextContent(
-      "summarize the data ingestion pipeline",
+      "list the key dependencies and frameworks",
     )
-    expect(prefills[2]).toHaveTextContent("map the public API surface")
+    expect(prefills[2]).toHaveTextContent("summarize the main features")
+    expect(prefills[3]).toHaveTextContent("map the project structure")
 
     // Clicking opens the modal with that example pre-filled.
     fireEvent.click(prefills[0])
@@ -130,7 +182,7 @@ describe("GoalsTab", () => {
     const textarea = screen.getByTestId(
       "new-goal-textarea",
     ) as HTMLTextAreaElement
-    expect(textarea.value).toBe("describe the authentication flow")
+    expect(textarea.value).toBe("describe what this project does")
   })
 
   it("GoalsTab_zh_locale_shows_no_english_prefill_literals", () => {
@@ -141,13 +193,15 @@ describe("GoalsTab", () => {
       screen.getByTestId("goals-empty-prefill-0"),
       screen.getByTestId("goals-empty-prefill-1"),
       screen.getByTestId("goals-empty-prefill-2"),
+      screen.getByTestId("goals-empty-prefill-3"),
     ]
-    expect(prefills[0]).toHaveTextContent("說明認證流程")
-    expect(prefills[1]).toHaveTextContent("整理資料 ingest pipeline 概要")
-    expect(prefills[2]).toHaveTextContent("畫出公開 API surface")
+    expect(prefills[0]).toHaveTextContent("說明這個專案在做什麼")
+    expect(prefills[1]).toHaveTextContent("列出主要依賴套件與框架")
+    expect(prefills[2]).toHaveTextContent("整理主要功能")
+    expect(prefills[3]).toHaveTextContent("畫出專案結構")
     // Crucially, none of the English literals leak through in zh locale.
     expect(prefills[0].textContent).not.toContain(
-      "describe the authentication flow",
+      "describe what this project does",
     )
   })
 

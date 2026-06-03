@@ -120,9 +120,11 @@ The Goals tab MUST render a content header row at the top of the main content ar
 
 The `N` shortcut chip SHALL label a working keyboard binding: while the Goals tab is the active tab and the user is not typing inside an `INPUT`, `TEXTAREA`, or `contenteditable` target, pressing the bare `N` key (no `Cmd`, `Ctrl`, `Alt`, or `Shift` modifier) SHALL open the New Goal modal. Pressing `N` while the New Goal modal is already open SHALL be a no-op (the user is presumed to be typing the letter into the modal's textarea). The bare `N` binding SHALL NOT compete with the `Cmd+N` / `Ctrl+N` "new vault" shortcut bound in the Lobby route by `useNewVaultShortcut`.
 
-When the list is non-empty (one or more goal runs), the Goals tab MUST render a `RECENT` section label above the goal list using the `SectionLabel` component with `variant="caps"` (see capability `design-system`). The literal text `RECENT` is an identifier and SHALL NOT be translated.
+The Goals tab SHALL expose the same ordered set of exactly four example starter prompts in BOTH the empty state and the non-empty state, sourced from a single ordered set of i18n keys `workspace.goals.examplePlaceholder1` through `workspace.goals.examplePlaceholder4`. The example labels SHALL NOT be hard-coded literals in the component source. Clicking any example (pill or chip) SHALL open the New Goal modal with that example pre-filled in the textarea.
 
-When the list is empty (no goal runs in the vault), the main content area MUST render a three-region vertical layout below the content header row: (1) a centered hero region containing an emoji indicator, a headline (i18n key `workspace.goals.emptyHeroTitle`), and a subtitle (i18n key `workspace.goals.emptyHeroSubtitle`); (2) an examples region containing exactly three pre-fill example pill buttons. Each pill button's label SHALL come from i18n keys `workspace.goals.examplePlaceholder1`, `workspace.goals.examplePlaceholder2`, and `workspace.goals.examplePlaceholder3` respectively; the pill label text SHALL NOT be a hard-coded English literal in the component source. Clicking any pill button SHALL open the New Goal modal with that example pre-filled in the textarea.
+When the list is non-empty (one or more goal runs), the Goals tab MUST render, below the content header row and in top-to-bottom order: (1) a persistent quick-start examples region, then (2) a `RECENT` section label above the goal list. The `RECENT` section label SHALL use the `SectionLabel` component with `variant="caps"` (see capability `design-system`); the literal text `RECENT` is an identifier and SHALL NOT be translated. The quick-start examples region SHALL render a `SectionLabel` with `variant="caps"` whose text comes from i18n key `workspace.goals.quickStartLabel`, followed by exactly four quick-start chip buttons whose labels come from i18n keys `workspace.goals.examplePlaceholder1` through `workspace.goals.examplePlaceholder4` respectively.
+
+When the list is empty (no goal runs in the vault), the main content area MUST render a three-region vertical layout below the content header row: (1) a centered hero region containing an emoji indicator, a headline (i18n key `workspace.goals.emptyHeroTitle`), and a subtitle (i18n key `workspace.goals.emptyHeroSubtitle`); (2) an examples region containing exactly four pre-fill example pill buttons. Each pill button's label SHALL come from i18n keys `workspace.goals.examplePlaceholder1`, `workspace.goals.examplePlaceholder2`, `workspace.goals.examplePlaceholder3`, and `workspace.goals.examplePlaceholder4` respectively.
 
 #### Scenario: Goals overview filters to goal mode only
 
@@ -149,15 +151,20 @@ When the list is empty (no goal runs in the vault), the main content area MUST r
 - **WHEN** the goal list has at least one goal row
 - **THEN** a `SectionLabel` with `variant="caps"` and visible text `RECENT` renders above the goal list `ul`
 
+#### Scenario: Populated Goals overview shows persistent quick-start examples above RECENT
+
+- **WHEN** the goal list has at least one goal row
+- **THEN** a quick-start examples region renders above the `RECENT` section label containing a `SectionLabel` with `variant="caps"` whose text is the locale value of `workspace.goals.quickStartLabel` AND exactly four quick-start chip buttons whose labels are the locale values of `workspace.goals.examplePlaceholder1` through `workspace.goals.examplePlaceholder4` AND clicking any chip opens the New Goal modal with that example text pre-filled in the textarea
+
 #### Scenario: Empty Goals overview shows three-region layout with i18n-keyed pre-fill examples
 
 - **WHEN** the active vault has zero `mode=goal` rows in `runs-*.jsonl` AND no orphan `events-*.jsonl` files
-- **THEN** the Goals tab renders a content header row at the top AND a centered hero region containing the headline from `workspace.goals.emptyHeroTitle` and the subtitle from `workspace.goals.emptyHeroSubtitle` AND an examples region with exactly three clickable pill buttons whose labels come from `workspace.goals.examplePlaceholder1`, `workspace.goals.examplePlaceholder2`, and `workspace.goals.examplePlaceholder3` AND clicking any pill opens the New Goal modal with that example text in the textarea
+- **THEN** the Goals tab renders a content header row at the top AND a centered hero region containing the headline from `workspace.goals.emptyHeroTitle` and the subtitle from `workspace.goals.emptyHeroSubtitle` AND an examples region with exactly four clickable pill buttons whose labels come from `workspace.goals.examplePlaceholder1` through `workspace.goals.examplePlaceholder4` AND clicking any pill opens the New Goal modal with that example text in the textarea
 
 #### Scenario: Pre-fill example labels are not hard-coded English literals
 
 - **WHEN** the runtime locale switches between Traditional Chinese and English
-- **THEN** the three pre-fill example pill labels render the locale-specific value of `workspace.goals.examplePlaceholder1`, `workspace.goals.examplePlaceholder2`, and `workspace.goals.examplePlaceholder3` AND no English literal such as `"describe the authentication flow"` SHALL appear in the Traditional Chinese locale
+- **THEN** the empty-state pill labels and the non-empty-state quick-start chip labels both render the locale-specific value of `workspace.goals.examplePlaceholder1` through `workspace.goals.examplePlaceholder4` AND no English literal such as `"describe what this project does"` SHALL appear in the Traditional Chinese locale
 
 #### Scenario: Run row outcome icon matches RunLog outcome
 
@@ -182,6 +189,16 @@ code:
   - codebus-cli/src/main.rs
 tests:
   - codebus-cli/tests/quiz_flow.rs
+-->
+<!-- @trace
+source: goals-persistent-quickstart-examples
+updated: 2026-06-03
+code:
+  - codebus-app/src/components/workspace/GoalsTab.tsx
+  - codebus-app/src/i18n/messages.ts
+tests:
+  - codebus-app/src/i18n/workspace.test.ts
+  - codebus-app/src/components/workspace/GoalsTab.test.tsx
 -->
 
 ---

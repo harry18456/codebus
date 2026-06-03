@@ -167,9 +167,11 @@ const en = {
   "workspace.goals.newGoalButton": "+ New goal",
   "workspace.goals.emptyHint":
     "Click + New goal to ask codebus to ingest something into the wiki",
-  "workspace.goals.examplePlaceholder1": "describe the authentication flow",
-  "workspace.goals.examplePlaceholder2": "summarize the data ingestion pipeline",
-  "workspace.goals.examplePlaceholder3": "map the public API surface",
+  "workspace.goals.examplePlaceholder1": "describe what this project does",
+  "workspace.goals.examplePlaceholder2": "list the key dependencies and frameworks",
+  "workspace.goals.examplePlaceholder3": "summarize the main features",
+  "workspace.goals.examplePlaceholder4": "map the project structure",
+  "workspace.goals.quickStartLabel": "Quick start",
   "workspace.goals.headerTitle": "Goals",
   "workspace.goals.headerSubtitle":
     "List what you want to understand — codebus reads the codebase one stop at a time.",
@@ -722,9 +724,11 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.goals.newGoalButton": "+ 新增 Goal",
   "workspace.goals.emptyHint":
     "點 + 新增 Goal 讓 codebus 把某段內容整理進 wiki",
-  "workspace.goals.examplePlaceholder1": "說明認證流程",
-  "workspace.goals.examplePlaceholder2": "整理資料 ingest pipeline 概要",
-  "workspace.goals.examplePlaceholder3": "畫出公開 API surface",
+  "workspace.goals.examplePlaceholder1": "說明這個專案在做什麼",
+  "workspace.goals.examplePlaceholder2": "列出主要依賴套件與框架",
+  "workspace.goals.examplePlaceholder3": "整理主要功能",
+  "workspace.goals.examplePlaceholder4": "畫出專案結構",
+  "workspace.goals.quickStartLabel": "快速開始",
   "workspace.goals.headerTitle": "Goals",
   "workspace.goals.headerSubtitle":
     "列出你想搞懂的事——公車一站一站讀給你看。",
