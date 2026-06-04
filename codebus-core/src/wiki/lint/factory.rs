@@ -6,7 +6,7 @@ use crate::wiki::lint::rule::LintRule;
 use crate::wiki::lint::rules::{
     broken_wikilink::BrokenWikilinkRule, duplicate_slug::DuplicateSlugRule,
     frontmatter_integrity::FrontmatterIntegrityRule, missing_nav::MissingNavRule,
-    root_page::RootPageRule,
+    root_page::RootPageRule, vault_gate_integrity::VaultGateIntegrityRule,
 };
 
 pub fn build_default_rules() -> Vec<Box<dyn LintRule>> {
@@ -16,5 +16,6 @@ pub fn build_default_rules() -> Vec<Box<dyn LintRule>> {
         Box::new(BrokenWikilinkRule::new()),
         Box::new(RootPageRule::new()),
         Box::new(MissingNavRule::new()),
+        Box::new(VaultGateIntegrityRule::new()),
     ]
 }

@@ -70,8 +70,16 @@ pub fn format_lint_text(result: &LintResult, opts: &RenderOptions, wiki_root: &P
     for (path, issues) in by_path {
         let has_error = issues.iter().any(|i| i.severity == LintSeverity::Error);
         let lead = if has_error { error_lead } else { warn_lead };
-        let label = format!("wiki/{path}");
-        let path_line = wrap_osc8(&label, path, opts);
+        // Wiki-subtree issues render with a `wiki/` prefix and may be wrapped
+        // in an Obsidian OSC 8 hyperlink. Vault-internal issues (e.g. the
+        // `.claude/settings.json` gate finding) render verbatim and are never
+        // hyperlinked — they are not vault pages.
+        let path_line = if crate::wiki::lint::is_wiki_relative_path(path) {
+            let label = format!("wiki/{path}");
+            wrap_osc8(&label, path, opts)
+        } else {
+            path.to_string()
+        };
         out.push_str(&format!("{lead} {path_line}\n"));
         for issue in issues {
             let raw_tag = match issue.severity {
@@ -346,6 +354,59 @@ mod tests {
         };
         let s = format_lint_text(&one, &no_styling(), Path::new(""));
         assert!(s.contains("1 page + 1 nav file"));
+    }
+
+    /// agent-run-integrity task 2.5 — the vault-gate-integrity issue path
+    /// `.claude/settings.json` is NOT a wiki page; text format must render it
+    /// VERBATIM (no `wiki/` prefix that wiki-subtree issues get).
+    #[test]
+    fn gate_issue_path_rendered_verbatim_without_wiki_prefix() {
+        let result = LintResult {
+            pages_scanned: 0,
+            nav_files_scanned: 0,
+            issues: vec![issue(
+                ".claude/settings.json",
+                LintSeverity::Error,
+                "vault-gate-integrity",
+                "missing Bash gate",
+            )],
+            error_count: 1,
+            warn_count: 0,
+        };
+        let s = format_lint_text(&result, &no_styling(), Path::new(""));
+        // Verbatim path, no wiki/ prefix.
+        assert!(
+            s.contains(".claude/settings.json"),
+            "gate path must appear verbatim: {s:?}"
+        );
+        assert!(
+            !s.contains("wiki/.claude/settings.json"),
+            "gate path must NOT be prefixed with wiki/: {s:?}"
+        );
+    }
+
+    /// A non-wiki issue path is never wrapped in an Obsidian OSC 8 hyperlink
+    /// (it is not a vault page) even when hyperlinks + vault id are present.
+    #[test]
+    fn gate_issue_path_not_hyperlinked() {
+        let result = LintResult {
+            pages_scanned: 0,
+            nav_files_scanned: 0,
+            issues: vec![issue(
+                ".claude/settings.json",
+                LintSeverity::Error,
+                "vault-gate-integrity",
+                "missing Bash gate",
+            )],
+            error_count: 1,
+            warn_count: 0,
+        };
+        let s = format_lint_text(&result, &emoji_color_hyperlinks("vid"), Path::new(""));
+        assert!(
+            !s.contains("\x1b]8;"),
+            "non-wiki gate path must not be OSC 8 hyperlinked: {s:?}"
+        );
+        assert!(s.contains(".claude/settings.json"));
     }
 
     /// percent_encode round-trip basics.

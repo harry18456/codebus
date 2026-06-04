@@ -67,6 +67,46 @@ pub fn is_sandbox_denial(output: &str) -> bool {
     DENIAL_MARKERS.iter().any(|m| lower.contains(m))
 }
 
+/// Read `reader` line-by-line, count how many lines match
+/// [`is_sandbox_denial`], and dispose of EVERY line per `forward`: when
+/// `forward` is `true` each line is written to `out` (the parent terminal in
+/// production); when `false` the line is discarded (`out` may be an
+/// [`std::io::Sink`]). Returns the denial count.
+///
+/// ## Why classification is independent of `forward`
+///
+/// (agent-run-integrity, vertical A) The child's stderr is the ONLY surface
+/// for a sandbox denial that never produced a stdout `ToolResult`. The
+/// `CODEBUS_FORWARD_AGENT_STDERR` escape hatch only decides whether the
+/// dev terminal SEES the raw stream — it must NOT gate observability. So
+/// this helper always classifies, regardless of the forward disposition, and
+/// the caller sums the count into `InvokeReport.sandbox_denial_count` (no
+/// de-dup against the stdout source; over-count is acceptable).
+///
+/// A line that fails UTF-8 decoding is skipped for both classification and
+/// forwarding (best-effort, matching the existing "stderr is diagnostic
+/// noise" posture). I/O errors mid-stream stop the loop and return the count
+/// accumulated so far — the thread's job is best-effort, never fatal.
+pub fn classify_stderr_lines<R: std::io::BufRead, W: std::io::Write>(
+    reader: R,
+    mut out: W,
+    forward: bool,
+) -> usize {
+    let mut count = 0usize;
+    for line in reader.lines() {
+        let Ok(line) = line else { break };
+        if is_sandbox_denial(&line) {
+            count += 1;
+        }
+        if forward {
+            // Best-effort passthrough; a write failure to the parent
+            // terminal must not abort classification of later lines.
+            let _ = writeln!(out, "{line}");
+        }
+    }
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +175,62 @@ mod tests {
         assert!(is_sandbox_denial("ACCESS IS DENIED"));
         assert!(is_sandbox_denial("permissiondenied"));
         assert!(is_sandbox_denial("PERMISSION DENIED"));
+    }
+
+    // === agent-run-integrity (vertical A): classify_stderr_lines ===
+
+    use std::io::{BufReader, Cursor};
+
+    /// A buffer carrying exactly one curated denial marker line (plus benign
+    /// noise lines) yields `count == 1`, when forwarding is on.
+    #[test]
+    fn classify_counts_single_denial_line_when_forwarding() {
+        let input = "init: loading model\n\
+                     Set-Content : Access is denied.\n\
+                     done\n";
+        let reader = BufReader::new(Cursor::new(input));
+        let mut sink: Vec<u8> = Vec::new();
+        let count = classify_stderr_lines(reader, &mut sink, true);
+        assert_eq!(count, 1, "exactly one line carries a denial marker");
+        // Forwarding on → every line (denial + benign) is written out.
+        let forwarded = String::from_utf8(sink).unwrap();
+        assert_eq!(forwarded.lines().count(), 3);
+        assert!(forwarded.contains("Access is denied"));
+    }
+
+    /// Classification is INDEPENDENT of the forward toggle: the same buffer
+    /// with `forward == false` still counts the denial as 1, and discards
+    /// (does not write) any lines.
+    #[test]
+    fn classify_counts_denial_independent_of_forward_flag() {
+        let input = "init: loading model\n\
+                     Set-Content : Access is denied.\n\
+                     done\n";
+        let reader = BufReader::new(Cursor::new(input));
+        let mut sink: Vec<u8> = Vec::new();
+        let count = classify_stderr_lines(reader, &mut sink, false);
+        assert_eq!(
+            count, 1,
+            "denial counted regardless of CODEBUS_FORWARD_AGENT_STDERR toggle"
+        );
+        assert!(
+            sink.is_empty(),
+            "forward == false discards lines (nothing written): {sink:?}"
+        );
+    }
+
+    /// Multiple denial lines are each counted; benign lines (grep-no-match,
+    /// missing file) are not — proving per-line application of the same
+    /// curated marker set.
+    #[test]
+    fn classify_counts_every_denial_line_and_excludes_benign() {
+        let input = "cp: x: Permission denied\n\
+                     no matches found\n\
+                     kill: Operation not permitted\n\
+                     error: could not find file 'y'\n";
+        let reader = BufReader::new(Cursor::new(input));
+        let mut sink = std::io::sink();
+        let count = classify_stderr_lines(reader, &mut sink, false);
+        assert_eq!(count, 2, "two denial lines, two benign lines");
     }
 }

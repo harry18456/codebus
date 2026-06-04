@@ -7,4 +7,4 @@ pub mod sandbox_signal;
 
 pub use codex_parser::{parse_codex_stream_line, sniff_codex_thread_id};
 pub use parser::{StreamEvent, parse_claude_stream_line};
-pub use sandbox_signal::is_sandbox_denial;
+pub use sandbox_signal::{classify_stderr_lines, is_sandbox_denial};

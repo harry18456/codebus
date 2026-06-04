@@ -205,14 +205,21 @@ pub fn invoke(
         .ok()
         .filter(|v| !v.is_empty() && v != "0")
         .is_some();
-    let stderr_handle = thread::spawn(move || {
-        let mut stderr = stderr;
-        // io::copy returns Err only on read/write failure; ignore — the
-        // thread's job is best-effort passthrough.
+    // agent-run-integrity (vertical A): the thread now CLASSIFIES each stderr
+    // line for sandbox-denial markers as well as disposing of it. A denial
+    // that surfaces only on stderr (never produced a stdout `ToolResult`) is
+    // otherwise invisible. Classification runs REGARDLESS of `forward_stderr`
+    // — that toggle only decides whether the raw stream reaches the dev
+    // terminal, not whether denials are observable. The thread returns the
+    // per-line denial count via its `JoinHandle`, which the main thread sums
+    // into `sandbox_denial_count` below (no de-dup against the stdout source;
+    // over-count is acceptable per the design).
+    let stderr_handle = thread::spawn(move || -> usize {
+        let reader = BufReader::new(stderr);
         if forward_stderr {
-            let _ = io::copy(&mut stderr, &mut io::stderr().lock());
+            crate::stream::classify_stderr_lines(reader, io::stderr().lock(), true)
         } else {
-            let _ = io::copy(&mut stderr, &mut io::sink());
+            crate::stream::classify_stderr_lines(reader, io::sink(), false)
         }
     });
 
@@ -290,9 +297,15 @@ pub fn invoke(
     let exit = child.wait()?;
     let finished_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
 
-    // Best-effort join on the stderr passthrough thread. 5s deadline:
-    // longer is unlikely to help; if the thread is wedged, detach.
-    join_within(stderr_handle, Duration::from_secs(5));
+    // Best-effort join on the stderr classification thread. 5s deadline:
+    // longer is unlikely to help; if the thread is wedged, detach (and lose
+    // its denial count — `None` → contributes 0, best-effort observability).
+    let stderr_denials = join_within(stderr_handle, Duration::from_secs(5)).unwrap_or(0);
+    // agent-run-integrity (vertical A): sum the stderr-derived denials into the
+    // stdout-derived count. The two sources are NOT de-duplicated — a denial
+    // appearing on both is counted twice; over-count is acceptable for this
+    // best-effort observability signal, which never changes `outcome`.
+    let sandbox_denial_count = sandbox_denial_count + stderr_denials;
 
     // Strict join on the cancel watcher: it must not outlive `invoke`,
     // since it holds the child's PID and could otherwise fire a kill
@@ -387,20 +400,26 @@ fn spawn_cancel_watcher(
     })
 }
 
-/// Wait for the thread to finish for at most `deadline`. If it doesn't,
-/// detach (drop the handle without joining). Used for the stderr
-/// passthrough thread which SHOULD exit when the child terminates but
-/// might wedge on a pathological pipe state.
-fn join_within(handle: thread::JoinHandle<()>, deadline: Duration) {
+/// Wait for the thread to finish for at most `deadline`, returning its value
+/// (`Some(T)`) if it joined cleanly. If it doesn't finish in time, detach
+/// (drop the handle without joining) and return `None`. Used for the stderr
+/// classification thread which SHOULD exit when the child terminates but
+/// might wedge on a pathological pipe state; a detached thread contributes
+/// no denial count (best-effort).
+fn join_within<T>(handle: thread::JoinHandle<T>, deadline: Duration) -> Option<T> {
     let started = Instant::now();
     // std::thread doesn't expose a timed join, so poll is_finished.
     while !handle.is_finished() && started.elapsed() < deadline {
         thread::sleep(Duration::from_millis(20));
     }
     if handle.is_finished() {
-        let _ = handle.join();
+        // The thread finished; a join here will not block. A panicked
+        // thread yields `Err` → `None` (no count, best-effort).
+        handle.join().ok()
+    } else {
+        // Detach. The OS will clean up the thread when it eventually exits.
+        None
     }
-    // Else: detach. The OS will clean up the thread when it eventually exits.
 }
 
 /// Compose the full `claude -p` argv from non-`'static` pieces. This is the
@@ -1212,6 +1231,63 @@ mod tests {
         assert_eq!(
             report.sandbox_denial_count, 1,
             "exactly the failed+marker result counts; got {}",
+            report.sandbox_denial_count
+        );
+    }
+
+    // === agent-run-integrity (vertical A): stderr-only denial accumulation ===
+
+    /// Backend whose child writes a denial marker to STDERR and exits 0 with
+    /// NO stdout `ToolResult`. Proves the stderr classification path counts a
+    /// denial the stdout path can never see.
+    struct StderrDenialBackend;
+
+    impl AgentBackend for StderrDenialBackend {
+        fn build_command(&self, _spec: &SpawnSpec) -> Command {
+            stderr_denial_then_exit_zero_command()
+        }
+        fn parse_stream_line(&self, _line: &str) -> Vec<StreamEvent> {
+            // Child emits nothing on stdout → no ToolResult events at all.
+            Vec::new()
+        }
+        fn extract_session_id(&self, _line: &str) -> Option<String> {
+            None
+        }
+    }
+
+    #[cfg(unix)]
+    fn stderr_denial_then_exit_zero_command() -> Command {
+        let mut c = Command::new("sh");
+        // Emit a curated denial marker on stderr, exit 0, no stdout.
+        c.args(["-c", "echo 'cp: x: Permission denied' 1>&2; exit 0"]);
+        c
+    }
+
+    #[cfg(windows)]
+    fn stderr_denial_then_exit_zero_command() -> Command {
+        let mut c = Command::new("cmd");
+        // `1>&2` redirects the echo to stderr; the process exits 0.
+        c.args(["/c", "echo Access is denied. 1>&2"]);
+        c
+    }
+
+    /// A denial that appears ONLY on the child's stderr (top-level exit 0,
+    /// no stdout ToolResult) is counted. Verification target for the A
+    /// vertical's `agent::invoke` stderr-classification contract.
+    #[test]
+    fn invoke_counts_stderr_only_denial_with_exit_zero() {
+        let backend = StderrDenialBackend;
+        let tmp = std::env::temp_dir();
+        let report = invoke(&backend, test_spec(), tmp.as_path(), |_event| {}, None, None)
+            .expect("spawn should succeed");
+        assert!(
+            report.exit.success(),
+            "child exits 0 (denial does not change the top-level exit); exit={:?}",
+            report.exit
+        );
+        assert!(
+            report.sandbox_denial_count >= 1,
+            "stderr-only denial must be counted; got {}",
             report.sandbox_denial_count
         );
     }

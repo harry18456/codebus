@@ -6,3 +6,4 @@ pub mod duplicate_slug;
 pub mod frontmatter_integrity;
 pub mod missing_nav;
 pub mod root_page;
+pub mod vault_gate_integrity;

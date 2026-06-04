@@ -16,10 +16,27 @@ pub mod rules;
 pub use factory::build_default_rules;
 pub use locate::{LocateError, locate_vault_root};
 pub use output::{format_json, format_text};
+// `is_wiki_relative_path` is defined below and used by both formatters; it is
+// part of the public lint surface so the `render` text formatter can share it.
 pub use rule::{LintRule, LoadedPage, NavFile, RECOGNIZED_ROOT_DIRS, SPECIAL_FILES, VaultContext};
 
 use crate::wiki::types::{LintIssue, LintResult, LintSeverity};
 use std::path::Path;
+
+/// Vault-internal config files that live OUTSIDE the `wiki/` subtree and whose
+/// lint issue paths must therefore NOT be prefixed with `wiki/` (text format)
+/// nor joined under `wiki/` (JSON format). Currently just the PreToolUse gate
+/// config flagged by the `vault-gate-integrity` rule.
+const NON_WIKI_ISSUE_PREFIXES: &[&str] = &[".claude/"];
+
+/// True when `path` is a wiki-subtree issue path (the default — rendered with a
+/// `wiki/` prefix). False for vault-internal issue paths like
+/// `.claude/settings.json`, which are rendered verbatim / joined at vault root.
+pub fn is_wiki_relative_path(path: &str) -> bool {
+    !NON_WIKI_ISSUE_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+}
 
 /// Validate a vault's `wiki/` subtree. Pure read — never writes.
 ///

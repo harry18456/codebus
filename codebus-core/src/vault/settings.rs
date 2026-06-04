@@ -20,6 +20,33 @@ pub enum SettingsOutcome {
     AlreadyPresent,
 }
 
+/// One required PreToolUse hook the vault gate relies on: a `matcher` tool
+/// name paired with the `command` codebus expects it to route to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequiredHook {
+    /// PreToolUse matcher (the agent tool name), e.g. `Bash` / `Read`.
+    pub matcher: &'static str,
+    /// The `type: command` hook command the matcher must install.
+    pub command: &'static str,
+}
+
+/// Single source of truth for the hooks `DEFAULT_SETTINGS_JSON` installs and
+/// the lint `vault-gate-integrity` rule verifies. Both the default content
+/// (its intent) and the lint rule reference this set so they cannot drift.
+///
+/// - `Bash` → `codebus hook check-bash` (Fix Bash Hook Installation)
+/// - `Read` → `codebus hook check-read` (PII Image Read Hook Installation)
+pub const REQUIRED_HOOKS: &[RequiredHook] = &[
+    RequiredHook {
+        matcher: "Bash",
+        command: "codebus hook check-bash",
+    },
+    RequiredHook {
+        matcher: "Read",
+        command: "codebus hook check-read",
+    },
+];
+
 /// `<vault_root>/.claude/settings.json` path (deterministic helper for
 /// callers / tests).
 pub fn settings_json_path(vault_root: &Path) -> PathBuf {
@@ -150,6 +177,59 @@ mod tests {
             find_entry("Read", "codebus hook check-read"),
             "PreToolUse must contain Read matcher entry invoking `codebus hook check-read`"
         );
+    }
+
+    // --- agent-run-integrity task 2.1 — drift guard: DEFAULT_SETTINGS_JSON
+    // must be consistent with the REQUIRED_HOOKS single source of truth. It
+    // must parse and contain EXACTLY the required hooks (no more, no fewer),
+    // so the lint `vault-gate-integrity` rule and the default content cannot
+    // silently diverge.
+
+    fn pretooluse_pairs(json: &str) -> Vec<(String, String)> {
+        let parsed: serde_json::Value = serde_json::from_str(json).unwrap();
+        let entries = parsed["hooks"]["PreToolUse"]
+            .as_array()
+            .expect("hooks.PreToolUse must be an array");
+        let mut pairs = Vec::new();
+        for entry in entries {
+            let matcher = entry["matcher"].as_str().unwrap_or_default().to_string();
+            let nested = entry["hooks"].as_array().cloned().unwrap_or_default();
+            for hook in nested {
+                if hook["type"] == "command" {
+                    if let Some(cmd) = hook["command"].as_str() {
+                        pairs.push((matcher.clone(), cmd.to_string()));
+                    }
+                }
+            }
+        }
+        pairs
+    }
+
+    #[test]
+    fn default_settings_json_matches_required_hooks_exactly() {
+        let pairs = pretooluse_pairs(DEFAULT_SETTINGS_JSON);
+        let expected: Vec<(String, String)> = REQUIRED_HOOKS
+            .iter()
+            .map(|h| (h.matcher.to_string(), h.command.to_string()))
+            .collect();
+        // Same length AND each required hook present (order-independent).
+        assert_eq!(
+            pairs.len(),
+            expected.len(),
+            "DEFAULT_SETTINGS_JSON PreToolUse hook count drifted from REQUIRED_HOOKS"
+        );
+        for req in &expected {
+            assert!(
+                pairs.contains(req),
+                "DEFAULT_SETTINGS_JSON missing required hook {req:?}"
+            );
+        }
+        for got in &pairs {
+            assert!(
+                expected.contains(got),
+                "DEFAULT_SETTINGS_JSON has unexpected hook {got:?} not in REQUIRED_HOOKS"
+            );
+        }
     }
 
     #[test]

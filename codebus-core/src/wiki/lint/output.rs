@@ -61,11 +61,21 @@ pub fn format_json(result: &LintResult, vault_root: &Path) -> serde_json::Result
     let issues: Vec<JsonIssue<'_>> = result
         .issues
         .iter()
-        .map(|i| JsonIssue {
-            path: absolutize(&wiki_root, &i.path),
-            severity: &i.severity,
-            rule: &i.rule_id,
-            message: &i.message,
+        .map(|i| {
+            // Wiki-subtree issues absolutize under `wiki/`; vault-internal
+            // issues (e.g. the `.claude/settings.json` gate finding) join at
+            // the vault root directly so the path points at the real file.
+            let base = if super::is_wiki_relative_path(&i.path) {
+                &wiki_root
+            } else {
+                vault_root
+            };
+            JsonIssue {
+                path: absolutize(base, &i.path),
+                severity: &i.severity,
+                rule: &i.rule_id,
+                message: &i.message,
+            }
         })
         .collect();
 
@@ -255,6 +265,42 @@ mod tests {
         // Per spec: JSON field name is `rule` (not `rule_id`).
         assert!(parsed["issues"][0]["rule"].is_string());
         assert_eq!(parsed["issues"][0]["rule"], "broken-wikilink-body");
+    }
+
+    // --- agent-run-integrity task 2.5 — the vault-gate-integrity issue path
+    // is `.claude/settings.json` (NOT a wiki page). JSON output must
+    // absolutize it under the vault_root (NOT under wiki/), and the error
+    // must be counted in error_count.
+
+    #[test]
+    fn json_format_gate_issue_path_is_absolute_settings_file_not_under_wiki() {
+        let vault = Path::new("/abs/vault/.codebus");
+        let result = LintResult {
+            pages_scanned: 0,
+            nav_files_scanned: 0,
+            issues: vec![issue(
+                ".claude/settings.json",
+                LintSeverity::Error,
+                "vault-gate-integrity",
+                "missing Bash gate",
+            )],
+            error_count: 1,
+            warn_count: 0,
+        };
+        let json = format_json(&result, vault).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let abs = parsed["issues"][0]["path"].as_str().unwrap();
+        let normalized = abs.replace('\\', "/");
+        assert!(
+            normalized.ends_with(".codebus/.claude/settings.json"),
+            "gate path must be vault-root-relative absolute path, got: {abs}"
+        );
+        // It must NOT be placed under wiki/.
+        assert!(
+            !normalized.contains("wiki/.claude"),
+            "gate path must not be joined under wiki/: {abs}"
+        );
+        assert_eq!(parsed["error_count"], 1);
     }
 
     #[test]

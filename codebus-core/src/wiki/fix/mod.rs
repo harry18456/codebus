@@ -182,6 +182,9 @@ mod tests {
         }
         fs::write(wiki.join("index.md"), "# index\n").unwrap();
         fs::write(wiki.join("log.md"), "# log\n").unwrap();
+        // A genuinely clean vault has its PreToolUse gate intact, so the
+        // `vault-gate-integrity` lint rule does not flag it.
+        crate::vault::settings::write_settings_if_missing(tmp.path()).unwrap();
         tmp
     }
 

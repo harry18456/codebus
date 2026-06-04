@@ -50,6 +50,12 @@ pub struct Catalog {
 
 #[derive(Debug)]
 pub struct VaultContext {
+    /// The vault root (`.codebus/`) — the parent of `wiki_root`. Used by
+    /// rules that read vault-internal files outside the `wiki/` subtree
+    /// (e.g. the `vault-gate-integrity` rule reads
+    /// `vault_root/.claude/settings.json`). Falls back to `wiki_root` when
+    /// `wiki_root` has no parent.
+    pub vault_root: PathBuf,
     pub wiki_root: PathBuf,
     pub pages: Vec<LoadedPage>,
     pub nav_files: Vec<NavFile>,
@@ -58,6 +64,10 @@ pub struct VaultContext {
 
 impl VaultContext {
     pub fn build(wiki_root: &Path) -> Self {
+        let vault_root = wiki_root
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| wiki_root.to_path_buf());
         let mut pages: Vec<LoadedPage> = Vec::new();
         let mut catalog = Catalog::default();
 
@@ -128,6 +138,7 @@ impl VaultContext {
         }
 
         Self {
+            vault_root,
             wiki_root: wiki_root.to_path_buf(),
             pages,
             nav_files,

@@ -263,6 +263,43 @@ fn lint_does_not_modify_vault_files() {
     assert_eq!(snap_before, snap_after, "lint must not modify vault");
 }
 
+/// agent-run-integrity task 2.6 — `vault-gate-integrity` rule: a vault whose
+/// `.claude/settings.json` has an emptied `hooks.PreToolUse` array MUST surface
+/// an `error` issue with rule `vault-gate-integrity` in JSON output (and exit
+/// 1 because it is an error).
+#[test]
+fn lint_flags_tampered_pretooluse_gate() {
+    let tmp = TempDir::new().unwrap();
+    init_vault(tmp.path());
+
+    // Tamper: empty the PreToolUse gate that init installed.
+    let settings = tmp
+        .path()
+        .join(".codebus")
+        .join(".claude")
+        .join("settings.json");
+    std::fs::write(&settings, r#"{"hooks":{"PreToolUse":[]}}"#).unwrap();
+
+    let out = lint(tmp.path(), &["--format", "json"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("JSON output must parse");
+    let issues = parsed["issues"].as_array().expect("issues array");
+    let gate = issues
+        .iter()
+        .find(|i| i["rule"] == "vault-gate-integrity")
+        .unwrap_or_else(|| panic!("expected a vault-gate-integrity issue, got: {stdout}"));
+    assert_eq!(gate["severity"], "error");
+    // The issue path points at the real settings.json file (absolute).
+    let gate_path = gate["path"].as_str().unwrap().replace('\\', "/");
+    assert!(
+        gate_path.ends_with(".claude/settings.json"),
+        "gate issue path must be the settings file: {gate_path}"
+    );
+    // An error issue → exit 1.
+    assert_eq!(out.status.code(), Some(1));
+}
+
 fn snapshot(dir: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
     let mut snap = Vec::new();
     fn recurse(d: &Path, snap: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {

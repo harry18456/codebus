@@ -13,6 +13,8 @@
 //!     `failure-write-then-exit-1` write `wiki/concepts/partial.md` then exit 1
 //!     `success-stream-json`       emit canonical 5-line stream-json + exit 0
 //!     `failure-stream-json`       emit partial stream + exit 1
+//!     `success-with-stderr-denial` emit success stream on stdout + a
+//!                                 sandbox-denial marker on stderr + exit 0
 //!     `chat-init-success`         emit init(session_id) + simple result, exit 0
 //!     `chat-emit-promote`         emit init + assistant text with marker + result
 //!     `chat-multi-tool`           emit init + 2 tool_use events + result
@@ -99,6 +101,22 @@ fn main() -> ExitCode {
         "failure-stream-json" => {
             emit_stream_json_partial();
             ExitCode::from(1)
+        }
+
+        // agent-run-integrity (vertical A): emit a normal successful
+        // stream-json run on STDOUT (so the verb derives outcome=succeeded)
+        // while printing a curated sandbox-denial marker on STDERR and
+        // exiting 0. Models the codex "top-level exit 0 but an inner command
+        // was blocked, surfacing only on stderr" case. The test asserts the
+        // resulting RunLog carries sandbox_denial_count > 0 with
+        // outcome=succeeded, and that codebus emits a `warning: sandbox-denial`
+        // line.
+        "success-with-stderr-denial" => {
+            // A curated locale-independent marker (see
+            // codebus-core stream::sandbox_signal::DENIAL_MARKERS).
+            eprintln!("Set-Content : Access is denied.");
+            emit_stream_json_success();
+            ExitCode::SUCCESS
         }
 
         // v3-chat-verb: emit `{type:system,subtype:init,session_id:...}`

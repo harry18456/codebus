@@ -273,6 +273,61 @@ fn query_streams_events_and_writes_jsonl_log_with_zero_wiki_changed() {
     assert_eq!(parsed["tokens"]["input_tokens"], 100);
 }
 
+// === agent-run-integrity (vertical A): stderr-only sandbox denial ===
+
+/// Full vertical: the mock emits a normal successful stream-json run on
+/// STDOUT while printing a sandbox-denial marker on STDERR and exiting 0
+/// (modelling the codex "top-level exit 0 but inner command blocked" case).
+/// `agent::invoke`'s stderr classification thread must count the denial even
+/// though `CODEBUS_FORWARD_AGENT_STDERR` is unset (the mock's stderr is
+/// otherwise discarded). The verb copies the count into RunLog WITHOUT
+/// changing `outcome`, and emits a `warning: sandbox-denial` line.
+#[test]
+fn query_stderr_only_denial_counts_without_changing_outcome() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
+    assert!(run_init(tmp.path()).status.success(), "setup init");
+
+    let (out, _log) = run_query(tmp.path(), "test", "success-with-stderr-denial");
+    // Top-level exit is 0: the denial does not change the run's success.
+    assert!(
+        out.status.success(),
+        "stderr-only denial must NOT change exit code; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // codebus emits the best-effort warning line on its own stderr.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("warning: sandbox-denial"),
+        "expected a `warning: sandbox-denial` line on codebus stderr, got: {stderr}"
+    );
+
+    // RunLog records sandbox_denial_count > 0 with outcome succeeded.
+    let log_dir = tmp.path().join(".codebus/log");
+    let entries: Vec<_> = fs::read_dir(&log_dir)
+        .expect("log dir exists")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("runs-"))
+        .collect();
+    assert_eq!(entries.len(), 1, "expected 1 runs-*.jsonl, got {entries:?}");
+    let body = fs::read_to_string(entries[0].path()).unwrap();
+    let line = body.lines().last().expect("at least one RunLog line");
+    let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+    assert_eq!(parsed["mode"], "query");
+    assert_eq!(
+        parsed["outcome"], "succeeded",
+        "denial is observability-only; outcome unchanged; line: {line}"
+    );
+    let count = parsed["sandbox_denial_count"]
+        .as_u64()
+        .expect("sandbox_denial_count present and numeric (skip_if zero means >0 serializes)");
+    assert!(
+        count > 0,
+        "stderr-only denial must be counted in RunLog; line: {line}"
+    );
+}
+
 // === run-outcome-lifecycle-integrity: per-run wall-clock timeout end-to-end ===
 
 /// Full vertical: `lifecycle.run_timeout_secs` config → CLI resolves +
