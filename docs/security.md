@@ -230,6 +230,8 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 
 **已知殘留**：vault 內 symlink 指向 vault 外、且目標不存在（無法 canonicalize、走 lexical fallback）時可能漏判（見 [`BACKLOG.md`](BACKLOG.md)）。native Windows 無 OS sandbox，但 containment 是 CLI 層 hook gate、與平台 OS sandbox 無關。緩解仍疊加：分析的 source 已先 PII mirror（見 §4）、toolset 無 WebFetch / MCP。
 
+**範圍界線（重要，別讀成 in-vault 內容也防住）**：containment 是 vault **位置**邊界——它擋「讀**逃出** vault」，**不**保護 vault **內**的敏感內容。對已經在 vault 內的密鑰：check-read 只有 **Read 路徑的 basename backstop**（`*id_rsa*`/`*.pem`/`*.key`）擋得到，**同一支 hook 對 Glob/Grep 跳過 basename 檢查**（search tool 只由 containment 管位置）→ 同一個 in-vault `.pem`，**Grep 讀得到內容、Read 讀不到**（不對稱仍在，只是從「任何地方」收窄到「vault 內」）；且 basename 只認那三類副檔名，**嵌在 `.yaml`/`.env`/`.txt` 的 secret 連 Read 也不擋**。→ **in-vault 密鑰防護不靠 check-read**，靠 PII mirror（§4，有 backlog 缺口）＋規劃中的 (a) materialized `settings.json` 的 `permissions.deny`（對 Glob/Grep 做 result-level 逐檔 scrub、已實測在 codebus argv 下成立）＋(d) scanner 硬化。**殘留**＝secret 落進 vault 內非 pattern 檔後的**跨 session 持久化**（後續無持有它的 session 仍 Grep 得回）；接受並記、未來槓桿是 vault write-policy。細節見 [`BACKLOG.md`](BACKLOG.md)「in-vault 機密讀取邊界」條。
+
 **既有 vault 升級**：本 change 用 write-if-missing，不自動改寫既有 `.codebus/.claude/settings.json`。既有 vault 跑 `codebus lint` 會被 `vault-gate-integrity` 規則 flag 缺少 Glob/Grep gate；補法＝在 `hooks.PreToolUse` 手動加 `Glob`/`Grep` → `codebus hook check-read` 兩個 matcher（與既有 Read entry 同形狀），或於新位置 `codebus init` re-materialize。
 
 **其他已知 codebus-side 缺口**（細節見 [`BACKLOG.md`](BACKLOG.md)）：
