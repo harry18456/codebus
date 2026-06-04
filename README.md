@@ -117,7 +117,7 @@ provider 切換、model / effort、Azure base_url / api-version 全在 app 的 S
 
 codebus 已內建幾層防護（cwd 隔離、PII filter、nested git 可隨時還原，加上 provider-specific 命令/工具限制），但這些不是萬靈丹——而且**各 provider 隔離強度不同**：
 
-- **claude** 走 `--tools` 白名單 + PreToolUse hook，讀寫都有 deterministic gate（含擋讀 `~/.ssh` 等敏感路徑）
+- **claude** 走 `--tools` 白名單 + PreToolUse hook，讀寫都有 deterministic gate：**寫**鎖在 vault cwd；**讀**自 `check-read-vault-containment` 起為 **vault-root containment**——Read/Glob/Grep 的 path canonicalize 後不在 vault 內一律 block（母 repo 原始碼、`~/.ssh`/`~/.kube`/`~/.env` 等皆擋），`hooks.read_path_containment` 預設 on
 - **codex** 走 `-s sandbox`（`read-only`／`workspace-write`）+ OS restricted token，但 Windows unelevated 實測（codex-cli 0.135.0）只是**部分**隔離：**寫**對正常 ACL 路徑有擋（workspace 外／家目錄回 `Access is denied`），但 Everyone-writable 目錄（如 `C:\Windows\Temp`）仍漏；**讀**照樣讀得到 workspace 外的檔與 `%USERPROFILE%` 內容（`~/.ssh`、`~/.aws` 等家目錄機密屬此類）；**網路**只擋外部 HTTPS/443，loopback 與外部 HTTP/80 仍外洩。→ codex 是**讀／網路 soft-partial、寫較硬**，敏感家目錄「讀」相關任務請用 claude 或自行承擔風險（細節見 [`docs/security.md`](docs/security.md) §5）
 
 完整 threat model 跟每層防護怎麼運作：[`docs/security.md`](docs/security.md)。

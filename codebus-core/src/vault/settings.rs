@@ -36,6 +36,8 @@ pub struct RequiredHook {
 ///
 /// - `Bash` → `codebus hook check-bash` (Fix Bash Hook Installation)
 /// - `Read` → `codebus hook check-read` (PII Image Read Hook Installation)
+/// - `Glob` → `codebus hook check-read` (check-read-vault-containment)
+/// - `Grep` → `codebus hook check-read` (check-read-vault-containment)
 pub const REQUIRED_HOOKS: &[RequiredHook] = &[
     RequiredHook {
         matcher: "Bash",
@@ -43,6 +45,16 @@ pub const REQUIRED_HOOKS: &[RequiredHook] = &[
     },
     RequiredHook {
         matcher: "Read",
+        command: "codebus hook check-read",
+    },
+    // check-read-vault-containment: route Glob/Grep through check-read so the
+    // vault-root containment boundary covers the search tools, not just Read.
+    RequiredHook {
+        matcher: "Glob",
+        command: "codebus hook check-read",
+    },
+    RequiredHook {
+        matcher: "Grep",
         command: "codebus hook check-read",
     },
 ];
@@ -53,12 +65,12 @@ pub fn settings_json_path(vault_root: &Path) -> PathBuf {
     vault_root.join(".claude").join("settings.json")
 }
 
-/// Default content for a fresh settings.json — registers two PreToolUse
+/// Default content for a fresh settings.json — registers four PreToolUse
 /// hooks: Bash (delegates to `codebus hook check-bash` per
-/// `Fix Bash Hook Installation`) and Read (delegates to
-/// `codebus hook check-read` per `PII Image Read Hook Installation`,
-/// blocking image / binary extensions that would bypass `regex_basic`
-/// PII filtering).
+/// `Fix Bash Hook Installation`) and Read / Glob / Grep (each delegates to
+/// `codebus hook check-read`, enforcing the vault-root containment boundary
+/// per `check-read-vault-containment` AND the image / sensitive denylist per
+/// `PII Image Read Hook Installation`).
 pub const DEFAULT_SETTINGS_JSON: &str = r#"{
   "hooks": {
     "PreToolUse": [
@@ -73,6 +85,24 @@ pub const DEFAULT_SETTINGS_JSON: &str = r#"{
       },
       {
         "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codebus hook check-read"
+          }
+        ]
+      },
+      {
+        "matcher": "Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codebus hook check-read"
+          }
+        ]
+      },
+      {
+        "matcher": "Grep",
         "hooks": [
           {
             "type": "command",
@@ -149,8 +179,8 @@ mod tests {
             .as_array()
             .expect("hooks.PreToolUse must be an array");
         assert!(
-            entries.len() >= 2,
-            "PreToolUse must carry at least two matcher entries (Bash + Read), got {}",
+            entries.len() >= 4,
+            "PreToolUse must carry at least four matcher entries (Bash + Read + Glob + Grep), got {}",
             entries.len()
         );
 
@@ -176,6 +206,14 @@ mod tests {
         assert!(
             find_entry("Read", "codebus hook check-read"),
             "PreToolUse must contain Read matcher entry invoking `codebus hook check-read`"
+        );
+        assert!(
+            find_entry("Glob", "codebus hook check-read"),
+            "PreToolUse must contain Glob matcher entry invoking `codebus hook check-read`"
+        );
+        assert!(
+            find_entry("Grep", "codebus hook check-read"),
+            "PreToolUse must contain Grep matcher entry invoking `codebus hook check-read`"
         );
     }
 

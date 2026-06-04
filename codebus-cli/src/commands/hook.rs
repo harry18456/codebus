@@ -16,8 +16,9 @@
 use clap::Subcommand;
 use codebus_core::config::{HooksConfig, default_config_path, load_hooks_config};
 use serde::Deserialize;
+use std::fs;
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 #[derive(Subcommand, Debug)]
@@ -97,10 +98,15 @@ fn format_metachar_for_reason(c: char) -> String {
 #[derive(Deserialize)]
 struct PreToolUseInput {
     #[serde(default)]
-    #[allow(dead_code)]
     tool_name: Option<String>,
     #[serde(default)]
     tool_input: Option<ToolInput>,
+    /// check-read-vault-containment: the agent working directory Claude
+    /// supplies in the PreToolUse payload; codebus sets it to the vault
+    /// root. Primary source for the containment boundary (fallback: the
+    /// hook subprocess cwd).
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -109,6 +115,10 @@ struct ToolInput {
     command: Option<String>,
     #[serde(default)]
     file_path: Option<serde_json::Value>,
+    /// check-read-vault-containment: the `path` argument of `Glob` / `Grep`
+    /// (their search root), distinct from `Read`'s `file_path`.
+    #[serde(default)]
+    path: Option<serde_json::Value>,
 }
 
 /// Per `Fix Bash Hook Installation` allow rule:
@@ -531,10 +541,26 @@ async fn check_read() -> ExitCode {
     // input path requires home comparison (per spec PII Image Read Hook
     // Installation §Block (unresolvable home)).
     let home = dirs::home_dir();
-    match check_read_inner(&buf, &hooks_cfg, home.as_deref()) {
-        Some(reason) => emit_block(&reason),
-        None => ExitCode::from(0),
+    // check-read-vault-containment: the vault root falls back to the hook
+    // subprocess working directory when the PreToolUse payload omits `cwd`.
+    let env_cwd = std::env::current_dir().ok();
+
+    // Stage 1 — vault containment (primary read gate; covers Read/Glob/Grep).
+    if let Some(reason) =
+        check_containment_inner(&buf, &hooks_cfg, home.as_deref(), env_cwd.as_deref())
+    {
+        return emit_block(&reason);
     }
+    // Stage 2 — image / sensitive denylist (in-vault defense-in-depth).
+    // Read-scoped: Glob/Grep carry no image-content-read risk AND are
+    // governed by containment alone, so they skip this stage (and must not
+    // be failed closed for lacking a `file_path`).
+    if !is_search_tool(&buf) {
+        if let Some(reason) = check_read_inner(&buf, &hooks_cfg, home.as_deref()) {
+            return emit_block(&reason);
+        }
+    }
+    ExitCode::from(0)
 }
 
 fn emit_block(reason: &str) -> ExitCode {
@@ -564,6 +590,157 @@ fn json_escape(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+// --- check-read-vault-containment: vault-root containment gate ---
+
+/// Resolve the agent's read target path from a parsed PreToolUse payload,
+/// keyed by `tool_name`: `Read` uses `file_path`, `Glob`/`Grep` use `path`.
+/// Any other tool name falls back to whichever field is present. Returns
+/// `None` when the relevant field is absent / empty / non-string.
+fn target_path_str<'a>(parsed: &'a PreToolUseInput, tool_name: &str) -> Option<&'a str> {
+    let ti = parsed.tool_input.as_ref()?;
+    let val = match tool_name {
+        "Read" => ti.file_path.as_ref(),
+        "Glob" | "Grep" => ti.path.as_ref(),
+        _ => ti.file_path.as_ref().or(ti.path.as_ref()),
+    };
+    match val {
+        Some(serde_json::Value::String(s)) if !s.is_empty() => Some(s.as_str()),
+        _ => None,
+    }
+}
+
+/// Lexically resolve `.` and `..` without touching the filesystem (the
+/// fallback when a path does not exist and so cannot be canonicalized).
+fn lexical_clean(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for comp in p.components() {
+        match comp {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Normalize a path to a comparable string: strip a Windows `\\?\` verbatim
+/// prefix, convert separators to `/`, drop a trailing slash, AND (on Windows)
+/// fold ASCII case so drive-letter / case differences do not defeat the
+/// prefix comparison.
+fn norm_path_string(p: &Path) -> String {
+    let lossy = p.to_string_lossy();
+    let stripped = lossy.strip_prefix(r"\\?\").unwrap_or(&lossy);
+    let mut s = stripped.replace('\\', "/");
+    while s.len() > 1 && s.ends_with('/') {
+        s.pop();
+    }
+    if cfg!(windows) {
+        s = s.to_ascii_lowercase();
+    }
+    s
+}
+
+/// Decide whether `target` resolves inside `vault_root`. A leading `~/` /
+/// `~\` is expanded to `home`; when that expansion is required but `home`
+/// is unavailable the boundary is undecidable (`None` → caller fails
+/// closed). Both operands are canonicalized (or lexically cleaned when they
+/// do not exist) AND string-normalized before the prefix comparison, so a
+/// `cwd` in backslash form and a target in forward-slash form (as observed
+/// in real PreToolUse payloads) compare correctly.
+fn target_within_vault(target: &str, vault_root: &Path, home: Option<&Path>) -> Option<bool> {
+    let expanded: String = if let Some(rest) = target
+        .strip_prefix("~/")
+        .or_else(|| target.strip_prefix("~\\"))
+    {
+        match home {
+            Some(h) => format!("{}/{}", h.display(), rest),
+            None => return None,
+        }
+    } else {
+        target.to_string()
+    };
+    let vr = fs::canonicalize(vault_root).unwrap_or_else(|_| lexical_clean(vault_root));
+    let t = Path::new(&expanded);
+    let target_abs = if t.is_absolute() {
+        fs::canonicalize(t).unwrap_or_else(|_| lexical_clean(t))
+    } else {
+        lexical_clean(&vr.join(t))
+    };
+    let vr_n = norm_path_string(&vr);
+    let t_n = norm_path_string(&target_abs);
+    Some(t_n == vr_n || t_n.starts_with(&format!("{vr_n}/")))
+}
+
+/// Pure decision for the containment stage of `codebus hook check-read`.
+/// Returns `Some(reason)` when the Read/Glob/Grep invocation MUST be blocked
+/// for resolving outside the vault root (or for an undecidable boundary);
+/// `None` when containment allows the path through to the denylist stage.
+///
+/// Gated by `hooks_cfg.read_path_containment` (independent of
+/// `read_image_block`). `env_cwd` is the hook subprocess working directory,
+/// used as the vault-root fallback when the PreToolUse payload omits `cwd`.
+fn check_containment_inner(
+    stdin_body: &str,
+    hooks_cfg: &HooksConfig,
+    home: Option<&Path>,
+    env_cwd: Option<&Path>,
+) -> Option<String> {
+    if !hooks_cfg.read_path_containment {
+        return None;
+    }
+    if stdin_body.trim().is_empty() {
+        return Some("hook: empty stdin (no PreToolUse JSON received)".to_string());
+    }
+    let parsed: PreToolUseInput = match serde_json::from_str(stdin_body) {
+        Ok(p) => p,
+        Err(_) => return Some("hook: malformed PreToolUse JSON on stdin".to_string()),
+    };
+    let tool_name = parsed.tool_name.as_deref().unwrap_or_default();
+    // No target path: Glob/Grep omitting `path` means the implicit search root
+    // is the vault cwd (in-vault) → allow; a Read with no `file_path` is failed
+    // closed by the denylist stage, not here.
+    let Some(path) = target_path_str(&parsed, tool_name) else {
+        return None;
+    };
+    let vault_root = parsed
+        .cwd
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| env_cwd.map(|p| p.to_path_buf()));
+    let vault_root = match vault_root {
+        Some(v) => v,
+        None => {
+            return Some(format!(
+                "hook: vault-containment — vault root unresolvable (no `cwd` in PreToolUse input, no process cwd); received `{path}`"
+            ));
+        }
+    };
+    match target_within_vault(path, &vault_root, home) {
+        Some(true) => None,
+        Some(false) => Some(format!(
+            "hook: vault-containment — read path resolves outside the vault root; received `{path}`"
+        )),
+        None => Some(format!(
+            "hook: vault-containment — cannot resolve `~` home directory for path; received `{path}`"
+        )),
+    }
+}
+
+/// True when the PreToolUse payload is a `Glob` or `Grep` invocation — those
+/// search tools are governed by containment only AND skip the Read-scoped
+/// denylist stage (so they are not failed closed for lacking `file_path`).
+fn is_search_tool(stdin_body: &str) -> bool {
+    serde_json::from_str::<PreToolUseInput>(stdin_body)
+        .ok()
+        .and_then(|p| p.tool_name)
+        .map(|t| t == "Glob" || t == "Grep")
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -1238,6 +1415,7 @@ mod tests {
     fn check_read_config_off_allows_image_extension() {
         let cfg = HooksConfig {
             read_image_block: false,
+            read_path_containment: true,
         };
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
         assert!(
@@ -1250,6 +1428,7 @@ mod tests {
     fn check_read_config_off_allows_uppercase_image() {
         let cfg = HooksConfig {
             read_image_block: false,
+            read_path_containment: true,
         };
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"assets/logo.JPG"}}"#;
         assert!(check_read_inner(body, &cfg, None).is_none());
@@ -1259,6 +1438,7 @@ mod tests {
     fn check_read_config_off_allows_pdf() {
         let cfg = HooksConfig {
             read_image_block: false,
+            read_path_containment: true,
         };
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"docs/manual.pdf"}}"#;
         assert!(check_read_inner(body, &cfg, None).is_none());
@@ -1271,6 +1451,7 @@ mod tests {
         // processing branch is short-circuited.
         let cfg = HooksConfig {
             read_image_block: false,
+            read_path_containment: true,
         };
         assert!(check_read_inner("", &cfg, None).is_none());
     }
@@ -1279,6 +1460,7 @@ mod tests {
     fn check_read_config_off_short_circuits_malformed_json() {
         let cfg = HooksConfig {
             read_image_block: false,
+            read_path_containment: true,
         };
         assert!(check_read_inner("{not valid json", &cfg, None).is_none());
     }
@@ -1287,6 +1469,7 @@ mod tests {
     fn check_read_config_off_short_circuits_missing_file_path() {
         let cfg = HooksConfig {
             read_image_block: false,
+            read_path_containment: true,
         };
         let body = r#"{"tool_name":"Read","tool_input":{}}"#;
         assert!(check_read_inner(body, &cfg, None).is_none());
@@ -1299,6 +1482,7 @@ mod tests {
         // identical to the pre-toggle implementation.
         let cfg = HooksConfig {
             read_image_block: true,
+            read_path_containment: true,
         };
         let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/diagrams/flow.png"}}"#;
         let reason = check_read_inner(body, &cfg, None);
@@ -1310,6 +1494,7 @@ mod tests {
     fn check_read_config_on_fails_closed_on_empty_stdin_like_before() {
         let cfg = HooksConfig {
             read_image_block: true,
+            read_path_containment: true,
         };
         let reason = check_read_inner("", &cfg, None);
         assert!(reason.is_some());
@@ -1513,6 +1698,239 @@ mod tests {
         let body = body_with_path("C:\\Users\\poc\\.ssh\\config");
         assert!(
             check_read_inner(&body, &HooksConfig::default(), Some(&home)).is_some()
+        );
+    }
+
+    // --- check-read-vault-containment: containment stage tests ---
+    // These target `check_containment_inner` directly (the denylist stage is
+    // covered by the tests above and is unchanged). The vault root is the
+    // PreToolUse `cwd` field (task 1.1, spike-confirmed) with the
+    // hook-subprocess cwd as fallback.
+
+    use tempfile::TempDir;
+
+    /// Build a PreToolUse JSON body with an explicit `cwd` (the vault root)
+    /// and a single `tool_input` field (`file_path` for Read, `path` for
+    /// Glob/Grep). serde_json escapes Windows backslashes correctly.
+    fn ct_body(tool: &str, key: &str, path: &str, cwd: &str) -> String {
+        let mut ti = serde_json::Map::new();
+        ti.insert(key.to_string(), serde_json::Value::String(path.to_string()));
+        serde_json::json!({
+            "tool_name": tool,
+            "cwd": cwd,
+            "tool_input": serde_json::Value::Object(ti),
+        })
+        .to_string()
+    }
+
+    fn both_on() -> HooksConfig {
+        HooksConfig::default()
+    }
+
+    // ---- 3.1 core ----
+
+    /// F1: an absolute Read path that canonicalizes outside the vault root
+    /// is blocked by containment.
+    #[test]
+    fn containment_blocks_out_of_vault_absolute_read() {
+        let vault = TempDir::new().unwrap();
+        let outside = vault.path().parent().unwrap().join("outside_secret.txt");
+        let body = ct_body(
+            "Read",
+            "file_path",
+            outside.to_str().unwrap(),
+            vault.path().to_str().unwrap(),
+        );
+        let r = check_containment_inner(&body, &both_on(), None, None);
+        assert!(r.is_some(), "out-of-vault Read must block");
+        assert!(r.unwrap().contains("vault-containment"));
+    }
+
+    /// An in-vault relative Read path is allowed (resolved against cwd).
+    #[test]
+    fn containment_allows_in_vault_relative_read() {
+        let vault = TempDir::new().unwrap();
+        let body = ct_body(
+            "Read",
+            "file_path",
+            "raw/code/src/main.rs",
+            vault.path().to_str().unwrap(),
+        );
+        assert!(check_containment_inner(&body, &both_on(), None, None).is_none());
+    }
+
+    /// The fix workflow reads in-vault wiki files via the ABSOLUTE paths
+    /// `codebus lint` emits — containment MUST allow these (the
+    /// canonicalize-then-contain rule, never ban-absolute).
+    #[test]
+    fn containment_allows_in_vault_absolute_read_fix_style() {
+        let vault = TempDir::new().unwrap();
+        let wikidir = vault.path().join("wiki").join("modules");
+        std::fs::create_dir_all(&wikidir).unwrap();
+        let f = wikidir.join("auth.md");
+        std::fs::write(&f, "x").unwrap();
+        let body = ct_body(
+            "Read",
+            "file_path",
+            f.to_str().unwrap(),
+            vault.path().to_str().unwrap(),
+        );
+        assert!(
+            check_containment_inner(&body, &both_on(), None, None).is_none(),
+            "fix's in-vault absolute path must be allowed"
+        );
+    }
+
+    /// F2: a Grep whose `path` is outside the vault root is blocked.
+    #[test]
+    fn containment_blocks_out_of_vault_grep_path() {
+        let vault = TempDir::new().unwrap();
+        let outside = vault.path().parent().unwrap();
+        let body = ct_body(
+            "Grep",
+            "path",
+            outside.to_str().unwrap(),
+            vault.path().to_str().unwrap(),
+        );
+        let r = check_containment_inner(&body, &both_on(), None, None);
+        assert!(r.is_some(), "out-of-vault Grep must block");
+        assert!(r.unwrap().contains("vault-containment"));
+    }
+
+    /// Glob/Grep omitting `path` means the implicit search root is the vault
+    /// cwd — allowed, NOT failed closed for the absent field.
+    #[test]
+    fn containment_allows_glob_grep_omitting_path() {
+        let vault = TempDir::new().unwrap();
+        let cwd = vault.path().to_str().unwrap();
+        let grep = serde_json::json!({"tool_name":"Grep","cwd":cwd,"tool_input":{"pattern":"foo"}})
+            .to_string();
+        assert!(check_containment_inner(&grep, &both_on(), None, None).is_none());
+        let glob =
+            serde_json::json!({"tool_name":"Glob","cwd":cwd,"tool_input":{"pattern":"**/*.md"}})
+                .to_string();
+        assert!(check_containment_inner(&glob, &both_on(), None, None).is_none());
+    }
+
+    /// The PreToolUse stdin `cwd` is the vault root, taking precedence over
+    /// the hook-subprocess cwd fallback. An absolute path under the stdin
+    /// cwd but outside the env_cwd MUST be allowed (proving stdin cwd wins).
+    #[test]
+    fn containment_prefers_stdin_cwd_over_env_cwd() {
+        let vault = TempDir::new().unwrap();
+        let other = TempDir::new().unwrap();
+        let f = vault.path().join("wiki").join("x.md");
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(&f, "x").unwrap();
+        let body = ct_body(
+            "Read",
+            "file_path",
+            f.to_str().unwrap(),
+            vault.path().to_str().unwrap(),
+        );
+        // env_cwd points at `other`; stdin cwd (vault) must govern → allow.
+        assert!(check_containment_inner(&body, &both_on(), None, Some(other.path())).is_none());
+    }
+
+    /// When the stdin payload omits `cwd`, the hook-subprocess cwd is the
+    /// fallback vault root.
+    #[test]
+    fn containment_falls_back_to_env_cwd_when_cwd_absent() {
+        let vault = TempDir::new().unwrap();
+        let inside =
+            serde_json::json!({"tool_name":"Read","tool_input":{"file_path":"raw/code/x.rs"}})
+                .to_string();
+        assert!(
+            check_containment_inner(&inside, &both_on(), None, Some(vault.path())).is_none(),
+            "relative in-vault path resolves against the env_cwd fallback"
+        );
+        let outside = vault.path().parent().unwrap().join("o.txt");
+        let body = serde_json::json!({"tool_name":"Read","tool_input":{"file_path":outside.to_str().unwrap()}})
+            .to_string();
+        assert!(
+            check_containment_inner(&body, &both_on(), None, Some(vault.path())).is_some(),
+            "out-of-vault absolute path blocks against the env_cwd fallback"
+        );
+    }
+
+    // ---- 3.2 edges ----
+
+    /// `read_path_containment: false` disables the boundary (escape hatch).
+    #[test]
+    fn containment_disabled_skips_boundary() {
+        let vault = TempDir::new().unwrap();
+        let outside = vault.path().parent().unwrap().join("o.txt");
+        let body = ct_body(
+            "Read",
+            "file_path",
+            outside.to_str().unwrap(),
+            vault.path().to_str().unwrap(),
+        );
+        let cfg = HooksConfig {
+            read_image_block: true,
+            read_path_containment: false,
+        };
+        assert!(
+            check_containment_inner(&body, &cfg, None, None).is_none(),
+            "containment off → no boundary block"
+        );
+    }
+
+    /// The two gates are independent: with `read_image_block: false` but
+    /// `read_path_containment: true`, an out-of-vault path is still blocked.
+    #[test]
+    fn containment_independent_of_read_image_block() {
+        let vault = TempDir::new().unwrap();
+        let outside = vault.path().parent().unwrap().join("o.txt");
+        let body = ct_body(
+            "Read",
+            "file_path",
+            outside.to_str().unwrap(),
+            vault.path().to_str().unwrap(),
+        );
+        let cfg = HooksConfig {
+            read_image_block: false,
+            read_path_containment: true,
+        };
+        assert!(check_containment_inner(&body, &cfg, None, None).is_some());
+    }
+
+    /// With a target path present but no resolvable vault root (no `cwd`,
+    /// no env_cwd), containment fails closed.
+    #[test]
+    fn containment_vault_root_unresolvable_blocks() {
+        let body =
+            serde_json::json!({"tool_name":"Read","tool_input":{"file_path":"/abs/x.txt"}})
+                .to_string();
+        let r = check_containment_inner(&body, &both_on(), None, None);
+        assert!(r.is_some());
+        assert!(r.unwrap().contains("unresolvable"));
+    }
+
+    /// Empty / malformed stdin fails closed while containment is on.
+    #[test]
+    fn containment_empty_and_malformed_stdin_block() {
+        assert!(check_containment_inner("", &both_on(), None, None).is_some());
+        assert!(check_containment_inner("{bad json", &both_on(), None, None).is_some());
+    }
+
+    /// Windows: an in-vault target expressed with backslash separators AND a
+    /// differently-cased drive letter than the cwd is still recognized as
+    /// in-vault (both operands normalize under one canonicalization).
+    #[cfg(windows)]
+    #[test]
+    fn containment_windows_separator_and_drive_case_in_vault_allows() {
+        let vault = TempDir::new().unwrap();
+        let f = vault.path().join("wiki").join("x.md");
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(&f, "x").unwrap();
+        // target: backslash form; cwd: forward-slash form — deliberate mismatch.
+        let target_bs = f.to_string_lossy().replace('/', "\\");
+        let cwd_fs = vault.path().to_string_lossy().replace('\\', "/");
+        let body = ct_body("Read", "file_path", &target_bs, &cwd_fs);
+        assert!(
+            check_containment_inner(&body, &both_on(), None, None).is_none(),
+            "in-vault path must allow despite separator / drive-case variance"
         );
     }
 }

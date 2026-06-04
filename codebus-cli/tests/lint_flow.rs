@@ -300,6 +300,48 @@ fn lint_flags_tampered_pretooluse_gate() {
     assert_eq!(out.status.code(), Some(1));
 }
 
+/// check-read-vault-containment — `codebus init` installs Bash + Read + Glob
+/// + Grep check-read gates; removing only the Glob gate MUST surface a
+/// `vault-gate-integrity` error naming the missing Glob gate (the same code
+/// path covers a missing Grep gate via the shared REQUIRED_HOOKS loop).
+#[test]
+fn lint_flags_missing_glob_gate() {
+    let tmp = TempDir::new().unwrap();
+    init_vault(tmp.path());
+
+    // Reinstall Bash + Read + Grep but drop the Glob gate that init wrote.
+    let settings = tmp
+        .path()
+        .join(".codebus")
+        .join(".claude")
+        .join("settings.json");
+    std::fs::write(
+        &settings,
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
+    )
+    .unwrap();
+
+    let out = lint(tmp.path(), &["--format", "json"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("JSON output must parse");
+    let issues = parsed["issues"].as_array().expect("issues array");
+    let gate = issues
+        .iter()
+        .find(|i| i["rule"] == "vault-gate-integrity")
+        .unwrap_or_else(|| panic!("expected a vault-gate-integrity issue, got: {stdout}"));
+    assert_eq!(gate["severity"], "error");
+    assert!(
+        gate["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Glob"),
+        "gate issue must name the missing Glob gate: {}",
+        gate["message"]
+    );
+    assert_eq!(out.status.code(), Some(1));
+}
+
 fn snapshot(dir: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
     let mut snap = Vec::new();
     fn recurse(d: &Path, snap: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {

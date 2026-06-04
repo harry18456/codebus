@@ -224,13 +224,87 @@ fn config_false_allows_non_image() {
 
 #[test]
 fn config_false_short_circuits_malformed_stdin() {
-    // When the gate is off, even malformed stdin (which would normally
-    // be fail-closed → block) MUST be allowed.
+    // check-read-vault-containment: the denylist (read_image_block) AND the
+    // containment (read_path_containment) gates are independent. To fully
+    // short-circuit malformed stdin (which either gate would otherwise
+    // fail-closed → block), BOTH gates must be off.
     let home = TempDir::new().expect("tmp CODEBUS_HOME");
-    write_codebus_config(home.path(), "hooks:\n  read_image_block: false\n");
+    write_codebus_config(
+        home.path(),
+        "hooks:\n  read_image_block: false\n  read_path_containment: false\n",
+    );
     let (code, stdout, _) = run_check_read_with_home("{not valid json", Some(home.path()));
     assert_eq!(code, Some(0));
     assert!(stdout.trim().is_empty());
+}
+
+// --- check-read-vault-containment: end-to-end containment via the real
+// binary. The vault root comes from the PreToolUse `cwd` field supplied in
+// the body. read_path_containment defaults on (explicit true here).
+
+#[test]
+fn containment_blocks_out_of_vault_read_via_binary() {
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(home.path(), "hooks:\n  read_path_containment: true\n");
+    let vault = TempDir::new().expect("vault");
+    let vault_fs = vault.path().to_string_lossy().replace('\\', "/");
+    let outside = vault.path().parent().unwrap().join("secret.txt");
+    let outside_fs = outside.to_string_lossy().replace('\\', "/");
+    let body =
+        format!(r#"{{"tool_name":"Read","cwd":"{vault_fs}","tool_input":{{"file_path":"{outside_fs}"}}}}"#);
+    let (code, stdout, _) = run_check_read_with_home(&body, Some(home.path()));
+    assert_eq!(code, Some(0));
+    let v = assert_block(&stdout);
+    assert!(
+        v["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("vault-containment"),
+        "block reason must name vault-containment: {stdout}"
+    );
+}
+
+#[test]
+fn containment_allows_in_vault_read_via_binary() {
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(home.path(), "hooks:\n  read_path_containment: true\n");
+    let vault = TempDir::new().expect("vault");
+    let vault_fs = vault.path().to_string_lossy().replace('\\', "/");
+    let body =
+        format!(r#"{{"tool_name":"Read","cwd":"{vault_fs}","tool_input":{{"file_path":"raw/code/x.rs"}}}}"#);
+    let (code, stdout, _) = run_check_read_with_home(&body, Some(home.path()));
+    assert_eq!(code, Some(0));
+    assert!(
+        stdout.trim().is_empty(),
+        "in-vault relative read must allow: {stdout}"
+    );
+}
+
+#[test]
+fn containment_blocks_out_of_vault_grep_path_via_binary() {
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(home.path(), "hooks:\n  read_path_containment: true\n");
+    let vault = TempDir::new().expect("vault");
+    let vault_fs = vault.path().to_string_lossy().replace('\\', "/");
+    let outside_fs = vault
+        .path()
+        .parent()
+        .unwrap()
+        .to_string_lossy()
+        .replace('\\', "/");
+    let body = format!(
+        r#"{{"tool_name":"Grep","cwd":"{vault_fs}","tool_input":{{"pattern":"x","path":"{outside_fs}"}}}}"#
+    );
+    let (code, stdout, _) = run_check_read_with_home(&body, Some(home.path()));
+    assert_eq!(code, Some(0));
+    let v = assert_block(&stdout);
+    assert!(
+        v["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("vault-containment"),
+        "Grep out-of-vault must block: {stdout}"
+    );
 }
 
 #[test]

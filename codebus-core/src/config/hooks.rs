@@ -31,12 +31,19 @@ use std::path::Path;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HooksConfig {
     pub read_image_block: bool,
+    /// check-read-vault-containment: gates the vault-root containment
+    /// boundary in `codebus hook check-read`, independent of
+    /// `read_image_block`. Default true, fail-safe. Set false only as an
+    /// emergency escape hatch (e.g. a canonicalization edge case
+    /// false-blocking a legitimate in-vault read).
+    pub read_path_containment: bool,
 }
 
 impl Default for HooksConfig {
     fn default() -> Self {
         Self {
             read_image_block: true,
+            read_path_containment: true,
         }
     }
 }
@@ -54,6 +61,8 @@ struct ConfigFile {
 struct HooksSection {
     #[serde(default)]
     read_image_block: Option<bool>,
+    #[serde(default)]
+    read_path_containment: Option<bool>,
 }
 
 /// Load `hooks` config from `path`. Returns defaults when the file does
@@ -76,6 +85,9 @@ pub fn load_hooks_config(path: &Path) -> Result<HooksConfig, super::ConfigLoadEr
     if let Some(hooks) = file.hooks {
         if let Some(v) = hooks.read_image_block {
             cfg.read_image_block = v;
+        }
+        if let Some(v) = hooks.read_path_containment {
+            cfg.read_path_containment = v;
         }
     }
     Ok(cfg)
@@ -184,5 +196,44 @@ mod tests {
             result,
             Err(super::super::ConfigLoadError::YamlParse(_))
         ));
+    }
+
+    // --- check-read-vault-containment: read_path_containment gate ---
+
+    /// Containment gate defaults on: `HooksConfig::default()` is true,
+    /// a missing file is true, AND a `hooks` section that omits the key
+    /// is true (fail-safe to contain). Independent of read_image_block.
+    #[test]
+    fn read_path_containment_defaults_true() {
+        assert!(HooksConfig::default().read_path_containment);
+        let tmp = TempDir::new().unwrap();
+        let cfg = load_hooks_config(&tmp.path().join("nonexistent.yaml")).unwrap();
+        assert!(cfg.read_path_containment);
+        // hooks section present (read_image_block set) but containment key absent → true.
+        let p = write_yaml(tmp.path(), "hooks:\n  read_image_block: false\n");
+        let cfg = load_hooks_config(&p).unwrap();
+        assert!(cfg.read_path_containment);
+        assert!(!cfg.read_image_block, "the two gates resolve independently");
+    }
+
+    /// Explicit `false` disables containment (escape hatch); the
+    /// read_image_block gate is unaffected (independent).
+    #[test]
+    fn read_path_containment_explicit_false_independent() {
+        let tmp = TempDir::new().unwrap();
+        let p = write_yaml(tmp.path(), "hooks:\n  read_path_containment: false\n");
+        let cfg = load_hooks_config(&p).unwrap();
+        assert!(!cfg.read_path_containment);
+        assert!(cfg.read_image_block, "read_image_block stays default true");
+    }
+
+    /// Non-boolean `read_path_containment` → loader Err → the call-site
+    /// `unwrap_or_default()` resolves to true (fail-safe to contain).
+    #[test]
+    fn read_path_containment_non_bool_resolves_true() {
+        let tmp = TempDir::new().unwrap();
+        let p = write_yaml(tmp.path(), "hooks:\n  read_path_containment: \"yes\"\n");
+        let resolved = load_hooks_config(&p).unwrap_or_default();
+        assert!(resolved.read_path_containment);
     }
 }

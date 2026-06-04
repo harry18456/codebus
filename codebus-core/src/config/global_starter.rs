@@ -141,6 +141,14 @@ hooks:
   # doing so bypasses the regex_basic PII filter (which only scans text).
   read_image_block: true
 
+  # Controls the vault-root containment boundary in `codebus hook
+  # check-read`: confines the agent's Read / Glob / Grep to inside the
+  # vault (raw/code, wiki). A read whose path canonicalizes outside the
+  # vault root is blocked. Default true (contain). Set false ONLY as an
+  # emergency escape hatch — disabling it re-opens reads of the parent
+  # repo and user-home files.
+  read_path_containment: true
+
 # Lint subsystem.
 lint:
   fix:
@@ -266,5 +274,19 @@ mod tests {
         // v3-run-log: log section also round-trips to default.
         let lg = load_log_config(&target).unwrap();
         assert_eq!(lg, LogConfig::default());
+
+        // check-read-vault-containment: hooks section round-trips, both
+        // gates default on (independent).
+        let hooks = crate::config::load_hooks_config(&target).unwrap();
+        assert_eq!(hooks, crate::config::HooksConfig::default());
+        assert!(hooks.read_image_block);
+        assert!(hooks.read_path_containment);
+    }
+
+    /// check-read-vault-containment: the starter documents AND enables the
+    /// containment gate (body contains the key set to true).
+    #[test]
+    fn starter_config_includes_read_path_containment() {
+        assert!(STARTER_CONFIG.contains("read_path_containment: true"));
     }
 }

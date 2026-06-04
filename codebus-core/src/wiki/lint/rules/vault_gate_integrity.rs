@@ -156,11 +156,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write_settings(tmp.path(), r#"{"hooks":{"PreToolUse":[]}}"#);
         let issues = run(tmp.path());
-        // Both required hooks missing → one error each. The spec scenario
+        // All four required hooks missing → one error each. The spec scenario
         // (b) wording ("exactly 1 issue") refers to the emptied-array case
         // surfacing the failure; we report one per missing required hook so
         // the message names each gone gate. Assert all are errors with the
-        // stable rule id and at least the Bash/Read gates are named.
+        // stable rule id and at least the Bash/Read/Glob/Grep gates are named.
         assert_eq!(issues.len(), REQUIRED_HOOKS.len());
         assert!(issues.iter().all(|i| i.severity == LintSeverity::Error));
         assert!(
@@ -176,7 +176,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write_settings(
             tmp.path(),
-            r#"{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
         );
         let issues = run(tmp.path());
         assert_eq!(issues.len(), 1, "got {issues:?}");
@@ -196,7 +196,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write_settings(
             tmp.path(),
-            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]}]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
         );
         let issues = run(tmp.path());
         assert_eq!(issues.len(), 1, "got {issues:?}");
@@ -207,6 +207,46 @@ mod tests {
             issue.message.contains("Read"),
             "message must name the missing Read gate: {}",
             issue.message
+        );
+    }
+
+    // (d2) check-read-vault-containment: Glob missing (others present) →
+    // error naming the Glob gate.
+    #[test]
+    fn glob_missing_others_present_names_glob_gate() {
+        let tmp = TempDir::new().unwrap();
+        write_settings(
+            tmp.path(),
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
+        );
+        let issues = run(tmp.path());
+        assert_eq!(issues.len(), 1, "got {issues:?}");
+        assert_eq!(issues[0].severity, LintSeverity::Error);
+        assert_eq!(issues[0].rule_id, VaultGateIntegrityRule::RULE_ID);
+        assert!(
+            issues[0].message.contains("Glob"),
+            "message must name the missing Glob gate: {}",
+            issues[0].message
+        );
+    }
+
+    // (d3) check-read-vault-containment: Grep missing (others present) →
+    // error naming the Grep gate.
+    #[test]
+    fn grep_missing_others_present_names_grep_gate() {
+        let tmp = TempDir::new().unwrap();
+        write_settings(
+            tmp.path(),
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
+        );
+        let issues = run(tmp.path());
+        assert_eq!(issues.len(), 1, "got {issues:?}");
+        assert_eq!(issues[0].severity, LintSeverity::Error);
+        assert_eq!(issues[0].rule_id, VaultGateIntegrityRule::RULE_ID);
+        assert!(
+            issues[0].message.contains("Grep"),
+            "message must name the missing Grep gate: {}",
+            issues[0].message
         );
     }
 
@@ -222,6 +262,8 @@ mod tests {
                 "PreToolUse": [
                   {"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},
                   {"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},
+                  {"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]},
+                  {"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]},
                   {"matcher":"Write","hooks":[{"type":"command","command":"user custom hook"}]}
                 ],
                 "PostToolUse": [
