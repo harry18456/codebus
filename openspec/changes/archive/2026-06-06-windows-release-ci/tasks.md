@@ -10,5 +10,5 @@
 
 ## 3. 驗證
 
-- [ ] 3.1 以 `workflow_dispatch` 手動觸發一次，確認 `build-windows` job 在 `windows-latest` 成功完成、且產生一個 draft GitHub Release，其 asset 含一個 `*-setup.exe`。完成標準：Actions 頁該 run 綠燈、Releases 頁出現對應 draft、draft 內有 `-setup.exe`（手動驗證；installer payload 內容由既有 `windows-distribution` spec 保證，本 change 不重複驗）。
+- [x] 3.1 以 `workflow_dispatch` 手動觸發一次，確認 `build-windows` job 在 `windows-latest` 成功完成、且產生一個 draft GitHub Release，其 asset 含一個 `*-setup.exe`。完成標準：Actions 頁該 run 綠燈、Releases 頁出現對應 draft、draft 內有 `-setup.exe`（手動驗證；installer payload 內容由既有 `windows-distribution` spec 保證，本 change 不重複驗）。
 - [x] 3.2 確認失敗路徑不發佈 Release：檢視 workflow 結構，確保唯一建立 Release 的步驟是建置成功後的 tauri-action，無任何獨立於建置成功的 release 發佈步驟。完成標準：靜態內容檢視確認沒有早於或獨立於建置成功的 release-publish 步驟（對齊 spec「Failed build does not publish a release」）。
