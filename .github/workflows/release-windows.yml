@@ -1,0 +1,66 @@
+# Windows release pipeline for codebus.
+#
+# Builds the Windows NSIS installer (GUI codebus-app.exe + bundled CLI bin/codebus.exe)
+# by reproducing the local `tauri build` path on a windows-latest runner, then attaches
+# the produced `-setup.exe` to a DRAFT GitHub Release. The installer is UNSIGNED, so the
+# draft is held for a human to add SmartScreen guidance and publish.
+#
+# RELEASE-TIME VERSION SYNC CHECK (do this BEFORE pushing a `v*` tag):
+#   The installer filename version is taken from codebus-app/src-tauri/tauri.conf.json
+#   (`version`), NOT from the git tag — they are not linked automatically. Before tagging,
+#   confirm BOTH of these are bumped to the tag's version:
+#     - Cargo.toml                              -> workspace.package.version
+#     - codebus-app/src-tauri/tauri.conf.json   -> version
+#   Otherwise the Release name (from the tag) and the asset filename (from tauri.conf.json)
+#   will disagree.
+
+name: release-windows
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Minimal scope: only the permission needed to create the Release and upload the asset
+# via the built-in GITHUB_TOKEN. No custom PAT, no broader scopes.
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Cache the workspace target dir (Cargo.lock lives at the repo root) to avoid
+      # recompiling the large dependency tree on every run.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: codebus-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: codebus-app
+        run: npm ci
+
+      # tauri-action runs the project's existing beforeBuildCommand (stage-cli.mjs builds
+      # and stages the release CLI, then `npm run build`), then `tauri build` to produce the
+      # NSIS installer. On success it creates a DRAFT GitHub Release and attaches the
+      # `-setup.exe`. If any earlier step or the build itself fails, the job fails and no
+      # Release is created.
+      - name: Build installer and publish draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: codebus-app
+          tagName: ${{ github.ref_name }}
+          releaseName: "codebus ${{ github.ref_name }}"
+          releaseDraft: true
