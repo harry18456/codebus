@@ -92,6 +92,11 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
   } | null>(null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<RunDetail | null>(null)
+  // True when the get_run_detail fetch for the selected run rejected.
+  // Surfaced as a retriable error state instead of swallowing the
+  // rejection and hanging on the loading affordance. Spec: app-workspace
+  // § Run Detail Load Failure Surfacing.
+  const [selectedDetailError, setSelectedDetailError] = useState(false)
 
   // Bind Cmd+K / Ctrl+K to toggle the chat widget. The hook scopes the
   // window listener to Workspace mount/unmount so the shortcut is inert in
@@ -148,17 +153,28 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
   useEffect(() => {
     if (!selectedRunId) return
     if (selectedDetail) return
+    // A prior fetch for this run already failed — wait for an explicit
+    // retry rather than busy-refetching. `onRetryLoadDetail` clears this.
+    if (selectedDetailError) return
     if (activeRun?.runId === selectedRunId) return
     let cancelled = false
     void getRunDetail(vault.path, selectedRunId)
       .then((detail) => {
-        if (!cancelled) setSelectedDetail(detail)
+        if (!cancelled) {
+          setSelectedDetail(detail)
+          setSelectedDetailError(false)
+        }
       })
-      .catch(() => {})
+      .catch(() => {
+        // Surface the failure instead of swallowing it — otherwise the
+        // GoalsArea router stays on the loading affordance forever. Spec:
+        // app-workspace § Run Detail Load Failure Surfacing.
+        if (!cancelled) setSelectedDetailError(true)
+      })
     return () => {
       cancelled = true
     }
-  }, [selectedRunId, selectedDetail, activeRun, vault.path])
+  }, [selectedRunId, selectedDetail, selectedDetailError, activeRun, vault.path])
 
   // Watcher integration: external edits to the open run's
   // `events-<run>.jsonl` (terminal-spawned runs, live appends) SHALL
@@ -215,6 +231,7 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
   const onSelectRun = useCallback(
     async (run: RunLogSummary) => {
       setSelectedRunId(run.run_id)
+      setSelectedDetailError(false)
       // Running rows are driven by the live `activeRun` buffer, not by
       // an on-disk RunDetail (the events file is still being appended).
       if (run.outcome === "running") {
@@ -226,6 +243,7 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
         setSelectedDetail(detail)
       } catch {
         setSelectedDetail(null)
+        setSelectedDetailError(true)
       }
     },
     [vault.path],
@@ -234,6 +252,15 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
   const onBackToList = useCallback(() => {
     setSelectedRunId(null)
     setSelectedDetail(null)
+    setSelectedDetailError(false)
+  }, [])
+
+  // Retry a failed RunDetail load: clear the error so the load effect
+  // re-fires for the still-selected run. Spec: app-workspace § Run Detail
+  // Load Failure Surfacing.
+  const onRetryLoadDetail = useCallback(() => {
+    setSelectedDetail(null)
+    setSelectedDetailError(false)
   }, [])
 
   /**
@@ -246,6 +273,7 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
   const onSelectRunId = useCallback((runId: string) => {
     setSelectedRunId(runId)
     setSelectedDetail(null)
+    setSelectedDetailError(false)
   }, [])
 
   const onSelectPage = useCallback(
@@ -266,6 +294,7 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
     setActiveTab("goals")
     setSelectedRunId(runId)
     setSelectedDetail(null)
+    setSelectedDetailError(false)
   }, [])
 
   function handleBack() {
@@ -331,6 +360,7 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
               setActiveTab(next)
               setSelectedRunId(null)
               setSelectedDetail(null)
+              setSelectedDetailError(false)
             }}
             activePulse={activeRun != null}
             activePulseAriaLabel={t("workspace.tab.goals.activeRunPulse")}
@@ -397,9 +427,11 @@ export function Workspace({ vault, onOpenSettings }: WorkspaceProps) {
             vaultPath={vault.path}
             selectedRunId={selectedRunId}
             selectedDetail={selectedDetail}
+            selectedDetailError={selectedDetailError}
             activeRunId={activeRun?.runId ?? null}
             onSelectRun={onSelectRun}
             onSelectRunId={onSelectRunId}
+            onRetryLoadDetail={onRetryLoadDetail}
             onBack={onBackToList}
             onSelectPage={onSelectPage}
             pendingNewGoalPrefill={pendingNewGoalPrefill}
@@ -564,10 +596,14 @@ interface GoalsAreaProps {
   vaultPath: string
   selectedRunId: string | null
   selectedDetail: RunDetail | null
+  /** True when the get_run_detail fetch for the selected run rejected. */
+  selectedDetailError: boolean
   activeRunId: string | null
   onSelectRun: (run: RunLogSummary) => void
   /** Switch the detail view to the given run id (used by spawn / retry). */
   onSelectRunId: (runId: string) => void
+  /** Re-attempt a failed RunDetail load for the still-selected run. */
+  onRetryLoadDetail: () => void
   onBack: () => void
   onSelectPage: (slug: string) => void
   /**
@@ -588,9 +624,11 @@ function GoalsArea({
   vaultPath,
   selectedRunId,
   selectedDetail,
+  selectedDetailError,
   activeRunId,
   onSelectRun,
   onSelectRunId,
+  onRetryLoadDetail,
   onBack,
   onSelectPage,
   pendingNewGoalPrefill,
@@ -611,6 +649,44 @@ function GoalsArea({
   // Running detail: driven by useGoalsStore.activeRun (live buffer).
   if (activeRunId === selectedRunId) {
     return <RunDetailRunning onBack={onBack} />
+  }
+  // RunDetail fetch rejected — surface a retriable error instead of
+  // hanging on the loading affordance. Spec: app-workspace § Run Detail
+  // Load Failure Surfacing.
+  if (selectedDetailError) {
+    return (
+      <div
+        data-testid="run-detail-load-error"
+        className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center"
+      >
+        <div className="flex flex-col items-center gap-1">
+          <h2 className="text-h-row font-semibold tracking-tight text-fg">
+            {t("workspace.runDetail.error.title")}
+          </h2>
+          <p className="max-w-[420px] text-meta text-fg-secondary">
+            {t("workspace.runDetail.error.body")}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            data-testid="run-detail-load-error-retry"
+            onClick={onRetryLoadDetail}
+            className="rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-sm font-medium text-fg hover:bg-bg-sunken focus:outline-none focus:ring-2 focus:ring-accent-ring"
+          >
+            {t("workspace.runDetail.error.retry")}
+          </button>
+          <button
+            type="button"
+            data-testid="run-detail-load-error-back"
+            onClick={onBack}
+            className="text-meta text-fg-tertiary hover:text-fg-secondary focus:outline-none focus:ring-2 focus:ring-accent-ring"
+          >
+            {t("workspace.runDetail.backLink")}
+          </button>
+        </div>
+      </div>
+    )
   }
   if (!selectedDetail) {
     return (

@@ -186,8 +186,15 @@ pub fn spawn_goal(
             let _ = app_for_terminal.emit("goal-terminal", payload);
         },
         content_verify,
-        move |repo, options, mut on_event, cancel| {
-            run_goal(repo, options, |e| on_event(e), cancel, run_timeout)
+        move |repo, options, mut on_event, cancel, started_at| {
+            run_goal(
+                repo,
+                options,
+                |e| on_event(e),
+                cancel,
+                run_timeout,
+                Some(started_at),
+            )
         },
     )
 }
@@ -219,6 +226,7 @@ where
             GoalOptions,
             Box<dyn FnMut(VerbEvent) + Send>,
             Option<Arc<AtomicBool>>,
+            String,
         ) -> Result<GoalReport, VerbError>
         + Send
         + 'static,
@@ -237,18 +245,26 @@ where
         });
     }
 
-    // RunId = started_at slug at millisecond precision so two spawns within
-    // the same wall-clock second receive distinct ids and the second one
-    // does not overwrite the first's cancel handle in `active_runs`. See
-    // spec `app-workspace § Tauri IPC Commands for Goal Lifecycle and Wiki
-    // Read` and the parallel `quiz_run_id` helper in `ipc/quiz.rs`.
-    let run_id = goal_run_id();
+    // Single wall-clock sample threaded through every consumer. The colon
+    // RFC 3339 form (`started_at`) goes down into `run_goal` (events.jsonl
+    // filename slug + RunLog.started_at); the slug form (`:`→`-`) is the
+    // `RunId` returned to the frontend AND the `active_runs` key AND the
+    // `goal-stream` / `goal-terminal` payload id. Because all of these
+    // derive from ONE sample, the frontend's `RunId` is byte-identical to
+    // the persisted run's identity — a completed run stays reachable by
+    // `get_run_detail`, never lost to a second `Utc::now()` drift. Millis
+    // precision also keeps two same-second spawns distinct. See spec
+    // `app-workspace § Interrupted Run Detection — Single-Source Run Id
+    // Invariant`.
+    let started_at = goal_started_at_now();
+    let run_id = slug_started_at(&started_at);
 
     let cancel = Arc::new(AtomicBool::new(false));
     active_runs.insert(&vault_str, run_id.clone(), cancel.clone());
 
     let active_runs_thread = active_runs.clone();
     let run_id_thread = run_id.clone();
+    let started_at_thread = started_at.clone();
     let cancel_thread = cancel.clone();
 
     thread::Builder::new()
@@ -277,7 +293,13 @@ where
             };
 
             let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                let _ = runner(&vault_path, options, on_event, Some(cancel_thread));
+                let _ = runner(
+                    &vault_path,
+                    options,
+                    on_event,
+                    Some(cancel_thread),
+                    started_at_thread,
+                );
             }));
 
             active_runs_thread.remove(&run_id_thread);
@@ -566,12 +588,20 @@ pub(crate) fn read_events_jsonl(path: &Path) -> Result<Vec<EventEnvelope>, AppEr
     Ok(events)
 }
 
-/// Derive a new goal-mode `RunId` from the current wall-clock time.
-///
-/// Millisecond precision: two consecutive calls within the same second
-/// receive distinct ids (see `spawn_goal_with_runner` for why).
-pub(crate) fn goal_run_id() -> String {
-    let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+/// Sample the wall-clock once as an RFC 3339 UTC string at millisecond
+/// precision (colon time separators). This is the SINGLE source for a
+/// goal run's identity: the colon form threads into `run_goal` as
+/// `run_started_at` (events.jsonl filename slug + RunLog.started_at) and
+/// the slug form (`slug_started_at`) is the `RunId` returned to the
+/// frontend. Millisecond precision keeps two same-second spawns distinct.
+pub(crate) fn goal_started_at_now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// Slug an RFC 3339 started_at string into a `RunId` / events-file slug by
+/// replacing `:` with `-`. Pairs with `goal_started_at_now` so the RunId
+/// and the persisted run derive from the SAME sample.
+pub(crate) fn slug_started_at(started_at: &str) -> String {
     started_at.replace(':', "-")
 }
 
@@ -584,80 +614,76 @@ mod tests {
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
-    /// Invariant: the IPC layer's `goal_run_id()` and the verb-layer
-    /// `run_started_at` slug (events.jsonl filename + RunLog row) MUST
-    /// be derived at the same `SecondsFormat::Millis` precision. The
-    /// orphan-run-detection join in `list_runs_impl` (events-file slug
-    /// ↔ active_runs key) silently breaks if precision drifts: a live
-    /// goal is mis-labeled `interrupted` because `active_runs.get(slug)`
-    /// always misses. See `app-workspace § Interrupted Run Detection`
-    /// NOTE on precision alignment.
+    /// Regression (goal-run-id-unify-stuck-rundetail): the `RunId` returned
+    /// by `spawn_goal` and the `run_started_at` threaded into `run_goal`
+    /// MUST originate from the SAME single wall-clock sample, so the
+    /// frontend's `RunId` is byte-identical (after slugging) to the
+    /// events.jsonl filename slug + `RunLog.started_at` the verb persists.
     ///
-    /// This test reproduces both derivation paths in this process and
-    /// asserts they produce string slugs of the same byte length and
-    /// format shape (millis fractional + `-` time separators). If a
-    /// future change reverts verb-side derivation back to `Secs` (or
-    /// flips IPC-side back to `Secs`), this test fails immediately and
-    /// names the affected derivation site.
+    /// This replaces the former `goal_run_id_precision_matches_verb_run_started_at_slug`
+    /// test, which only compared two INDEPENDENT samples by byte LENGTH —
+    /// it passed even though the values drifted by milliseconds, which is
+    /// exactly the bug that left a completed run unreachable by
+    /// `get_run_detail` and hung the GUI on "載入中…". See app-workspace
+    /// § Interrupted Run Detection — Single-Source Run Id Invariant.
     #[test]
-    fn goal_run_id_precision_matches_verb_run_started_at_slug() {
-        let ipc_runid = goal_run_id();
-
-        // Mirror codebus_core::verb::goal::run_goal line ~140:
-        //   chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
-        // then `.replace(':', '-')` for the events.jsonl filename slug.
-        let verb_started_at =
-            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let verb_slug = verb_started_at.replace(':', "-");
-
-        assert!(
-            ipc_runid.contains('.'),
-            "IPC RunId must carry the `.fff` millisecond fractional component; got `{ipc_runid}`"
-        );
-        assert!(
-            verb_slug.contains('.'),
-            "verb slug must carry the `.fff` millisecond fractional component; got `{verb_slug}`"
-        );
-        assert!(
-            !ipc_runid.contains(':'),
-            "IPC RunId must replace `:` with `-`; got `{ipc_runid}`"
-        );
-        assert!(
-            !verb_slug.contains(':'),
-            "verb slug must replace `:` with `-`; got `{verb_slug}`"
-        );
+    fn spawn_goal_runid_matches_started_at_threaded_into_run_goal() {
+        let runtime = AppRuntimeState::new();
+        let (tx, rx) = mpsc::sync_channel::<String>(1);
+        let temp = tempfile::TempDir::new().unwrap();
+        // Capturing runner records the started_at the IPC layer threads
+        // down into run_goal.
+        let runner = move |_repo: &Path,
+                           _opts: GoalOptions,
+                           _on_event: Box<dyn FnMut(VerbEvent) + Send>,
+                           _cancel: Option<Arc<AtomicBool>>,
+                           started_at: String| {
+            let _ = tx.send(started_at);
+            Ok(fake_report())
+        };
+        let run_id = spawn_goal_with_runner(
+            runtime.active_runs.clone(),
+            temp.path().to_path_buf(),
+            "drift check".into(),
+            |_p| {},
+            |_t| {},
+            false,
+            runner,
+        )
+        .expect("spawn ok");
+        let threaded_started_at = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("runner must receive run_started_at");
         assert_eq!(
-            ipc_runid.len(),
-            verb_slug.len(),
-            "IPC RunId and verb slug must use the same precision; \
-             ipc=`{ipc_runid}` (len {}) verb=`{verb_slug}` (len {}); \
-             a length mismatch means one side reverted to SecondsFormat::Secs, \
-             which will break the orphan-detection invariant in list_runs_impl",
-            ipc_runid.len(),
-            verb_slug.len()
+            run_id,
+            slug_started_at(&threaded_started_at),
+            "the RunId returned to the frontend MUST equal the slug of the \
+             started_at threaded into run_goal (single-source invariant); \
+             run_id=`{run_id}` started_at=`{threaded_started_at}`"
         );
     }
 
-    /// `goal_run_id` returns millisecond-precision slugs so two calls within
-    /// the same wall-clock second produce distinct ids. See spec
+    /// The single-sample RunId derivation (`slug_started_at` over
+    /// `goal_started_at_now`) carries millisecond precision so two spawns
+    /// within the same wall-clock second produce distinct ids. See spec
     /// `app-workspace § Tauri IPC Commands for Goal Lifecycle and Wiki Read`
     /// scenario "spawn_goal same-second calls yield distinct RunIds".
     #[test]
     fn goal_run_id_same_second_yields_distinct_ids() {
-        let first = goal_run_id();
+        let first = slug_started_at(&goal_started_at_now());
         std::thread::sleep(Duration::from_millis(2));
-        let second = goal_run_id();
+        let second = slug_started_at(&goal_started_at_now());
         assert_ne!(
             first, second,
-            "two consecutive goal_run_id() calls must differ; got {first} and {second}"
+            "two consecutive RunId derivations must differ; got {first} and {second}"
         );
         assert!(
             first.contains('.'),
-            "goal_run_id must include a `.fff` fractional component; got {first}"
+            "RunId must include a `.fff` fractional component; got {first}"
         );
         assert!(
             second.contains('.'),
-            "goal_run_id must include a `.fff` fractional component; got {second}"
+            "RunId must include a `.fff` fractional component; got {second}"
         );
     }
 
@@ -706,10 +732,11 @@ mod tests {
         GoalOptions,
         Box<dyn FnMut(VerbEvent) + Send>,
         Option<Arc<AtomicBool>>,
+        String,
     ) -> Result<GoalReport, VerbError>
            + Send
            + 'static {
-        move |_repo, opts, _on_event, _cancel| {
+        move |_repo, opts, _on_event, _cancel, _started_at| {
             let _ = tx.send(opts);
             Ok(fake_report())
         }
@@ -818,7 +845,8 @@ mod tests {
         let runner = move |_repo: &Path,
                            _opts: GoalOptions,
                            _on_event: Box<dyn FnMut(VerbEvent) + Send>,
-                           _cancel: Option<Arc<AtomicBool>>| {
+                           _cancel: Option<Arc<AtomicBool>>,
+                           _started_at: String| {
             start_tx.send(()).unwrap();
             release_rx.recv().unwrap();
             Ok(fake_report())
@@ -881,7 +909,7 @@ mod tests {
             |_p| {},
             |_terminal| {},
             false,
-            |_repo, _opts, _on_event, _cancel| Ok(fake_report()),
+            |_repo, _opts, _on_event, _cancel, _started_at| Ok(fake_report()),
         )
         .expect_err("second spawn must be rejected");
         match err {
@@ -920,7 +948,7 @@ mod tests {
             |_p| {},
             |_terminal| {},
             false,
-            |_repo, _opts, _on_event, _cancel| Ok(fake_report()),
+            |_repo, _opts, _on_event, _cancel, _started_at| Ok(fake_report()),
         )
         .expect("goal spawn MUST succeed when only a chat turn is active");
 
@@ -1006,7 +1034,8 @@ mod tests {
         let runner = move |_repo: &Path,
                            _opts: GoalOptions,
                            _on_event: Box<dyn FnMut(VerbEvent) + Send>,
-                           _cancel: Option<Arc<AtomicBool>>| {
+                           _cancel: Option<Arc<AtomicBool>>,
+                           _started_at: String| {
             start_tx.send(()).unwrap();
             release_rx.recv().unwrap();
             Ok(fake_report())

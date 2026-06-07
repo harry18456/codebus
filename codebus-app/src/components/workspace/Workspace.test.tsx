@@ -21,7 +21,7 @@ vi.mock("@milkdown/core", () => ({
 vi.mock("@milkdown/preset-commonmark", () => ({ commonmark: () => ({}) }))
 
 import { invoke } from "@tauri-apps/api/core"
-import type { VaultEntry } from "@/lib/ipc"
+import type { RunLogSummary, VaultEntry } from "@/lib/ipc"
 import { Workspace } from "./Workspace"
 import { useChatStore } from "@/store/chat"
 import { useGoalsStore } from "@/store/goals"
@@ -547,5 +547,79 @@ describe("Workspace", () => {
       (c) => c[0] === "stop_vault_watcher",
     )
     expect(stopCall?.[1]).toEqual({ vaultPath: VAULT.path })
+  })
+
+  // ---- Run Detail Load Failure Surfacing (goal-run-id-unify-stuck-rundetail) ----
+
+  describe("Run Detail Load Failure Surfacing", () => {
+    const SUCCEEDED_RUN: RunLogSummary = {
+      run_id: "2026-06-07T05-48-45.791Z",
+      mode: "goal",
+      goal: "explain the project",
+      started_at: "2026-06-07T05:48:45.791Z",
+      finished_at: "2026-06-07T05:50:00Z",
+      tokens: { input_tokens: 0, output_tokens: 0 },
+      wiki_changed: false,
+      lint_error_count: 0,
+      lint_warn_count: 0,
+      outcome: "succeeded",
+    }
+
+    it("get_run_detail rejection shows a retriable error state, not the loading affordance", async () => {
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_runs") return Promise.resolve([SUCCEEDED_RUN])
+        if (cmd === "get_run_detail")
+          return Promise.reject(new Error("no run found for id"))
+        return Promise.resolve([])
+      })
+      render(<Workspace vault={VAULT} />)
+      const row = await screen.findByTestId(`run-row-${SUCCEEDED_RUN.run_id}`)
+      await act(async () => {
+        fireEvent.click(row)
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId("run-detail-load-error")).toBeInTheDocument()
+      })
+      // Retriable + a path back to the list — never a silent hang.
+      expect(
+        screen.getByTestId("run-detail-load-error-retry"),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByTestId("run-detail-load-error-back"),
+      ).toBeInTheDocument()
+      // The router is mutually exclusive: the error branch returns before
+      // the loading / terminal branches, so neither is mounted.
+      expect(screen.queryByTestId("run-detail-done")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("run-detail-running")).not.toBeInTheDocument()
+    })
+
+    it("retry after a transient failure loads the terminal Done detail", async () => {
+      // `shouldFail` gates the result rather than a call counter, because
+      // both onSelectRun and the load effect can fetch get_run_detail for
+      // the same run (harmless in production — same backend, same result).
+      let shouldFail = true
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_runs") return Promise.resolve([SUCCEEDED_RUN])
+        if (cmd === "get_run_detail") {
+          return shouldFail
+            ? Promise.reject(new Error("transient"))
+            : Promise.resolve({ summary: SUCCEEDED_RUN, events: [] })
+        }
+        return Promise.resolve([])
+      })
+      render(<Workspace vault={VAULT} />)
+      const row = await screen.findByTestId(`run-row-${SUCCEEDED_RUN.run_id}`)
+      await act(async () => {
+        fireEvent.click(row)
+      })
+      const retry = await screen.findByTestId("run-detail-load-error-retry")
+      shouldFail = false
+      await act(async () => {
+        fireEvent.click(retry)
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId("run-detail-done")).toBeInTheDocument()
+      })
+    })
   })
 })

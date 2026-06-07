@@ -127,6 +127,14 @@ pub struct GoalReport {
     pub content_review: Option<GoalContentReview>,
 }
 
+/// Resolve the run's started_at slug source. `Some` (the GUI IPC path)
+/// is used verbatim so the caller's RunId and the persisted run share one
+/// wall-clock sample; `None` (the CLI path) samples internally at the
+/// millisecond precision the events filename slug + RunLog row require.
+fn resolve_run_started_at(provided: Option<String>) -> String {
+    provided.unwrap_or_else(|| chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true))
+}
+
 /// Run the goal verb against `repo`. See module docs for full behavior.
 pub fn run_goal(
     repo: &Path,
@@ -134,16 +142,21 @@ pub fn run_goal(
     mut on_event: impl FnMut(VerbEvent),
     cancel: Option<Arc<AtomicBool>>,
     timeout: Option<std::time::Duration>,
+    run_started_at: Option<String>,
 ) -> Result<GoalReport, VerbError> {
     let paths = vault_paths(repo);
 
-    // Capture run started_at early — events.jsonl filename slug + RunLog
-    // row. Millisecond precision is REQUIRED so the slug matches the IPC
-    // layer's `active_runs` key (also Millis): the orphan-detection
-    // invariant in `list_runs_impl` joins events-file slug ↔ active_runs
-    // key, and a precision mismatch would mis-label a live goal as
-    // `interrupted`. See app-workspace § Interrupted Run Detection NOTE.
-    let run_started_at = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    // Resolve the run's started_at — the single source for the
+    // events.jsonl filename slug + the RunLog row. When the caller
+    // provides it (the GUI IPC layer, which sampled the wall-clock ONCE
+    // and uses the same value for its `active_runs` key / returned RunId),
+    // it is used verbatim so the frontend's RunId and the persisted run
+    // are byte-identical — never two independent `Utc::now()` samples that
+    // drift apart and leave a completed run unreachable by RunId. When
+    // `None` (the CLI path, which has no cross-layer id join), it is
+    // sampled internally at millisecond precision. See app-workspace
+    // § Interrupted Run Detection — Single-Source Run Id Invariant.
+    let run_started_at = resolve_run_started_at(run_started_at);
 
     // Step 1: vault precondition — auto-init if missing. No banners
     // yet — events sink needs vault dir to exist; we emit Start +
@@ -742,5 +755,33 @@ mod tests {
             content_verify: false,
         };
         let _ = TempDir::new().unwrap();
+    }
+
+    #[test]
+    fn run_started_at_uses_caller_value_when_some() {
+        // The GUI IPC layer threads its single wall-clock sample down so
+        // the events filename slug + RunLog row match the RunId it already
+        // returned to the frontend. A caller-provided value MUST be used
+        // verbatim, not re-sampled.
+        let provided = "2026-05-13T14:56:21.123Z".to_string();
+        let resolved = resolve_run_started_at(Some(provided.clone()));
+        assert_eq!(resolved, provided);
+    }
+
+    #[test]
+    fn run_started_at_samples_millis_when_none() {
+        // The CLI path has no cross-layer id join; it samples internally
+        // at millisecond precision (the events filename slug + RunLog row
+        // require the `.fff` fractional component).
+        let resolved = resolve_run_started_at(None);
+        assert!(
+            resolved.contains('.') && resolved.ends_with('Z'),
+            "internally-sampled run_started_at must carry RFC3339 millis (`.fffZ`); got `{resolved}`"
+        );
+        // RFC 3339 with millis is parseable back into a timestamp.
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&resolved).is_ok(),
+            "internally-sampled run_started_at must be valid RFC3339; got `{resolved}`"
+        );
     }
 }

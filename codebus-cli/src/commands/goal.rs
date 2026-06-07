@@ -82,7 +82,10 @@ pub async fn run(
     };
 
     let timeout = super::resolve_run_timeout(debug);
-    match run_goal(repo, options, on_event, None, timeout) {
+    // CLI has no cross-layer RunId join; let run_goal sample its own
+    // started_at (per the Single-Source Run Id Invariant — only the GUI
+    // IPC path threads a caller-provided value).
+    match run_goal(repo, options, on_event, None, timeout, None) {
         Ok(report) => {
             // Match pre-refactor stderr: when the fix loop terminated
             // with issues remaining, emit the same warning line.

@@ -815,7 +815,7 @@ tests:
 
 The system SHALL register Tauri commands beyond the foundation's nine commands, covering goal-mode lifecycle, chat-turn lifecycle, and wiki read paths. The full added set is:
 
-- `spawn_goal(vault_path: String, goal_text: String) -> Result<String, AppError>` — spawn a background thread that invokes `codebus_core::verb::goal::run_goal` with the given vault and goal text. The function SHALL allocate an `Arc<AtomicBool>` cancel flag, store it in `AppState.active_runs` keyed by the new `RunId` (where `RunId` equals the run's `started_at` slug derived from `chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)` with `:` replaced by `-`), and emit each `VerbEvent` produced by the closure to a Tauri event channel named `"goal-stream"` with payload `{ run_id: String, event: VerbEvent }`. On thread completion (success, failure, or panic), the entry SHALL be removed from `active_runs`.
+- `spawn_goal(vault_path: String, goal_text: String) -> Result<String, AppError>` — spawn a background thread that invokes `codebus_core::verb::goal::run_goal` with the given vault and goal text. The function SHALL sample the wall-clock time EXACTLY ONCE via `chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)` and derive from that single sample BOTH the `RunId` slug (the RFC 3339 string with `:` replaced by `-`) AND the colon-form RFC 3339 string passed down into `run_goal` as its `run_started_at` argument. The function SHALL allocate an `Arc<AtomicBool>` cancel flag, store it in `AppState.active_runs` keyed by the `RunId` slug, return the `RunId` slug to the caller, AND emit each `VerbEvent` produced by the closure to a Tauri event channel named `"goal-stream"` with payload `{ run_id: String, event: VerbEvent }` carrying that same `RunId` slug. The `goal-terminal` payload SHALL carry that same `RunId` slug. Because the events.jsonl filename slug and `RunLog.started_at` written by `run_goal` derive from the SAME single sample, the `RunId` returned to the frontend SHALL (after slugging) be byte-equal to the persisted run's identity, so a completed run's `get_run_detail` lookup by that `RunId` SHALL succeed. On thread completion (success, failure, or panic), the entry SHALL be removed from `active_runs`.
 
 - `cancel_goal(run_id: String) -> Result<(), AppError>` — look up the cancel flag in `active_runs` by `run_id`; if found, `store(true, Ordering::Relaxed)` and return `Ok(())`. If not found (run already terminated), return `Ok(())` (idempotent).
 
@@ -833,17 +833,22 @@ The chat-turn lifecycle commands (`spawn_chat_turn`, `cancel_chat_turn`) are def
 
 `AppError` SHALL be the same discriminated union used by the foundation's commands — no new variants added by this change.
 
-The goal `RunId` SHALL be derived using `chrono::SecondsFormat::Millis` precision so that two `spawn_goal` invocations occurring within the same wall-clock second receive distinct `active_runs` keys and the second invocation does not overwrite the first invocation's cancel handle.
+The goal `RunId` SHALL be sampled EXACTLY ONCE in the IPC layer at `chrono::SecondsFormat::Millis` precision and threaded down into `run_goal` (as `run_started_at`), so that (a) two `spawn_goal` invocations within the same wall-clock second receive distinct `active_runs` keys, AND (b) the `active_runs` key, the `RunId` returned to the frontend, the events.jsonl filename slug, and the `RunLog.started_at` value all originate from that single sample and are therefore byte-identical strings — never two independent `Utc::now()` samples that can drift apart.
 
-#### Scenario: spawn_goal returns run id derived from started_at
+#### Scenario: spawn_goal returns run id derived from a single IPC sample
 
-- **WHEN** the frontend calls `invoke("spawn_goal", { vault_path: "/some/vault", goal_text: "X" })` AND the spawned `run_goal` invocation's first stream event timestamps the run at `2026-05-13T14:56:21.123Z`
-- **THEN** the IPC call resolves with `"2026-05-13T14-56-21.123Z"` AND a corresponding entry exists in `AppState.active_runs` keyed by that string
+- **WHEN** the frontend calls `invoke("spawn_goal", { vault_path: "/some/vault", goal_text: "X" })` AND the IPC layer samples the wall-clock once at `2026-05-13T14:56:21.123Z`
+- **THEN** the IPC call resolves with `"2026-05-13T14-56-21.123Z"` AND a corresponding entry exists in `AppState.active_runs` keyed by that string AND the colon-form `"2026-05-13T14:56:21.123Z"` is passed to `run_goal` as `run_started_at`
 
 #### Scenario: spawn_goal same-second calls yield distinct RunIds
 
 - **WHEN** the frontend calls `invoke("spawn_goal", ...)` twice in rapid succession AND both calls land within the same wall-clock second but on distinct wall-clock milliseconds
 - **THEN** the two IPC calls SHALL resolve with two distinct `RunId` strings differing in the `.fff` fractional component AND `AppState.active_runs` SHALL contain two entries simultaneously, each with its own cancel handle
+
+#### Scenario: spawn_goal RunId resolves via get_run_detail after the run terminates
+
+- **WHEN** the frontend calls `invoke("spawn_goal", ...)` and receives `RunId` `R` AND the spawned `run_goal` runs to a terminal outcome (`succeeded` or `failed`), writing its `events-*.jsonl` file and `RunLog` row to disk
+- **THEN** a subsequent `invoke("get_run_detail", { vault_path, run_id: R })` SHALL resolve with the `RunDetail` for that run (the persisted run's slug equals `R`) AND SHALL NOT return `AppError::Invalid { field: "run_id" }`
 
 #### Scenario: cancel_goal idempotent on unknown run
 
@@ -862,8 +867,8 @@ The goal `RunId` SHALL be derived using `chrono::SecondsFormat::Millis` precisio
 
 
 <!-- @trace
-source: backend-cleanup-codex-websearch-and-runid-millis
-updated: 2026-05-28
+source: backend-cleanup-codex-websearch-and-runid-millis, goal-run-id-unify-stuck-rundetail
+updated: 2026-06-07
 code:
   - codebus-core/src/verb/chat.rs
   - codebus-core/src/verb/fix.rs
@@ -882,6 +887,11 @@ code:
   - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
   - docs/2026-05-28-cancelling-stuck-todo.md
   - codebus-core/src/verb/query.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-app/src/components/workspace/Workspace.tsx
+  - codebus-app/src/i18n/messages.ts
+tests:
+  - codebus-app/src/components/workspace/Workspace.test.tsx
 -->
 
 ---
@@ -897,7 +907,7 @@ The virtual entry SHALL NOT be written back to any `runs-*.jsonl` file — it ex
 
 If the same events file later gains a matching RunLog row (e.g., because the original `run_goal` process recovered and wrote its terminal RunLog late), the virtual entry SHALL no longer appear in `list_runs` output — the real row supersedes it.
 
-**NOTE — Precision Alignment Invariant:** The `active_runs` map key (set by `spawn_goal` / `spawn_chat_turn` in the IPC layer), the `events-<slug>.jsonl` filename slug (set by the verb function's `run_started_at` capture), AND the `RunLog.started_at` value persisted in `runs-*.jsonl` (also set from the verb function's `run_started_at`) SHALL all be derived at the SAME `chrono::SecondsFormat::Millis` precision. The orphan-detection join in `list_runs` joins these three values as strings; if a future change reverts any one of them to `SecondsFormat::Secs` (or upgrades to a higher precision asymmetrically), the join silently breaks and live goals are mis-labeled `"interrupted"` because `active_runs.get(events_slug)` always misses. This invariant is enforced by the `goal_run_id_precision_matches_verb_run_started_at_slug` unit test in `codebus-app/src-tauri/src/ipc/goals.rs`; that test SHALL fail loudly the moment the precisions drift apart.
+**NOTE — Single-Source Run Id Invariant:** The `active_runs` map key, the `RunId` returned to the frontend, the `events-<slug>.jsonl` filename slug, AND the `RunLog.started_at` value persisted in `runs-*.jsonl` SHALL all originate from a SINGLE `chrono::Utc::now()` sample taken once in the IPC layer (`spawn_goal` / `spawn_chat_turn`) and threaded down into the verb function (e.g. the `run_started_at` argument of `run_goal`). Deriving the verb-side slug from an INDEPENDENT second `Utc::now()` sample is FORBIDDEN: equal `SecondsFormat` precision does NOT guarantee equal values across two samples taken at different instants, so the orphan-detection join in `list_runs` (which joins these values as strings) would silently miss — a live goal would be mis-labeled `"interrupted"` AND a completed run's detail would be unreachable by the frontend's `RunId` (a permanent loading state). The CLI path, which has no cross-layer id join, MAY let the verb function sample internally (passing `run_started_at = None`). This invariant is enforced by a regression test asserting that the `RunId` returned by `spawn_goal` resolves via `get_run_detail` / `list_runs` after the verb writes its terminal RunLog.
 
 #### Scenario: Orphan goal events file with no active_runs entry produces interrupted virtual entry
 
@@ -906,18 +916,18 @@ If the same events file later gains a matching RunLog row (e.g., because the ori
 
 #### Scenario: Orphan goal events file with live active_runs entry produces running virtual entry
 
-- **WHEN** `list_runs` is invoked AND the vault contains `events-2026-05-28T07-39-26.123Z.jsonl` whose leading events include a `VerbBanner::Goal` event with `goal_text="smoke probe goal"` AND no `runs-*.jsonl` row matches its slug AND `active_runs` currently contains an entry keyed by `"2026-05-28T07-39-26.123Z"` (the in-flight spawn from the current app session, with millisecond precision matching the events file slug)
+- **WHEN** `list_runs` is invoked AND the vault contains `events-2026-05-28T07-39-26.123Z.jsonl` whose leading events include a `VerbBanner::Goal` event with `goal_text="smoke probe goal"` AND no `runs-*.jsonl` row matches its slug AND `active_runs` currently contains an entry keyed by `"2026-05-28T07-39-26.123Z"` (the in-flight spawn from the current app session, whose key is the same single IPC sample as the events file slug)
 - **THEN** the returned list contains a virtual entry with `outcome == "running"` AND `mode == "goal"` AND `goal == "smoke probe goal"` AND `started_at == "2026-05-28T07:39:26.123Z"` AND `interrupt_reason` absent AND `finished_at` empty
 
-#### Scenario: Precision drift between active_runs key and events file slug breaks orphan detection
+#### Scenario: Single-source run id keeps active_runs key, events slug, and RunLog.started_at byte-equal
 
-- **WHEN** the IPC layer's `active_runs` map keys are derived at `SecondsFormat::Millis` precision (e.g., `"2026-05-28T09-50-42.322Z"`) AND a verb function reverts to `SecondsFormat::Secs` so its `events-<slug>.jsonl` filename and `RunLog.started_at` use second precision (e.g., `"2026-05-28T09-50-42Z"`)
-- **THEN** `list_runs` SHALL mis-label the still-running goal as `"interrupted"` because the events-file slug (Secs) cannot match any `active_runs` key (Millis), violating this requirement; the `goal_run_id_precision_matches_verb_run_started_at_slug` unit test SHALL fail and name the offending derivation site
+- **WHEN** `spawn_goal` samples the wall-clock once as `2026-05-28T09:50:42.322Z` AND threads the colon form into `run_goal` as `run_started_at` AND the run writes `events-2026-05-28T09-50-42.322Z.jsonl` plus a `RunLog` row with `started_at == "2026-05-28T09:50:42.322Z"`
+- **THEN** the `active_runs` key, the `RunId` returned to the frontend, the events-file slug, and the slugged `RunLog.started_at` SHALL all be the byte-identical string `"2026-05-28T09-50-42.322Z"` AND `list_runs` SHALL join them without a miss (the run shows `"running"` while live and is reachable by `get_run_detail` once terminal — never a spurious `"interrupted"` or an unresolvable `RunId`)
 
 
 <!-- @trace
-source: backend-cleanup-codex-websearch-and-runid-millis
-updated: 2026-05-28
+source: backend-cleanup-codex-websearch-and-runid-millis, goal-run-id-unify-stuck-rundetail
+updated: 2026-06-07
 code:
   - codebus-core/src/verb/chat.rs
   - codebus-core/src/verb/fix.rs
@@ -936,6 +946,11 @@ code:
   - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
   - docs/2026-05-28-cancelling-stuck-todo.md
   - codebus-core/src/verb/query.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-app/src/components/workspace/Workspace.tsx
+  - codebus-app/src/i18n/messages.ts
+tests:
+  - codebus-app/src/components/workspace/Workspace.test.tsx
 -->
 
 ---
@@ -3993,4 +4008,32 @@ code:
   - codebus-app/scripts/.v11-acceptance/01-loading-overlay/error-mode-en.png
   - docs/2026-05-28-goal-token-display-streaming-todo.md
   - docs/2026-05-28-claude-trace-prompt-analysis-todo.md
+-->
+
+---
+### Requirement: Run Detail Load Failure Surfacing
+
+The system SHALL surface a load failure when fetching a selected run's `RunDetail` (via `get_run_detail`) rejects, instead of remaining indefinitely in the loading state. When the user has selected a non-active run whose `RunDetail` has not yet loaded, the Goals content area SHALL show the loading affordance (`workspace.runDetail.loading`); when the `get_run_detail` call for that run rejects, the Goals content area SHALL render an error state that names the failure AND offers a retry action AND a path back to the Goals list. The frontend SHALL NOT silently discard the `get_run_detail` rejection (no empty catch handler) and SHALL NOT leave the user on the loading affordance after a rejection.
+
+#### Scenario: get_run_detail rejection shows retriable error state
+
+- **WHEN** the user is viewing a selected non-active run AND the `get_run_detail` IPC for that run rejects with an error
+- **THEN** the Goals content area SHALL render an error state (not the `workspace.runDetail.loading` affordance) AND the error state SHALL expose a retry control AND a control to return to the Goals list
+
+#### Scenario: successful load after terminal transition shows terminal detail
+
+- **WHEN** the user is sitting in the `Running` detail of a goal AND the goal reaches a terminal outcome (so `activeRun` clears) AND `get_run_detail` for that run resolves
+- **THEN** the Goals content area SHALL transition to the matching terminal view (`Done` for `succeeded`, or the interrupted/failed view) AND SHALL NOT remain on the `workspace.runDetail.loading` affordance
+
+<!-- @trace
+source: goal-run-id-unify-stuck-rundetail
+updated: 2026-06-07
+code:
+  - codebus-core/src/verb/goal.rs
+  - codebus-cli/src/commands/goal.rs
+  - codebus-app/src-tauri/src/ipc/goals.rs
+  - codebus-app/src/components/workspace/Workspace.tsx
+  - codebus-app/src/i18n/messages.ts
+tests:
+  - codebus-app/src/components/workspace/Workspace.test.tsx
 -->

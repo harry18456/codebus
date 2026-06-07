@@ -447,6 +447,10 @@ const en = {
 
   // ---- Workspace · Run detail loading state (residual sweep) ----
   "workspace.runDetail.loading": "Loading…",
+  "workspace.runDetail.error.title": "Couldn't load this run",
+  "workspace.runDetail.error.body":
+    "The run detail failed to load. It may still be on disk — try again.",
+  "workspace.runDetail.error.retry": "Retry",
 
   // ---- a11y (Cat C sweep) — shared accessibility keys ----
   "a11y.dialogClose": "Close",
@@ -991,6 +995,9 @@ const zh: Record<keyof typeof en, string> = {
 
   // ---- Workspace · Run detail loading state (residual sweep) ----
   "workspace.runDetail.loading": "載入中…",
+  "workspace.runDetail.error.title": "無法載入這次執行",
+  "workspace.runDetail.error.body": "執行明細載入失敗，資料可能仍在磁碟上——請再試一次。",
+  "workspace.runDetail.error.retry": "重試",
 
   // ---- a11y (Cat C sweep) — shared accessibility keys ----
   "a11y.dialogClose": "關閉",
