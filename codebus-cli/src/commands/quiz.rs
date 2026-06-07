@@ -69,6 +69,14 @@ pub struct QuizValidateArgs {
     /// Emit a machine-readable JSON findings array instead of human text.
     #[arg(long)]
     pub json: bool,
+
+    /// Expected question count. When supplied, the validator additionally
+    /// flags a question-count mismatch (body has a different number of
+    /// `## Q<n>.` blocks). When omitted, the question count is not checked.
+    /// The codebus-quiz generate agent passes the count from its prompt so
+    /// its self-validate loop reacts to over/under-production.
+    #[arg(long)]
+    pub count: Option<u8>,
 }
 
 /// Resolve `question_count`: explicit `--count` wins; otherwise the
@@ -280,7 +288,7 @@ fn run_validate(args: &QuizValidateArgs, debug: bool) -> ExitCode {
         }
     };
 
-    let issues = validate_quiz_body(&body, &wiki_root);
+    let issues = validate_quiz_body(&body, &wiki_root, args.count);
 
     if args.json {
         // Machine-readable: the LintIssue array, the same shape the

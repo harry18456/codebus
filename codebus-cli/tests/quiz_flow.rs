@@ -330,7 +330,11 @@ fn quiz_clean_body_marks_validation_ok() {
     fs::write(tmp.path().join("README.md"), b"# hello").unwrap();
     assert!(run_init(tmp.path()).status.success(), "setup init");
 
-    let (out, _log) = run_quiz(tmp.path(), "validator topic", "quiz-clean-body", None);
+    // The clean mock body is a single question, so request `--count 1` —
+    // a clean body whose count matches the requested count must validate
+    // ok. (With the question-count rule, a count mismatch would correctly
+    // mark validation: failed; that path is covered in quiz_validate.)
+    let (out, _log) = run_quiz(tmp.path(), "validator topic", "quiz-clean-body", Some(1));
     assert!(
         out.status.success(),
         "clean quiz should exit 0; stderr: {}",
@@ -341,7 +345,7 @@ fn quiz_clean_body_marks_validation_ok() {
     assert_eq!(
         frontmatter_value(&body, "validation").as_deref(),
         Some("ok"),
-        "structurally valid, citation-free quiz must persist validation: ok:\n{body}"
+        "structurally valid, citation-free quiz whose count matches must persist validation: ok:\n{body}"
     );
 }
 

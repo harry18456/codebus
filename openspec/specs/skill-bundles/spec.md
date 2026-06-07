@@ -364,7 +364,7 @@ The `codebus-quiz` SKILL.md SHALL declare a read scope of `wiki/` only and SHALL
 
 The `generate:` mode prompt contract SHALL be `generate: pages=[<path1>,<path2>,...] count=<N>` and SHALL accept an OPTIONAL `topic=<...>` field carried alongside `pages=[...] count=<N>` as the language signal. The `topic=<...>` field SHALL be present for the Goal flow (where the caller has an originating topic) and SHALL be absent for the Page flow. The agent SHALL treat the presence/absence of `topic=<...>` as the switch between topic-follows and page-auto-detect language selection.
 
-The `generate:` mode SHALL additionally instruct the agent to self-validate and self-repair before emitting its final body: after drafting the quiz, the agent SHALL invoke `codebus quiz validate` on its draft via its Bash tool, SHALL correct the questions reported by the findings, and SHALL re-run the validator, repeating up to a fixed internal iteration cap stated explicitly in the SKILL body; when the cap is reached the agent SHALL emit its best current body rather than looping further. The SKILL SHALL reference the validator as the authority for structural and citation correctness and SHALL NOT restate the validator rule definitions (no parallel schema copy); it SHALL describe acting on the validator findings, not the rules themselves.
+The `generate:` mode SHALL additionally instruct the agent to self-validate and self-repair before emitting its final body: after drafting the quiz, the agent SHALL invoke `codebus quiz validate --count <N>` on its draft via its Bash tool — where `<N>` is the question count from the agent's own `generate:` prompt — SHALL correct the questions reported by the findings (including a question-count finding, which the agent resolves by adding or removing whole question blocks until the count equals `<N>`), and SHALL re-run the validator, repeating up to a fixed internal iteration cap stated explicitly in the SKILL body; when the cap is reached the agent SHALL emit its best current body rather than looping further. The SKILL SHALL reference the validator as the authority for structural, citation, and question-count correctness and SHALL NOT restate the validator rule definitions (no parallel schema copy); it SHALL describe acting on the validator findings, not the rules themselves. This `--count <N>` self-validation applies to the claude-path body; the codex-path body retains its existing no-validate behavior (see the claude/codex translation requirement).
 
 The SKILL SHALL ALSO define a third prompt mode `verify:` selected by the prompt prefix. The `verify:` mode SHALL instruct the agent to read the supplied planned pages plus a generated quiz body and judge each question against exactly five content defect types — answer-wrong (marked option not supported as correct by the planned pages), out-of-scope (a claim the planned pages do not state), not-exactly-one-correct (multiple defensibly-correct options or the marked one wrong), degenerate-distractor (a non-discriminating distractor), and off-topic (not about the supplied topic; evaluated only when a topic is supplied) — and to emit, for each flagged question, its question number, the defect type, and a concrete correction suggestion. The `verify:` mode SHALL NOT restate the deterministic validator structural/citation rules, and the SKILL SHALL keep the deterministic `codebus quiz validate` structural check separate from this content judgement.
 
@@ -390,10 +390,10 @@ The `verify:` mode SHALL additionally contain an explicit output-termination bou
 - **WHEN** the `codebus-quiz/SKILL.md` is materialized
 - **THEN** its `generate:` mode contract SHALL document `pages=[...] count=<N>` with an OPTIONAL `topic=<...>` field AND SHALL state that `topic=<...>` is present for the Goal flow and absent for the Page flow
 
-#### Scenario: Generate mode defines a bounded self-validate/self-repair loop
+#### Scenario: Generate mode defines a bounded self-validate/self-repair loop with the count flag
 
 - **WHEN** the `codebus-quiz/SKILL.md` is materialized
-- **THEN** its `generate:` mode SHALL instruct the agent to invoke `codebus quiz validate` on its draft, correct reported findings, and re-validate up to a fixed internal iteration cap stated in the body AND SHALL instruct the agent to emit its best current body when the cap is reached
+- **THEN** its claude-path `generate:` mode SHALL instruct the agent to invoke `codebus quiz validate --count <N>` on its draft (where `<N>` is the prompt's question count), correct reported findings (including a question-count mismatch), and re-validate up to a fixed internal iteration cap stated in the body AND SHALL instruct the agent to emit its best current body when the cap is reached
 
 #### Scenario: Quiz bundle does not duplicate validator rules
 
@@ -418,8 +418,8 @@ The `verify:` mode SHALL additionally contain an explicit output-termination bou
 
 
 <!-- @trace
-source: quiz-content-verify, prompt-surface-output-discipline-batch, quiz-output-language-follows-topic
-updated: 2026-06-03
+source: quiz-content-verify, prompt-surface-output-discipline-batch, quiz-output-language-follows-topic, quiz-validate-enforce-question-count
+updated: 2026-06-07
 code:
   - codebus-core/src/skill_bundle/mod.rs
   - codebus-core/src/config/quiz.rs

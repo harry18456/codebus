@@ -32,6 +32,12 @@ use crate::wiki::types::{LintIssue, LintSeverity};
 /// body is structurally sound and every citation resolves. `path` on
 /// each issue is the question identifier (`Q<n>`); callers may prefix
 /// the source file for display.
+///
+/// `expected_count`: when `Some(n)`, the validator additionally emits one
+/// body-level `quiz-question-count` finding (`path = "quiz"`) if the number
+/// of `## Q<n>.` blocks differs from `n`. When `None`, the question count is
+/// not checked — count-unaware callers (e.g. `codebus quiz validate` without
+/// `--count`) keep their prior behavior.
 const CHOICE_KEYS: [char; 4] = ['A', 'B', 'C', 'D'];
 
 fn err(qnum: &str, rule_id: &str, message: String) -> LintIssue {
@@ -43,7 +49,11 @@ fn err(qnum: &str, rule_id: &str, message: String) -> LintIssue {
     }
 }
 
-pub fn validate_quiz_body(quiz_md: &str, wiki_root: &Path) -> Vec<LintIssue> {
+pub fn validate_quiz_body(
+    quiz_md: &str,
+    wiki_root: &Path,
+    expected_count: Option<u8>,
+) -> Vec<LintIssue> {
     // Wiki slug catalog is the existence authority (reuse wiki::lint).
     let page_slugs = VaultContext::build(wiki_root).catalog.page_slugs;
 
@@ -131,6 +141,23 @@ pub fn validate_quiz_body(quiz_md: &str, wiki_root: &Path) -> Vec<LintIssue> {
         }
     }
 
+    // Question-count finding (body-level): only when the caller supplies an
+    // expected count. `None` (e.g. `codebus quiz validate` without `--count`)
+    // skips the check entirely so count-unaware callers are unaffected. The
+    // GUI/CLI generate path passes the run's requested count so the agent
+    // self-repair loop and the final-verify marker both react to a count drift.
+    if let Some(expected) = expected_count {
+        let actual = headers.len();
+        if actual != expected as usize {
+            issues.push(LintIssue {
+                path: "quiz".to_string(),
+                severity: LintSeverity::Error,
+                rule_id: "quiz-question-count".to_string(),
+                message: format!("expected {expected} question(s), found {actual}"),
+            });
+        }
+    }
+
     issues
 }
 
@@ -166,7 +193,7 @@ mod tests {
     fn missing_answer_yields_schema_answer_finding() {
         let w = wiki_with(&[]);
         let md = "## Q1. stem?\n- A) a\n- B) b\n- C) c\n- D) d\n## Explanation: e";
-        let issues = validate_quiz_body(md, w.path());
+        let issues = validate_quiz_body(md, w.path(), None);
         assert_eq!(err(&issues, "quiz-schema-answer"), 1);
     }
 
@@ -174,7 +201,7 @@ mod tests {
     fn fewer_than_four_choices_yields_choices_finding() {
         let w = wiki_with(&[]);
         let md = "## Q1. stem?\n- A) a\n- B) b\n- C) c\n## Answer: A\n## Explanation: e";
-        let issues = validate_quiz_body(md, w.path());
+        let issues = validate_quiz_body(md, w.path(), None);
         assert_eq!(err(&issues, "quiz-schema-choices"), 1);
     }
 
@@ -182,7 +209,7 @@ mod tests {
     fn empty_stem_yields_stem_finding() {
         let w = wiki_with(&[]);
         let md = "## Q1. \n- A) a\n- B) b\n- C) c\n- D) d\n## Answer: A\n## Explanation: e";
-        let issues = validate_quiz_body(md, w.path());
+        let issues = validate_quiz_body(md, w.path(), None);
         assert_eq!(err(&issues, "quiz-schema-stem"), 1);
     }
 
@@ -190,14 +217,14 @@ mod tests {
     fn missing_explanation_yields_explanation_finding() {
         let w = wiki_with(&[]);
         let md = "## Q1. stem?\n- A) a\n- B) b\n- C) c\n- D) d\n## Answer: A";
-        let issues = validate_quiz_body(md, w.path());
+        let issues = validate_quiz_body(md, w.path(), None);
         assert_eq!(err(&issues, "quiz-schema-explanation"), 1);
     }
 
     #[test]
     fn well_formed_with_blank_lines_yields_no_findings() {
         let w = wiki_with(&[]);
-        let issues = validate_quiz_body(GOOD_Q, w.path());
+        let issues = validate_quiz_body(GOOD_Q, w.path(), None);
         assert!(issues.is_empty(), "expected no findings, got {issues:?}");
     }
 
@@ -206,7 +233,7 @@ mod tests {
         let w = wiki_with(&[]);
         let md = "## Q1. stem?\n- A) a\n- B) b\n- C) c\n- D) d\n\
 ## Answer: A\n## Explanation: see [[no-such-page]] for detail";
-        let issues = validate_quiz_body(md, w.path());
+        let issues = validate_quiz_body(md, w.path(), None);
         assert_eq!(err(&issues, "quiz-broken-wikilink"), 1);
     }
 
@@ -215,7 +242,54 @@ mod tests {
         let w = wiki_with(&["jwt-pitfalls"]);
         let md = "## Q1. stem?\n- A) a\n- B) b\n- C) c\n- D) d\n\
 ## Answer: A\n## Explanation: see [[jwt-pitfalls]] for detail";
-        let issues = validate_quiz_body(md, w.path());
+        let issues = validate_quiz_body(md, w.path(), None);
         assert_eq!(err(&issues, "quiz-broken-wikilink"), 0);
+    }
+
+    /// Build a body of `n` structurally-valid, citation-free questions so
+    /// the only finding under test is the question-count rule.
+    fn n_questions(n: usize) -> String {
+        (1..=n)
+            .map(|i| {
+                format!(
+                    "## Q{i}. stem?\n- A) a\n- B) b\n- C) c\n- D) d\n\
+## Answer: A\n## Explanation: ok"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    #[test]
+    fn expected_count_mismatch_yields_count_finding() {
+        // Spec example: nine blocks, expected five → one count finding.
+        let w = wiki_with(&[]);
+        let issues = validate_quiz_body(&n_questions(9), w.path(), Some(5));
+        assert_eq!(err(&issues, "quiz-question-count"), 1);
+        let f = issues
+            .iter()
+            .find(|i| i.rule_id == "quiz-question-count")
+            .unwrap();
+        assert_eq!(f.path, "quiz", "count finding is body-level, not per-Q");
+        assert!(
+            f.message.contains('5') && f.message.contains('9'),
+            "message must state expected and actual; got `{}`",
+            f.message
+        );
+    }
+
+    #[test]
+    fn matching_expected_count_yields_no_count_finding() {
+        let w = wiki_with(&[]);
+        let issues = validate_quiz_body(&n_questions(5), w.path(), Some(5));
+        assert_eq!(err(&issues, "quiz-question-count"), 0);
+    }
+
+    #[test]
+    fn no_expected_count_skips_count_check() {
+        // None → count is not checked even when the body has nine blocks.
+        let w = wiki_with(&[]);
+        let issues = validate_quiz_body(&n_questions(9), w.path(), None);
+        assert_eq!(err(&issues, "quiz-question-count"), 0);
     }
 }

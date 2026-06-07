@@ -49,6 +49,20 @@ const GOOD: &str = "## Q1. What does AuthMiddleware return on an expired token?\
 const BAD_MISSING_ANSWER: &str =
     "## Q1. stem?\n- A) a\n- B) b\n- C) c\n- D) d\n## Explanation: e";
 
+/// `n` structurally-valid questions citing the existing `jwt-pitfalls`
+/// slug, so the only finding under test is the question-count rule.
+fn n_good(n: usize) -> String {
+    (1..=n)
+        .map(|i| {
+            format!(
+                "## Q{i}. stem {i}?\n\n- A) a\n- B) b\n- C) c\n- D) d\n\n\
+## Answer: A\n\n## Explanation: see [[jwt-pitfalls]]."
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 #[test]
 fn clean_file_exits_zero() {
     let v = vault_with(&[("good.md", GOOD)]);
@@ -98,6 +112,42 @@ fn json_output_is_machine_readable() {
             .unwrap_or(false)
             && f.get("severity").is_some()),
         "JSON entries must carry rule_id + severity; got: {stdout}"
+    );
+}
+
+#[test]
+fn count_flag_flags_question_count_mismatch() {
+    // Spec scenario: nine blocks, --count 5 → question-count finding, exit 1.
+    let v = vault_with(&[("nine.md", &n_good(9))]);
+    let out = quiz_validate(v.path(), &["quiz/t/nine.md", "--count", "5"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a count mismatch must exit 1; stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("quiz-question-count"),
+        "human output must name the question-count rule; got:\n{combined}"
+    );
+}
+
+#[test]
+fn count_flag_omitted_skips_count_check() {
+    // Same nine-block body, no --count → count is not checked → exit 0.
+    let v = vault_with(&[("nine.md", &n_good(9))]);
+    let out = quiz_validate(v.path(), &["quiz/t/nine.md"]);
+    assert!(
+        out.status.success(),
+        "without --count the question count must not be checked; stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
     );
 }
 

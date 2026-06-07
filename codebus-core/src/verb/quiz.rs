@@ -296,6 +296,52 @@ pub(crate) fn strip_preamble_before_first_question(body: &str) -> String {
     }
 }
 
+/// Byte offset of the LAST `## Q1.` header (question number exactly `1`
+/// followed by `.`), or `None` when no such header exists. Distinct from
+/// `## Q10.` etc. because the digit run must be exactly the single char
+/// `1`.
+fn final_quiz_body_index(body: &str) -> Option<usize> {
+    let bytes = body.as_bytes();
+    const PAT: &[u8] = b"## Q";
+    let mut last: Option<usize> = None;
+    let mut i = 0usize;
+    while i + PAT.len() <= bytes.len() {
+        if &bytes[i..i + PAT.len()] == PAT {
+            let j = i + PAT.len();
+            // number is exactly "1" AND immediately followed by '.'
+            if j < bytes.len()
+                && bytes[j] == b'1'
+                && j + 1 < bytes.len()
+                && bytes[j + 1] == b'.'
+            {
+                last = Some(i);
+            }
+        }
+        i += 1;
+    }
+    last
+}
+
+/// Extract the FINAL quiz body, discarding any earlier draft copies the
+/// agent restated before self-validating.
+///
+/// The claude Mode-B self-validate workflow makes the agent emit a draft
+/// quiz body, run `codebus quiz validate`, then re-emit the (possibly
+/// revised) final body. `run_spawn` accumulates ALL assistant text, so
+/// naive preamble-stripping keeps BOTH copies — observed live: a correct
+/// 5-question quiz persisted as 10 (two byte-identical copies of Q1–Q5).
+/// Each full emission restarts numbering at `## Q1.`, so the final body
+/// begins at the LAST `## Q1.` header. Falls back to
+/// `strip_preamble_before_first_question` when no `## Q1.` header exists
+/// (e.g. a single body the agent did not number from 1), preserving the
+/// prior single-emission behavior and the codex path (which emits once).
+pub(crate) fn strip_to_final_quiz_body(body: &str) -> String {
+    match final_quiz_body_index(body) {
+        Some(idx) => body[idx..].trim().to_string(),
+        None => strip_preamble_before_first_question(body),
+    }
+}
+
 fn is_cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
     cancel
         .as_ref()
@@ -597,7 +643,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
         timeout,
     )?;
     let mut quiz_md =
-        strip_preamble_before_first_question(&strip_code_fence(&gen_text));
+        strip_to_final_quiz_body(&strip_code_fence(&gen_text));
 
     // Deterministic final verify (design D1/D3/D4). Run the same
     // validator the `codebus quiz validate` sub-action / agent
@@ -608,7 +654,11 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
     // best-effort: the quiz is still persisted (caller side) with a
     // `validation: failed` marker, a non-fatal warning is surfaced, no
     // question is dropped, and the verb does NOT fail for this reason.
-    let findings = validate_quiz_body(&quiz_md, &paths.wiki);
+    // Pass the run's requested question count so a count drift (agent
+    // over/under-produced despite the prompt) surfaces as a finding →
+    // `validation: failed`. Best-effort policy is unchanged: no question is
+    // dropped; count enforcement is the agent self-repair loop's job.
+    let findings = validate_quiz_body(&quiz_md, &paths.wiki, Some(options.question_count));
     fan_out(VerbEvent::Banner(VerbBanner::LintDone {
         errors: findings.len(),
         warns: 0,
@@ -708,7 +758,7 @@ pub fn run_quiz_generate<F: FnMut(VerbEvent)>(
                     timeout,
                 ) {
                     Ok((rtext, _)) => {
-                        Ok(strip_preamble_before_first_question(&strip_code_fence(&rtext)))
+                        Ok(strip_to_final_quiz_body(&strip_code_fence(&rtext)))
                     }
                     Err(e) => {
                         eprintln!(
@@ -1146,6 +1196,63 @@ mod tests {
     fn strip_preamble_noop_when_no_question_heading() {
         let body = "random text with no question heading at all";
         assert_eq!(strip_preamble_before_first_question(body), body);
+    }
+
+    // --- strip_to_final_quiz_body (gen_text draft+final dedup) ---
+    // Regression for the live-observed bug: the claude self-validate
+    // workflow makes the agent restate the full quiz body before AND after
+    // `codebus quiz validate`; run_spawn concatenates both, so a correct
+    // 5-question quiz persisted as 10 (two identical copies). Only the
+    // FINAL body (last `## Q1.`) must survive.
+
+    #[test]
+    fn final_body_dedups_draft_and_final_copies() {
+        let draft = "## Q1. DRAFT one\n## Answer: A\n## Explanation: e\n\n\
+## Q2. DRAFT two\n## Answer: B\n## Explanation: e";
+        let fin = "## Q1. FINAL one\n## Answer: A\n## Explanation: e\n\n\
+## Q2. FINAL two\n## Answer: B\n## Explanation: e";
+        let body = format!("{draft}\n\nPerfect! Here is the final quiz:\n\n{fin}");
+        let out = strip_to_final_quiz_body(&body);
+        assert_eq!(
+            out.matches("## Q").count(),
+            2,
+            "only the final 2-question body survives: {out:?}"
+        );
+        assert!(
+            out.starts_with("## Q1. FINAL one"),
+            "must begin at the final body: {out:?}"
+        );
+        assert!(!out.contains("DRAFT"), "draft copy must be discarded: {out:?}");
+    }
+
+    #[test]
+    fn final_body_keeps_single_emission_unchanged() {
+        let body = "## Q1. only\n## Answer: A\n## Explanation: e\n\n\
+## Q2. two\n## Answer: B\n## Explanation: e";
+        assert_eq!(strip_to_final_quiz_body(body), body);
+    }
+
+    #[test]
+    fn final_body_takes_final_when_draft_partial() {
+        // Draft had only 1 question; the final has 2 — the final survives.
+        let draft = "## Q1. partial draft\n## Answer: A\n## Explanation: e";
+        let fin = "## Q1. final one\n## Answer: A\n## Explanation: e\n\n\
+## Q2. final two\n## Answer: B\n## Explanation: e";
+        let body = format!("{draft}\n\nfixing the count...\n\n{fin}");
+        let out = strip_to_final_quiz_body(&body);
+        assert_eq!(out.matches("## Q").count(), 2, "final 2-question body: {out:?}");
+        assert!(out.starts_with("## Q1. final one"), "begins at final: {out:?}");
+    }
+
+    #[test]
+    fn final_body_falls_back_to_preamble_strip_without_q1() {
+        // No `## Q1.` header → fall back to first-question preamble strip.
+        let body = "intro text\n## Q2. weird start\n## Answer: A\n## Explanation: e";
+        let out = strip_to_final_quiz_body(body);
+        assert!(
+            out.starts_with("## Q2. weird start"),
+            "fallback strips preamble to the first question: {out:?}"
+        );
     }
 
     // --- vault preconditions (no spawn) ---

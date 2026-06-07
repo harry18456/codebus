@@ -268,7 +268,7 @@ const CODEX_BODY_TRANSLATIONS: &[(&str, &str)] = &[
     // marker line instead AND skips the validate loop entirely — caller's
     // post-agent `codebus quiz validate` run handles downstream validation.
     (
-        "### Self-validate before emitting (Mode B only)\n\nBefore you emit the final body, verify it deterministically:\n\n1. Validate your draft via the Bash tool using a heredoc fed straight into codebus — the command MUST start with `codebus` (the sandbox hook only permits a Bash command whose first word is `codebus`):\n\n       codebus quiz validate - <<'CBQZ'\n       ## Q1. ...\n       ... your entire draft body ...\n       CBQZ\n\n   `-` means read the body from stdin; the heredoc supplies it. It exits 0 with no findings when the draft is structurally sound and every `[[slug]]` citation resolves; otherwise it lists findings (add `--json` before the heredoc for machine-readable output). Do NOT use `cat ... | codebus quiz validate -` (a pipeline's first word is `cat`, which the sandbox hook blocks) and do NOT try to write the draft to a temp file first (you have no file-writing tool — the heredoc is the only way).\n2. If it reports findings, fix exactly the questions it names, then run it again.\n3. Repeat this validate→fix→re-validate loop **at most 3** times. When that cap is reached, emit your best current body rather than looping further — do not keep iterating past the cap.\n4. `codebus quiz validate` is the sole authority for structural and citation correctness. Act on its findings; do NOT reproduce, restate, or argue its rules here — the rules live in the validator, not in this skill.",
+        "### Self-validate before emitting (Mode B only)\n\nBefore you emit the final body, verify it deterministically:\n\n1. Validate your draft via the Bash tool using a heredoc fed straight into codebus — the command MUST start with `codebus` (the sandbox hook only permits a Bash command whose first word is `codebus`). Pass `--count <N>`, where `<N>` is the question count from your `generate:` prompt (the `count=<N>` segment):\n\n       codebus quiz validate --count <N> - <<'CBQZ'\n       ## Q1. ...\n       ... your entire draft body ...\n       CBQZ\n\n   `-` means read the body from stdin; the heredoc supplies it. It exits 0 with no findings when the draft is structurally sound, every `[[slug]]` citation resolves, and the body has exactly `<N>` questions; otherwise it lists findings (add `--json` before the heredoc for machine-readable output). Do NOT use `cat ... | codebus quiz validate -` (a pipeline's first word is `cat`, which the sandbox hook blocks) and do NOT try to write the draft to a temp file first (you have no file-writing tool — the heredoc is the only way).\n2. If it reports findings, fix exactly the questions it names — for a `quiz-question-count` finding, add or remove whole question blocks until you have exactly `<N>` — then run it again.\n3. Repeat this validate→fix→re-validate loop **at most 3** times. When that cap is reached, emit your best current body rather than looping further — do not keep iterating past the cap.\n4. `codebus quiz validate` is the sole authority for structural, citation, and question-count correctness. Act on its findings; do NOT reproduce, restate, or argue its rules here — the rules live in the validator, not in this skill.",
         "### Self-validate before emitting (Mode B only) — codex path: NOT AVAILABLE\n\nThe codex provider's sandbox `-s` levels (`read-only` / `workspace-write` / `danger-full-access`) lack a per-command allowance that would let this agent run `codebus quiz validate` from inside Mode B safely. Instead of attempting validation here:\n\n1. As the FIRST line of your response, emit `[CODEBUS_QUIZ_NO_VALIDATE] <short reason in 5-15 words naming what would have been validated>`, then a blank line, then your draft starting with `## Q1.`.\n2. Skip the validate / fix / re-validate loop entirely; emit your best draft directly.\n3. The caller (codebus CLI) will run `codebus quiz validate` after this agent terminates and use that result as the authoritative success signal — the agent's responsibility ends at marker + body emission.\n\n(Codex per-command allowance is tracked as a Phase 5 spike in the prompt-surface-review backlog. Until that is resolved, codex quiz Mode B remains best-effort with no in-session structural self-check.)",
     ),
     // F72: QUIZ_SKILL_CONTENT Read-Only Invariant — claude uses mcp_*
@@ -657,17 +657,17 @@ Rules:
 
 Before you emit the final body, verify it deterministically:
 
-1. Validate your draft via the Bash tool using a heredoc fed straight into codebus — the command MUST start with `codebus` (the sandbox hook only permits a Bash command whose first word is `codebus`):
+1. Validate your draft via the Bash tool using a heredoc fed straight into codebus — the command MUST start with `codebus` (the sandbox hook only permits a Bash command whose first word is `codebus`). Pass `--count <N>`, where `<N>` is the question count from your `generate:` prompt (the `count=<N>` segment):
 
-       codebus quiz validate - <<'CBQZ'
+       codebus quiz validate --count <N> - <<'CBQZ'
        ## Q1. ...
        ... your entire draft body ...
        CBQZ
 
-   `-` means read the body from stdin; the heredoc supplies it. It exits 0 with no findings when the draft is structurally sound and every `[[slug]]` citation resolves; otherwise it lists findings (add `--json` before the heredoc for machine-readable output). Do NOT use `cat ... | codebus quiz validate -` (a pipeline's first word is `cat`, which the sandbox hook blocks) and do NOT try to write the draft to a temp file first (you have no file-writing tool — the heredoc is the only way).
-2. If it reports findings, fix exactly the questions it names, then run it again.
+   `-` means read the body from stdin; the heredoc supplies it. It exits 0 with no findings when the draft is structurally sound, every `[[slug]]` citation resolves, and the body has exactly `<N>` questions; otherwise it lists findings (add `--json` before the heredoc for machine-readable output). Do NOT use `cat ... | codebus quiz validate -` (a pipeline's first word is `cat`, which the sandbox hook blocks) and do NOT try to write the draft to a temp file first (you have no file-writing tool — the heredoc is the only way).
+2. If it reports findings, fix exactly the questions it names — for a `quiz-question-count` finding, add or remove whole question blocks until you have exactly `<N>` — then run it again.
 3. Repeat this validate→fix→re-validate loop **at most 3** times. When that cap is reached, emit your best current body rather than looping further — do not keep iterating past the cap.
-4. `codebus quiz validate` is the sole authority for structural and citation correctness. Act on its findings; do NOT reproduce, restate, or argue its rules here — the rules live in the validator, not in this skill.
+4. `codebus quiz validate` is the sole authority for structural, citation, and question-count correctness. Act on its findings; do NOT reproduce, restate, or argue its rules here — the rules live in the validator, not in this skill.
 
 ### Mode C — `verify: topic=<topic-or-empty>`
 
@@ -1468,6 +1468,13 @@ mod tests {
         assert!(
             body.contains("codebus quiz validate"),
             "generate mode must instruct self-validation via `codebus quiz validate`"
+        );
+        // quiz-validate-enforce-question-count: the claude self-validate
+        // invocation passes `--count <N>` so the agent's loop reacts to a
+        // question-count mismatch (not just schema / citation findings).
+        assert!(
+            body.contains("codebus quiz validate --count <N>"),
+            "generate mode self-validation must pass `--count <N>` so the count is enforced"
         );
         // an explicit numeric internal cap is stated
         assert!(
