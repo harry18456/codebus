@@ -1,6 +1,6 @@
 //! Wiki domain — types, frontmatter parser, lint rules, fix loop.
 //!
-//! Ported from `legacy/v2-rust/codebus-core/src/wiki/` for v3-lint.
+//! Ported from the v2 implementation for v3-lint.
 //! v3 augments v2 with: stable `rule_id` per lint issue (for JSON output
 //! consumers like the fix agent), and vault root auto-detection so the
 //! lint subcommand can run from either source repo cwd or vault cwd.

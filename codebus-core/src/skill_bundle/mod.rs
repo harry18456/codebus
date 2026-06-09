@@ -206,7 +206,7 @@ fn write_plain_file_if_missing(path: &Path, content: &str) -> io::Result<BundleO
 /// Applied to the FULL final body (shared head + workflow section, or
 /// CHAT_SKILL_CONTENT, or QUIZ_SKILL_CONTENT) — the claude body is the
 /// source of truth, codex is derived. Each replacement here corresponds
-/// to one or more findings in `docs/2026-05-23-prompt-surface-inventory.md`
+/// to one or more findings in `docs/internal/2026-05-23-prompt-surface-inventory.md`
 /// §8 (F19/F40/F49/F65/F66/F67/F72/F73/F79 etc.).
 fn claude_to_codex_translate(body: String) -> String {
     // Apply each claude→codex replacement in declaration order. `str::replace`
@@ -230,7 +230,7 @@ fn claude_to_codex_translate(body: String) -> String {
 /// This is the SINGLE source of truth shared by `claude_to_codex_translate`
 /// AND the drift-guard tests — adding/changing an entry automatically extends
 /// the guard. Each entry maps to one or more findings in
-/// `docs/2026-05-23-prompt-surface-inventory.md` §8.
+/// `docs/internal/2026-05-23-prompt-surface-inventory.md` §8.
 const CODEX_BODY_TRANSLATIONS: &[(&str, &str)] = &[
     // F19/F67/F79: schema doc filename — codex's cwd schema doc is AGENTS.md
     // (CLAUDE.md does not exist on the codex path; vault init materializes
@@ -474,7 +474,7 @@ The query text's language SHALL override the natural language of any wiki conten
 /// suggestion emission rule per `chat-verb` capability (Chat Skill Bundle
 /// Content + Promote Suggestion Line Marker + MCP Tool Prompt Layer
 /// Exclusion requirements). Sourced from the spike v0 draft (see
-/// `docs/2026-05-13-chat-verb-discussion.md` §Spike ❺), which passed 4/4
+/// `docs/internal/2026-05-13-chat-verb-discussion.md` §Spike ❺), which passed 4/4
 /// scenarios with 2/2 format consistency.
 const CHAT_SKILL_CONTENT: &str = "---
 name: codebus-chat

@@ -41,8 +41,8 @@ Env overrides (useful for tests / non-default setups): `CODEBUS_CLAUDE_BIN` / `C
 ## Non-obvious invariants
 
 - **Cancellation / timeout** kill the whole process tree via `KillHandle::terminate_tree()` (Windows Job Object `KILL_ON_JOB_CLOSE` / Unix `killpg`). codex on Windows is a `.cmd` → `node.exe` → native `codex.exe` chain whose `codex.exe` leaf holds the inherited stdout pipe and can outlive the shim; killing only the immediate child leaves the pipe open (no EOF) and a naive pipe read hangs — cancellation must kill the whole tree, and ad-hoc codex probe output must be redirected to a file, not piped.
-- **`docs/BACKLOG.md`** tracks open work and links to `docs/<date>-<slug>-backlog.md` detail docs; it is table-formatted and Git stores it as LF (`core.autocrlf=input`, despite occasional CRLF in the working tree). Be careful editing rows — removing one can mash adjacent rows, so grep for `|| 2026` after.
-- This repo dogfoods itself: the `.codebus/` directory at the repo root is codebus's own vault, with materialized (generated) skill bundles and instruction files — not hand-authored source.
+- **`docs/internal/BACKLOG.md`** tracks open work and links to `docs/internal/<date>-<slug>-backlog.md` detail docs; it is table-formatted and Git stores it as LF (`core.autocrlf=input`, despite occasional CRLF in the working tree). Be careful editing rows — removing one can mash adjacent rows, so grep for `|| 2026` after. (`docs/` top level holds only outward-facing docs — `security.md`, `codebus-ai-architecture.md`; all dated working docs / spikes / backlog live under `docs/internal/`.)
+- This repo dogfoods itself: running codebus against this repo materializes a `.codebus/` vault at the repo root (generated skill bundles + instruction files, not hand-authored source). It is `.gitignore`d and absent from a fresh checkout — there is no committed copy to inspect; it only appears after you run codebus here.
 
 <!-- SPECTRA:START v1.0.2 -->
 

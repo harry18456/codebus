@@ -1,7 +1,7 @@
 //! `.codebus/` vault layout — 7 directories.
 //!
 //! Path D drops v2's `output/`, `goals.jsonl`, and nested `.git/`. See
-//! `docs/v3-roadmap.md` §4 #2 and the `Vault Layout` requirement.
+//! `docs/internal/v3-roadmap.md` §4 #2 and the `Vault Layout` requirement.
 
 use std::fs;
 use std::io;

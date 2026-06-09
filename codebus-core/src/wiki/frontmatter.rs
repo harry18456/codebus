@@ -1,4 +1,4 @@
-//! YAML frontmatter parser ported from `legacy/v2-rust/codebus-core/src/wiki/frontmatter.rs`.
+//! YAML frontmatter parser ported from the v2 implementation.
 //!
 //! Required by lint rules that need to inspect `related[]`, `sources[]`,
 //! `stale`, and detect parse failures (rule `frontmatter-parse`).

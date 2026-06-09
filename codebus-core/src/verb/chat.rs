@@ -5,7 +5,7 @@
 //! into the next call as `ChatTurnOptions.session_id`.
 //!
 //! See spec capabilities `chat-verb` + `verb-library` (Agent Invoke Resume
-//! Session Support) and design `docs/2026-05-13-chat-verb-discussion.md`.
+//! Session Support) and design `docs/internal/2026-05-13-chat-verb-discussion.md`.
 //!
 //! Behavior order (one turn):
 //!  1. Vault precondition — `VerbError::VaultMissing` when `<repo>/.codebus/`
@@ -77,7 +77,7 @@ pub struct ChatTurnOptions {
 /// Outcome of a successful `run_chat_turn` invocation. `session_id` is
 /// non-Option here (vs. `Option<String>` on `ChatTurnOptions`) because
 /// the first `init` stream event always carries the field — see the
-/// spike `❷` result in `docs/2026-05-13-chat-verb-discussion.md`.
+/// spike `❷` result in `docs/internal/2026-05-13-chat-verb-discussion.md`.
 /// `agent_exit_code` mirrors the underlying `claude` child exit; the
 /// CLI REPL uses it to decide whether the turn errored.
 #[derive(Debug, Clone)]

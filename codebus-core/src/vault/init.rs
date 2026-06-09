@@ -325,7 +325,7 @@ pub fn run_init(
     // alongside the claude bundles. Unconditional — the user can switch
     // `agent.active_provider` post-init without re-running init, and a vault
     // missing `.codex/skills/` leaves codex spawns unable to enter SKILL Mode
-    // (see docs/2026-05-25-codex-skill-trigger-diagnose.md). Claude path is
+    // (see docs/internal/2026-05-25-codex-skill-trigger-diagnose.md). Claude path is
     // unaffected because it never reads `.codex/` or `AGENTS.md`.
     // write-if-missing; silent (no extra lifecycle event so the declared
     // event order is unchanged).
@@ -620,7 +620,7 @@ mod tests {
     /// `active_provider` from claude → codex on an already-initialized vault
     /// leaves codex spawns with no SKILL bundle to load, and the agent falls
     /// back to generic task-reply mode (see
-    /// `docs/2026-05-25-codex-skill-trigger-diagnose.md`).
+    /// `docs/internal/2026-05-25-codex-skill-trigger-diagnose.md`).
     #[test]
     fn init_always_materializes_codex_bundles_regardless_of_active_provider() {
         let tmp = TempDir::new().unwrap();

@@ -9,7 +9,7 @@
 //! so the long-running goal flow does not block chat REPL stdin).
 //!
 //! See specs `chat-verb` + `cli` (Chat Subcommand Behavior, Spawn Verb
-//! Library Delegation modified) + design `docs/2026-05-13-chat-verb-discussion.md`.
+//! Library Delegation modified) + design `docs/internal/2026-05-13-chat-verb-discussion.md`.
 
 use std::cell::RefCell;
 use std::io::{self, BufRead, Write};

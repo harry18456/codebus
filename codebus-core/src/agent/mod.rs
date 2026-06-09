@@ -5,10 +5,10 @@
 //! and a concrete agent CLI. [`invoke`] drives a backend via three methods
 //! (build command / parse stream line / extract session id) and owns the
 //! provider-neutral spawn loop. The verb layer constructs a neutral
-//! [`SpawnSpec`] ([`spawn_spec`]) describing one spawn's intent. The only
-//! implementation today is [`ClaudeBackend`] ([`claude_backend`]); a second
-//! provider (codex) lands in a future change as a pure addition — a new
-//! backend module implementing the same trait, with no change to this seam.
+//! [`SpawnSpec`] ([`spawn_spec`]) describing one spawn's intent. Two backends
+//! implement the trait today — [`ClaudeBackend`] ([`claude_backend`]) and
+//! [`CodexBackend`] ([`codex_backend`]) — the second landed as a pure addition
+//! with no change to this seam, validating the provider-neutral design.
 
 pub mod backend;
 pub mod claude_backend;

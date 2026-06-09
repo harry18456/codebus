@@ -2,7 +2,7 @@
 //!
 //! Rules are object-safe sync impls. Orchestrator owns I/O cost — reads +
 //! parses every page once and hands rules a [`VaultContext`] with pre-loaded
-//! results. Ported from `legacy/v2-rust/codebus-core/src/wiki/lint/rule.rs`.
+//! results. Ported from the v2 implementation.
 
 use crate::wiki::frontmatter::{FrontmatterError, parse_page};
 use crate::wiki::types::{LintIssue, PageType, ParsedPage};

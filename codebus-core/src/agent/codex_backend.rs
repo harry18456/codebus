@@ -8,7 +8,7 @@
 //! provider-agnostic [`invoke`](super::claude_cli::invoke) loop drives it
 //! through the three trait methods only.
 //!
-//! Isolation recipe (verified 2026-05-22, docs/2026-05-14-...backlog.md §4(F)):
+//! Isolation recipe (verified 2026-05-22, docs/internal/2026-05-14-...backlog.md §4(F)):
 //! every spawn carries `--ignore-user-config` (drop user global config/MCP),
 //! `--disable apps` (drop plugin/codex_apps tools), `--ignore-rules` (drop
 //! execpolicy), and `-c project_root_markers=['<marker>']` (pin the codex
@@ -132,7 +132,7 @@ impl AgentBackend for CodexBackend {
         // parent process to already be admin and aborts spawn otherwise, while
         // `unelevated` runs the sandbox as the current user — which is the
         // codebus case. K-mode bisect + unelevated/elevated comparison is in
-        // docs/2026-05-25-codex-skill-trigger-diagnose.md. On non-Windows
+        // docs/internal/2026-05-25-codex-skill-trigger-diagnose.md. On non-Windows
         // hosts the unknown-platform table is a no-op per codex's TOML
         // schema tolerance; cross-platform follow-up tracked separately.
         // `-c web_search=disabled`: codex's hosted web_search tool is enabled
@@ -140,7 +140,7 @@ impl AgentBackend for CodexBackend {
         // violates the codebus offline / sandbox-bounded contract. `--disable`
         // only accepts built-in sub-feature ids (apps / image_generation /
         // ...), so `web_search` has to be turned off via a config-key
-        // override. Verified by docs/2026-05-28-codex-hook-hard-gate-spike.md
+        // override. Verified by docs/internal/2026-05-28-codex-hook-hard-gate-spike.md
         // E11 (codex returns "Web search is unavailable." after the override).
         // Image generation is intentionally left enabled.
         cmd.arg("--json")
@@ -426,7 +426,7 @@ mod tests {
     /// capability that `--ignore-user-config` would otherwise strip; on non-
     /// Windows hosts the unknown-platform table is a no-op per codex's TOML
     /// schema tolerance. See
-    /// docs/2026-05-25-codex-skill-trigger-diagnose.md (Layer (c) + K-mode
+    /// docs/internal/2026-05-25-codex-skill-trigger-diagnose.md (Layer (c) + K-mode
     /// bisect) for the underlying evidence.
     #[test]
     fn workspace_argv_includes_windows_sandbox_elevation_override() {

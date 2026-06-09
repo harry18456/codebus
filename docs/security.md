@@ -58,7 +58,7 @@ codebus 把使用者輸入餵給 LLM、再讓 LLM 寫檔到你的 repo 旁邊。
 --permission-mode acceptEdits # -p mode 沒 terminal 必須
 ```
 
-這個組合是 v2 iter-9 一連串 sandbox spike 痛苦得來的（[`legacy/v2-rust/docs/strategy/2026-05-08-skill-vs-binary-pivot.md`](../legacy/v2-rust/docs/strategy/2026-05-08-skill-vs-binary-pivot.md) §3.2.4）。**三條都必要 — 缺任一條 sandbox 不完整**：
+這個組合是 v2 iter-9 一連串 sandbox spike 痛苦得來的（v2 設計史見 git 歷史）。**三條都必要 — 缺任一條 sandbox 不完整**：
 
 - 只下 `--tools` 沒下 `--allowedTools`：agent 每用一次 tool 都要互動式確認，`-p` mode 沒 terminal → 卡死
 - 只下 `--allowedTools` 沒下 `--tools`：白名單只是 auto-approve，沒 hard-gate → 真要寫 agent 還是寫得進去
@@ -94,7 +94,7 @@ codebus 把使用者輸入餵給 LLM、再讓 LLM 寫檔到你的 repo 旁邊。
 
 ---
 
-## 4. PII filter（raw_sync 階段）
+## PII filter（raw_sync 階段）
 
 `init` / `goal` 把 source code 複製進 `<repo>/.codebus/raw/code/` 給 agent 看時，會跑 PII scan。
 
@@ -121,7 +121,7 @@ codebus 把使用者輸入餵給 LLM、再讓 LLM 寫檔到你的 repo 旁邊。
 
 ---
 
-## 5. Nested git auto-commit 後路
+## Nested git auto-commit 後路
 
 `<repo>/.codebus/` 自己是一個獨立 git repo（nested git，不影響你 source repo 的 git）。每次 `goal` / `fix` 收尾自動 commit。
 
@@ -215,7 +215,7 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 - 但 `spawn_agent` **無 sandbox / cwd 參數**，`-s` 是 `codex exec` 的 process 級政策、子 agent 是同 process 的 thread → **子 agent 繼承 session 的 `-s` sandbox**。實證（mock 強制 worker 真跑 shell 寫、合成 marker）：session `-s read-only` → 子 agent 的寫被 `rejected: blocked by policy`；`-s workspace-write` → 子 agent 被框在 workspace 內（workspace 外正常 ACL 寫照樣被擋）——逐格吻合 session sandbox，未逃逸
 - ⚠️ **此繼承只及 `-s` 真正 enforce 的寫／命令面。** 讀取面子 agent 與 main agent **一樣 soft-partial**：`-s` 在 Windows unelevated 本就不擋讀（見上方「讀取」段）、子 agent 繼承的是**同一個 `-s`**，所以讀漏**不因 subagent 而變好或變壞**——別把「per-spawn 保證仍成立」誤讀成子 agent 連讀都 contained
 - 所以「每 spawn 單一受限 agent」的保證**透過 session 級 sandbox 繼承延伸到子 agent**（就 `-s` enforce 的寫／命令面而言），無需額外機制
-- 軟層：codex system prompt 本就限制「只有 user 明確要求 delegation 才 spawn」、codebus 的 `$codebus-<bundle>` skill prompt 不請求 delegation；要徹底移除能力面可加 `--disable multi_agent`（spike 證實能乾淨移除 toolset），但子 agent 已 bounded、非必要。PoC：`scripts/codex_subagent_*.py`
+- 軟層：codex system prompt 本就限制「只有 user 明確要求 delegation 才 spawn」、codebus 的 `$codebus-<bundle>` skill prompt 不請求 delegation；要徹底移除能力面可加 `--disable multi_agent`（spike 證實能乾淨移除 toolset），但子 agent 已 bounded、非必要。
 
 → **codex 在 Windows unelevated 的隔離是「讀／網路 soft-partial、寫較硬」。** macOS / Linux 尚未實測——別從 Windows 結果推論 Seatbelt / Landlock。hard read enforcement 是 open backlog（見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」）。✅ **注意：claude path 的讀取自 `check-read-vault-containment` 起是 vault-root containment 硬邊界（見 §6，除該節殘留），敏感讀取走 claude 現確有 vault 邊界**；codex path 的讀仍 soft-partial。
 

@@ -1,4 +1,4 @@
-//! Wiki type definitions ported from `legacy/v2-rust/codebus-core/src/wiki/types.rs`.
+//! Wiki type definitions ported from the v2 implementation.
 //!
 //! v3 additions:
 //! - `LintIssue.rule_id`: stable kebab-case identifier per rule, supplied to

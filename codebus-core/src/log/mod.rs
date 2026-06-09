@@ -1,6 +1,6 @@
 //! Run-log subsystem — RunLog struct, LogSink trait, and concrete sinks.
 //!
-//! v3-run-log carry from `legacy/v2-rust/codebus-core/src/log/`. The TokenUsage
+//! v3-run-log carry from the v2 implementation. The TokenUsage
 //! shape is provider-agnostic (Anthropic-shaped now; OpenAI/Ollama/Gemini will
 //! map onto the same fields via per-provider stream parsers). The LogSink
 //! trait is object-safe so callers can pass `&mut dyn LogSink` and swap impls
