@@ -187,12 +187,41 @@ pub fn sync_with_scanner(
     sync_with_scanner_into(repo_root, raw_code_dir, scanner, on_hit, &mut stderr)
 }
 
+/// Convert a byte `offset` into `content` to a 1-based `(line, column)`
+/// position for human-readable warn lines. `line` is the number of `\n`
+/// characters before `offset`, plus one. `column` is the number of Unicode
+/// scalar values between the start of that line and `offset`, plus one — so
+/// multibyte characters count as one column each, not one per byte.
+///
+/// Walks `char_indices` rather than slicing on `offset`, so an `offset` that
+/// is past the end of `content` (loop runs out) or that falls inside a
+/// multibyte character (counted only once its char start is reached) never
+/// panics. In practice `offset` is always a `PiiMatch.start`, i.e. a regex
+/// match start that already lands on a char boundary.
+fn byte_offset_to_line_col(content: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1usize;
+    let mut col = 1usize;
+    for (idx, ch) in content.char_indices() {
+        if idx >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
+}
+
 /// Same as [`sync_with_scanner`] but writes PII warning lines into the
 /// caller-supplied `warn_sink` instead of stderr. Exposed primarily so
 /// integration tests can verify warning line format and content without
 /// process-level stderr capture.
 ///
-/// Warning line format: `pii warn: <pattern_name> at <relative_path>:<byte_offset>\n`.
+/// Warning line format: `pii warn: <pattern_name> at <relative_path>:<line>:<col>\n`
+/// where `<line>`/`<col>` are 1-based (see [`byte_offset_to_line_col`]).
 /// The `matched_text` of each match is intentionally NOT written to the
 /// sink — emitting the literal secret would defeat the redaction intent.
 pub fn sync_with_scanner_into<W: io::Write>(
@@ -311,10 +340,18 @@ pub fn sync_with_scanner_into<W: io::Write>(
         // Emit warn lines for every match before deciding mirror action.
         // Order: ascending byte offset (scanner contract). One line per match.
         for m in &matches {
+            // Render the match location as 1-based line:col (not the raw byte
+            // offset, which reads like a nonexistent line number). `content`
+            // is present whenever `matches` is non-empty (non-UTF-8 files
+            // produce no matches), so the fallback is unreachable in practice.
+            let (line, col) = utf8_content
+                .as_deref()
+                .map(|c| byte_offset_to_line_col(c, m.start))
+                .unwrap_or((1, 1));
             writeln!(
                 warn_sink,
-                "pii warn: {} at {}:{}",
-                m.pattern_name, rel_str, m.start
+                "pii warn: {} at {}:{}:{}",
+                m.pattern_name, rel_str, line, col
             )?;
         }
         summary.pii_matches += matches.len();
@@ -970,10 +1007,50 @@ mod tests {
         assert!(raw.path().join("docs.md").exists());
         let mirrored = fs::read_to_string(raw.path().join("docs.md")).unwrap();
         assert_eq!(mirrored, "contact alice@example.com\n");
+        // 'a' of alice@example.com is at byte 8 on line 1 → col 9.
         assert!(
-            warns.contains("pii warn: email at docs.md:"),
-            "warn line missing or wrong format: {warns:?}"
+            warns.contains("pii warn: email at docs.md:1:9"),
+            "warn line missing or wrong line:col format: {warns:?}"
         );
+    }
+
+    // === pii-warn-location-line-col: byte_offset_to_line_col helper ===
+
+    #[test]
+    fn byte_offset_to_line_col_first_line() {
+        // 'a' of alice@example.com starts at byte 8 → line 1, col 9.
+        assert_eq!(
+            byte_offset_to_line_col("contact alice@example.com\n", 8),
+            (1, 9)
+        );
+    }
+
+    #[test]
+    fn byte_offset_to_line_col_third_line() {
+        // Two newlines before the match line → line 3; column is relative to
+        // the start of that line, not the file.
+        assert_eq!(
+            byte_offset_to_line_col("a\nb\ncontact alice@example.com\n", 12),
+            (3, 9)
+        );
+    }
+
+    #[test]
+    fn byte_offset_to_line_col_zero_offset() {
+        assert_eq!(byte_offset_to_line_col("anything", 0), (1, 1));
+    }
+
+    #[test]
+    fn byte_offset_to_line_col_counts_scalars_not_bytes() {
+        // Three CJK scalars (9 bytes) precede the match; column is the
+        // 1-based scalar count (4), not the byte count (10).
+        assert_eq!(byte_offset_to_line_col("日本語email@x.com", 9), (1, 4));
+    }
+
+    #[test]
+    fn byte_offset_to_line_col_offset_past_end_clamps() {
+        // Offset beyond content length clamps to the end without panicking.
+        assert_eq!(byte_offset_to_line_col("abc", 999), (1, 4));
     }
 
     /// `OnHit::Skip` for Warn-severity-only file: file is NOT mirrored;
@@ -1132,6 +1209,15 @@ mod tests {
             warns.matches("pii warn:").count(),
             2,
             "exactly 2 warn lines expected: {warns:?}"
+        );
+        // email after `key1=` (line 1, col 6); ipv4 after `key2=` (line 2, col 6).
+        assert!(
+            warns.contains("pii warn: email at logs.txt:1:6"),
+            "email warn line:col wrong: {warns:?}"
+        );
+        assert!(
+            warns.contains("pii warn: ipv4 at logs.txt:2:6"),
+            "ipv4 warn line:col wrong: {warns:?}"
         );
     }
 
