@@ -256,9 +256,13 @@ export function LoadingOverlay() {
         data-tauri-drag-region
         className="flex flex-col items-center gap-4 px-6"
       >
+        {/* The horizontal flip (face right) is baked into the
+            codebus-bus-roll keyframes alongside the per-frame transform, so
+            the bus rolls forward in the direction it faces with no parent
+            wrapper. */}
         <div
-          className="text-[72px] leading-none"
           aria-hidden="true"
+          className="text-[72px] leading-none"
           style={{ animation: busAnimation }}
         >
           🚌

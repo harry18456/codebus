@@ -93,18 +93,25 @@ button:disabled,
   }
 }
 
+/* LoadingOverlay bus roll. `scaleX(-1)` is baked into every frame (placed
+ * last so it only mirrors the glyph — the leftmost translateX stays in
+ * screen space). Default 🚌 faces left; the flip makes it face right, and
+ * translateX -26px→+12px drives it left→right (forward, matching the
+ * facing) before snapping back. Same approach as codebus-bus-roll-mirrored
+ * below; no parent scaleX wrapper needed — a wrapper would also mirror the
+ * animated translateX and make the bus appear to reverse. */
 @keyframes codebus-bus-roll {
   0%, 100% {
-    transform: translateX(-26px) rotate(-2deg);
+    transform: translateX(-26px) rotate(-2deg) scaleX(-1);
   }
   25% {
-    transform: translateX(-12px) translateY(-3px) rotate(0deg);
+    transform: translateX(-12px) translateY(-3px) rotate(0deg) scaleX(-1);
   }
   50% {
-    transform: translateX(0) rotate(2deg);
+    transform: translateX(0) rotate(2deg) scaleX(-1);
   }
   75% {
-    transform: translateX(12px) translateY(-3px) rotate(0deg);
+    transform: translateX(12px) translateY(-3px) rotate(0deg) scaleX(-1);
   }
 }
 
