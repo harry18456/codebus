@@ -1,4 +1,4 @@
-# build / runtime artifacts (kept generic — v3 implementation language TBD)
+# build / runtime artifacts
 node_modules/
 dist/
 coverage/
