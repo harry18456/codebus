@@ -138,29 +138,27 @@ button:disabled,
   }
 }
 
-/* WP11 design v1.1 spec lock: wiki link visual variants.
+/* WP11 spec lock: wiki link visual variants.
  *
- * `.plain-wikilink` — body navigation (resolvable). Default fg with a
- * strong-border underline; on hover the text + underline shift to accent.
- * The CSS rules below mirror the Tailwind utility composition attached
- * to each anchor so the literal class name carries the spec contract
- * even when the utility stack is overridden / pruned.
+ * `.plain-wikilink` — body navigation (resolvable). Accent proportional
+ * text by default; hover/focus exposes the accent underline.
  *
  * `.cite-link` — citation provenance (quiz citation block, chat reply
- * citation). Monospace + accent + dashed underline; no hover transition
- * because citations don't navigate elsewhere.
+ * citation). Monospace + accent + dashed underline.
  *
  * Spec: openspec/specs/app-workspace/spec.md ·
  *   Requirement "Wikilink Plain and Citation Style Variants" */
 .plain-wikilink {
-  color: var(--color-fg);
-  text-decoration: underline;
-  text-decoration-color: var(--color-border-strong);
+  color: var(--color-accent);
+  text-decoration-line: none;
+  text-decoration-color: var(--color-accent);
   text-underline-offset: 3px;
   transition: color 120ms ease-out, text-decoration-color 120ms ease-out;
 }
-.plain-wikilink:hover {
-  color: var(--color-accent);
+.plain-wikilink:hover,
+.plain-wikilink:focus-visible {
+  color: var(--color-accent-hover);
+  text-decoration-line: underline;
   text-decoration-color: var(--color-accent);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -175,4 +173,85 @@ button:disabled,
   text-decoration: underline;
   text-decoration-style: dashed;
   text-underline-offset: 3px;
+}
+
+/* Wiki markdown code highlighting.
+ * Theme colors are scoped to the wiki preview and adapted from
+ * github-dark. The pre box keeps app-owned background/border/padding. */
+.wiki-preview .hljs {
+  color: #c9d1d9;
+  background: transparent;
+}
+.wiki-preview .hljs-doctag,
+.wiki-preview .hljs-keyword,
+.wiki-preview .hljs-meta .hljs-keyword,
+.wiki-preview .hljs-template-tag,
+.wiki-preview .hljs-template-variable,
+.wiki-preview .hljs-type,
+.wiki-preview .hljs-variable.language_ {
+  color: #ff7b72;
+}
+.wiki-preview .hljs-title,
+.wiki-preview .hljs-title.class_,
+.wiki-preview .hljs-title.class_.inherited__,
+.wiki-preview .hljs-title.function_ {
+  color: #d2a8ff;
+}
+.wiki-preview .hljs-attr,
+.wiki-preview .hljs-attribute,
+.wiki-preview .hljs-literal,
+.wiki-preview .hljs-meta,
+.wiki-preview .hljs-number,
+.wiki-preview .hljs-operator,
+.wiki-preview .hljs-selector-attr,
+.wiki-preview .hljs-selector-class,
+.wiki-preview .hljs-selector-id,
+.wiki-preview .hljs-variable {
+  color: #79c0ff;
+}
+.wiki-preview .hljs-meta .hljs-string,
+.wiki-preview .hljs-regexp,
+.wiki-preview .hljs-string {
+  color: #a5d6ff;
+}
+.wiki-preview .hljs-built_in,
+.wiki-preview .hljs-symbol {
+  color: #ffa657;
+}
+.wiki-preview .hljs-code,
+.wiki-preview .hljs-comment,
+.wiki-preview .hljs-formula {
+  color: #8b949e;
+}
+.wiki-preview .hljs-name,
+.wiki-preview .hljs-quote,
+.wiki-preview .hljs-selector-pseudo,
+.wiki-preview .hljs-selector-tag {
+  color: #7ee787;
+}
+.wiki-preview .hljs-subst {
+  color: #c9d1d9;
+}
+.wiki-preview .hljs-section {
+  color: #1f6feb;
+  font-weight: 700;
+}
+.wiki-preview .hljs-bullet {
+  color: #f2cc60;
+}
+.wiki-preview .hljs-emphasis {
+  color: #c9d1d9;
+  font-style: italic;
+}
+.wiki-preview .hljs-strong {
+  color: #c9d1d9;
+  font-weight: 700;
+}
+.wiki-preview .hljs-addition {
+  color: #aff5b4;
+  background-color: #033a16;
+}
+.wiki-preview .hljs-deletion {
+  color: #ffdcd7;
+  background-color: #67060c;
 }

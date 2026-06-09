@@ -90,6 +90,49 @@ describe("QuizAnswering", () => {
     expect(screen.queryByTestId("quiz-back-to-wiki")).not.toBeInTheDocument()
   })
 
+  it("renders inline markdown in stem, choices, and explanation", () => {
+    const onOpenWikiPage = vi.fn()
+    const MD = `## Q1. Why use \`codebus-core\` with **Rust**?
+
+- A) *workspace* modeling
+- B) plain text
+- C) no parser
+- D) raw output
+
+## Answer: A
+
+## Explanation: Use \`read_wiki_page\` with [[desktop-app-workspace]] and **typed** data.`
+    render(
+      <QuizAnswering
+        quizMd={MD}
+        passThreshold={80}
+        pages={{
+          "desktop-app-workspace": {
+            slug: "desktop-app-workspace",
+            path: "wiki/modules/desktop-app-workspace.md",
+            title: "Desktop App Workspace",
+          },
+        }}
+        onOpenWikiPage={onOpenWikiPage}
+      />,
+    )
+
+    expect(screen.getByText("codebus-core").tagName).toBe("CODE")
+    expect(screen.getByText("Rust").tagName).toBe("STRONG")
+    expect(screen.getByText("workspace").tagName).toBe("EM")
+    expect(screen.getByTestId("quiz-stem")).not.toHaveTextContent("`")
+    fireEvent.click(screen.getByTestId("quiz-choice-A"))
+    fireEvent.click(screen.getByTestId("quiz-submit"))
+
+    expect(screen.getByText("read_wiki_page").tagName).toBe("CODE")
+    expect(screen.getByText("typed").tagName).toBe("STRONG")
+    const link = screen.getByTestId("wikilink-desktop-app-workspace")
+    expect(link).toHaveClass("cite-link")
+    fireEvent.click(link)
+    expect(onOpenWikiPage).toHaveBeenCalledWith("desktop-app-workspace")
+    expect(screen.getByTestId("quiz-explanation")).not.toHaveTextContent("`")
+  })
+
   // Spec: "Summary applies pass threshold" — 2/2 (100%) ≥ 80 → pass.
   it("summary passes when score meets the threshold", () => {
     render(<QuizAnswering quizMd={TWO_Q} passThreshold={80} />)

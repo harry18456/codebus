@@ -21,7 +21,7 @@ import {
 } from "@/lib/quiz-parse"
 import type { QuizAnswer, QuizProgress, WikiPageMeta } from "@/lib/ipc"
 import { useT } from "@/i18n/useT"
-import { ExplanationText } from "./ExplanationText"
+import { InlineMarkdownText } from "./ExplanationText"
 
 const CHOICE_KEYS: ChoiceKey[] = ["A", "B", "C", "D"]
 
@@ -235,7 +235,11 @@ export function QuizAnswering({
         })}
       </p>
       <h3 data-testid="quiz-stem" className="text-body-lg text-fg-primary">
-        {q.stem}
+        <InlineMarkdownText
+          text={q.stem}
+          pages={pages ?? {}}
+          onOpenWikiPage={onOpenWikiPage}
+        />
       </h3>
       <ul className="flex flex-col gap-2">
         {CHOICE_KEYS.map((k) => {
@@ -255,7 +259,12 @@ export function QuizAnswering({
                   revealed && isPicked && !isAnswer ? "bg-red-500/15" : "",
                 ].join(" ")}
               >
-                {k}) {q.choices[k]}
+                {k}){" "}
+                <InlineMarkdownText
+                  text={q.choices[k]}
+                  pages={pages ?? {}}
+                  onOpenWikiPage={onOpenWikiPage}
+                />
               </button>
             </li>
           )
@@ -285,7 +294,7 @@ export function QuizAnswering({
               : t("workspace.quiz.answering.verdictIncorrect")}
           </p>
           <p data-testid="quiz-explanation" className="text-body-lg">
-            <ExplanationText
+            <InlineMarkdownText
               text={q.explanation}
               pages={pages ?? {}}
               onOpenWikiPage={onOpenWikiPage}

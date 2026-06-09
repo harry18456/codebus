@@ -26,7 +26,7 @@ import { isPassing, parseQuiz, type ChoiceKey } from "@/lib/quiz-parse"
 import type { QuizProgress, WikiPageMeta } from "@/lib/ipc"
 import { useT } from "@/i18n/useT"
 import { QuizGenerationLog } from "./QuizGenerationLog"
-import { ExplanationText } from "./ExplanationText"
+import { InlineMarkdownText } from "./ExplanationText"
 
 const CHOICE_KEYS: ChoiceKey[] = ["A", "B", "C", "D"]
 
@@ -141,7 +141,13 @@ export function QuizReview({
                   total,
                 })}
               </p>
-              <h3 className="text-body-lg text-fg-primary">{q.stem}</h3>
+              <h3 className="text-body-lg text-fg-primary">
+                <InlineMarkdownText
+                  text={q.stem}
+                  pages={pages ?? {}}
+                  onOpenWikiPage={onOpenWikiPage}
+                />
+              </h3>
               <ul className="flex flex-col gap-1">
                 {CHOICE_KEYS.map((k) => {
                   const isAnswer = k === q.answer
@@ -155,7 +161,12 @@ export function QuizReview({
                         isPicked && !isAnswer ? "bg-red-500/15" : "",
                       ].join(" ")}
                     >
-                      {k}) {q.choices[k]}
+                      {k}){" "}
+                      <InlineMarkdownText
+                        text={q.choices[k]}
+                        pages={pages ?? {}}
+                        onOpenWikiPage={onOpenWikiPage}
+                      />
                     </li>
                   )
                 })}
@@ -171,7 +182,7 @@ export function QuizReview({
                 })}
               </p>
               <p className="text-body-lg text-fg-secondary">
-                <ExplanationText
+                <InlineMarkdownText
                   text={q.explanation}
                   pages={pages ?? {}}
                   onOpenWikiPage={onOpenWikiPage}

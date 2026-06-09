@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -208,6 +208,54 @@ describe("QuizReview", () => {
     expect(link.textContent ?? "").not.toContain("[[")
     fireEvent.click(link)
     expect(onOpenWikiPage).toHaveBeenCalledWith("auth-middleware-verification")
+  })
+
+  it("renders inline markdown in review stem, choices, and explanation", () => {
+    const MD = `## Q1. Why use \`codebus-core\` with **Rust**?
+
+- A) *workspace* modeling
+- B) plain text
+- C) no parser
+- D) raw output
+
+## Answer: A
+
+## Explanation: Use \`read_wiki_page\` with [[desktop-app-workspace]] and **typed** data.`
+    const progress: QuizProgress = {
+      schema_version: 1,
+      answers: [{ q: 1, selected: "A", correct: true }],
+      status: "completed",
+      started_at: "2026-05-18T10:00:00Z",
+      completed_at: "2026-05-18T10:05:00Z",
+    }
+    render(
+      <QuizReview
+        quizMd={MD}
+        progress={progress}
+        passThreshold={80}
+        vaultPath="/v"
+        eventsLog={null}
+        pages={{
+          "desktop-app-workspace": {
+            slug: "desktop-app-workspace",
+            path: "wiki/modules/desktop-app-workspace.md",
+            title: "Desktop App Workspace",
+          },
+        }}
+        onRedo={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    )
+
+    const question = screen.getByTestId("quiz-review-question")
+    expect(within(question).getByText("codebus-core").tagName).toBe("CODE")
+    expect(within(question).getByText("Rust").tagName).toBe("STRONG")
+    expect(within(question).getByText("workspace").tagName).toBe("EM")
+    expect(within(question).getByText("read_wiki_page").tagName).toBe("CODE")
+    expect(within(question).getByText("typed").tagName).toBe("STRONG")
+    const link = screen.getByTestId("wikilink-desktop-app-workspace")
+    expect(link).toHaveClass("cite-link")
+    expect(question).not.toHaveTextContent("`")
   })
 
   // Phase 5.4 quiz-fullscreen-wizard-view: when hosted inside the wizard

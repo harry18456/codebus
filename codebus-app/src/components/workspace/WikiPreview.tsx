@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react"
 import type { ComponentPropsWithoutRef, ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
+import rehypeHighlight from "rehype-highlight"
 import remarkGfm from "remark-gfm"
 
 import { Button } from "@/components/ui/button"
@@ -194,7 +195,7 @@ export function WikiPreview({
   return (
     <div
       data-testid="wiki-preview"
-      className="h-full w-full overflow-auto"
+      className="wiki-preview h-full w-full overflow-auto"
     >
       <div
         className="mx-auto max-w-[720px] px-10 py-10 text-body-lg leading-[1.7] text-fg"
@@ -213,6 +214,7 @@ export function WikiPreview({
         )}
         <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
         // react-markdown's default urlTransform strips custom URL
         // schemes (anything that isn't http/https/relative). The
         // synthetic `codebus://wiki/<slug>` scheme produced by
@@ -266,7 +268,7 @@ export function WikiPreview({
                       e.preventDefault()
                       void loadPage(vaultPath, slug)
                     }}
-                    className="plain-wikilink text-fg underline decoration-border-strong underline-offset-[3px] transition-colors hover:text-accent hover:decoration-accent motion-reduce:transition-none"
+                    className="plain-wikilink text-accent"
                   >
                     {displayText}
                   </a>
@@ -289,7 +291,7 @@ export function WikiPreview({
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="plain-wikilink text-fg underline decoration-border-strong underline-offset-[3px] transition-colors hover:text-accent hover:decoration-accent motion-reduce:transition-none"
+                className="plain-wikilink text-accent"
               >
                 {children}
               </a>
@@ -302,9 +304,26 @@ export function WikiPreview({
             <ol className="my-2 list-decimal space-y-1 pl-6">{children}</ol>
           ),
           li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-          code: (props: ComponentPropsWithoutRef<"code"> & { inline?: boolean }) => {
-            const { inline, children, className } = props
-            if (inline) {
+          code: (
+            props: ComponentPropsWithoutRef<"code"> & {
+              inline?: boolean
+              node?: {
+                position?: {
+                  start: { line: number }
+                  end: { line: number }
+                }
+              }
+            },
+          ) => {
+            const { inline, children, className, node } = props
+            const spansMultipleLines =
+              node?.position !== undefined &&
+              node.position.start.line !== node.position.end.line
+            const isInline =
+              inline ??
+              (!spansMultipleLines &&
+                !/\b(language-|hljs)\b/.test(className ?? ""))
+            if (isInline) {
               return (
                 <code className="rounded border border-border bg-bg-sunken px-1 py-0.5 font-mono text-meta text-fg">
                   {children}

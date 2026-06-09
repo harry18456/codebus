@@ -124,14 +124,26 @@ describe("WikiPreview", () => {
   })
 
   it("WikiPreview_renders_code_blocks_and_inline_code", () => {
-    render(
+    const { container } = render(
       <WikiPreview
         vaultPath="/v"
-        body={"use `inline` and:\n\n```\nblock\n```\n"}
+        body={
+          "use `inline` and:\n\n```\nplain-block\n```\n\n```rust\nfn main() {}\n```\n"
+        }
       />,
     )
-    expect(screen.getByText("inline").tagName).toBe("CODE")
-    expect(screen.getByText("block").tagName).toBe("CODE")
+    const inline = screen.getByText("inline")
+    expect(inline.tagName).toBe("CODE")
+    expect(inline).toHaveClass("rounded")
+    expect(inline).not.toHaveClass("hljs")
+    const plainBlock = screen.getByText("plain-block")
+    expect(plainBlock.tagName).toBe("CODE")
+    expect(plainBlock).not.toHaveClass("rounded")
+
+    const block = container.querySelector("code.language-rust")
+    expect(block).toBeTruthy()
+    expect(block).toHaveClass("hljs")
+    expect(block?.querySelector(".hljs-keyword, .hljs-title")).toBeTruthy()
   })
 
   // --- task 5.3: [Quiz me on this] trigger ---
@@ -314,6 +326,8 @@ describe("WikiPreview", () => {
     render(<WikiPreview vaultPath="/v" body={"see [[uv-lib]] here"} />)
     const link = screen.getByText("UV Library")
     expect(link.className).toMatch(/plain-wikilink/)
+    expect(link).toHaveClass("text-accent")
+    expect(link.className).not.toMatch(/text-fg|decoration-border-strong/)
     expect(link.getAttribute("data-state")).toBe("resolvable")
   })
 
