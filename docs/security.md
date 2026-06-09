@@ -169,7 +169,7 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 
 ### 5. codex provider 的檔案/網路隔離只是部分（Windows 已證實）
 
-上面 §多層 sandbox 的 cwd 隔離 + toolset gate **只適用 claude provider**。codex provider 走 OS-native sandbox（`-s read-only` / `workspace-write`）+ unelevated restricted token。Windows 實測（codex-cli **0.135.0**、Windows 11 Home non-admin、`windows.sandbox=unelevated`；讀取邊界 2026-05-28 先在 0.134.0 首證 [`2026-05-28-codex-windows-sandbox-read-poc.md`](2026-05-28-codex-windows-sandbox-read-poc.md)、寫入與 egress 為 0.135.0 PoC 重驗，raw 證據在 sibling research repo `agent-cli-research/poc/codex-sandbox/`）逐項如下：
+上面 §多層 sandbox 的 cwd 隔離 + toolset gate **只適用 claude provider**。codex provider 走 OS-native sandbox（`-s read-only` / `workspace-write`）+ unelevated restricted token。Windows 實測（codex-cli **0.135.0**、Windows 11 Home non-admin、`windows.sandbox=unelevated`；讀取邊界 2026-05-28 先在 0.134.0 首證 [`2026-05-28-codex-windows-sandbox-read-poc.md`](internal/2026-05-28-codex-windows-sandbox-read-poc.md)、寫入與 egress 為 0.135.0 PoC 重驗，raw 證據在 sibling research repo `agent-cli-research/poc/codex-sandbox/`）逐項如下：
 
 **讀取（漏 — `-s` 不設讀邊界，靠兩道機率性層 + 架構框架，皆非硬邊界）**
 
@@ -195,7 +195,7 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 *硬邊界升級路徑（solo-dev 威脅模型下暫緩）*
 
 - 真正的 per-spawn 硬讀取邊界是 **AppContainer / LowBox**（或 elevated backend，需 admin / WSL2 外包）。solo-dev 威脅模型下**接受殘餘風險、暫不實作**
-- **觸發升級的條件**＝(a) 出現外部 / 不可信 prompt 來源，或 (b) 未來 probe 在**良性檔名**標的上示範繞過。見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」
+- **觸發升級的條件**＝(a) 出現外部 / 不可信 prompt 來源，或 (b) 未來 probe 在**良性檔名**標的上示範繞過。見 [`BACKLOG.md`](internal/BACKLOG.md)「Codex 端 hard read + command/tool 隔離」
 
 **寫入（正常 ACL 有擋、Everyone-writable 例外）**
 
@@ -217,7 +217,7 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 - 所以「每 spawn 單一受限 agent」的保證**透過 session 級 sandbox 繼承延伸到子 agent**（就 `-s` enforce 的寫／命令面而言），無需額外機制
 - 軟層：codex system prompt 本就限制「只有 user 明確要求 delegation 才 spawn」、codebus 的 `$codebus-<bundle>` skill prompt 不請求 delegation；要徹底移除能力面可加 `--disable multi_agent`（spike 證實能乾淨移除 toolset），但子 agent 已 bounded、非必要。
 
-→ **codex 在 Windows unelevated 的隔離是「讀／網路 soft-partial、寫較硬」。** macOS / Linux 尚未實測——別從 Windows 結果推論 Seatbelt / Landlock。hard read enforcement 是 open backlog（見 [`BACKLOG.md`](BACKLOG.md)「Codex 端 hard read + command/tool 隔離」）。✅ **注意：claude path 的讀取自 `check-read-vault-containment` 起是 vault-root containment 硬邊界（見 §6，除該節殘留），敏感讀取走 claude 現確有 vault 邊界**；codex path 的讀仍 soft-partial。
+→ **codex 在 Windows unelevated 的隔離是「讀／網路 soft-partial、寫較硬」。** macOS / Linux 尚未實測——別從 Windows 結果推論 Seatbelt / Landlock。hard read enforcement 是 open backlog（見 [`BACKLOG.md`](internal/BACKLOG.md)「Codex 端 hard read + command/tool 隔離」）。✅ **注意：claude path 的讀取自 `check-read-vault-containment` 起是 vault-root containment 硬邊界（見 §6，除該節殘留），敏感讀取走 claude 現確有 vault 邊界**；codex path 的讀仍 soft-partial。
 
 ### 6. claude provider 的「讀」：vault-root containment 硬邊界（Windows）
 
@@ -228,13 +228,13 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 - 由 `hooks.read_path_containment` 開關（`~/.codebus/config.yaml`，預設 `true`、fail-safe）控制，與 image denylist 的 `read_image_block` **獨立**。設 `false` 僅作 emergency escape hatch（會重新打開 vault 外讀取）。
 - 鐵則：containment 用 **canonicalize-then-contain，非 ban-absolute**——因 `fix` verb 正常運作就靠 lint 給的**絕對路徑**讀/改 vault 內 wiki，禁絕對路徑會擋死 fix。
 
-**已知殘留**：vault 內 symlink 指向 vault 外、且目標不存在（無法 canonicalize、走 lexical fallback）時可能漏判（見 [`BACKLOG.md`](BACKLOG.md)）。native Windows 無 OS sandbox，但 containment 是 CLI 層 hook gate、與平台 OS sandbox 無關。緩解仍疊加：分析的 source 已先 PII mirror（見 §4）、toolset 無 WebFetch / MCP。
+**已知殘留**：vault 內 symlink 指向 vault 外、且目標不存在（無法 canonicalize、走 lexical fallback）時可能漏判（見 [`BACKLOG.md`](internal/BACKLOG.md)）。native Windows 無 OS sandbox，但 containment 是 CLI 層 hook gate、與平台 OS sandbox 無關。緩解仍疊加：分析的 source 已先 PII mirror（見 §4）、toolset 無 WebFetch / MCP。
 
-**範圍界線（重要，別讀成 in-vault 內容也防住）**：containment 是 vault **位置**邊界——它擋「讀**逃出** vault」，**不**保護 vault **內**的敏感內容。對已經在 vault 內的密鑰：check-read 只有 **Read 路徑的 basename backstop**（`*id_rsa*`/`*.pem`/`*.key`）擋得到，**同一支 hook 對 Glob/Grep 跳過 basename 檢查**（search tool 只由 containment 管位置）→ 同一個 in-vault `.pem`，**Grep 讀得到內容、Read 讀不到**（不對稱仍在，只是從「任何地方」收窄到「vault 內」）；且 basename 只認那三類副檔名，**嵌在 `.yaml`/`.env`/`.txt` 的 secret 連 Read 也不擋**。→ **in-vault 密鑰防護不靠 check-read**，靠 PII mirror（§4，有 backlog 缺口）＋規劃中的 (a) materialized `settings.json` 的 `permissions.deny`（對 Glob/Grep 做 result-level 逐檔 scrub、已實測在 codebus argv 下成立）＋(d) scanner 硬化。**殘留**＝secret 落進 vault 內非 pattern 檔後的**跨 session 持久化**（後續無持有它的 session 仍 Grep 得回）；接受並記、未來槓桿是 vault write-policy。細節見 [`BACKLOG.md`](BACKLOG.md)「in-vault 機密讀取邊界」條。
+**範圍界線（重要，別讀成 in-vault 內容也防住）**：containment 是 vault **位置**邊界——它擋「讀**逃出** vault」，**不**保護 vault **內**的敏感內容。對已經在 vault 內的密鑰：check-read 只有 **Read 路徑的 basename backstop**（`*id_rsa*`/`*.pem`/`*.key`）擋得到，**同一支 hook 對 Glob/Grep 跳過 basename 檢查**（search tool 只由 containment 管位置）→ 同一個 in-vault `.pem`，**Grep 讀得到內容、Read 讀不到**（不對稱仍在，只是從「任何地方」收窄到「vault 內」）；且 basename 只認那三類副檔名，**嵌在 `.yaml`/`.env`/`.txt` 的 secret 連 Read 也不擋**。→ **in-vault 密鑰防護不靠 check-read**，靠 PII mirror（§4，有 backlog 缺口）＋規劃中的 (a) materialized `settings.json` 的 `permissions.deny`（對 Glob/Grep 做 result-level 逐檔 scrub、已實測在 codebus argv 下成立）＋(d) scanner 硬化。**殘留**＝secret 落進 vault 內非 pattern 檔後的**跨 session 持久化**（後續無持有它的 session 仍 Grep 得回）；接受並記、未來槓桿是 vault write-policy。細節見 [`BACKLOG.md`](internal/BACKLOG.md)「in-vault 機密讀取邊界」條。
 
 **既有 vault 升級**：本 change 用 write-if-missing，不自動改寫既有 `.codebus/.claude/settings.json`。既有 vault 跑 `codebus lint` 會被 `vault-gate-integrity` 規則 flag 缺少 Glob/Grep gate；補法＝在 `hooks.PreToolUse` 手動加 `Glob`/`Grep` → `codebus hook check-read` 兩個 matcher（與既有 Read entry 同形狀），或於新位置 `codebus init` re-materialize。
 
-**其他已知 codebus-side 缺口**（細節見 [`BACKLOG.md`](BACKLOG.md)）：
+**其他已知 codebus-side 缺口**（細節見 [`BACKLOG.md`](internal/BACKLOG.md)）：
 
 - spawn agent **沒有 `env_clear`** → 父 shell 的機密 env（`GITHUB_TOKEN` / `AWS_*` / `KUBECONFIG`）+ codebus 自己注入的 provider key 都進 agent child env（PII filter 只掃檔案、不掃 env；codex workspace-write 的 shell / subagent 讀得到）。
 - child stderr 預設 drain（非 denial 行需 `CODEBUS_FORWARD_AGENT_STDERR=1` 才轉發到終端）；**自 `agent-run-integrity` 起，stderr 每行已過 `is_sandbox_denial` 分類、命中與 stdout 來源相加計入 `sandbox_denial_count`**（獨立於轉發旗標）→ Windows 上只出現在 stderr 的 sandbox denial 不再被漏計（仍 observability-only、不改變 outcome）。
