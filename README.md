@@ -1,196 +1,205 @@
 # 🚌 codebus
 
-> **來囉來囉~** 跟 AI 上車探索陌生 codebase，每站發明信片，集結成你自己的程式碼旅遊書。
+**English** | [繁體中文](README.zh-TW.md)
+
+> Hop on. Explore an unfamiliar codebase with an AI, leave a postcard at every stop, and end up with your own travel guide to the code.
 >
 > *Build an LLM-maintained, Obsidian-compatible wiki for any codebase.*
 
-**白話講**：codebus 驅動你已裝好的 AI coding agent（[Claude Code](https://claude.ai/code) 或 [OpenAI Codex](https://github.com/openai/codex)）邊讀你的 repo、邊把理解寫成一份結構化、可用 [Obsidian](https://obsidian.md)（免費的 markdown 筆記軟體）開啟的 wiki，存在 repo 裡的 `.codebus/` 資料夾（稱為 vault）。codebus 本身不含 LLM，是「驅動 agent CLI」的工具。
+In plain terms: codebus drives the AI coding agent you already have ([Claude Code](https://claude.ai/code) or [OpenAI Codex](https://github.com/openai/codex)) to read your repo and write down its understanding as a structured wiki you can open in [Obsidian](https://obsidian.md) (a free markdown note app), stored inside the repo under `.codebus/` (the *vault*). codebus ships no LLM of its own — it is a tool that drives an agent CLI.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Rust](https://img.shields.io/badge/rust-1.85+-blue)
 
 ---
 
-## 為什麼有這台車
+## Why codebus
 
-身為 RD，這幾個情境是不是很熟：
+If you write software for a living, these probably sound familiar:
 
-- 接手陌生 repo，從零讀到有 mental model 要花一兩天
-- 讀完一輪沒寫筆記，下次回來又得重讀
-- 同事問「這 repo 的 X 怎麼運作」，又得 re-discover 一次
-- 想開新 feature 前要先弄懂相關模組，但 grep 跟 IDE 跳定義有極限
+- You inherit an unfamiliar repo, and going from zero to a working mental model takes a day or two
+- You read through it once, take no notes, and have to re-read everything next time
+- A colleague asks "how does X work in this repo?" and you re-discover it from scratch
+- You need to understand a module before starting a feature, but grep and IDE go-to-definition only take you so far
 
-codebus 把「**讀懂的中間態**」強制持久化成有結構的 wiki — 下次（或下個同事）來，看 wiki 就好。
+codebus forces that **intermediate state of understanding** to persist as a structured wiki — next time (or the next person), just read the wiki.
 
-不是自動 doc 產生器，是 **「跟 AI 共寫的程式碼旅遊書」**。
+It is not an automatic doc generator. It is a **travel guide to the code, co-written with an AI**.
 
 ---
 
-## 30 秒體驗
+## Requirements
 
-> **前置需求**：codebus 不含 LLM — 先裝好一個 agent CLI 並登入。預設是 [Claude Code](https://claude.ai/code)（OAuth）；也可改用 [OpenAI Codex](https://github.com/openai/codex)（見下方 [Provider 選擇](#provider-選擇)）。
+codebus ships no LLM — install and log in to an agent CLI first:
+
+- [Claude Code](https://claude.ai/code) (default, OAuth login), or
+- [OpenAI Codex](https://github.com/openai/codex) (incl. Azure OpenAI deployments — see [Providers](#providers))
+
+Building the CLI from source also needs Rust 1.85+ (edition 2024).
+
+> **💸 Cost warning — a subscription does not make this free.** codebus drives claude in headless mode (`claude -p`). Starting June 15, 2026, on Claude subscription plans (Pro / Max / Team / Enterprise) this usage draws from a separate monthly **Agent SDK credit** (e.g. US$20/month on Pro), not your interactive usage limits — once the credit runs out, Agent SDK requests stop until it refreshes (or spill over to pay-as-you-go usage credits if you've enabled them). API-key / Azure setups bill per token as usual, and the codex provider likewise consumes your OpenAI / Azure quota. Details: [Use the Claude Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan).
+
+---
+
+## Install
 
 ```bash
-# 先確保 Claude Code CLI 已安裝且 OAuth（預設 provider）：https://claude.ai/code
+# from a checkout of this repo
 cargo install --path codebus-cli
+```
 
+`cargo install` drops `codebus` into `~/.cargo/bin/`. **Strongly recommended for `fix`** — while fixing, the driver calls `codebus lint` to check its own work; off PATH, it fixes blind.
+
+Just want to try `init` / `goal` / `query` / `lint`? Running the `cargo build --release` binary by absolute path works too.
+
+On Windows there is also a prebuilt installer (desktop app + bundled CLI) on [GitHub Releases](https://github.com/harry18456/codebus/releases) — see [Desktop app](#desktop-app).
+
+---
+
+## 30-second tour
+
+```bash
 cd ~/some/unfamiliar/repo
 
-codebus init                                # 🚏 上車：建 vault
-codebus goal "搞懂 auth 模組怎麼運作"        # 🚌 第一站，AI 開寫
-codebus query "token 在哪驗證？"             # 💬 問一句、看現有 wiki（不改檔）
-codebus chat                                # 💬 跟司機多輪聊天
-codebus quiz "auth flow"                    # 🎓 抽考你看懂沒
-codebus lint                                # 🔍 車況檢查
-codebus fix                                 # 🛠️ 司機自己修
+codebus init                                  # 🚏 Hop on: create the vault
+codebus goal "understand the auth module"     # 🚌 First stop — the AI starts writing
+codebus query "where are tokens validated?"   # 💬 One question, answered from the wiki (read-only)
+codebus chat                                  # 💬 Multi-turn chat with the driver
+codebus quiz "auth flow"                      # 🎓 Quiz yourself on what you read
+codebus lint                                  # 🔍 Vehicle inspection
+codebus fix                                   # 🛠️ The driver fixes it himself
 
-# 開 Obsidian 看 .codebus/wiki/，明信片都在裡面
+# Open .codebus/wiki/ in Obsidian — the postcards are all there
 ```
 
-到站。
+You've arrived.
 
 ---
 
-## 安裝
+## Commands
 
-```bash
-cargo install --path codebus-cli
+| Command | What it does |
+|---|---|
+| `codebus init` | 🚏 **Board** — create `.codebus/` in the repo, register it with Obsidian |
+| `codebus goal "..."` | 🚌 **Ride to a stop** — the AI explores, writes pages, auto-commits |
+| `codebus query "..."` | 💬 **Quick question** — answered from the existing wiki (no writes) |
+| `codebus chat` | 💬 **Chat with the driver** — multi-turn REPL; a good thread can be promoted into a goal |
+| `codebus quiz "..."` | 🎓 **Pop quiz** — give a topic, get multiple-choice questions to check yourself |
+| `codebus lint` | 🔍 **Vehicle inspection** — pure rules, no LLM call |
+| `codebus fix` | 🛠️ **Repairs** — run lint → edit → re-lint until green |
+| `codebus config` | 🔑 **Fuel card** — set / show / delete Azure endpoint API keys (OS keyring) |
+
+Each wiki page is a markdown file in one of five buckets (a nod to Karpathy's 5-bucket scheme):
+
+```
+.codebus/wiki/
+├─ concepts/      abstract ideas, design principles, mental models
+├─ entities/      data structures, schemas, records
+├─ modules/       code organization units, libraries, services
+├─ processes/     workflows, state machines, ordered algorithms
+├─ synthesis/     cross-page summaries
+├─ index.md       the route map (table of contents for all postcards)
+└─ log.md         the travel log (timeline of every ride)
 ```
 
-`cargo install` 會把 `codebus` 丟到 `~/.cargo/bin/`。**`fix` 強烈建議走這條** — 司機修車時要呼叫 `codebus lint` 看看自己修得怎樣，沒在 PATH 上他會盲修。
-
-只想試 `init` / `goal` / `query` / `lint`？`cargo build --release` 用絕對路徑跑也行。
+The design follows [Karpathy's "LLM Wiki" pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — typed folders + wikilinks, grown goal by goal, not one-shot RAG.
 
 ---
 
-## Provider 選擇
+## Desktop app
 
-codebus 預設用 **Claude Code CLI** 開司機（30 秒體驗的設定就是這條）。也支援 **OpenAI Codex CLI**（含 Azure OpenAI 部署）當第二 provider：
+Alongside the CLI there is a Tauri desktop app — a GUI for goal / chat / quiz / wiki preview, and the place to configure the codex / Azure provider.
 
-- **Claude**（預設）：裝 [`claude` CLI](https://claude.ai/code) 並 OAuth。若用 Azure 部署的 claude，用 `codebus config set-key azure` 把 API key 收進 OS keyring。
-- **Codex**：裝 [`codex` CLI](https://github.com/openai/codex)。Azure OpenAI 部署的 provider 切換、model / effort、base_url / api_version 都在[桌面 app](#桌面-app) 的 Settings → Endpoint 設定（CLI 目前不提供 provider 切換指令）。Azure API key 放進 OS keyring，或設環境變數 `CODEBUS_AZURE_KEY=<your-key>`（keyring 取不到時的通用 fallback，claude / codex 皆適用）。
-
-provider 切換、model / effort、Azure base_url / api_version 全在 app 的 Settings 介面設；CLI 共用同份 `~/.codebus/config.yaml`。
-
----
-
-## 桌面 app
-
-CLI 之外有一個 Tauri 桌面 app — goal / chat / quiz / wiki 預覽的圖形介面，也是設定 codex / Azure provider 的地方。
-
-從原始碼跑：
+Run from source:
 
 ```bash
 cd codebus-app
 npm install
-npm run tauri dev          # 開發模式（需 Node 20+、Rust 1.85+）
+npm run tauri dev          # dev mode (needs Node 20+, Rust 1.85+)
 ```
 
-桌面 app 還需要 [Tauri 的系統相依](https://tauri.app/start/prerequisites/)。Windows 想出安裝檔：在 repo 根目錄跑 `./build-installer.ps1` 產 NSIS `-setup.exe`（含 GUI + 內嵌 CLI）；標記版本（`v*` tag）也會由 CI 自動建置並發到 [GitHub Releases](https://github.com/harry18456/codebus/releases)（**未簽章**，Windows SmartScreen 會警告 → 仍要執行）。
+The desktop app additionally needs [Tauri's system prerequisites](https://tauri.app/start/prerequisites/). To produce a Windows installer, run `./build-installer.ps1` at the repo root for an NSIS `-setup.exe` (GUI + bundled CLI); tagged versions (`v*` tags) are also built by CI and published to [GitHub Releases](https://github.com/harry18456/codebus/releases) (**unsigned** — Windows SmartScreen will warn → choose to run anyway).
 
 ---
 
-## 平台支援
+## Providers
 
-- **Windows** — 主要開發 / 測試平台，也是唯一有自動建置安裝檔的平台；codex provider 的沙箱隔離只在 Windows 實測過（細節見 [`docs/security.md`](docs/security.md) §5）。
-- **macOS / Linux** — 能 build 與執行，但 codex 沙箱隔離尚未實測；涉及敏感家目錄讀取的任務建議走 claude provider。
+codebus drives the **Claude Code CLI** by default (the 30-second tour assumes it). The **OpenAI Codex CLI** (incl. Azure OpenAI deployments) is supported as a second provider:
 
----
+- **Claude** (default): install the [`claude` CLI](https://claude.ai/code) and log in via OAuth. For an Azure-deployed claude, store the API key in the OS keyring with `codebus config set-key azure`.
+- **Codex**: install the [`codex` CLI](https://github.com/openai/codex). Provider switching, model / effort, and Azure base_url / api_version are configured in the [desktop app](#desktop-app) under Settings → Endpoint (the CLI has no provider-switch command yet). Put the Azure API key in the OS keyring, or set `CODEBUS_AZURE_KEY=<your-key>` (a generic fallback when the keyring is unavailable; applies to both claude and codex).
 
-## 公車怎麼開
-
-| 指令 | 在做什麼 |
-|---|---|
-| `codebus init` | 🚏 **進站** — 在 repo 建 `.codebus/`、註冊到 Obsidian |
-| `codebus goal "..."` | 🚌 **載你去某站** — AI 探索、寫明信片、auto-commit |
-| `codebus query "..."` | 💬 **問司機一句** — 看現有 wiki 回答（不改檔） |
-| `codebus chat` | 💬 **跟司機聊** — 多輪 REPL，聊到滿意可以直接升級成 goal |
-| `codebus quiz "..."` | 🎓 **司機抽考** — 給個主題，出選擇題自我驗證 |
-| `codebus lint` | 🔍 **車況檢查** — 純規則，不叫 LLM |
-| `codebus fix` | 🛠️ **司機修車** — 跑 lint → 改 → re-lint 直到綠燈 |
-| `codebus config` | 🔑 **油卡管理** — 設 / 查 / 刪 Azure 端點 API key（keyring） |
-
-每站的明信片是一個 markdown，分成 5 種類型（致敬 Karpathy 5-bucket）：
-
-```
-.codebus/wiki/
-├─ concepts/      抽象概念、設計原則、mental models
-├─ entities/      data structures、schemas、records
-├─ modules/       code organization units、libraries、services
-├─ processes/     workflows、state machines、有順序的演算法
-├─ synthesis/     跨頁面整合的綜述
-├─ index.md       路線圖（所有明信片的目錄）
-└─ log.md         旅行日誌（每次上車的時間軸）
-```
-
-設計遵循 [Karpathy 的 "LLM Wiki" pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — typed folders + wikilinks + goal-driven 慢慢長大，不是一次性 RAG。
+All provider settings live in the app's Settings UI; the CLI shares the same `~/.codebus/config.yaml`.
 
 ---
 
-## 為什麼 markdown + Obsidian
+## Platform support
 
-- **工具死了 wiki 還活著** — 純 markdown，沒鎖在誰家
-- **Obsidian 開即用** — backlinks / graph view / Dataview 全部免費送
-- **手動編輯也行** — AI 寫錯直接改，下次 lint 不會抗議
-- **Git 友善** — 每次 goal / fix 收尾 auto-commit，演化歷史全留
+- **Windows** — primary dev / test platform and the only one with automated installer builds; codex sandbox isolation has only been measured on Windows (details in [`docs/security.md`](docs/security.md) §5).
+- **macOS / Linux** — builds and runs, but codex sandbox isolation is untested there; for tasks involving sensitive home-directory reads, prefer the claude provider.
 
 ---
 
-## ⚠️ 安全提醒：你輸入的字會餵給 LLM
+## ⚠️ Security note: your words are fed to an LLM
 
-`goal` / `query` / `chat` / `quiz` 裡你打的字會變成 system prompt 的一部份送進 Claude。
+Whatever you type into `goal` / `query` / `chat` / `quiz` becomes part of the system prompt sent to the agent.
 
-**別把不可信的內容（隨機 GitHub issue、外部網頁、Slack 訊息）整段貼進來** — 這是 prompt injection vector，會讓司機被乘客帶歪路。
+**Don't paste untrusted content (random GitHub issues, external web pages, Slack messages) wholesale** — that is a prompt-injection vector; passengers can steer the driver off route.
 
-codebus 已內建幾層防護（cwd 隔離、PII filter、nested git 可隨時還原，加上 provider-specific 命令/工具限制），但這些不是萬靈丹——而且**各 provider 隔離強度不同**：
+codebus ships several layers of protection (cwd isolation, a PII filter, nested git for easy rollback, plus provider-specific command/tool restrictions), but they are not a silver bullet — and **isolation strength differs by provider**:
 
-- **claude** 走 `--tools` 白名單 + PreToolUse hook，讀寫都有 deterministic gate：**寫**鎖在 vault cwd；**讀**自 `check-read-vault-containment` 起為 **vault-root containment**——Read/Glob/Grep 的 path canonicalize 後不在 vault 內一律 block（母 repo 原始碼、`~/.ssh`/`~/.kube`/`~/.env` 等皆擋），`hooks.read_path_containment` 預設 on
-- **codex** 走 `-s sandbox`（`read-only`／`workspace-write`）+ OS restricted token，但 Windows unelevated 實測（codex-cli 0.135.0）只是**部分**隔離：**寫**對正常 ACL 路徑有擋（workspace 外／家目錄回 `Access is denied`），但 Everyone-writable 目錄（如 `C:\Windows\Temp`）仍漏；**讀**照樣讀得到 workspace 外的檔與 `%USERPROFILE%` 內容（`~/.ssh`、`~/.aws` 等家目錄機密屬此類）；**網路**只擋外部 HTTPS/443，loopback 與外部 HTTP/80 仍外洩。→ codex 是**讀／網路 soft-partial、寫較硬**，敏感家目錄「讀」相關任務請用 claude 或自行承擔風險（細節見 [`docs/security.md`](docs/security.md) §5）
+- **claude** uses a `--tools` allowlist + PreToolUse hooks, with deterministic gates on both reads and writes: **writes** are locked to the vault cwd; **reads**, since `check-read-vault-containment`, enforce **vault-root containment** — any Read/Glob/Grep path that does not canonicalize into the vault is blocked (parent-repo source, `~/.ssh` / `~/.kube` / `~/.env`, all of it), with `hooks.read_path_containment` on by default
+- **codex** uses the `-s` sandbox (`read-only` / `workspace-write`) + an OS restricted token, but as measured on Windows unelevated (codex-cli 0.135.0) the isolation is only **partial**: **writes** are blocked on normal-ACL paths (outside the workspace / home dir → `Access is denied`) but Everyone-writable dirs (e.g. `C:\Windows\Temp`) still leak; **reads** still reach files outside the workspace and inside `%USERPROFILE%` (home-dir secrets like `~/.ssh`, `~/.aws` fall in this class); **network** only blocks external HTTPS/443 — loopback and external HTTP/80 still get out. → codex is **soft-partial on reads/network, harder on writes**; for read-sensitive home-directory tasks use claude or accept the risk (details in [`docs/security.md`](docs/security.md) §5)
 
-完整 threat model 跟每層防護怎麼運作：[`docs/security.md`](docs/security.md)。
+Full threat model and how each layer works: [`docs/security.md`](docs/security.md).
 
 ---
 
-## 還想看更多？
+## Why markdown + Obsidian
 
-README 故意只放「目的 + 怎麼用」。其他往這走：
+- **The wiki outlives the tool** — plain markdown, no lock-in
+- **Obsidian works out of the box** — backlinks / graph view / Dataview, all for free
+- **Hand-edits welcome** — if the AI got something wrong, just fix it; the next lint won't complain
+- **Git friendly** — every goal / fix ends with an auto-commit, so the wiki's full evolution history is kept
 
-- 🏗️ **AI 怎麼被馴服成執行引擎（架構＋流程圖）** → [`docs/codebus-ai-architecture.md`](docs/codebus-ai-architecture.md)
-- 📐 **capability 規格 / spec 在哪** → [`openspec/specs/`](openspec/specs/)
+---
+
+## Want more?
+
+The README deliberately covers only "what it's for + how to use it". For the rest:
+
+- 🏗️ **How the AI is tamed into an execution engine (architecture + flow charts)** → [`docs/codebus-ai-architecture.md`](docs/codebus-ai-architecture.md)
+- 📐 **Capability specs** → [`openspec/specs/`](openspec/specs/)
 
 ---
 
 ## Development
 
 ```bash
-cargo check --workspace        # 快速 type-check
-cargo test --workspace         # 跑全部 test
-cargo build --release          # 出 target/release/codebus
+cargo check --workspace        # fast type-check
+cargo test --workspace         # run all tests
+cargo build --release          # produce target/release/codebus
 cargo clippy --workspace       # lint
 cargo fmt --all                # format
 ```
 
-需要：
-
-- Rust 1.85+ (edition 2024)
-- 至少裝一個 provider CLI：[Claude Code](https://claude.ai/code)（預設）或 [OpenAI Codex CLI](https://github.com/openai/codex)（含 Azure OpenAI 部署支援）
-- Windows / macOS / Linux 都能 build；主力 dev 在 Windows MSVC
+Needs Rust 1.85+ (edition 2024) and at least one provider CLI (see [Requirements](#requirements)). All three platforms build; primary dev happens on Windows MSVC.
 
 ---
 
 ## Why "codebus"?
 
-致敬 **「上車舞」** meme — 不用怕、跟著走、總會到站的 vibe。
+A tribute to the **"get on the bus" dance meme (上車舞)** — don't overthink it, follow along, you'll get there.
 
-讀陌生 codebase 不該是讓人焦慮的事。**上車就對了**。 🚌
+Reading an unfamiliar codebase shouldn't be stressful. **Just hop on.** 🚌
 
 ---
 
-## 上車吧
+## Hop on
 
-找早期乘客中 — issue / PR / 報 bug / 提建議都歡迎，駕駛座還有空位。
+Looking for early riders — issues / PRs / bug reports / suggestions all welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)); there are still seats up front.
 
-`codebus-app`（Tauri 桌面 app，把 wiki 變成可互動的「站點 + 抽考」教學介面）正在烤，目前已經能 lobby / 跑 goal / 抽 quiz / Cmd+K 聊天。
+`codebus-app` (the Tauri desktop app that turns the wiki into an interactive "stops + quizzes" learning UI) is still in the oven — the lobby, running goals, quizzes, and Cmd+K chat already work.
 
 ---
 
