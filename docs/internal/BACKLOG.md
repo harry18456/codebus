@@ -1,37 +1,138 @@
 # Backlog
 
-未來 TODO 集中表。每條指向 `docs/<date>-<slug>-backlog.md` 看完整描述、proposed fix、工程量。新發現的 design smell / UX 缺陷 / feature gap 都記在這——之後再決定要不要 `/spectra-propose` 起 change。
+> **這是 codebus 唯一的待辦權威清單 —— 要決定「接下來做什麼」只看這份。**
+
+本檔分三段：**開放項目**（真正還沒做、按主題分組，每條附「起點」可直接定位要改哪）、**已完成 / Archived**（曾是開放項目、後來做掉的，留對應 change 當脈絡）、**已決定不做**（評估後放棄、留決策理由）。詳述見各自的 `docs/internal/<date>-<slug>-backlog.md`。新發現的 design smell / UX 缺陷 / feature gap 先記成開放項目，之後再決定要不要 `/spectra-propose` 起 change。
+
+> **最後校正：2026-06-14** —— 逐條對 `openspec/changes/archive/`（99 個 change）+ 真實程式碼 grep 驗證過。本輪移除已完成卻仍掛開放的 `check-read-vault-containment` 與 Windows 打包（P1–P5 全完成、移入已完成段），並把 RunId / provider-PE / GitHub setup / Settings chat 標成「部分完成、剩 X」。
+> 嚴重度／工程量為相對估值；組內由上而下大致為建議優先序。
+
+---
 
 ## 開放項目
 
-| 加入日期 | 標題 | 嚴重度 | 工程量 | 詳細文件 |
-|---|---|---|---|---|
-| 2026-05-14 | 全域 font-scale / accessibility text size | accessibility gap | 中（2-3 個半天） | [app-font-scale](2026-05-14-app-font-scale-backlog.md) |
-| 2026-05-14 | UI 無障礙（對比度 + 鍵盤導航） | accessibility gap | 中（2-3 個半天） | [ui-accessibility](2026-05-14-ui-accessibility-backlog.md) |
-| 2026-05-14 | OpenAI Privacy Filter 整合（local 語意層 PII） | PII 保護強化 | 重（3-5 個半天） | [openai-privacy-filter](2026-05-14-openai-privacy-filter-backlog.md) |
-| 2026-05-14 | RAG index + search（LanceDB，after F） | 知識檢索品質 | 重（1 週以上） | [rag-index-search](2026-05-14-rag-index-search-backlog.md) |
-| 2026-05-14 | codebus 作為 MCP Server（query-only，after F） | 擴充性 / 生態整合 | 中-重（3-5 個半天） | [mcp-server](2026-05-14-mcp-server-backlog.md) |
-| 2026-05-14 | MyCoder CLI 整合 | pending（等對方 CLI 長出 contract，見 2026-05-20 spike 結論） | 中（spike 後定） | [mycoder-cli](2026-05-14-mycoder-cli-backlog.md) |
-| 2026-05-14 | GitHub 倉庫設定（Actions CI + Release + Issue templates） | release readiness | 輕-中（1-2 個半天） | [github-repo-setup](2026-05-14-github-repo-setup-backlog.md) |
-| 2026-05-14 | Settings 缺少 chat verb 的 model / effort 設定（**2026-06-01 review：方案 A read-only hint 已 ship**，`EndpointSection.tsx:242-255` `endpoint-chat-row` 顯示「Chat: 沿用 query（model/effort）」、解掉透明度問題；**剩方案 B** 可編輯 chat config，刻意延後至 v2 multi-provider 或 user 反映 chat 需獨立 model 時再做） | UX gap（透明度已解、剩可編輯設定） | 剩方案 B 1-2 半天 | [settings-chat-model](2026-05-14-settings-chat-model-backlog.md) |
-| 2026-05-21 | App Activity Stream 顯示完整 AI 回覆細節（CLI 詳細模式的前端對齊） | UX 補強 | 輕-中（觸發 UX 定案後約 1 個半天） | [app-stream-verbose-detail](2026-05-21-app-stream-verbose-detail-backlog.md) |
-| 2026-05-21 | 在 goal 引入動態 subagent 委派（Task 工具，AI 自主探索） | capability enhancement | 中（先 ground-truth 測 + 最小實驗版） | [goal-subagent-delegation](2026-05-21-goal-subagent-delegation-backlog.md) |
-| 2026-05-21 | CLI `[[slug]]` 可點連結 + 可設定連結目標（app / obsidian，預設 app）+ CLI chat markdown polish（GFM 表格 + 視覺樣式，2026-05-23 自 chat-display-polish 併入） | regression 補回 + capability + UX 補強 | 重（codebus:// 協定吃掉大半 + markdown styling 約 1 個半天） | [cli-wikilink-link-target](2026-05-21-cli-wikilink-link-target-backlog.md) |
-| 2026-05-22 | provider-specific prompt engineering（Codex 整合後輸出品質） | 輸出品質 / multi-provider 完成度 | 待研究（loop PE1 診斷 → PE2 設計後定） | [provider-prompt-engineering](2026-05-22-provider-prompt-engineering-backlog.md) |
-| 2026-05-23 | Codex 端 hard read + command/tool 隔離（`workspace-write` 設計上允許讀 workspace 外任意檔含 `~/.ssh` `~/.aws`；**2026-05-28 Windows PoC 確認 threat C OPEN** — `workspace-write` 跟 `read-only` 都讀得到家目錄機密、isolation flags 擋不了 filesystem read；agent-hook-hardening 只給 AGENTS.md soft constraint；**2026-05-30 增補**：PII raw_sync mirror 框住讀漏的實際嚴重度（agent 讀 redacted 鏡像非 live repo）、`CODEX_AGENTS_SOFT_CONSTRAINT` efficacy 2026-05-30 對抗式 workflow 測過＝**conditional**（real codex gpt-5.4、with-constraint leak 0/8、唯一乾淨良性檔名 A/B 由 leak 翻 refuse 但 n=1；另發現 codex 對 `id_rsa` 類檔名有內建 credential guard 第二層、但良性檔名 home secret 只剩 soft constraint 獨守）→ solo-dev 接受殘餘風險+誠實記、AppContainer 留升級路徑；codex subagent 隔離未驗=cli-applicability T2-2） | 安全（codex path 缺 read enforcement，僅靠 model 自律；**Windows confirmed**、macOS/Linux 未測） | 重（待研究：separate-user / ACL deny / AppContainer / container；+ macOS/Linux 等價 PoC） | [Windows PoC](2026-05-28-codex-windows-sandbox-read-poc.md) + [§10 discussion](2026-05-23-bash-hook-and-codex-sandbox-discussion.md) + [hard-gate spike](2026-05-28-codex-hook-hard-gate-spike.md) + [cli-applicability 增補](2026-05-30-cli-capability-applicability-backlog.md) |
-| 2026-05-28 | Claude-trace 分析 long propose prompt 的 token / cache / context 用量（每 change 200+ 行 prompt × 多 session 累積成本未量化） | workflow efficiency / 複利成本 | 半天 | [claude-trace-prompt-analysis](2026-05-28-claude-trace-prompt-analysis-todo.md) |
-| 2026-05-28 | RunId source-of-truth 統一（IPC 跟 verb 兩處獨立 `Utc::now()` 派生 RunId 跟 RunLog started_at、極端時鐘抖動下仍可能差 1ms、list_runs orphan-detection 偶誤標 interrupted；長期解需 plumb RunId 進 verb signature） | 邊緣正確性 / latent invariant | 中（5 verb signature + 5 CLI entrypoint） | [runid-source-of-truth](2026-05-28-runid-source-of-truth-todo.md) |
-| 2026-05-28 | Windows 打包 / 安裝流程（app + CLI）— **P1+P2 done**（`windows-installer-foundation`：impl `520c5bf` + archive `120e2d7`、spec=windows-distribution；NSIS `-setup.exe`、bundle GUI `codebus-app.exe` + CLI `bin\codebus.exe`、per-user HKCU PATH installerHooks；改用 NSIS 非 MSI 因 PATH 自動加需 installerHooks、WiX 剛性；build+payload 已驗；**opt-in purge 也 done**（`windows-uninstaller-opt-in-purge`：`fdcb0c9`+`9f2389e`、卸載 MB_YESNO 預設 No、Yes 才 best-effort 清 keyring 兩 entry+app data+~/.codebus、`/SD IDNO` silent-safe、vault 永不碰、新增 `codebus config purge-keys` CLI））；**剩 P3 真機驗**（裝免 admin / `bin\` 進 PATH / 卸載 reverse 乾淨 / user data 保留 / **purge：MB_YESNO 預設 No、選 Yes 兩 entry+兩目錄真清、選 No 全留**，需乾淨 Windows + 重 build 含 purge 的 installer）+ **P4 GitHub Releases CI** + **P5 install docs**；signing / auto-update / macOS / Linux 仍 out of scope | release readiness / distribution | 剩 P3 半天（user 手動）+ P4/P5 各半天 | [windows-packaging-installation](2026-05-28-windows-packaging-installation-backlog.md) |
-| 2026-05-28 | Claude Code 4.8 + ultracode 對 codebus 開發流程影響評估（長 prompt / spectra apply / grep 校準 / memory pattern 是否該調整；跟 claude-trace 分析同 batch） | workflow / tooling observability | 半天（跟 claude-trace 合做）| [claude-code-4.8-ultracode-impact](2026-05-28-claude-code-4.8-ultracode-impact-todo.md) |
-| 2026-05-30 | 新能力候選（structured output `--json-schema`/`--output-schema` 跨 provider 對等、codex `--oss` 本地模型 profile、泛化既有 `content_verify` 多 spawn orchestrator）— 有具體需求再接、不投機抽象 | new-capability（deferred） | 中-重（各別 spike 後定） | [cli-applicability T3](2026-05-30-cli-capability-applicability-backlog.md) |
-| 2026-06-01 | claude-code-config spec 殘留 stale `codebus-azure`：CLI resolver 實際 default = `codebus-claude-azure`（config.rs:24 `DEFAULT_AZURE_KEYRING_SERVICE`），但 spec 的 Endpoint Profile Schema（schema 預設）+ OS Keyring Integration（keyring 儲存）兩 req 仍寫 `codebus-azure`，跟已修的 Config Subcommand req（`windows-uninstaller-opt-in-purge` 落地、set-key/purge-keys=`codebus-claude-azure`）跨 req 不一致；**先 ground core config loader vs CLI resolver 雙層 default**（可能各有預設＝本身是 bug）再 align spec（+ starter `codex.rs:264` 範例、`endpoint.rs` test yaml 視情況） | 邊緣正確性 / spec-vs-code drift | 輕（grep+對齊半天、先 ground 雙層 default） | （無 detail doc；源自 `windows-uninstaller-opt-in-purge` review `fdcb0c9`/`9f2389e`） |
-| 2026-06-02 | **✅ DONE（`check-read-vault-containment`）** Claude path Windows 讀取邊界硬化：`check-read` 改為 vault-root containment allowlist（canonicalize-then-contain、vault root 取自 PreToolUse stdin `cwd`、備援子程序 cwd）+ Glob/Grep PreToolUse matcher（`REQUIRED_HOOKS` 四條、`vault-gate-integrity` 連動偵測既有 vault）+ `tool_input.path` 解析；新增 `hooks.read_path_containment` 開關（預設 on、與 `read_image_block` 獨立）。F1（絕對路徑讀母 repo + denylist 外憑證）+ F2-escape（Glob/Grep 繞過讀 vault **外**）closed、實機 live smoke 驗；vault **內**敏感檔的 Read↔Grep 不對稱屬獨立後續（見 2026-06-04「in-vault 機密讀取邊界」條）。原洞：denylist 非 allowlist、Glob/Grep 未 gate、`check_read` 只解析 `file_path` | 安全（claude read boundary、Windows） | **done** | [security.md §6](security.md) |
-| 2026-06-02 | Agent spawn env scrub：`claude_cli.rs:511` / `codex_backend.rs:247` 只 `envs`/`env` 加 key、無 `env_clear` → 父 shell 機密（`GITHUB_TOKEN`/`AWS_*`/`KUBECONFIG`）+ codebus 自注入的 provider key 全繼承進 agent child env（PII filter 不掃 env；codex workspace-write shell/subagent 讀得到）。修法＝env allowlist（清空後只注入 PATH/HOME/locale/provider key）或 provider key broker | 安全（secret 洩漏面） | 中 | （無 detail doc；源自 2026-06-02 agent-study review、security.md §6） |
-| 2026-06-02 | PII mirror 完整性：scanner 只 4 pattern（AWS/Anthropic Critical + email/ipv4 Warn）→ GitHub PAT/GCP/Slack/JWT/PEM body/DB URL pw 不遮；非 UTF-8（UTF-16）檔 `raw_sync.rs:305` `read_to_string().ok()` 失敗→byte-identical copy 不掃（連 Critical floor 不 fire）；gitignored/oversized 不進 mirror 也不掃（codex live-read / claude 絕對路徑仍可達）。修法＝擴充 pattern + 非 UTF-8 fail-closed/decode-scan + gitignored/oversized 企業可見 manifest | 安全（PII mirror false-negative） | 中 | （無 detail doc；源自 2026-06-02 agent-study review、security.md §4/§6） |
-| 2026-06-04 | in-vault 機密讀取邊界（check-read 是 vault **位置**邊界、非內容邊界）：containment 已封「讀逃出 vault」（`check-read-vault-containment`），但 vault **內**敏感檔仍有 Read↔Grep 不對稱——check-read 的 `*.pem`/`*.key`/`id_rsa` basename backstop 只擋 Read、Glob/Grep 跳過（`hook.rs` `if !is_search_tool`），且嵌在非 pattern 檔（`.yaml`/`.env`）的 secret 連 Read 不擋。修法（同儕 security review 2026-06-04 收斂、與上方「PII mirror 完整性」條互補不重疊）：**(a)** materialized `settings.json` 加 `permissions.deny`（sensitive basename `**/*.pem`/`**/*.key`/`**/*id_rsa*`、forward-slash glob）收 file-class + already-in-vault + runtime-write——**實測**（codebus 真實 argv）project settings 即生效、`--allowedTools` 不蓋 deny、對 dir-root Grep 做 result-level 逐檔 scrub、native Windows OK（**P2：相對反斜線 deny 會 silent fail-open 須避**）；**(d)＝上方「PII mirror 完整性」條**（scanner 補 PEM/PAT body + UTF-16 decode-scan）收 ingest/embedded。單源：一份 sensitive basename 清單餵 (a) deny + check-read basename（(a) 上線後 Read 端冗餘 DiD），且 **`vault-gate-integrity` lint 須擴及驗 `permissions.deny`**（非只 hooks matcher）防 deny 側 drift→silent fail-open。home-prefix（`~/.ssh` 等）不進 (a)：containment 已擋、留 check-read 當 containment-off fallback。**殘留**＝跨 session 持久化（secret 在非 pattern 檔、後續無持有它的 session Grep 回）；accept+document、未來槓桿是 vault write-policy（限制 agent 寫什麼）非再加掃描層 | 安全（claude in-vault 內容邊界） | 中（(a) 數行 deny + lint 擴；(d) 見上條） | （無 detail doc；源自 2026-06-04 同儕 security review、security.md §6） |
-| 2026-06-03 | codex token usage parser 欄位脆弱：`codex_parser.rs:69-82` 解析 `turn.completed.usage` 欄位名寫死 + `.unwrap_or(0)`，只要外層 `usage` 物件在就必 emit `StreamEvent::Usage`（即使內層欄位全缺）；配 `sink.rs:296` Cumulative 分支無條件 last-wins（`*acc = addend.clone()`、無 keep-last-nonzero / max 守衛）→ 未來 codex 改 usage 欄位名（如 `input_tokens`→`prompt_tokens`）會**靜默產 0**、multi-turn 下後來的 0 覆蓋掉前面正確累計總量。純 telemetry（只進 `RunLog.tokens` 成本統計、無 control-flow 讀它）、0.136 上正常（`turn_completed_maps_usage` 釘住現欄位、2026-06-03 grounding 確認）、`extras: usage.clone()` 留原始 wire 可救。修法＝last-wins 加「addend 非零才覆蓋」守衛 + 欄位缺失時 warn | 邊緣正確性 / telemetry（LOW） | 輕（一行守衛 + warn） | （無 detail doc；源自 2026-06-03 codex 0.136 grounding） |
+### 🔒 安全
 
-## 已 archived 項目
+- **SEC-1 · Agent spawn env scrub** — 嚴重度：高 · 工程量：中
+  - **問題**：spawn agent child 時只 `.envs()/.env()` 疊加 provider key，**無 `env_clear()`** → child 完整繼承父 shell 機密（`GITHUB_TOKEN`/`AWS_*`/`KUBECONFIG`）+ codebus 自注入的 provider key（PII filter 不掃 env；codex `workspace-write` 的 shell/subagent 讀得到）。
+  - **起點**：`agent/claude_cli.rs:527-530`、`agent/codex_backend.rs:246-248`（全 repo grep `env_clear` 程式碼 0 命中）。
+  - **方案**：env allowlist（清空後只注入 PATH/HOME/locale/provider key）或 provider key broker。
+  - 源自 2026-06-02 agent-study review、security.md §6（無 detail doc）。
+
+- **SEC-2 · Codex 端 hard read + 命令/工具隔離** — 嚴重度：高（Windows confirmed）· 工程量：重（待研究）
+  - **問題**：codex `workspace-write` 設計上可讀 workspace 外任意檔（含 `~/.ssh`/`~/.aws`），只靠 `-s` OS sandbox + AGENTS.md soft constraint，**無硬性 read enforcement**。2026-05-28 Windows PoC 確認 threat C OPEN；macOS/Linux 未測。PII raw_sync mirror 框住實際嚴重度（agent 讀 redacted 鏡像、非 live repo）。
+  - **起點**：`agent/codex_backend.rs:146-169`（isolation flags）、`:187-192`（sandbox flag `-s` / `-c sandbox_mode`）；全 `src` grep `AppContainer|icacls|LowBox|separate-user` 0 命中。
+  - **方案**（待研究）：separate-user / ACL deny / AppContainer / container；+ macOS/Linux 等價 PoC。AppContainer 留升級路徑。
+  - 詳細：[Windows PoC](2026-05-28-codex-windows-sandbox-read-poc.md) + [§10 discussion](2026-05-23-bash-hook-and-codex-sandbox-discussion.md) + [hard-gate spike](2026-05-28-codex-hook-hard-gate-spike.md) + [cli-applicability](2026-05-30-cli-capability-applicability-backlog.md)
+
+- **SEC-3 · in-vault 機密讀取邊界（內容邊界，非位置邊界）** — 嚴重度：中 · 工程量：中
+  - **問題**：containment 已封「讀逃出 vault 外」（`check-read-vault-containment`，已完成），但 vault **內**敏感檔仍有 Read↔Grep 不對稱——`*.pem`/`*.key`/`id_rsa` basename backstop 只擋 Read，Glob/Grep 因 `if !is_search_tool` 跳過；且嵌在 `.yaml`/`.env` 的 secret 連 Read 不擋。
+  - **起點**：`codebus-cli/src/commands/hook.rs:548-563`（Stage 2 被 `if !is_search_tool` 包住）、`vault/settings.rs:74-116`（`DEFAULT_SETTINGS_JSON` 無 `permissions.deny`）。
+  - **方案**：(a) materialized `settings.json` 加 `permissions.deny`（sensitive basename `**/*.pem` 等、forward-slash glob），且 `vault-gate-integrity` lint 擴及驗 `permissions.deny`（防 silent fail-open）；(d) 同 SEC-4 擴 PII pattern + UTF-16 decode-scan。殘留（跨 session 持久化）accept+document，未來槓桿是 vault write-policy。
+  - 源自 2026-06-04 同儕 security review、security.md §6（無 detail doc）。
+
+- **SEC-4 · PII mirror 完整性** — 嚴重度：中 · 工程量：中
+  - **問題**：scanner 只 **4 pattern**（AWS/Anthropic Critical + email/ipv4 Warn）→ GitHub PAT/GCP/Slack/JWT/PEM body/DB URL pw 不遮；非 UTF-8（UTF-16）檔讀失敗→byte-identical copy 不掃（連 Critical floor 不 fire）；gitignored/oversized 不進 mirror 也不掃。
+  - **起點**：`pii/scanners/regex_basic.rs:22-55`（`BUILTIN_PATTERNS` 恰 4 條）、`vault/raw_sync.rs:331-338`（非 UTF-8 `read_to_string().ok()`→不掃）、`:301-325`（oversized 跳過）。
+  - **方案**：擴充 pattern + 非 UTF-8 fail-closed/decode-scan + gitignored/oversized 企業可見 manifest。
+  - 源自 2026-06-02 agent-study review、security.md §4/§6（無 detail doc）。
+
+### 🎯 正確性 / telemetry
+
+- **COR-1 · RunId source-of-truth 統一（剩 quiz/chat）** — 邊緣正確性 · 工程量：輕-中
+  - **已完成**：goal 路徑（最嚴重的「完成後卡載入」regression）已根治——IPC 取樣一次、以 slug 回傳前端、colon 形式下傳 `run_goal`。change `goal-run-id-unify-stuck-rundetail`（2026-06-07 archived）；`verb/goal.rs:139-159` 已接 caller-provided started-at。
+  - **剩**：quiz（`verb/quiz.rs:583` + `ipc/quiz.rs:115`）、chat（`verb/chat.rs:128` + `ipc/chats.rs:262`）仍「IPC 一次 + verb 一次」各自 `Utc::now()`、未下傳；影響上限是 orphan/interrupted 標籤（無 goal 那種卡載入症狀、嚴重度較低）。
+  - 詳細：[runid-source-of-truth](2026-05-28-runid-source-of-truth-todo.md)
+
+- **COR-2 · claude-code-config spec 殘留 stale `codebus-azure`** — spec↔code drift · 工程量：輕（先 ground 雙層 default）
+  - **問題**：spec 兩個 requirement（Endpoint Profile Schema + OS Keyring Integration）仍寫 `codebus-azure`，CLI resolver 實際 default = `codebus-claude-azure`。額外發現：core loader 對 claude azure `keyring_service` 是**必填、無 default**，codex loader 卻有 `codebus-codex-azure` default → 兩層 default 不一致，可能本身是 bug。
+  - **起點**：spec `claude-code-config/spec.md:11,246`（寫 `codebus-azure`）；CLI `codebus-cli/src/commands/config.rs:24`（`codebus-claude-azure`）；core `config/endpoint.rs:400`（claude 必填無 default）vs `config/codex.rs:157`（codex 有 default）。
+  - **方案**：先 ground core loader vs CLI resolver 雙層 default（決定是否本身是 bug）再對齊 spec（+ starter 範例、test yaml）。
+  - 源自 `windows-uninstaller-opt-in-purge` review（無 detail doc）。
+
+- **COR-3 · codex token usage parser 欄位脆弱** — telemetry（LOW）· 工程量：輕
+  - **問題**：解析 `turn.completed.usage` 欄位名寫死 + `.unwrap_or(0)`，只要外層 `usage` 物件在就必 emit `Usage`（即使內層全缺）；配 sink Cumulative 分支無條件 last-wins（無「非零才覆蓋」守衛）→ 未來 codex 改欄位名會靜默產 0、覆蓋掉前面正確累計。純 telemetry（無 control-flow 讀它）、0.136 上正常。
+  - **起點**：`stream/codex_parser.rs:69-82`（欄位寫死 + `unwrap_or(0)`）、`log/sink.rs:289-298`（`Cumulative => *acc = addend.clone()`）。
+  - **方案**：last-wins 加「addend 非零才覆蓋」守衛 + 欄位缺失時 warn。
+  - 源自 2026-06-03 codex 0.136 grounding（無 detail doc）。
+
+### 🚀 能力 / capability
+
+- **CAP-1 · goal 引入動態 subagent 委派（Task 工具）** — capability enhancement · 工程量：中
+  - **現況**：`verb/goal.rs:58` `GOAL_TOOLSET = [Read, Glob, Grep, Write, Edit]` **不含 Task**，無 agents 目錄、agent 無法自主開 subagent。機制 claude-only（codex 有內建 `spawn_agent` 不受 `--tools` 約束、安全需重驗）。
+  - **方案**：先 ground-truth 測 + 最小實驗版。
+  - 詳細：[goal-subagent-delegation](2026-05-21-goal-subagent-delegation-backlog.md)
+
+- **CAP-2 · provider-specific prompt engineering（剩 C2 parser 保真度）** — 輸出品質 · 待研究
+  - **已完成**：C1 skill 觸發機制 native 化——codex 已用 `$codebus-<bundle>` native explicit-invocation（省 ~24.8% input token）、非 `/skill` description-match；SpawnSpec 已重構成 verb+sub_mode+input。隨 `prompt-surface-layer-3-spawnspec-restructure`（2026-05-24 archived）落地。`agent/codex_backend.rs:71-72`。
+  - **剩 C2**：codex parser 保真度——`stream/codex_parser.rs:51` 仍寫死 `name:"Shell"`、`tool_kind` 永遠 None（codex wire 不送）、無 reasoning/格式保真度擴充。卡 ground-truth 樣本。
+  - 詳細：[provider-prompt-engineering](2026-05-22-provider-prompt-engineering-backlog.md)、loop PE1/PE2（`2026-05-22-provider-prompt-diagnosis.md` / `-design.md`）
+
+- **CAP-3 · codebus 作為 MCP Server（query-only）** — 擴充性 / 生態整合 · 工程量：中-重
+  - **現況**：CLI 無 `mcp` 子命令；所有 mcp 命中都是 client 隔離（`--strict-mcp-config`），無「自身作為 server 對外暴露 wiki query 工具」。原設計 after F+RAG，但有 incremental MVP 路線（先做三件唯讀 wiki 工具、不必全卡）。
+  - 詳細：[mcp-server](2026-05-14-mcp-server-backlog.md)
+
+- **CAP-4 · 新能力候選（deferred，有具體需求再接）** — new-capability · 工程量：中-重（各別 spike 後定）
+  - (a) structured output `--json-schema`/`--output-schema` 跨 provider 對等；(b) codex `--oss` 本地模型 profile；(c) 泛化既有 `content_verify` 成多 spawn orchestrator（現 `verb/content_verify.rs:172` 只被 `goal.rs:557`/`quiz.rs:773` 兩處固定呼叫）。不投機抽象。
+  - 詳細：[cli-applicability T3](2026-05-30-cli-capability-applicability-backlog.md)
+
+- **CAP-5 · OpenAI Privacy Filter 整合（local 語意層 PII）** — PII 保護強化 · 工程量：重
+  - **現況**：`pii/scanners/mod.rs:8-10` 明文「Presidio/Comprehend 等 deferred」；現只有 regex 4-pattern scanner，無語意層。與 SEC-4 互補。
+  - 詳細：[openai-privacy-filter](2026-05-14-openai-privacy-filter-backlog.md)
+
+- **CAP-6 · RAG index + search（LanceDB，after F）** — 知識檢索品質 · 工程量：重（1 週以上）
+  - **現況**：Cargo.toml 零 LanceDB/embedding/ONNX 依賴、無實作。ONNX runtime 與 MCP 唯讀工具可共用基礎設施；注入路徑要 provider-neutral。
+  - 詳細：[rag-index-search](2026-05-14-rag-index-search-backlog.md)
+
+### 🎨 UX
+
+- **UX-1 · Settings 可編輯 chat verb 的 model/effort（方案 B）** — UX gap · 工程量：1-2 半天
+  - **已完成**：方案 A read-only hint——`EndpointSection.tsx:242-255` `endpoint-chat-row` 顯示「chat 沿用 query（model/effort）」，解掉透明度問題。
+  - **剩方案 B**：讓 chat 可獨立編輯 model/effort（chat 不在可編輯 `VERBS=[goal,query,fix,verify]`）。刻意延後至 v2 multi-provider 或 user 反映 chat 需獨立 model 時再做。
+  - 詳細：[settings-chat-model](2026-05-14-settings-chat-model-backlog.md)
+
+- **UX-2 · App Activity Stream 對齊 CLI verbose（完整 AI 回覆細節）** — UX 補強 · 工程量：輕-中
+  - **現況**：app `ActivityStreamItem.tsx:24-30` 只渲染精簡 cluster（ToolResult/Usage NOT rendered、tool input 縮短）。CLI 端**已有** verbose（`render/stream_event.rs:55,70,81`，來自 `cli-debug-stream-detail`），app 未對齊。與 CAP-2 C2 有順序耦合（codex 編輯無 event 可展開）。
+  - 詳細：[app-stream-verbose-detail](2026-05-21-app-stream-verbose-detail-backlog.md)
+
+- **UX-3 · 全域 font-scale / accessibility text size** — accessibility gap · 工程量：中（2-3 個半天）
+  - **現況**：`store/settings.ts` 設定 key 無 fontScale/zoom 任何欄位；CSS 是固定 token utility，無使用者可調縮放。
+  - 詳細：[app-font-scale](2026-05-14-app-font-scale-backlog.md)
+
+- **UX-4 · UI 無障礙（對比度 + 鍵盤導航）** — accessibility gap · 工程量：中（2-3 個半天）
+  - **現況**：191 處 aria/focus 散落 51 檔屬零星（多來自 Radix 預設）；`prefers-contrast`/`focus-trap` grep 0 命中，無系統性高對比模式 / tab-order / skip-link。
+  - 詳細：[ui-accessibility](2026-05-14-ui-accessibility-backlog.md)
+
+- **UX-5 · CLI `[[slug]]` 可點連結 + 連結目標 + CLI chat markdown polish** — regression 補回 + capability + UX · 工程量：重
+  - **現況**：CLI chat 輸出 raw `println!`（`commands/chat.rs:195-198`），`[[slug]]` 不可點、無 GFM 表格 / markdown 樣式；CLI 唯一 OSC 8 在 lint 輸出（`render/lint_text.rs`），不涵蓋 chat。**注意**：app 端 `markdown-rendering-fidelity`（已完成）是 GUI surface，與本 CLI 條不同、別誤判已完成。`codebus://` 協定吃掉大半工。
+  - 詳細：[cli-wikilink-link-target](2026-05-21-cli-wikilink-link-target-backlog.md)
+
+### 📦 發佈 / release readiness
+
+- **REL-1 · GitHub 倉庫設定（剩 CI + templates）** — release readiness · 工程量：輕-中
+  - **已完成**：tag 觸發的 Windows release workflow（`.github/workflows/release-windows.yml`，change `windows-release-ci`）。
+  - **剩**：(a) push/PR 觸發的 CI（`cargo test` / `clippy` / `npm test`）；(b) `.github/ISSUE_TEMPLATE/`；(c) PR template。現 `.github/` 只有 `release-windows.yml` + `FUNDING.yml`。
+  - 詳細：[github-repo-setup](2026-05-14-github-repo-setup-backlog.md)
+
+- **REL-2 · Claude-trace 分析 long propose prompt 的 token/cache/context 用量** — workflow efficiency · 工程量：半天
+  - **現況**：只有任務描述 todo 檔、無 finding 產出。每 change 200+ 行 prompt × 多 session 累積成本未量化。跟 REL-3 同 batch。
+  - 詳細：[claude-trace-prompt-analysis](2026-05-28-claude-trace-prompt-analysis-todo.md)
+
+- **REL-3 · Claude Code 4.8 + ultracode 對開發流程影響評估** — workflow / tooling observability · 工程量：半天
+  - **現況**：todo `Status: open`、無評估產出。長 prompt / spectra apply / grep 校準 / memory pattern 是否該調整。跟 REL-2 合做。
+  - 詳細：[claude-code-4.8-ultracode-impact](2026-05-28-claude-code-4.8-ultracode-impact-todo.md)
+
+### ⏳ 外部阻塞
+
+- **EXT-1 · MyCoder CLI 整合** — pending（等對方 CLI 長出 contract）· 工程量：spike 後定
+  - **現況**：codebase 零整合 code（僅 backlog/spec-trace 提及）。等對方 CLI 長出 codebus contract（見 2026-05-20 spike 結論）再評估。
+  - 詳細：[mycoder-cli](2026-05-14-mycoder-cli-backlog.md)
+
+---
+
+## 已完成 / Archived 項目
+
+曾是開放項目、後來被 change 解決的，移到這裡留脈絡。部分完成的不在此（留開放、條目內標「已完成/剩 X」）。
 
 | Archive 日期 | 標題 | 對應 change | 詳細文件 |
 |---|---|---|---|
@@ -58,6 +159,10 @@
 | 2026-06-01 | claude spawn user-global 設定隔離（`compose_claude_cmd` 原只隔 MCP、user `~/.claude` CLAUDE.md/settings/plugins 仍 bleed 進蓋 wiki 的 agent 帶偏行為 → 無條件加 `--setting-sources project,local`、排 user 層保 vault project+local（`check-bash`/`check-read` hook gate + `.codebus/CLAUDE.md` schema）、對齊 codex `--ignore-user-config`；2026-05-31 real-claude spike 三方驗過、否決 `--bare`） | `claude-setting-sources-user-isolation`（commit `56174cc`） | [cli-applicability T2-4](2026-05-30-cli-capability-applicability-backlog.md) |
 | 2026-06-01 | raw mirror >5MiB 跳過檔對 agent 可見：除既有 warn + `oversized_skipped_files` counter（operator surface 逐字不動）外，walk 後多寫一份彙整 manifest `.codebus/raw/code/_codebus-oversized.md`（header + 每檔 forward-slash path+bytes、依路徑排序、結構上不含內容；有 oversized 才寫、無則不留、stale 靠既有 `remove_dir_all` 全量重建天然消失）；非 BACKLOG 開放項、源自 chat #5 點子（中控評低價值仍做成低噪音結構訊號） | `oversized-files-manifest`（impl `6743452` + archive `7e7620b`） | 無 backlog detail doc；proposal/design 見 `archive/2026-06-01-oversized-files-manifest/` |
 | 2026-06-04 | Agent run 稽核 + vault hook integrity（(A) stderr-only sandbox denial 計 0、run 誤標 succeeded；(B) vault `.codebus/.claude/settings.json` hook 可被 inject 的 goal/fix agent 改空、無偵測）→ (A) `agent::invoke` 把 child stderr 也逐行過 `is_sandbox_denial` 計入 `sandbox_denial_count`（observability-only、不改 outcome）；(B) 新增 `vault-gate-integrity` lint 規則偵測兩條必要 hook 被移除/改空（偵測非預防、`fix` 自動帶到）；security.md §6 同步。token-parser 脆弱（2026-06-03 列）仍開放、不在本 change | `agent-run-integrity`（impl `913af73` + archive `1f53671`；specs verb-library + lint-feedback-loop） | 無 backlog detail doc；artifacts 見 `archive/2026-06-04-agent-run-integrity/` |
+| 2026-06-04 | Claude path Windows 讀取邊界硬化：`check-read` 改 vault-root containment allowlist（canonicalize-then-contain、vault root 取自 PreToolUse stdin `cwd`）+ Glob/Grep PreToolUse matcher（`REQUIRED_HOOKS` 四條、`vault-gate-integrity` 連動）+ `tool_input.path` 解析 + `hooks.read_path_containment` 開關（預設 on）。F1（絕對路徑讀母 repo + denylist 外憑證）+ F2-escape（Glob/Grep 繞過讀 vault **外**）closed、live smoke 驗。vault **內**敏感檔 Read↔Grep 不對稱屬獨立後續（見開放 SEC-3） | `check-read-vault-containment`（specs lint-feedback-loop + hook；security.md §6） | 無 backlog detail doc；artifacts 見 `archive/2026-06-04-check-read-vault-containment/` |
+| 2026-06-14 | Windows 打包 / 安裝（app + CLI）**P1–P5 全完成**：NSIS `-setup.exe`、bundle GUI `codebus-app.exe` + CLI `bin\codebus.exe`、per-user HKCU PATH installerHooks（P1/P2）；opt-in 卸載 purge（MB_YESNO 預設 No、Yes 才清 keyring 兩 entry + app data + `~/.codebus`、vault 永不碰、新增 `codebus config purge-keys`）；tag 觸發 GitHub Releases CI（P4）；README 安裝文件中英雙語（P5）；P3 乾淨 Windows 真機裝/卸/升級驗證（2026-06-14 user 確認）。signing / auto-update / macOS / Linux 仍 out of scope | `windows-installer-foundation`（`120e2d7`）+ `windows-uninstaller-opt-in-purge`（`fdcb0c9` / `9f2389e`）+ `windows-release-ci` | [windows-packaging-installation](2026-05-28-windows-packaging-installation-backlog.md) |
+
+---
 
 ## 已決定不做
 
@@ -74,15 +179,18 @@
 
 ## 怎麼加新項目
 
-1. 在 `docs/` 建 `YYYY-MM-DD-<slug>-backlog.md`，內容仿照既有兩條格式：
+1. 在 `docs/internal/` 建 `YYYY-MM-DD-<slug>-backlog.md`，內容仿照既有格式：
    - 觀察 / 問題描述
    - Proposed fix（如有多方案列出）
    - Tasks 粗估 + 工程量
    - Out of scope
    - 何時動 / 優先序
-2. 在這份 `BACKLOG.md` 的「開放項目」表加一列
-3. 之後若決定動，用 `/spectra-propose <slug>` 把該 backlog 當 pre-discuss 帶進 propose flow
+2. 在本檔「開放項目」對應主題分組（🔒安全 / 🎯正確性 / 🚀能力 / 🎨UX / 📦發佈 / ⏳外部）下新增一條，沿用編號慣例（`SEC-/COR-/CAP-/UX-/REL-/EXT-`）+ 附「起點」檔案。
+3. 之後若決定動，用 `/spectra-propose <slug>` 把該 backlog 當 pre-discuss 帶進 propose flow。
 
 ## 怎麼歸檔
 
-對應 change archive 後（`spectra archive <change-name>`），把這項從「開放項目」移到「已 archived 項目」並標明對應 change 名稱 + archive 日期。
+對應 change archive 後（`spectra archive <change-name>`）：
+
+- **整條完成** → 從「開放項目」移到「已完成 / Archived」表，標明對應 change 名稱 + archive 日期。
+- **部分完成** → 留在「開放項目」，在該條內加「**已完成**：…（對應 change）」與「**剩**：…」兩段，別整條移走。
