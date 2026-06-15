@@ -293,8 +293,20 @@ pub fn apply_token_usage(
 ) {
     match semantics {
         TokenUsageSemantics::Delta => accumulate_token_usage(acc, addend),
-        TokenUsageSemantics::Cumulative => *acc = addend.clone(),
+        TokenUsageSemantics::Cumulative => {
+            if token_usage_has_nonzero_counts(addend) {
+                *acc = addend.clone();
+            }
+        }
     }
+}
+
+fn token_usage_has_nonzero_counts(usage: &TokenUsage) -> bool {
+    usage.input_tokens != 0
+        || usage.output_tokens != 0
+        || usage.cache_read_tokens.unwrap_or(0) != 0
+        || usage.cache_write_tokens.unwrap_or(0) != 0
+        || usage.reasoning_tokens.unwrap_or(0) != 0
 }
 
 #[cfg(test)]
@@ -323,6 +335,32 @@ mod tests {
         assert_eq!(acc.input_tokens, 250, "latest cumulative wins, not the sum");
         assert_ne!(acc.input_tokens, 350, "must not sum cumulative events");
         assert_eq!(acc.output_tokens, 90);
+    }
+
+    /// Empty cumulative snapshots carry no normalized token counts and must not
+    /// erase the last non-empty cumulative total.
+    #[test]
+    fn apply_cumulative_ignores_empty_snapshot_after_non_empty() {
+        let mut acc = TokenUsage::default();
+        let first = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 40,
+            cache_read_tokens: Some(12),
+            reasoning_tokens: Some(7),
+            ..Default::default()
+        };
+        let empty = TokenUsage {
+            extras: json!({"renamed_input_tokens": 100, "renamed_output_tokens": 40}),
+            ..Default::default()
+        };
+
+        apply_token_usage(&mut acc, &first, TokenUsageSemantics::Cumulative);
+        apply_token_usage(&mut acc, &empty, TokenUsageSemantics::Cumulative);
+
+        assert_eq!(acc.input_tokens, 100);
+        assert_eq!(acc.output_tokens, 40);
+        assert_eq!(acc.cache_read_tokens, Some(12));
+        assert_eq!(acc.reasoning_tokens, Some(7));
     }
 
     /// Delta semantics: two events reporting their own slices (100 then 25)

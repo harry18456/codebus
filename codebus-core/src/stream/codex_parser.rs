@@ -12,6 +12,10 @@ use serde_json::{Value, json};
 /// Format-only; malformed JSON and unhandled event types yield an empty vec
 /// (forward-compat). Does NOT interpret `[CODEBUS_*]` markers.
 pub fn parse_codex_stream_line(raw: &str) -> Vec<StreamEvent> {
+    parse_codex_stream_line_with_warning(raw, |message| eprintln!("{message}"))
+}
+
+fn parse_codex_stream_line_with_warning(raw: &str, mut warn: impl FnMut(&str)) -> Vec<StreamEvent> {
     let v: Value = match serde_json::from_str(raw) {
         Ok(v) => v,
         Err(_) => return Vec::new(),
@@ -71,12 +75,25 @@ pub fn parse_codex_stream_line(raw: &str) -> Vec<StreamEvent> {
                 return Vec::new();
             };
             let g = |k: &str| usage.get(k).and_then(Value::as_u64);
+            let input_tokens = g("input_tokens");
+            let output_tokens = g("output_tokens");
+            let cache_read_tokens = g("cached_input_tokens");
+            let reasoning_tokens = g("reasoning_output_tokens");
+            if input_tokens.is_none()
+                && output_tokens.is_none()
+                && cache_read_tokens.is_none()
+                && reasoning_tokens.is_none()
+            {
+                warn(
+                    "warning: codex usage: turn.completed usage object contained no decodable expected token fields",
+                );
+            }
             vec![StreamEvent::Usage(TokenUsage {
-                input_tokens: g("input_tokens").unwrap_or(0),
-                output_tokens: g("output_tokens").unwrap_or(0),
-                cache_read_tokens: g("cached_input_tokens"),
+                input_tokens: input_tokens.unwrap_or(0),
+                output_tokens: output_tokens.unwrap_or(0),
+                cache_read_tokens,
                 cache_write_tokens: None,
-                reasoning_tokens: g("reasoning_output_tokens"),
+                reasoning_tokens,
                 extras: usage.clone(),
             })]
         }
@@ -159,6 +176,62 @@ mod tests {
                 assert_eq!(u.output_tokens, 43);
                 assert_eq!(u.cache_read_tokens, Some(22272));
                 assert_eq!(u.reasoning_tokens, Some(17));
+            }
+            other => panic!("expected Usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn turn_completed_with_unrecognized_usage_fields_warns_once_and_preserves_empty_usage() {
+        let line =
+            r#"{"type":"turn.completed","usage":{"inputTokenCount":30515,"outputTokenCount":43}}"#;
+        let mut warnings = Vec::new();
+
+        let events = parse_codex_stream_line_with_warning(line, |message| {
+            warnings.push(message.to_string());
+        });
+
+        assert_eq!(warnings.len(), 1, "warnings: {warnings:?}");
+        assert!(warnings[0].starts_with("warning: codex usage"));
+        assert!(!warnings[0].contains("inputTokenCount"));
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            StreamEvent::Usage(u) => {
+                assert_eq!(u.input_tokens, 0);
+                assert_eq!(u.output_tokens, 0);
+                assert_eq!(u.cache_read_tokens, None);
+                assert_eq!(u.cache_write_tokens, None);
+                assert_eq!(u.reasoning_tokens, None);
+                assert_eq!(
+                    u.extras.get("inputTokenCount").and_then(Value::as_u64),
+                    Some(30515)
+                );
+                assert_eq!(
+                    u.extras.get("outputTokenCount").and_then(Value::as_u64),
+                    Some(43)
+                );
+            }
+            other => panic!("expected Usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn turn_completed_with_decoded_zero_usage_field_does_not_warn() {
+        let line = r#"{"type":"turn.completed","usage":{"input_tokens":0,"outputTokenCount":43}}"#;
+        let mut warnings = Vec::new();
+
+        let events = parse_codex_stream_line_with_warning(line, |message| {
+            warnings.push(message.to_string());
+        });
+
+        assert!(warnings.is_empty(), "warnings: {warnings:?}");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            StreamEvent::Usage(u) => {
+                assert_eq!(u.input_tokens, 0);
+                assert_eq!(u.output_tokens, 0);
+                assert_eq!(u.cache_read_tokens, None);
+                assert_eq!(u.reasoning_tokens, None);
             }
             other => panic!("expected Usage, got {other:?}"),
         }
