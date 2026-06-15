@@ -4,7 +4,7 @@
 
 本檔分三段：**開放項目**（真正還沒做、按主題分組，每條附「起點」可直接定位要改哪）、**已完成 / Archived**（曾是開放項目、後來做掉的，留對應 change 當脈絡）、**已決定不做**（評估後放棄、留決策理由）。詳述見各自的 `docs/internal/<date>-<slug>-backlog.md`。新發現的 design smell / UX 缺陷 / feature gap 先記成開放項目，之後再決定要不要 `/spectra-propose` 起 change。
 
-> **最後校正：2026-06-14** —— 逐條對 `openspec/changes/archive/`（99 個 change）+ 真實程式碼 grep 驗證過。本輪移除已完成卻仍掛開放的 `check-read-vault-containment` 與 Windows 打包（P1–P5 全完成、移入已完成段），並把 RunId / provider-PE / GitHub setup / Settings chat 標成「部分完成、剩 X」。
+> **最後校正：2026-06-16** —— Tier 0 三條（COR-3 codex token guard、SEC-3 in-vault deny、REL-1 GitHub CI+templates）完成、移入已完成段。（2026-06-14：逐條對 `openspec/changes/archive/` + 真實程式碼 grep 驗證、移除 check-read / Windows 打包、標註 RunId / provider-PE / Settings chat 等部分完成項。）
 > 嚴重度／工程量為相對估值；組內由上而下大致為建議優先序。
 
 ---
@@ -25,12 +25,6 @@
   - **方案**（待研究）：separate-user / ACL deny / AppContainer / container；+ macOS/Linux 等價 PoC。AppContainer 留升級路徑。
   - 詳細：[Windows PoC](2026-05-28-codex-windows-sandbox-read-poc.md) + [§10 discussion](2026-05-23-bash-hook-and-codex-sandbox-discussion.md) + [hard-gate spike](2026-05-28-codex-hook-hard-gate-spike.md) + [cli-applicability](2026-05-30-cli-capability-applicability-backlog.md)
 
-- **SEC-3 · in-vault 機密讀取邊界（內容邊界，非位置邊界）** — 嚴重度：中 · 工程量：中
-  - **問題**：containment 已封「讀逃出 vault 外」（`check-read-vault-containment`，已完成），但 vault **內**敏感檔仍有 Read↔Grep 不對稱——`*.pem`/`*.key`/`id_rsa` basename backstop 只擋 Read，Glob/Grep 因 `if !is_search_tool` 跳過；且嵌在 `.yaml`/`.env` 的 secret 連 Read 不擋。
-  - **起點**：`codebus-cli/src/commands/hook.rs:548-563`（Stage 2 被 `if !is_search_tool` 包住）、`vault/settings.rs:74-116`（`DEFAULT_SETTINGS_JSON` 無 `permissions.deny`）。
-  - **方案**：(a) materialized `settings.json` 加 `permissions.deny`（sensitive basename `**/*.pem` 等、forward-slash glob），且 `vault-gate-integrity` lint 擴及驗 `permissions.deny`（防 silent fail-open）；(d) 同 SEC-4 擴 PII pattern + UTF-16 decode-scan。殘留（跨 session 持久化）accept+document，未來槓桿是 vault write-policy。
-  - 源自 2026-06-04 同儕 security review、security.md §6（無 detail doc）。
-
 - **SEC-4 · PII mirror 完整性** — 嚴重度：中 · 工程量：中
   - **問題**：scanner 只 **4 pattern**（AWS/Anthropic Critical + email/ipv4 Warn）→ GitHub PAT/GCP/Slack/JWT/PEM body/DB URL pw 不遮；非 UTF-8（UTF-16）檔讀失敗→byte-identical copy 不掃（連 Critical floor 不 fire）；gitignored/oversized 不進 mirror 也不掃。
   - **起點**：`pii/scanners/regex_basic.rs:22-55`（`BUILTIN_PATTERNS` 恰 4 條）、`vault/raw_sync.rs:331-338`（非 UTF-8 `read_to_string().ok()`→不掃）、`:301-325`（oversized 跳過）。
@@ -49,12 +43,6 @@
   - **起點**：spec `claude-code-config/spec.md:11,246`（寫 `codebus-azure`）；CLI `codebus-cli/src/commands/config.rs:24`（`codebus-claude-azure`）；core `config/endpoint.rs:400`（claude 必填無 default）vs `config/codex.rs:157`（codex 有 default）。
   - **方案**：先 ground core loader vs CLI resolver 雙層 default（決定是否本身是 bug）再對齊 spec（+ starter 範例、test yaml）。
   - 源自 `windows-uninstaller-opt-in-purge` review（無 detail doc）。
-
-- **COR-3 · codex token usage parser 欄位脆弱** — telemetry（LOW）· 工程量：輕
-  - **問題**：解析 `turn.completed.usage` 欄位名寫死 + `.unwrap_or(0)`，只要外層 `usage` 物件在就必 emit `Usage`（即使內層全缺）；配 sink Cumulative 分支無條件 last-wins（無「非零才覆蓋」守衛）→ 未來 codex 改欄位名會靜默產 0、覆蓋掉前面正確累計。純 telemetry（無 control-flow 讀它）、0.136 上正常。
-  - **起點**：`stream/codex_parser.rs:69-82`（欄位寫死 + `unwrap_or(0)`）、`log/sink.rs:289-298`（`Cumulative => *acc = addend.clone()`）。
-  - **方案**：last-wins 加「addend 非零才覆蓋」守衛 + 欄位缺失時 warn。
-  - 源自 2026-06-03 codex 0.136 grounding（無 detail doc）。
 
 ### 🚀 能力 / capability
 
@@ -109,11 +97,6 @@
 
 ### 📦 發佈 / release readiness
 
-- **REL-1 · GitHub 倉庫設定（剩 CI + templates）** — release readiness · 工程量：輕-中
-  - **已完成**：tag 觸發的 Windows release workflow（`.github/workflows/release-windows.yml`，change `windows-release-ci`）。
-  - **剩**：(a) push/PR 觸發的 CI（`cargo test` / `clippy` / `npm test`）；(b) `.github/ISSUE_TEMPLATE/`；(c) PR template。現 `.github/` 只有 `release-windows.yml` + `FUNDING.yml`。
-  - 詳細：[github-repo-setup](2026-05-14-github-repo-setup-backlog.md)
-
 - **REL-2 · Claude-trace 分析 long propose prompt 的 token/cache/context 用量** — workflow efficiency · 工程量：半天
   - **現況**：只有任務描述 todo 檔、無 finding 產出。每 change 200+ 行 prompt × 多 session 累積成本未量化。跟 REL-3 同 batch。
   - 詳細：[claude-trace-prompt-analysis](2026-05-28-claude-trace-prompt-analysis-todo.md)
@@ -161,6 +144,9 @@
 | 2026-06-04 | Agent run 稽核 + vault hook integrity（(A) stderr-only sandbox denial 計 0、run 誤標 succeeded；(B) vault `.codebus/.claude/settings.json` hook 可被 inject 的 goal/fix agent 改空、無偵測）→ (A) `agent::invoke` 把 child stderr 也逐行過 `is_sandbox_denial` 計入 `sandbox_denial_count`（observability-only、不改 outcome）；(B) 新增 `vault-gate-integrity` lint 規則偵測兩條必要 hook 被移除/改空（偵測非預防、`fix` 自動帶到）；security.md §6 同步。token-parser 脆弱（2026-06-03 列）仍開放、不在本 change | `agent-run-integrity`（impl `913af73` + archive `1f53671`；specs verb-library + lint-feedback-loop） | 無 backlog detail doc；artifacts 見 `archive/2026-06-04-agent-run-integrity/` |
 | 2026-06-04 | Claude path Windows 讀取邊界硬化：`check-read` 改 vault-root containment allowlist（canonicalize-then-contain、vault root 取自 PreToolUse stdin `cwd`）+ Glob/Grep PreToolUse matcher（`REQUIRED_HOOKS` 四條、`vault-gate-integrity` 連動）+ `tool_input.path` 解析 + `hooks.read_path_containment` 開關（預設 on）。F1（絕對路徑讀母 repo + denylist 外憑證）+ F2-escape（Glob/Grep 繞過讀 vault **外**）closed、live smoke 驗。vault **內**敏感檔 Read↔Grep 不對稱屬獨立後續（見開放 SEC-3） | `check-read-vault-containment`（specs lint-feedback-loop + hook；security.md §6） | 無 backlog detail doc；artifacts 見 `archive/2026-06-04-check-read-vault-containment/` |
 | 2026-06-14 | Windows 打包 / 安裝（app + CLI）**P1–P5 全完成**：NSIS `-setup.exe`、bundle GUI `codebus-app.exe` + CLI `bin\codebus.exe`、per-user HKCU PATH installerHooks（P1/P2）；opt-in 卸載 purge（MB_YESNO 預設 No、Yes 才清 keyring 兩 entry + app data + `~/.codebus`、vault 永不碰、新增 `codebus config purge-keys`）；tag 觸發 GitHub Releases CI（P4）；README 安裝文件中英雙語（P5）；P3 乾淨 Windows 真機裝/卸/升級驗證（2026-06-14 user 確認）。signing / auto-update / macOS / Linux 仍 out of scope | `windows-installer-foundation`（`120e2d7`）+ `windows-uninstaller-opt-in-purge`（`fdcb0c9` / `9f2389e`）+ `windows-release-ci` | [windows-packaging-installation](2026-05-28-windows-packaging-installation-backlog.md) |
+| 2026-06-16 | codex token usage parser 空快照守衛（cumulative 全 0/None snapshot 不覆蓋既有累計 + parser 四欄全不可解碼時 warn）— 原開放 COR-3 | `codex-usage-parser-zero-guard`（commit `1bad5e1`；specs agent-backend + codex-backend） | 無 backlog detail doc；artifacts 見 `archive/2026-06-15-codex-usage-parser-zero-guard/` |
+| 2026-06-16 | in-vault 機密讀取邊界硬化：vault `settings.json` 加 sensitive-basename `permissions.deny`（bracket-class、case-insensitive、跨 Read/Glob/Grep）+ `vault-gate-integrity` lint 擴驗 deny + 單一來源 rule set — 原開放 SEC-3 | `vault-sensitive-basename-deny`（commit `41bb21f`；spec lint-feedback-loop） | 無 backlog detail doc；artifacts 見 `archive/2026-06-16-vault-sensitive-basename-deny/` |
+| 2026-06-16 | GitHub push/PR CI（windows-latest、cargo test + clippy baseline guard + npm test/typecheck）+ issue/PR templates；連同既有 `windows-release-ci` 讓「GitHub 倉庫設定」整條 close — 原開放 REL-1 | `github-ci-and-templates`（commit `0a3c753`；spec ci-automation new capability） | 無 backlog detail doc；artifacts 見 `archive/2026-06-16-github-ci-and-templates/` |
 
 ---
 
