@@ -777,11 +777,15 @@ The fix loop's caller-observable behavior — Bash tool gated to `codebus lint *
 ---
 ### Requirement: PII Image Read Hook Installation
 
-The `codebus init` subcommand SHALL ensure `<vault_root>/.claude/settings.json` contains `hooks.PreToolUse` entries whose `matcher` fields equal `"Read"`, `"Glob"`, AND `"Grep"` respectively, each routing to `codebus hook check-read` as a `command`-type hook, in addition to the Bash matcher entry required by `Fix Bash Hook Installation`. The same write-if-missing semantics from `Fix Bash Hook Installation` SHALL apply at the file level: if `<vault_root>/.claude/settings.json` already exists, init SHALL NOT modify it. Existing vaults predating this requirement SHALL be upgraded via release-note guidance (manual JSON snippet insertion or re-init at a new location), NOT by automatic in-place migration; the `Vault Gate Integrity Check` requirement provides the detection signal for such vaults.
+The `codebus init` subcommand SHALL ensure `<vault_root>/.claude/settings.json` contains `hooks.PreToolUse` entries whose `matcher` fields equal `"Read"`, `"Glob"`, AND `"Grep"` respectively, each routing to `codebus hook check-read` as a `command`-type hook, in addition to the Bash matcher entry required by `Fix Bash Hook Installation`. The same file SHALL contain a top-level `permissions.deny` array with the required sensitive-basename Read deny rules. The same write-if-missing semantics from `Fix Bash Hook Installation` SHALL apply at the file level: if `<vault_root>/.claude/settings.json` already exists, init SHALL NOT modify it. Existing vaults predating this requirement SHALL be upgraded via lint-detected remediation or explicit user edits, NOT by automatic in-place migration; the `Vault Gate Integrity Check` requirement provides the detection signal for such vaults.
 
-The `codebus hook check-read` subcommand SHALL intercept the `Read`, `Glob`, AND `Grep` tools. The read target path SHALL be resolved by `tool_name`: `tool_input.file_path` for `Read`, AND `tool_input.path` for `Glob` or `Grep`. The `Vault Containment Read Gate` requirement SHALL be evaluated FIRST on this target path; the image / sensitive-path denylist defined below SHALL apply only after containment has allowed the path through, AND serves as in-vault defense-in-depth.
+The required sensitive-basename Read deny rules SHALL cover basenames matching `*.pem`, `*.key`, and `*id_rsa*` case-insensitively in practice. The settings file SHALL store the Claude Code rules with forward-slash gitignore syntax and bracket classes: `Read(**/*.[pP][eE][mM])`, `Read(**/*.[kK][eE][yY])`, and `Read(**/*[iI][dD]_[rR][sS][aA]*)`. The required rule strings SHALL NOT contain backslash path separators. These deny rules SHALL be installed unconditionally and SHALL NOT be gated by `hooks.read_image_block` or `hooks.read_path_containment`.
 
-The hook entries SHALL be installed unconditionally — their runtime behavior is gated at hook-invocation time by the `hooks.read_image_block` (denylist) AND `hooks.read_path_containment` (containment) config keys, NOT by conditional install-time logic. This SHALL allow `~/.codebus/config.yaml` to be the single source of truth: changing a config key takes immediate effect for all existing vaults without requiring re-init or per-vault edits to `settings.json`.
+The required sensitive-basename rule set SHALL be sourced from the same definition that generates the default settings file and that evaluates the `codebus hook check-read` basename backstop, so the settings deny rules and the hook's Read defense-in-depth matcher cannot drift.
+
+The `codebus hook check-read` subcommand SHALL intercept the `Read`, `Glob`, AND `Grep` tools. The read target path SHALL be resolved by `tool_name`: `tool_input.file_path` for `Read`, AND `tool_input.path` for `Glob` or `Grep`. The `Vault Containment Read Gate` requirement SHALL be evaluated FIRST on this target path; the image / sensitive-path denylist defined below SHALL apply only after containment has allowed the path through, AND serves as in-vault defense-in-depth. The Claude Code `permissions.deny` rules are the cross-tool in-vault sensitive-basename boundary for Read, Glob, and Grep.
+
+The hook entries SHALL be installed unconditionally; their runtime behavior is gated at hook-invocation time by the `hooks.read_image_block` (denylist) AND `hooks.read_path_containment` (containment) config keys, NOT by conditional install-time logic. This SHALL allow `~/.codebus/config.yaml` to be the single source of truth for hook behavior: changing a config key takes immediate effect for all existing vaults without requiring re-init or per-vault edits to hook entries in `settings.json`.
 
 The `codebus hook check-read` subcommand SHALL read `~/.codebus/config.yaml` at the start of every invocation AND SHALL consult the boolean configuration key `hooks.read_image_block` for the denylist stage. The key resolution rules SHALL be:
 
@@ -805,14 +809,19 @@ The hook installer SHALL emit the `Read`, `Glob`, AND `Grep` matcher entries as 
 
 The `hooks.read_image_block` key SHALL belong to a top-level `hooks` namespace in `~/.codebus/config.yaml`, parallel to existing top-level namespaces (`pii`, `lint`, `quiz`, `goal`, `log`, `app`, `claude_code`) AND to the `hooks.read_path_containment` key. The default value SHALL be `true`. The starter config file written by `codebus init` (when no global config exists) SHALL include a documented `hooks` section with `read_image_block: true` AND `read_path_containment: true` AND inline commentary describing each trade-off.
 
-#### Scenario: Init writes Read, Glob, and Grep matcher entries alongside Bash on fresh vault
+#### Scenario: Init writes Read, Glob, and Grep matcher entries and sensitive basename deny rules on fresh vault
 
 - **WHEN** `codebus init` runs against a repository with no existing `<vault_root>/.claude/settings.json`
-- **THEN** the system SHALL create `<vault_root>/.claude/settings.json` AND the file content SHALL parse as JSON AND the `hooks.PreToolUse` array SHALL contain a Bash matcher entry invoking `codebus hook check-bash` AND `Read`, `Glob`, AND `Grep` matcher entries each invoking `codebus hook check-read`
+- **THEN** the system SHALL create `<vault_root>/.claude/settings.json` AND the file content SHALL parse as JSON AND the `hooks.PreToolUse` array SHALL contain a Bash matcher entry invoking `codebus hook check-bash` AND `Read`, `Glob`, AND `Grep` matcher entries each invoking `codebus hook check-read` AND `permissions.deny` SHALL contain `Read(**/*.[pP][eE][mM])`, `Read(**/*.[kK][eE][yY])`, and `Read(**/*[iI][dD]_[rR][sS][aA]*)`
 
-#### Scenario: Init does not overwrite existing settings.json for Read hook migration
+#### Scenario: Required sensitive basename deny rules use forward slash and case-covering bracket classes
 
-- **WHEN** `codebus init` runs against a vault where `<vault_root>/.claude/settings.json` already exists with a prior matcher set
+- **WHEN** the default `<vault_root>/.claude/settings.json` content is generated
+- **THEN** each required sensitive basename deny rule SHALL contain `/` for path separation AND SHALL NOT contain `\` AND the `.pem`, `.key`, and `id_rsa` rules SHALL use bracket classes that cover uppercase and lowercase ASCII letters
+
+#### Scenario: Init does not overwrite existing settings.json for Read hook and deny migration
+
+- **WHEN** `codebus init` runs against a vault where `<vault_root>/.claude/settings.json` already exists with a prior matcher set or custom permissions
 - **THEN** the system SHALL NOT modify the existing file AND its byte-content SHALL be identical before and after init
 
 #### Scenario: hook check-read blocks blacklisted image extensions
@@ -853,22 +862,22 @@ The `hooks.read_image_block` key SHALL belong to a top-level `hooks` namespace i
 #### Scenario: hook check-read fails closed on malformed stdin
 
 - **WHEN** `codebus hook check-read` receives stdin that does not parse as JSON OR stdin that is empty AND `hooks.read_image_block` resolves to `true`
-- **THEN** the subcommand SHALL exit with status zero AND stdout SHALL contain a JSON object whose `decision` field equals `"block"` (fail-closed default — the subcommand SHALL NEVER silently allow on parse failure)
+- **THEN** the subcommand SHALL exit with status zero AND stdout SHALL contain a JSON object whose `decision` field equals `"block"` AND the subcommand SHALL NEVER silently allow on parse failure
 
 #### Scenario: hook check-read with read_image_block disabled skips the denylist
 
 - **WHEN** `~/.codebus/config.yaml` contains `hooks.read_image_block: false` AND `codebus hook check-read` receives stdin JSON with any in-vault `tool_input.file_path` value (image extension, sensitive-path hit, text extension, or malformed JSON)
-- **THEN** the subcommand SHALL NOT print any denylist `decision` JSON, regardless of the stdin contents (containment, governed independently by `hooks.read_path_containment`, is unaffected by this key)
+- **THEN** the subcommand SHALL NOT print any denylist `decision` JSON, regardless of the stdin contents AND containment, governed independently by `hooks.read_path_containment`, SHALL be unaffected
 
-#### Scenario: Missing config file resolves read_image_block to true (fail-safe block)
+#### Scenario: Missing config file resolves read_image_block to true
 
 - **WHEN** `~/.codebus/config.yaml` does not exist AND `codebus hook check-read` receives stdin JSON whose in-vault `tool_input.file_path` ends in `.png`
 - **THEN** the subcommand SHALL behave as if `hooks.read_image_block` were `true` AND SHALL print a block decision JSON to stdout
 
-#### Scenario: Malformed config yaml resolves read_image_block to true (fail-safe block)
+#### Scenario: Malformed config yaml resolves read_image_block to true
 
 - **WHEN** `~/.codebus/config.yaml` contains content that fails to parse as YAML AND `codebus hook check-read` receives stdin JSON whose in-vault `tool_input.file_path` ends in `.png`
-- **THEN** the subcommand SHALL behave as if `hooks.read_image_block` were `true` AND SHALL print a block decision JSON to stdout (the hook subcommand SHALL NEVER be made permissive by a config load failure)
+- **THEN** the subcommand SHALL behave as if `hooks.read_image_block` were `true` AND SHALL print a block decision JSON to stdout AND the hook subcommand SHALL NEVER be made permissive by a config load failure
 
 #### Scenario: Absent hooks section resolves read_image_block to true
 
@@ -877,12 +886,25 @@ The `hooks.read_image_block` key SHALL belong to a top-level `hooks` namespace i
 
 #### Scenario: hook check-read blocks sensitive key basename inside the vault
 
-- **WHEN** `codebus hook check-read` receives stdin JSON whose resolved in-vault target path has a basename matching `*id_rsa*`, `*.pem`, or `*.key` (e.g., a key file that slipped into `raw/code/`) AND `hooks.read_image_block` resolves to `true`
+- **WHEN** `codebus hook check-read` receives stdin JSON whose resolved in-vault target path has a basename matching `*id_rsa*`, `*.pem`, or `*.key` case-insensitively (e.g., a key file that slipped into `raw/code/`) AND `hooks.read_image_block` resolves to `true`
 - **THEN** the subcommand SHALL exit with status zero AND stdout SHALL contain a JSON object whose `decision` field equals `"block"` AND whose `reason` field mentions the basename-glob rule
+
+##### Example: sensitive basename coverage
+
+| Input target path | Decision | Notes |
+| --- | --- | --- |
+| `raw/code/server.pem` | block | lowercase pem |
+| `raw/code/server.PEM` | block | uppercase pem |
+| `raw/code/private.key` | block | lowercase key |
+| `raw/code/private.KEY` | block | uppercase key |
+| `raw/code/id_rsa` | block | exact id_rsa substring |
+| `raw/code/backup-ID_RSA.txt` | block | uppercase id_rsa substring |
+| `raw/code/readme.md` | allow | non-sensitive basename |
+
 
 <!-- @trace
 source: agent-hook-hardening
-updated: 2026-06-04
+updated: 2026-06-16
 code:
   - codebus-cli/src/commands/hook.rs
   - codebus-core/src/vault/settings.rs
@@ -895,47 +917,62 @@ tests:
 ---
 ### Requirement: Vault Gate Integrity Check
 
-The lint subsystem SHALL verify that the vault PreToolUse gate configuration at `<vault-root>/.claude/settings.json` still installs the hooks codebus relies on to sandbox the claude-path agent: a `Bash` matcher routing to `codebus hook check-bash`, AND `Read`, `Glob`, AND `Grep` matchers each routing to `codebus hook check-read`. This check SHALL read exactly that single file; it SHALL NOT scan, traverse, or read any other path outside the `wiki/` subtree, AND SHALL NOT broaden lint into a general vault-structure validator. The check is a detection signal only — it SHALL NOT modify, restore, or rewrite the settings file (the Lint Read-Only Invariant continues to hold).
+The lint subsystem SHALL verify that the vault gate configuration at `<vault-root>/.claude/settings.json` still installs the hooks and Claude Code permission deny rules codebus relies on to sandbox the claude-path agent. The required hooks are a `Bash` matcher routing to `codebus hook check-bash`, AND `Read`, `Glob`, AND `Grep` matchers each routing to `codebus hook check-read`. The required permission deny rules are the sensitive-basename Read deny rules `Read(**/*.[pP][eE][mM])`, `Read(**/*.[kK][eE][yY])`, and `Read(**/*[iI][dD]_[rR][sS][aA]*)`. This check SHALL read exactly that single file; it SHALL NOT scan, traverse, or read any other path outside the `wiki/` subtree, AND SHALL NOT broaden lint into a general vault-structure validator. The check is a detection signal only; it SHALL NOT modify, restore, or rewrite the settings file (the Lint Read-Only Invariant continues to hold).
 
-The required hook set (the matcher → command pairs `Bash` → `codebus hook check-bash`, `Read` → `codebus hook check-read`, `Glob` → `codebus hook check-read`, AND `Grep` → `codebus hook check-read`) SHALL be sourced from the same definition that `codebus init` uses to author the default settings file, so the linter AND the installer cannot drift.
+The required hook set (the matcher-command pairs `Bash` -> `codebus hook check-bash`, `Read` -> `codebus hook check-read`, `Glob` -> `codebus hook check-read`, AND `Grep` -> `codebus hook check-read`) SHALL be sourced from the same definition that `codebus init` uses to author the default settings file, so the linter AND the installer cannot drift. The required sensitive-basename deny set SHALL likewise be sourced from the same definition that the settings writer and `codebus hook check-read` basename backstop use.
 
-The check SHALL emit a lint issue with `severity: error` AND the stable kebab-case rule identifier `vault-gate-integrity` when ANY of the following holds: the settings file is absent; the file does not parse as JSON; `hooks.PreToolUse` is missing or is not an array; OR any one of the four required hook entries (`Bash` → check-bash, `Read` → check-read, `Glob` → check-read, `Grep` → check-read) is absent. The issue `message` SHALL identify which condition failed (which required hook is missing, or that the file is absent / unparseable). When ALL four required hook entries are present, the check SHALL emit NO `vault-gate-integrity` issue, regardless of any additional user-added matcher entries, hook commands, or top-level keys present in the file (preserving the write-if-missing user-customization contract).
+The check SHALL emit a lint issue with `severity: error` AND the stable kebab-case rule identifier `vault-gate-integrity` when ANY of the following holds: the settings file is absent; the file does not parse as JSON; `hooks.PreToolUse` is missing or is not an array; any one of the four required hook entries (`Bash` -> check-bash, `Read` -> check-read, `Glob` -> check-read, `Grep` -> check-read) is absent; `permissions.deny` is missing or is not an array; OR any one of the three required sensitive-basename deny rules is absent. The issue `message` SHALL identify which condition failed, including the specific missing hook or deny rule. When `permissions.deny` is missing, empty, or not an array, the check SHALL treat all required sensitive-basename deny rules as missing. When ALL four required hook entries and ALL three required deny rules are present, the check SHALL emit NO `vault-gate-integrity` issue, regardless of any additional user-added matcher entries, hook commands, permission rules, or top-level keys present in the file (preserving the write-if-missing user-customization contract).
 
 The issue path for a `vault-gate-integrity` finding SHALL be the settings file location: in `text` format it SHALL render as the vault-relative path `.claude/settings.json` verbatim, WITHOUT the `wiki/` prefix that the text format applies to wiki-subtree issue paths; in `json` format the issue `path` SHALL be the absolute filesystem path of the settings file. This finding SHALL be counted in the `error_count` totals like any other error-severity issue.
 
 #### Scenario: Intact gate produces no issue
 
-- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the `Bash` → `codebus hook check-bash`, `Read` → `codebus hook check-read`, `Glob` → `codebus hook check-read`, AND `Grep` → `codebus hook check-read` PreToolUse hook entries
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the `Bash` -> `codebus hook check-bash`, `Read` -> `codebus hook check-read`, `Glob` -> `codebus hook check-read`, AND `Grep` -> `codebus hook check-read` PreToolUse hook entries and the required sensitive-basename `permissions.deny` Read rules
 - **THEN** the lint result SHALL NOT contain any issue whose `rule` is `vault-gate-integrity`
 
 #### Scenario: Emptied PreToolUse array is flagged
 
-- **WHEN** the system runs lint against a vault whose `.claude/settings.json` parses as JSON but whose `hooks.PreToolUse` array has been rewritten to empty
-- **THEN** the lint result SHALL contain one `error`-severity issue whose `rule` is `vault-gate-integrity` per missing required hook — i.e., four such issues when all of the `Bash`, `Read`, `Glob`, AND `Grep` gates are absent — AND each issue `message` SHALL identify the specific missing gate
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` parses as JSON but whose `hooks.PreToolUse` array has been rewritten to empty while required `permissions.deny` rules remain present
+- **THEN** the lint result SHALL contain one `error`-severity issue whose `rule` is `vault-gate-integrity` per missing required hook, i.e. four such issues when all of the `Bash`, `Read`, `Glob`, AND `Grep` gates are absent, AND each issue `message` SHALL identify the specific missing gate
 
 #### Scenario: Missing Bash gate hook is flagged
 
-- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the `Read`, `Glob`, AND `Grep` check-read entries but not the `Bash` → `codebus hook check-bash` entry
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the required sensitive-basename deny rules and the `Read`, `Glob`, AND `Grep` check-read entries but not the `Bash` -> `codebus hook check-bash` entry
 - **THEN** the lint result SHALL contain a `vault-gate-integrity` error issue whose `message` identifies the missing `Bash` check-bash gate
 
 #### Scenario: Missing Read gate hook is flagged
 
-- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the `Bash`, `Glob`, AND `Grep` entries but not the `Read` → `codebus hook check-read` entry
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the required sensitive-basename deny rules and the `Bash`, `Glob`, AND `Grep` entries but not the `Read` -> `codebus hook check-read` entry
 - **THEN** the lint result SHALL contain a `vault-gate-integrity` error issue whose `message` identifies the missing `Read` check-read gate
 
 #### Scenario: Missing Glob gate hook is flagged
 
-- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the `Bash`, `Read`, AND `Grep` entries but not the `Glob` → `codebus hook check-read` entry
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the required sensitive-basename deny rules and the `Bash`, `Read`, AND `Grep` entries but not the `Glob` -> `codebus hook check-read` entry
 - **THEN** the lint result SHALL contain a `vault-gate-integrity` error issue whose `message` identifies the missing `Glob` check-read gate
 
 #### Scenario: Missing Grep gate hook is flagged
 
-- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the `Bash`, `Read`, AND `Glob` entries but not the `Grep` → `codebus hook check-read` entry
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains the required sensitive-basename deny rules and the `Bash`, `Read`, AND `Glob` entries but not the `Grep` -> `codebus hook check-read` entry
 - **THEN** the lint result SHALL contain a `vault-gate-integrity` error issue whose `message` identifies the missing `Grep` check-read gate
+
+#### Scenario: Missing permissions deny array is flagged
+
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains all four required PreToolUse hooks but has no `permissions.deny` array
+- **THEN** the lint result SHALL contain `vault-gate-integrity` error issues naming the missing sensitive-basename Read deny rules
+
+#### Scenario: Empty permissions deny array is flagged
+
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains all four required PreToolUse hooks and `permissions.deny` is an empty array
+- **THEN** the lint result SHALL contain `vault-gate-integrity` error issues naming the missing sensitive-basename Read deny rules
+
+#### Scenario: Missing one sensitive basename deny rule is flagged
+
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` contains all four required PreToolUse hooks and contains the `.pem` and `.key` sensitive-basename deny rules but not the `id_rsa` sensitive-basename deny rule
+- **THEN** the lint result SHALL contain a `vault-gate-integrity` error issue whose `message` contains `Read(**/*[iI][dD]_[rR][sS][aA]*)`
 
 #### Scenario: User-added settings do not cause a false positive
 
-- **WHEN** the system runs lint against a vault whose `.claude/settings.json` retains all four required hook entries AND also contains additional user-added PreToolUse entries or unrelated top-level keys
+- **WHEN** the system runs lint against a vault whose `.claude/settings.json` retains all four required hook entries and all required sensitive-basename deny rules AND also contains additional user-added PreToolUse entries, permission rules, or unrelated top-level keys
 - **THEN** the lint result SHALL NOT contain any `vault-gate-integrity` issue
 
 #### Scenario: Absent or unparseable settings file is flagged
@@ -953,9 +990,10 @@ The issue path for a `vault-gate-integrity` finding SHALL be the settings file l
 - **WHEN** the system runs lint against any vault, whether or not the gate is intact
 - **THEN** `<vault-root>/.claude/settings.json` SHALL be byte-identical before and after the lint invocation
 
+
 <!-- @trace
 source: agent-run-integrity
-updated: 2026-06-04
+updated: 2026-06-16
 code:
   - codebus-core/src/wiki/lint/rules/vault_gate_integrity.rs
   - codebus-core/src/wiki/lint/rules/mod.rs

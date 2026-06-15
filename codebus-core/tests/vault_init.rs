@@ -625,6 +625,36 @@ fn settings_json_content_has_pretooluse_bash_hook_invoking_codebus_hook_check_ba
 }
 
 #[test]
+fn settings_json_content_has_sensitive_basename_permissions_deny_rules() {
+    let tmp = TempDir::new().unwrap();
+    settings::write_settings_if_missing(tmp.path()).unwrap();
+    let body = fs::read_to_string(settings::settings_json_path(tmp.path())).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("settings.json must parse");
+    let deny = parsed["permissions"]["deny"]
+        .as_array()
+        .expect("permissions.deny must be array");
+    let got: Vec<&str> = deny
+        .iter()
+        .map(|v| v.as_str().expect("deny rule must be string"))
+        .collect();
+    let expected: Vec<&str> = settings::SENSITIVE_BASENAME_RULES
+        .iter()
+        .map(|rule| rule.claude_read_rule)
+        .collect();
+    assert_eq!(got, expected);
+    for rule in got {
+        assert!(
+            rule.contains('/'),
+            "deny rule must use forward slash: {rule}"
+        );
+        assert!(
+            !rule.contains('\\'),
+            "deny rule must not contain backslash: {rule}"
+        );
+    }
+}
+
+#[test]
 fn settings_json_writer_preserves_existing_user_customization() {
     let tmp = TempDir::new().unwrap();
     let custom = r#"{"hooks":{"PreToolUse":[]},"my_field":"keep me"}"#;
@@ -640,7 +670,7 @@ fn settings_json_writer_preserves_existing_user_customization() {
 
 #[test]
 fn run_init_writes_both_nav_stubs_on_fresh_vault() {
-    use codebus_core::vault::init::{run_init, InitOptions};
+    use codebus_core::vault::init::{InitOptions, run_init};
     let tmp = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     unsafe { std::env::set_var("CODEBUS_HOME", home.path()) };
@@ -660,10 +690,16 @@ fn run_init_writes_both_nav_stubs_on_fresh_vault() {
     let index_body = fs::read_to_string(&index).unwrap();
     let log_body = fs::read_to_string(&log).unwrap();
     for body in [&index_body, &log_body] {
-        assert!(body.starts_with("---\n"), "nav stub must start with frontmatter delimiter");
+        assert!(
+            body.starts_with("---\n"),
+            "nav stub must start with frontmatter delimiter"
+        );
         assert!(body.contains("type: synthesis"));
         // Spec scenario: no wikilink syntax in placeholder body.
-        assert!(!body.contains("[["), "nav stub body must not contain `[[`:\n{body}");
+        assert!(
+            !body.contains("[["),
+            "nav stub body must not contain `[[`:\n{body}"
+        );
         assert!(!body.contains("]]"));
     }
 
@@ -672,7 +708,7 @@ fn run_init_writes_both_nav_stubs_on_fresh_vault() {
 
 #[test]
 fn re_init_preserves_existing_nav_index() {
-    use codebus_core::vault::init::{run_init, InitOptions};
+    use codebus_core::vault::init::{InitOptions, run_init};
     let tmp = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     unsafe { std::env::set_var("CODEBUS_HOME", home.path()) };
@@ -708,7 +744,7 @@ fn re_init_preserves_existing_nav_index() {
 
 #[test]
 fn lint_on_freshly_inited_vault_reports_no_nav_missing() {
-    use codebus_core::vault::init::{run_init, InitOptions};
+    use codebus_core::vault::init::{InitOptions, run_init};
     use codebus_core::wiki::lint::lint_wiki;
 
     let tmp = TempDir::new().unwrap();

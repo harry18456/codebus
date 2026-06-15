@@ -1,15 +1,17 @@
-//! `vault_gate_integrity` rule — verify the vault PreToolUse gate config at
-//! `<vault-root>/.claude/settings.json` still installs the two hooks codebus
-//! relies on (`Bash` → `codebus hook check-bash`, `Read` → `codebus hook
-//! check-read`).
+//! `vault_gate_integrity` rule — verify the vault gate config at
+//! `<vault-root>/.claude/settings.json` still installs the hooks and
+//! `permissions.deny` rules codebus relies on.
 //!
 //! agent-run-integrity `Vault Gate Integrity Check` requirement. This is a
 //! detection-only check: it reads exactly ONE file and NEVER modifies it.
-//! The required-hook expectation set is sourced from
-//! [`crate::vault::settings::REQUIRED_HOOKS`] (single source of truth shared
-//! with `DEFAULT_SETTINGS_JSON`) so the two cannot drift.
+//! The required expectation sets are sourced from [`crate::vault::settings`]
+//! (single source of truth shared with the default settings writer) so lint and
+//! init cannot drift.
 
-use crate::vault::settings::{REQUIRED_HOOKS, RequiredHook, settings_json_path};
+use crate::vault::settings::{
+    REQUIRED_HOOKS, RequiredHook, SENSITIVE_BASENAME_RULES, SensitiveBasenameRule,
+    settings_json_path,
+};
 use crate::wiki::lint::rule::{LintRule, VaultContext};
 use crate::wiki::types::{LintIssue, LintSeverity};
 use std::fs;
@@ -85,6 +87,15 @@ impl LintRule for VaultGateIntegrityRule {
                 )));
             }
         }
+        let deny_entries = parsed["permissions"]["deny"].as_array().map(Vec::as_slice);
+        for required in SENSITIVE_BASENAME_RULES {
+            if !contains_deny_rule(deny_entries, required) {
+                issues.push(gate_issue(format!(
+                    "vault gate config {SETTINGS_REL_PATH} is missing the required permissions.deny rule `{}` — this sensitive-basename Read deny gate has been removed or altered",
+                    required.claude_read_rule
+                )));
+            }
+        }
         issues
     }
 }
@@ -106,6 +117,17 @@ fn contains_hook(entries: &[serde_json::Value], required: &RequiredHook) -> bool
     })
 }
 
+fn contains_deny_rule(
+    entries: Option<&[serde_json::Value]>,
+    required: &SensitiveBasenameRule,
+) -> bool {
+    entries.is_some_and(|entries| {
+        entries
+            .iter()
+            .any(|entry| entry.as_str() == Some(required.claude_read_rule))
+    })
+}
+
 fn gate_issue(message: String) -> LintIssue {
     LintIssue {
         path: SETTINGS_REL_PATH.to_string(),
@@ -118,7 +140,7 @@ fn gate_issue(message: String) -> LintIssue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::settings::DEFAULT_SETTINGS_JSON;
+    use crate::vault::settings::{SENSITIVE_BASENAME_RULES, default_settings_json};
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -141,11 +163,30 @@ mod tests {
         VaultGateIntegrityRule::new().check(&ctx)
     }
 
+    fn all_required_deny_rules_json() -> String {
+        SENSITIVE_BASENAME_RULES
+            .iter()
+            .map(|rule| format!(r#""{}""#, rule.claude_read_rule))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    fn settings_with_pretooluse(pretooluse: &str) -> String {
+        format!(
+            r#"{{"permissions":{{"deny":[{}]}},"hooks":{{"PreToolUse":{pretooluse}}}}}"#,
+            all_required_deny_rules_json()
+        )
+    }
+
+    fn all_required_hooks_pretooluse() -> &'static str {
+        r#"[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]"#
+    }
+
     // (a) both hooks present → 0 issues.
     #[test]
     fn both_required_hooks_present_yields_no_issue() {
         let tmp = TempDir::new().unwrap();
-        write_settings(tmp.path(), DEFAULT_SETTINGS_JSON);
+        write_settings(tmp.path(), default_settings_json());
         let issues = run(tmp.path());
         assert!(issues.is_empty(), "expected 0 issues, got {issues:?}");
     }
@@ -154,7 +195,7 @@ mod tests {
     #[test]
     fn empty_pretooluse_array_yields_one_error_per_missing_hook() {
         let tmp = TempDir::new().unwrap();
-        write_settings(tmp.path(), r#"{"hooks":{"PreToolUse":[]}}"#);
+        write_settings(tmp.path(), &settings_with_pretooluse("[]"));
         let issues = run(tmp.path());
         // All four required hooks missing → one error each. The spec scenario
         // (b) wording ("exactly 1 issue") refers to the emptied-array case
@@ -176,7 +217,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write_settings(
             tmp.path(),
-            r#"{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
+            &settings_with_pretooluse(
+                r#"[{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]"#,
+            ),
         );
         let issues = run(tmp.path());
         assert_eq!(issues.len(), 1, "got {issues:?}");
@@ -196,7 +239,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write_settings(
             tmp.path(),
-            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
+            &settings_with_pretooluse(
+                r#"[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]"#,
+            ),
         );
         let issues = run(tmp.path());
         assert_eq!(issues.len(), 1, "got {issues:?}");
@@ -217,7 +262,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write_settings(
             tmp.path(),
-            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
+            &settings_with_pretooluse(
+                r#"[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]"#,
+            ),
         );
         let issues = run(tmp.path());
         assert_eq!(issues.len(), 1, "got {issues:?}");
@@ -237,7 +284,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write_settings(
             tmp.path(),
-            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
+            &settings_with_pretooluse(
+                r#"[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]}]"#,
+            ),
         );
         let issues = run(tmp.path());
         assert_eq!(issues.len(), 1, "got {issues:?}");
@@ -254,10 +303,12 @@ mod tests {
     #[test]
     fn extra_user_entries_and_keys_do_not_trigger_issue() {
         let tmp = TempDir::new().unwrap();
-        write_settings(
-            tmp.path(),
-            r#"{
+        let body = r#"{
               "my_custom_top_level": "value",
+              "permissions": {
+                "deny": [__DENY__],
+                "allow": ["Read(wiki/**)"]
+              },
               "hooks": {
                 "PreToolUse": [
                   {"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},
@@ -270,10 +321,103 @@ mod tests {
                   {"matcher":"Bash","hooks":[{"type":"command","command":"some user thing"}]}
                 ]
               }
-            }"#,
-        );
+            }"#
+        .replace("__DENY__", &all_required_deny_rules_json());
+        write_settings(tmp.path(), &body);
         let issues = run(tmp.path());
         assert!(issues.is_empty(), "expected 0 issues, got {issues:?}");
+    }
+
+    #[test]
+    fn missing_permissions_deny_yields_error_per_required_deny_rule() {
+        let tmp = TempDir::new().unwrap();
+        write_settings(
+            tmp.path(),
+            &format!(
+                r#"{{"hooks":{{"PreToolUse":{}}}}}"#,
+                all_required_hooks_pretooluse()
+            ),
+        );
+        let issues = run(tmp.path());
+        assert_eq!(
+            issues.len(),
+            SENSITIVE_BASENAME_RULES.len(),
+            "got {issues:?}"
+        );
+        for rule in SENSITIVE_BASENAME_RULES {
+            assert!(
+                issues
+                    .iter()
+                    .any(|issue| issue.message.contains(rule.claude_read_rule)),
+                "missing deny issue must name {}; got {issues:?}",
+                rule.claude_read_rule
+            );
+        }
+    }
+
+    #[test]
+    fn non_array_permissions_deny_yields_error_per_required_deny_rule() {
+        let tmp = TempDir::new().unwrap();
+        write_settings(
+            tmp.path(),
+            &format!(
+                r#"{{"permissions":{{"deny":"Read(**/*.pem)"}},"hooks":{{"PreToolUse":{}}}}}"#,
+                all_required_hooks_pretooluse()
+            ),
+        );
+        let issues = run(tmp.path());
+        assert_eq!(
+            issues.len(),
+            SENSITIVE_BASENAME_RULES.len(),
+            "got {issues:?}"
+        );
+        assert!(issues.iter().all(|i| i.severity == LintSeverity::Error));
+        assert!(
+            issues
+                .iter()
+                .all(|i| i.rule_id == VaultGateIntegrityRule::RULE_ID)
+        );
+    }
+
+    #[test]
+    fn empty_permissions_deny_yields_error_per_required_deny_rule() {
+        let tmp = TempDir::new().unwrap();
+        write_settings(
+            tmp.path(),
+            &format!(
+                r#"{{"permissions":{{"deny":[]}},"hooks":{{"PreToolUse":{}}}}}"#,
+                all_required_hooks_pretooluse()
+            ),
+        );
+        let issues = run(tmp.path());
+        assert_eq!(
+            issues.len(),
+            SENSITIVE_BASENAME_RULES.len(),
+            "got {issues:?}"
+        );
+    }
+
+    #[test]
+    fn missing_one_sensitive_deny_rule_names_rule() {
+        let tmp = TempDir::new().unwrap();
+        write_settings(
+            tmp.path(),
+            &format!(
+                r#"{{"permissions":{{"deny":["{}","{}"]}},"hooks":{{"PreToolUse":{}}}}}"#,
+                SENSITIVE_BASENAME_RULES[0].claude_read_rule,
+                SENSITIVE_BASENAME_RULES[1].claude_read_rule,
+                all_required_hooks_pretooluse()
+            ),
+        );
+        let issues = run(tmp.path());
+        assert_eq!(issues.len(), 1, "got {issues:?}");
+        assert!(
+            issues[0]
+                .message
+                .contains(SENSITIVE_BASENAME_RULES[2].claude_read_rule),
+            "message must name the missing deny rule: {}",
+            issues[0].message
+        );
     }
 
     // (f) settings file absent → error.

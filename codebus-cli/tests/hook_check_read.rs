@@ -123,8 +123,7 @@ fn blocks_windows_path_with_backslashes() {
 
 #[test]
 fn allows_markdown_text() {
-    let body =
-        r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/modules/uv-lib.md"}}"#;
+    let body = r#"{"tool_name":"Read","tool_input":{"file_path":"wiki/modules/uv-lib.md"}}"#;
     let (code, stdout, _) = run_check_read(body);
     assert_eq!(code, Some(0));
     assert_allow(&stdout);
@@ -132,7 +131,8 @@ fn allows_markdown_text() {
 
 #[test]
 fn allows_rust_source() {
-    let body = r#"{"tool_name":"Read","tool_input":{"file_path":"codebus-core/src/agent/claude_cli.rs"}}"#;
+    let body =
+        r#"{"tool_name":"Read","tool_input":{"file_path":"codebus-core/src/agent/claude_cli.rs"}}"#;
     let (code, stdout, _) = run_check_read(body);
     assert_eq!(code, Some(0));
     assert_allow(&stdout);
@@ -152,6 +152,36 @@ fn allows_no_extension() {
     let (code, stdout, _) = run_check_read(body);
     assert_eq!(code, Some(0));
     assert_allow(&stdout);
+}
+
+#[test]
+fn blocks_sensitive_key_basename_variants() {
+    let home = TempDir::new().expect("tmp CODEBUS_HOME");
+    write_codebus_config(
+        home.path(),
+        "hooks:\n  read_image_block: true\n  read_path_containment: true\n",
+    );
+    for path in [
+        "raw/code/server.pem",
+        "raw/code/server.PEM",
+        "raw/code/private.key",
+        "raw/code/private.KEY",
+        "raw/code/id_rsa",
+        "raw/code/ID_RSA",
+        "raw/code/backup-ID_RSA.txt",
+    ] {
+        let body = format!(r#"{{"tool_name":"Read","tool_input":{{"file_path":"{path}"}}}}"#);
+        let (code, stdout, _) = run_check_read_with_home(&body, Some(home.path()));
+        assert_eq!(code, Some(0), "exit code for {path}");
+        let parsed = assert_block(&stdout);
+        assert!(
+            parsed["reason"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("basename"),
+            "reason must name basename rule for {path}: {stdout}"
+        );
+    }
 }
 
 #[test]
@@ -250,8 +280,9 @@ fn containment_blocks_out_of_vault_read_via_binary() {
     let vault_fs = vault.path().to_string_lossy().replace('\\', "/");
     let outside = vault.path().parent().unwrap().join("secret.txt");
     let outside_fs = outside.to_string_lossy().replace('\\', "/");
-    let body =
-        format!(r#"{{"tool_name":"Read","cwd":"{vault_fs}","tool_input":{{"file_path":"{outside_fs}"}}}}"#);
+    let body = format!(
+        r#"{{"tool_name":"Read","cwd":"{vault_fs}","tool_input":{{"file_path":"{outside_fs}"}}}}"#
+    );
     let (code, stdout, _) = run_check_read_with_home(&body, Some(home.path()));
     assert_eq!(code, Some(0));
     let v = assert_block(&stdout);
@@ -270,8 +301,9 @@ fn containment_allows_in_vault_read_via_binary() {
     write_codebus_config(home.path(), "hooks:\n  read_path_containment: true\n");
     let vault = TempDir::new().expect("vault");
     let vault_fs = vault.path().to_string_lossy().replace('\\', "/");
-    let body =
-        format!(r#"{{"tool_name":"Read","cwd":"{vault_fs}","tool_input":{{"file_path":"raw/code/x.rs"}}}}"#);
+    let body = format!(
+        r#"{{"tool_name":"Read","cwd":"{vault_fs}","tool_input":{{"file_path":"raw/code/x.rs"}}}}"#
+    );
     let (code, stdout, _) = run_check_read_with_home(&body, Some(home.path()));
     assert_eq!(code, Some(0));
     assert!(

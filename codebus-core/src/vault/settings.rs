@@ -13,6 +13,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsOutcome {
@@ -59,6 +60,54 @@ pub const REQUIRED_HOOKS: &[RequiredHook] = &[
     },
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SensitiveBasenameMatcher {
+    SuffixAsciiCaseInsensitive(&'static str),
+    ContainsAsciiCaseInsensitive(&'static str),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SensitiveBasenameRule {
+    pub matcher: SensitiveBasenameMatcher,
+    pub claude_read_rule: &'static str,
+}
+
+impl SensitiveBasenameRule {
+    pub fn matches(&self, basename: &str) -> bool {
+        let lower = basename.to_ascii_lowercase();
+        match self.matcher {
+            SensitiveBasenameMatcher::SuffixAsciiCaseInsensitive(suffix) => lower.ends_with(suffix),
+            SensitiveBasenameMatcher::ContainsAsciiCaseInsensitive(needle) => {
+                lower.contains(needle)
+            }
+        }
+    }
+}
+
+/// Single source of truth for sensitive key-file basename patterns enforced
+/// by Claude Code `permissions.deny`, verified by `vault-gate-integrity`, and
+/// retained as a Read-hook defense-in-depth backstop.
+pub const SENSITIVE_BASENAME_RULES: &[SensitiveBasenameRule] = &[
+    SensitiveBasenameRule {
+        matcher: SensitiveBasenameMatcher::SuffixAsciiCaseInsensitive(".pem"),
+        claude_read_rule: "Read(**/*.[pP][eE][mM])",
+    },
+    SensitiveBasenameRule {
+        matcher: SensitiveBasenameMatcher::SuffixAsciiCaseInsensitive(".key"),
+        claude_read_rule: "Read(**/*.[kK][eE][yY])",
+    },
+    SensitiveBasenameRule {
+        matcher: SensitiveBasenameMatcher::ContainsAsciiCaseInsensitive("id_rsa"),
+        claude_read_rule: "Read(**/*[iI][dD]_[rR][sS][aA]*)",
+    },
+];
+
+pub fn matches_sensitive_basename(basename: &str) -> bool {
+    SENSITIVE_BASENAME_RULES
+        .iter()
+        .any(|rule| rule.matches(basename))
+}
+
 /// `<vault_root>/.claude/settings.json` path (deterministic helper for
 /// callers / tests).
 pub fn settings_json_path(vault_root: &Path) -> PathBuf {
@@ -71,49 +120,44 @@ pub fn settings_json_path(vault_root: &Path) -> PathBuf {
 /// `codebus hook check-read`, enforcing the vault-root containment boundary
 /// per `check-read-vault-containment` AND the image / sensitive denylist per
 /// `PII Image Read Hook Installation`).
-pub const DEFAULT_SETTINGS_JSON: &str = r#"{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "codebus hook check-bash"
-          }
-        ]
-      },
-      {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "codebus hook check-read"
-          }
-        ]
-      },
-      {
-        "matcher": "Glob",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "codebus hook check-read"
-          }
-        ]
-      },
-      {
-        "matcher": "Grep",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "codebus hook check-read"
-          }
-        ]
-      }
-    ]
-  }
+pub static DEFAULT_SETTINGS_JSON: LazyLock<String> = LazyLock::new(build_default_settings_json);
+
+pub fn default_settings_json() -> &'static str {
+    DEFAULT_SETTINGS_JSON.as_str()
 }
-"#;
+
+fn build_default_settings_json() -> String {
+    let pretooluse: Vec<serde_json::Value> = REQUIRED_HOOKS
+        .iter()
+        .map(|required| {
+            serde_json::json!({
+                "matcher": required.matcher,
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": required.command
+                    }
+                ]
+            })
+        })
+        .collect();
+    let deny: Vec<&str> = SENSITIVE_BASENAME_RULES
+        .iter()
+        .map(|rule| rule.claude_read_rule)
+        .collect();
+    let value = serde_json::json!({
+        "hooks": {
+            "PreToolUse": pretooluse
+        },
+        "permissions": {
+            "deny": deny
+        }
+    });
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(&value).expect("default settings JSON must serialize")
+    )
+}
 
 /// Write `<vault_root>/.claude/settings.json` containing the default
 /// PreToolUse Bash hook config when the file does not already exist.
@@ -126,7 +170,7 @@ pub fn write_settings_if_missing(vault_root: &Path) -> io::Result<SettingsOutcom
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&path, DEFAULT_SETTINGS_JSON)?;
+    fs::write(&path, default_settings_json())?;
     Ok(SettingsOutcome::Written)
 }
 
@@ -134,6 +178,12 @@ pub fn write_settings_if_missing(vault_root: &Path) -> io::Result<SettingsOutcom
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    const REQUIRED_SENSITIVE_DENY_RULES: &[&str] = &[
+        "Read(**/*.[pP][eE][mM])",
+        "Read(**/*.[kK][eE][yY])",
+        "Read(**/*[iI][dD]_[rR][sS][aA]*)",
+    ];
 
     #[test]
     fn writes_settings_json_on_fresh_vault() {
@@ -193,9 +243,9 @@ mod tests {
                     Some(arr) => arr,
                     None => return false,
                 };
-                nested.iter().any(|hook| {
-                    hook["type"] == "command" && hook["command"] == command
-                })
+                nested
+                    .iter()
+                    .any(|hook| hook["type"] == "command" && hook["command"] == command)
             })
         };
 
@@ -215,6 +265,64 @@ mod tests {
             find_entry("Grep", "codebus hook check-read"),
             "PreToolUse must contain Grep matcher entry invoking `codebus hook check-read`"
         );
+    }
+
+    #[test]
+    fn sensitive_basename_rules_match_ascii_case_insensitively() {
+        for basename in [
+            "server.pem",
+            "server.PEM",
+            "private.key",
+            "private.KEY",
+            "id_rsa",
+            "ID_RSA",
+            "backup-ID_RSA.txt",
+        ] {
+            assert!(
+                matches_sensitive_basename(basename),
+                "expected sensitive basename hit for {basename}"
+            );
+        }
+        assert!(
+            !matches_sensitive_basename("readme.md"),
+            "non-sensitive basename must not match"
+        );
+    }
+
+    #[test]
+    fn sensitive_basename_rule_set_exposes_required_claude_read_rules() {
+        let got: Vec<&str> = SENSITIVE_BASENAME_RULES
+            .iter()
+            .map(|rule| rule.claude_read_rule)
+            .collect();
+        assert_eq!(got, REQUIRED_SENSITIVE_DENY_RULES);
+    }
+
+    #[test]
+    fn default_settings_json_contains_sensitive_basename_permissions_deny() {
+        let parsed: serde_json::Value = serde_json::from_str(default_settings_json()).unwrap();
+        let deny = parsed["permissions"]["deny"]
+            .as_array()
+            .expect("permissions.deny must be an array");
+        let got: Vec<&str> = deny
+            .iter()
+            .map(|v| v.as_str().expect("deny rule must be a string"))
+            .collect();
+        assert_eq!(got, REQUIRED_SENSITIVE_DENY_RULES);
+        for rule in got {
+            assert!(
+                rule.contains('/'),
+                "required sensitive deny rule must use forward slash: {rule}"
+            );
+            assert!(
+                !rule.contains('\\'),
+                "required sensitive deny rule must not use backslash: {rule}"
+            );
+            assert!(
+                rule.contains('['),
+                "required sensitive deny rule must use bracket classes: {rule}"
+            );
+        }
     }
 
     // --- agent-run-integrity task 2.1 — drift guard: DEFAULT_SETTINGS_JSON
@@ -245,7 +353,7 @@ mod tests {
 
     #[test]
     fn default_settings_json_matches_required_hooks_exactly() {
-        let pairs = pretooluse_pairs(DEFAULT_SETTINGS_JSON);
+        let pairs = pretooluse_pairs(default_settings_json());
         let expected: Vec<(String, String)> = REQUIRED_HOOKS
             .iter()
             .map(|h| (h.matcher.to_string(), h.command.to_string()))

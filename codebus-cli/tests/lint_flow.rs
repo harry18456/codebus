@@ -342,6 +342,45 @@ fn lint_flags_missing_glob_gate() {
     assert_eq!(out.status.code(), Some(1));
 }
 
+#[test]
+fn lint_flags_missing_sensitive_basename_deny_rules() {
+    let tmp = TempDir::new().unwrap();
+    init_vault(tmp.path());
+
+    let settings = tmp
+        .path()
+        .join(".codebus")
+        .join(".claude")
+        .join("settings.json");
+    std::fs::write(
+        &settings,
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"codebus hook check-bash"}]},{"matcher":"Read","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Glob","hooks":[{"type":"command","command":"codebus hook check-read"}]},{"matcher":"Grep","hooks":[{"type":"command","command":"codebus hook check-read"}]}]}}"#,
+    )
+    .unwrap();
+
+    let out = lint(tmp.path(), &["--format", "json"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("JSON output must parse");
+    let issues = parsed["issues"].as_array().expect("issues array");
+    let gate = issues
+        .iter()
+        .find(|i| {
+            i["rule"] == "vault-gate-integrity"
+                && i["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("Read(**/*.[pP][eE][mM])")
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a vault-gate-integrity issue naming missing pem deny rule, got: {stdout}"
+            )
+        });
+    assert_eq!(gate["severity"], "error");
+    assert_eq!(out.status.code(), Some(1));
+}
+
 fn snapshot(dir: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
     let mut snap = Vec::new();
     fn recurse(d: &Path, snap: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {

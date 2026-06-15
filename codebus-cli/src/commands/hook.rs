@@ -15,6 +15,7 @@
 
 use clap::Subcommand;
 use codebus_core::config::{HooksConfig, default_config_path, load_hooks_config};
+use codebus_core::vault::settings::matches_sensitive_basename;
 use serde::Deserialize;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -419,7 +420,7 @@ fn check_sensitive_path(path: &str, home: Option<&Path>) -> Option<String> {
     // hits are caught even on an environment where home resolution would
     // otherwise force fail-closed.
     let basename = extract_basename(path);
-    if matches_sensitive_basename_glob(basename) {
+    if matches_sensitive_basename(basename) {
         return Some(format!(
             "hook: file path basename matches sensitive key glob (e.g. id_rsa / *.pem / *.key); received `{path}`"
         ));
@@ -454,19 +455,6 @@ fn extract_basename(path: &str) -> &str {
     path.rsplit(|c| c == '/' || c == '\\')
         .next()
         .unwrap_or(path)
-}
-
-/// Returns true when `basename` (case-insensitive) matches any of the
-/// sensitive key-file glob patterns: `*id_rsa*`, `*.pem`, `*.key`.
-fn matches_sensitive_basename_glob(basename: &str) -> bool {
-    let lower = basename.to_ascii_lowercase();
-    if lower.contains("id_rsa") {
-        return true;
-    }
-    if lower.ends_with(".pem") || lower.ends_with(".key") {
-        return true;
-    }
-    false
 }
 
 /// Returns true when `path` is `~`-prefixed OR is an absolute path
