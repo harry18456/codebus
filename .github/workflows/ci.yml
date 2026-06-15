@@ -31,6 +31,18 @@ jobs:
         working-directory: codebus-app
         run: npm ci
 
+      - name: Stage CLI binary for the tauri bundle resource
+        shell: pwsh
+        run: |
+          # codebus-app-tauri's build script requires the bin-staging/codebus.exe
+          # bundle resource (tauri.conf.json bundle.resources) to exist even for
+          # cargo test/clippy, which compile the crate (the build script runs)
+          # without bundling. Release uses scripts/stage-cli.mjs (release CLI);
+          # a debug build is enough to satisfy the resource path for CI.
+          cargo build -p codebus-cli
+          New-Item -ItemType Directory -Force codebus-app/src-tauri/bin-staging | Out-Null
+          Copy-Item target/debug/codebus.exe codebus-app/src-tauri/bin-staging/codebus.exe -Force
+
       - name: Rust tests
         run: cargo test --workspace
 
