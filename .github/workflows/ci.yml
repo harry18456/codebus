@@ -1,0 +1,128 @@
+name: ci
+
+"on":
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: codebus-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: codebus-app
+        run: npm ci
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Rust clippy baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $baseline = @{
+            "codebus-core" = 8
+            "codebus-cli" = 5
+            "codebus-app-tauri" = 6
+          }
+
+          $counts = @{}
+          foreach ($pkg in $baseline.Keys) {
+            $counts[$pkg] = 0
+          }
+
+          $log = Join-Path $env:RUNNER_TEMP "cargo-clippy.jsonl"
+          cargo clippy --workspace --message-format=json 2>&1 | Tee-Object -FilePath $log
+          $clippyExit = $LASTEXITCODE
+          if ($clippyExit -ne 0) {
+            Write-Host "::error::cargo clippy failed with exit code $clippyExit"
+            exit $clippyExit
+          }
+
+          function Get-CodebusPackageName($message) {
+            $manifest = [string]$message.manifest_path
+            $manifest = $manifest -replace "\\", "/"
+            if ($manifest.EndsWith("/codebus-core/Cargo.toml")) {
+              return "codebus-core"
+            }
+            if ($manifest.EndsWith("/codebus-cli/Cargo.toml")) {
+              return "codebus-cli"
+            }
+            if ($manifest.EndsWith("/codebus-app/src-tauri/Cargo.toml")) {
+              return "codebus-app-tauri"
+            }
+
+            $packageId = [string]$message.package_id
+            if ($packageId -match "#([^#@]+)@") {
+              return $Matches[1]
+            }
+            return $null
+          }
+
+          foreach ($line in Get-Content $log) {
+            if ([string]::IsNullOrWhiteSpace($line)) {
+              continue
+            }
+
+            try {
+              $message = $line | ConvertFrom-Json
+            } catch {
+              continue
+            }
+
+            if ($message.reason -ne "compiler-message") {
+              continue
+            }
+            if ($message.message.level -ne "warning") {
+              continue
+            }
+
+            $pkg = Get-CodebusPackageName $message
+            if ($null -eq $pkg -or -not $baseline.ContainsKey($pkg)) {
+              continue
+            }
+
+            $counts[$pkg] += 1
+          }
+
+          $failed = $false
+          foreach ($pkg in ($baseline.Keys | Sort-Object)) {
+            $count = $counts[$pkg]
+            $limit = $baseline[$pkg]
+            Write-Host "$pkg clippy warnings: $count (baseline: $limit)"
+            if ($count -gt $limit) {
+              Write-Host "::error::$pkg has $count clippy warnings, above baseline $limit"
+              $failed = $true
+            }
+          }
+
+          if ($failed) {
+            exit 1
+          }
+
+      - name: Frontend tests
+        working-directory: codebus-app
+        run: npm run test
+
+      - name: Frontend typecheck
+        working-directory: codebus-app
+        run: npm run typecheck
