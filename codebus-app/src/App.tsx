@@ -20,8 +20,13 @@ import { useRouteStore } from "@/store/route"
 import { useSettingsStore } from "@/store/settings"
 import { useVaultsStore } from "@/store/vaults"
 import { PrimitiveShowcase } from "@/sandbox/PrimitiveShowcase"
+import { version as appVersion } from "../package.json"
 
-const APP_VERSION = "v3.0.0"
+// Single source of truth for the version shown in the UI — the app's
+// package.json version (kept in sync with Cargo.toml / tauri.conf.json on
+// every bump). Imported (not hardcoded) so the BottomStrip label can never
+// drift from the real version again; works in build/dev/test alike.
+const APP_VERSION = `v${appVersion}`
 const PII_PATTERN_COUNT = 14
 
 export function App() {
