@@ -135,10 +135,10 @@ describe("QuizReview", () => {
       />,
     )
     fireEvent.click(screen.getByTestId("quiz-view-log"))
-    await waitFor(() =>
-      expect(screen.getByTestId("quiz-view-log-modal")).toBeInTheDocument(),
-    )
-    expect(screen.getByTestId("thought-item")).toBeInTheDocument()
+    // findBy (not waitFor-on-container then getBy-on-child): Radix Dialog's
+    // portal/Presence mount is non-atomic; getByTestId on the deep child can
+    // miss it on a slow CI runner. Same race + fix as QuizTab.test.tsx.
+    expect(await screen.findByTestId("thought-item")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("quiz-view-log-close"))
     await waitFor(() =>
       expect(
