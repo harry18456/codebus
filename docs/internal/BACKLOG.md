@@ -4,7 +4,7 @@
 
 本檔分三段：**開放項目**（真正還沒做、按主題分組，每條附「起點」可直接定位要改哪）、**已完成 / Archived**（曾是開放項目、後來做掉的，留對應 change 當脈絡）、**已決定不做**（評估後放棄、留決策理由）。詳述見各自的 `docs/internal/<date>-<slug>-backlog.md`。新發現的 design smell / UX 缺陷 / feature gap 先記成開放項目，之後再決定要不要 `/spectra-propose` 起 change。
 
-> **最後校正：2026-06-16** —— Tier 0 三條（COR-3 codex token guard、SEC-3 in-vault deny、REL-1 GitHub CI+templates）完成、移入已完成段。（2026-06-14：逐條對 `openspec/changes/archive/` + 真實程式碼 grep 驗證、移除 check-read / Windows 打包、標註 RunId / provider-PE / Settings chat 等部分完成項。）
+> **最後校正：2026-06-26** —— 對 19 條開放 + 3 個 session todo 逐條 grep 真實程式碼 review，確認全部仍真開放（無 stale）、新增 TOOL-1（spectra archive `@trace` 污染）。（2026-06-16：Tier 0 三條完成移入已完成段。2026-06-14：逐條 grep 驗證、移除 check-read / Windows 打包、標註部分完成項。）
 > 嚴重度／工程量為相對估值；組內由上而下大致為建議優先序。
 
 ---
@@ -111,6 +111,15 @@
   - **現況**：codebase 零整合 code（僅 backlog/spec-trace 提及）。等對方 CLI 長出 codebus contract（見 2026-05-20 spike 結論）再評估。
   - 詳細：[mycoder-cli](2026-05-14-mycoder-cli-backlog.md)
 
+### 🛠️ 工具 / 流程
+
+- **TOOL-1 · spectra archive 對 `@trace` 的污染（系統性，每 change 都要手修）** — workflow 複利成本 · 工程量：中（驗證/還原腳本）/ 輕（若可關 auto-trace）
+  - **問題**：每次 `spectra archive` 套用 MODIFIED / ADDED requirement 時，把該 requirement 的 `@trace` `code:` 清單**平攤成整個 dirty 工作樹的檔**（含無關檔）、多 requirement **交叉污染**（互塞對方的檔）、`source:` 被覆寫、原 provenance + `tests:` 丟失；ADDED 新 capability 的 trace 也被平攤。每個 change archive 後都要逐條手動還原。
+  - **現況**（2026-06-26 review 實證、無緩解）：`scripts/` 無 trace 驗證/還原工具、`.spectra.yaml` 無關閉 auto-trace 的開關、無根治計畫；活體污染可見——`openspec/specs/app-workspace/spec.md` 把 `docs/2026-05-14-mycoder-cli-backlog.md` 平攤進 6 個與 mycoder 無關的 requirement `@trace`。這 session 三條 Tier 0 archive 全踩、手修三次。
+  - **方案**：(a) post-archive 驗證 + 還原腳本（archive 後逐條 grep `@trace`、抓平攤污染檔、還原成每-req 相關檔 + 原 provenance(append 本次) + 原 tests）；或 (b) 評估關閉 spectra auto-trace（若工具支援）；或 (c) 回報 spectra upstream。註：spectra 是外部工具、多半只能側面緩解；SOP「archive 前先 commit 實作成 clean tree」可減少「平攤無關髒檔」，但 MODIFIED 刪不重生 / ADDED 不生成仍要手補。
+  - **備註（低風險觀察，暫不開條）**：`codebus-app/src/components/workspace/GoalsTab.test.tsx:261` 的「`keyDown` 開 modal → 立即 `getByTestId`（非 `findBy`）」同 QuizTab/QuizReview 已修的 Radix Dialog mount race，CI 慢時理論上可能撞（目前穩定過、RTL 同步 flush）；未來 CI 真撞再改 `findBy`。
+  - 源自 2026-06-26 backlog review；完整 SOP 見 memory `project_spectra_archive_drops_trace_on_modified_requirement`（無 in-repo detail doc）。
+
 ---
 
 ## 已完成 / Archived 項目
@@ -171,7 +180,7 @@
    - Tasks 粗估 + 工程量
    - Out of scope
    - 何時動 / 優先序
-2. 在本檔「開放項目」對應主題分組（🔒安全 / 🎯正確性 / 🚀能力 / 🎨UX / 📦發佈 / ⏳外部）下新增一條，沿用編號慣例（`SEC-/COR-/CAP-/UX-/REL-/EXT-`）+ 附「起點」檔案。
+2. 在本檔「開放項目」對應主題分組（🔒安全 / 🎯正確性 / 🚀能力 / 🎨UX / 📦發佈 / ⏳外部 / 🛠️工具流程）下新增一條，沿用編號慣例（`SEC-/COR-/CAP-/UX-/REL-/EXT-/TOOL-`）+ 附「起點」檔案。
 3. 之後若決定動，用 `/spectra-propose <slug>` 把該 backlog 當 pre-discuss 帶進 propose flow。
 
 ## 怎麼歸檔
