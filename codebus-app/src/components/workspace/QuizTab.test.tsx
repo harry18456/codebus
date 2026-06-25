@@ -794,10 +794,12 @@ describe("QuizTab", () => {
     expect(screen.getAllByTestId("quiz-review-question")).toHaveLength(5)
 
     fireEvent.click(screen.getByTestId("quiz-view-log"))
-    await waitFor(() =>
-      expect(screen.getByTestId("quiz-view-log-modal")).toBeInTheDocument(),
-    )
-    expect(screen.getByTestId("thought-item")).toBeInTheDocument()
+    // findBy (not waitFor-on-container then getBy-on-child): Radix Dialog's
+    // portal/Presence mount is non-atomic, so the modal container can flash
+    // into the DOM (passing a waitFor) while the deep child isn't stably
+    // committed yet — on a slow CI runner getByTestId then misses it. findBy
+    // polls until the modal is stably mounted and thought-item is present.
+    expect(await screen.findByTestId("thought-item")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("quiz-view-log-close"))
     await waitFor(() =>
       expect(
