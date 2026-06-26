@@ -25,6 +25,27 @@ use crate::error::AppError;
 /// remains YAML.
 pub type GlobalConfig = serde_json::Value;
 
+/// Reserved synthetic payload key carrying the backend's built-in PII pattern
+/// count to the frontend Settings UI (`regex_basic · N patterns`). It is NOT
+/// user config: injected on load so N is never hard-coded in the UI, and
+/// stripped on save so it never lands in `~/.codebus/config.yaml`. The double
+/// underscore marks it as codebus-reserved, not a user YAML section.
+const PII_PATTERN_COUNT_KEY: &str = "__pii_pattern_count";
+
+/// Attach the live `builtin_pattern_count()` to a load payload so the frontend
+/// can render the pattern count from the backend rather than a hard-coded
+/// literal. A non-object payload is returned unchanged (defensive; the loaded
+/// config is always a YAML mapping in practice).
+fn inject_pattern_count(mut payload: GlobalConfig) -> GlobalConfig {
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            PII_PATTERN_COUNT_KEY.to_string(),
+            serde_json::Value::from(codebus_core::pii::builtin_pattern_count()),
+        );
+    }
+    payload
+}
+
 /// Default in-memory payload when no file exists yet. The CLI's
 /// `write_starter_config_if_missing` is the canonical default writer, but
 /// the app may run before the CLI ever has — fall back to a payload that
@@ -96,6 +117,9 @@ pub(crate) fn save_global_config_at(path: &Path, payload: &GlobalConfig) -> IpcR
         // `default_length`, so a legacy `app.quiz.default_length` is
         // dropped here. Write the resolved length to the shared top-level
         // `quiz.*` key — this is the one-time migration landing point.
+        // Strip the synthetic pattern-count key the load path injects — it is
+        // backend-derived metadata, never user config, and SHALL NOT persist.
+        obj.remove(PII_PATTERN_COUNT_KEY);
         obj.insert("app".to_string(), enriched_app);
         // Merge the resolved `quiz.default_length` into the existing `quiz`
         // object rather than replacing the whole namespace — replacing
@@ -193,7 +217,8 @@ fn global_config_path() -> IpcResult<PathBuf> {
 #[tauri::command]
 pub async fn load_global_config() -> IpcResult<GlobalConfig> {
     let path = global_config_path()?;
-    load_global_config_at(&path)
+    let payload = load_global_config_at(&path)?;
+    Ok(inject_pattern_count(payload))
 }
 
 #[tauri::command]
@@ -210,6 +235,32 @@ mod tests {
 
     fn config_path(tmp: &TempDir) -> PathBuf {
         tmp.path().join("config.yaml")
+    }
+
+    #[test]
+    fn inject_pattern_count_carries_live_builtin_count() {
+        let injected = inject_pattern_count(json!({ "pii": { "scanner": "regex_basic" } }));
+        assert_eq!(
+            injected[PII_PATTERN_COUNT_KEY],
+            json!(codebus_core::pii::builtin_pattern_count())
+        );
+    }
+
+    #[test]
+    fn save_strips_synthetic_pattern_count_key() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        // Frontend echoes back the injected key on save — it MUST NOT persist.
+        let payload = json!({
+            "__pii_pattern_count": 13,
+            "app": { "quiz": { "pass_threshold": 80 } },
+        });
+        save_global_config_at(&path, &payload).unwrap();
+        let reloaded = load_global_config_at(&path).unwrap();
+        assert!(
+            reloaded.get(PII_PATTERN_COUNT_KEY).is_none(),
+            "synthetic key leaked to disk: {reloaded:?}"
+        );
     }
 
     #[test]

@@ -85,6 +85,14 @@ interface SettingsState {
    * hardcoded constant.
    */
   getDefaultLength: () => number
+  /**
+   * Number of built-in PII patterns the active scanner ships with, read from
+   * the backend-injected `__pii_pattern_count` payload key (see
+   * `load_global_config`). Returns `null` until the config has loaded so the
+   * Settings UI can degrade to a neutral placeholder instead of a hard-coded
+   * number — satisfying the app-shell "PII pattern count is dynamic" rule.
+   */
+  getPiiPatternCount: () => number | null
   reset: () => void
   save: () => Promise<void>
   clearError: () => void
@@ -181,6 +189,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const cfg = get().config
     const raw = cfg.quiz?.default_length ?? cfg.app?.quiz?.default_length ?? 5
     return Math.min(10, Math.max(3, raw))
+  },
+
+  getPiiPatternCount() {
+    const raw = get().config.__pii_pattern_count
+    return typeof raw === "number" ? raw : null
   },
 
   reset() {

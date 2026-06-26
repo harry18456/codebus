@@ -52,7 +52,85 @@ const BUILTIN_PATTERNS: &[(&str, PiiSeverity, &str)] = &[
         PiiSeverity::Warn,
         r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b",
     ),
+    // pii-mirror-completeness: high-precision, low-false-positive secret shapes.
+    // Each carries a fixed prefix + high-entropy body so a `[REDACTED:...]` hit
+    // is overwhelmingly a real credential, not stray prose.
+    //
+    // GitHub classic personal access token: prefix `ghp_`/`gho_`/`ghu_`/`ghs_`/
+    // `ghr_` + 36 base62. The `[pousr]` class enumerates the documented token
+    // type letters.
+    (
+        "github-pat",
+        PiiSeverity::Critical,
+        r"\bgh[pousr]_[A-Za-z0-9]{36}\b",
+    ),
+    // GitHub fine-grained PAT: `github_pat_` + 82 chars from [0-9A-Za-z_].
+    (
+        "github-fine-grained-pat",
+        PiiSeverity::Critical,
+        r"\bgithub_pat_[0-9A-Za-z_]{82}\b",
+    ),
+    // Slack token: `xoxb-`/`xoxa-`/`xoxp-`/`xoxr-`/`xoxs-` + hyphen-separated
+    // alphanumerics. The 16-char floor avoids matching a bare prefix mention.
+    (
+        "slack-token",
+        PiiSeverity::Critical,
+        r"\bxox[baprs]-[0-9A-Za-z-]{16,}",
+    ),
+    // Google API key: `AIza` + 35 chars from [0-9A-Za-z_-]. No trailing \b
+    // because a `-` final char is a non-word boundary edge case.
+    (
+        "google-api-key",
+        PiiSeverity::Critical,
+        r"\bAIza[0-9A-Za-z_\-]{35}",
+    ),
+    // OpenAI key: `sk-proj-...` OR `sk-` + 20+ pure-alnum. The second branch
+    // forbids `-`/`_`, so an Anthropic `sk-ant-...` (hyphen after `ant`) fails
+    // before reaching 20 chars and is NOT swallowed here — regex crate has no
+    // lookaround, so the alternation is how the overlap is avoided.
+    (
+        "openai-api-key",
+        PiiSeverity::Critical,
+        r"\bsk-(?:proj-[A-Za-z0-9_\-]{20,}|[A-Za-z0-9]{20,})\b",
+    ),
+    // Stripe live secret key: `sk_live_` + 24+ base62.
+    (
+        "stripe-secret-key",
+        PiiSeverity::Critical,
+        r"\bsk_live_[0-9A-Za-z]{24,}\b",
+    ),
+    // PEM private-key header. The optional key-type group covers RSA / EC /
+    // OPENSSH / DSA / PGP variants as well as the bare header.
+    (
+        "pem-private-key",
+        PiiSeverity::Critical,
+        r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
+    ),
+    // JSON Web Token: three base64url segments, first two beginning `eyJ`.
+    // Warn (not Critical) because a JWT can be a non-sensitive token.
+    (
+        "jwt",
+        PiiSeverity::Warn,
+        r"\beyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+",
+    ),
+    // Database connection string with an embedded password: scheme `://` then
+    // `user:password@`. The `@`-terminated userinfo with a `:` password segment
+    // is what distinguishes a credential leak from a host-only URI.
+    (
+        "db-connection-string",
+        PiiSeverity::Critical,
+        r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^:@/\s]+:[^@/\s]+@",
+    ),
 ];
+
+/// Number of built-in patterns the `regex_basic` scanner ships with.
+///
+/// Single source of truth for the count surfaced in the app's Settings UI
+/// (`regex_basic · N patterns`) so the displayed number can never drift from
+/// the actual pattern set.
+pub fn builtin_pattern_count() -> usize {
+    BUILTIN_PATTERNS.len()
+}
 
 pub struct RegexBasicScanner {
     rules: Vec<CompiledRule>,
@@ -225,5 +303,148 @@ mod tests {
     #[test]
     fn scanner_is_object_safe() {
         let _: Box<dyn PiiScanner> = Box::new(scanner());
+    }
+
+    // --- pii-mirror-completeness: expanded builtin pattern coverage ---
+
+    /// Count matches carrying a given `pattern_name`.
+    fn count_named(matches: &[PiiMatch], name: &str) -> usize {
+        matches.iter().filter(|m| m.pattern_name == name).count()
+    }
+
+    #[test]
+    fn builtin_pattern_count_is_thirteen() {
+        assert_eq!(builtin_pattern_count(), 13);
+        assert_eq!(BUILTIN_PATTERNS.len(), 13);
+    }
+
+    #[test]
+    fn detects_classic_github_pat_positive() {
+        let key = format!("ghp_{}", "a".repeat(36));
+        let m = scanner().scan(&format!("token = {key}"), "src/ci.rs");
+        assert_eq!(count_named(&m, "github-pat"), 1, "got {m:?}");
+        let hit = m.iter().find(|x| x.pattern_name == "github-pat").unwrap();
+        assert_eq!(hit.severity, PiiSeverity::Critical);
+    }
+
+    #[test]
+    fn ignores_github_prefix_lookalike_negative() {
+        // `ghp_short` has fewer than 36 trailing chars.
+        let m = scanner().scan("see ghp_short in docs", "README.md");
+        assert_eq!(count_named(&m, "github-pat"), 0, "got {m:?}");
+    }
+
+    #[test]
+    fn detects_fine_grained_github_pat_positive() {
+        let key = format!("github_pat_{}", "A1b2".repeat(20) + "ab"); // 82 chars
+        assert_eq!(key.len(), "github_pat_".len() + 82);
+        let m = scanner().scan(&format!("PAT={key}"), "src/ci.rs");
+        assert_eq!(count_named(&m, "github-fine-grained-pat"), 1, "got {m:?}");
+        let hit = m
+            .iter()
+            .find(|x| x.pattern_name == "github-fine-grained-pat")
+            .unwrap();
+        assert_eq!(hit.severity, PiiSeverity::Critical);
+    }
+
+    #[test]
+    fn detects_slack_token_positive() {
+        // Split the prefix from the body (as the other pattern tests do) so the
+        // source never contains a complete `xoxb-` literal that push-protection
+        // secret scanners flag as a real Slack token.
+        let key = format!("xoxb-{}", "123456789012-1234567890123-abcdEFGHijklMNOPqrstUVWX");
+        let m = scanner().scan(&format!("SLACK={key}"), "src/bot.rs");
+        assert_eq!(count_named(&m, "slack-token"), 1, "got {m:?}");
+        let hit = m.iter().find(|x| x.pattern_name == "slack-token").unwrap();
+        assert_eq!(hit.severity, PiiSeverity::Critical);
+    }
+
+    #[test]
+    fn detects_google_api_key_positive() {
+        let key = format!("AIza{}", "Bc3_-d".repeat(6).chars().take(35).collect::<String>());
+        let m = scanner().scan(&format!("GOOGLE_KEY={key}"), "src/maps.rs");
+        assert_eq!(count_named(&m, "google-api-key"), 1, "got {m:?}");
+        let hit = m
+            .iter()
+            .find(|x| x.pattern_name == "google-api-key")
+            .unwrap();
+        assert_eq!(hit.severity, PiiSeverity::Critical);
+    }
+
+    #[test]
+    fn detects_openai_api_key_positive() {
+        let key = format!("sk-{}", "a1B2c3D4".repeat(6)); // 48 alnum
+        let m = scanner().scan(&format!("OPENAI_API_KEY={key}"), "src/llm.rs");
+        assert_eq!(count_named(&m, "openai-api-key"), 1, "got {m:?}");
+        let hit = m
+            .iter()
+            .find(|x| x.pattern_name == "openai-api-key")
+            .unwrap();
+        assert_eq!(hit.severity, PiiSeverity::Critical);
+    }
+
+    #[test]
+    fn openai_pattern_does_not_match_anthropic_key_negative() {
+        // The OpenAI alternation must NOT swallow an `sk-ant-` Anthropic key.
+        let key = "sk-ant-api01-abcDEF123456789_-XYZ012345";
+        let m = scanner().scan(&format!("api_key=\"{key}\""), "src/llm.rs");
+        assert_eq!(count_named(&m, "anthropic-api-key"), 1, "got {m:?}");
+        assert_eq!(count_named(&m, "openai-api-key"), 0, "got {m:?}");
+    }
+
+    #[test]
+    fn detects_stripe_secret_key_positive() {
+        let key = format!("sk_live_{}", "Ab3Cd9Ef".repeat(3)); // 24 base62
+        let m = scanner().scan(&format!("STRIPE={key}"), "src/pay.rs");
+        assert_eq!(count_named(&m, "stripe-secret-key"), 1, "got {m:?}");
+        let hit = m
+            .iter()
+            .find(|x| x.pattern_name == "stripe-secret-key")
+            .unwrap();
+        assert_eq!(hit.severity, PiiSeverity::Critical);
+    }
+
+    #[test]
+    fn detects_pem_private_key_header_positive() {
+        let m = scanner().scan("-----BEGIN OPENSSH PRIVATE KEY-----", "id_ed25519");
+        assert_eq!(count_named(&m, "pem-private-key"), 1, "got {m:?}");
+        let hit = m
+            .iter()
+            .find(|x| x.pattern_name == "pem-private-key")
+            .unwrap();
+        assert_eq!(hit.severity, PiiSeverity::Critical);
+    }
+
+    #[test]
+    fn detects_jwt_positive() {
+        let key = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+        let m = scanner().scan(&format!("Authorization: Bearer {key}"), "src/auth.rs");
+        assert_eq!(count_named(&m, "jwt"), 1, "got {m:?}");
+        let hit = m.iter().find(|x| x.pattern_name == "jwt").unwrap();
+        assert_eq!(hit.severity, PiiSeverity::Warn);
+    }
+
+    #[test]
+    fn detects_db_connection_string_positive() {
+        let m = scanner().scan(
+            "DATABASE_URL=postgres://dbuser:s3cr3tPassw0rd@db.internal:5432/app",
+            "src/db.rs",
+        );
+        assert!(
+            count_named(&m, "db-connection-string") >= 1,
+            "expected a db-connection-string hit, got {m:?}"
+        );
+        let hit = m
+            .iter()
+            .find(|x| x.pattern_name == "db-connection-string")
+            .unwrap();
+        assert_eq!(hit.severity, PiiSeverity::Critical);
+    }
+
+    #[test]
+    fn ignores_db_uri_without_password_negative() {
+        // Host-only URI with no `user:password@` userinfo → no credential leak.
+        let m = scanner().scan("postgres://db.internal:5432/app", "src/db.rs");
+        assert_eq!(count_named(&m, "db-connection-string"), 0, "got {m:?}");
     }
 }

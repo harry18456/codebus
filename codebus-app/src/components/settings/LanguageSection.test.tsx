@@ -91,7 +91,7 @@ describe("SettingsModal · Language dropdown integration", () => {
   })
 
   it("renders the Language field between Endpoint Section and PII scanner", () => {
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     // Trigger exists in the modal.
     expect(screen.getByTestId("language-select-trigger")).toBeInTheDocument()
 
@@ -107,7 +107,7 @@ describe("SettingsModal · Language dropdown integration", () => {
   })
 
   it("picking English writes app.locale_override='en' to the store and marks dirty", () => {
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     fireEvent.click(screen.getByTestId("language-select-trigger"))
     fireEvent.click(screen.getByTestId("language-option-en"))
     const cfg = useSettingsStore.getState().config as {
@@ -119,7 +119,7 @@ describe("SettingsModal · Language dropdown integration", () => {
 
   it("picking Auto writes app.locale_override=null", () => {
     seedClaudeConfig({ locale_override: "en" })
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     fireEvent.click(screen.getByTestId("language-select-trigger"))
     fireEvent.click(screen.getByTestId("language-option-auto"))
     const cfg = useSettingsStore.getState().config as {

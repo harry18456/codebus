@@ -104,7 +104,7 @@ describe("Forbidden Behaviors in v1", () => {
 
   it("Settings modal has no forbidden phrases", () => {
     const { container } = render(
-      <SettingsModal open onClose={() => {}} piiPatternCount={14} />,
+      <SettingsModal open onClose={() => {}} piiPatternCount={13} />,
     )
     assertNoForbidden("Settings modal", container.textContent ?? "")
   })

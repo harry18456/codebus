@@ -6,7 +6,8 @@
 //!
 //! v3-config behavior matrix:
 //!   - clean file (zero matches) → mirrored byte-identical regardless of `on_hit`
-//!   - non-UTF-8 file → mirrored byte-identical (no scan, no warn, no mask) regardless of `on_hit`
+//!   - BOM-marked UTF-16 file → decoded to UTF-8, scanned, then masked (on hit) or mirrored byte-identical (clean)
+//!   - undecodable binary file → mirrored byte-identical (no scan, no warn, no mask), `unscanned_files += 1`
 //!   - matches + `OnHit::Warn` → mirrored byte-identical, one warn line per match
 //!   - matches + `OnHit::Skip` → file NOT mirrored, one warn line per match, `pii_skipped_files += 1`
 //!   - matches + `OnHit::Mask` → mirrored with each `matched_text` replaced by
@@ -113,6 +114,52 @@ pub struct SyncSummary {
     /// `walk_source_for_signal` skips silently without affecting this
     /// counter (which is exposed only on `SyncSummary`).
     pub oversized_skipped_files: usize,
+    /// pii-mirror-completeness (Decision 4): Number of files mirrored
+    /// verbatim WITHOUT being PII-scanned because their bytes are not valid
+    /// UTF-8 and carry no UTF-16/UTF-8 byte-order mark (true binary files,
+    /// e.g. images). The file is still mirrored byte-identically; this
+    /// aggregate counter is the load-bearing observable surface so that
+    /// "a file went unscanned" is visible without flooding a per-file
+    /// manifest with image/asset noise. BOM-marked UTF-16 text files are
+    /// decoded and scanned, so they do NOT increment this counter.
+    pub unscanned_files: usize,
+}
+
+/// Read a file as scannable UTF-8 text.
+///
+/// Returns `Some(text)` when the bytes are valid UTF-8, OR when they are not
+/// valid UTF-8 but carry a UTF-16 LE / UTF-16 BE byte-order mark and decode
+/// cleanly (the BOM is consumed; the decoded UTF-8 is what gets scanned).
+/// Returns `None` for undecodable binary — the caller mirrors it verbatim and
+/// counts it on `unscanned_files`. A UTF-8 BOM (`EF BB BF`) needs no special
+/// handling: it is already valid UTF-8, so `read_to_string` succeeds first try.
+fn read_scannable_text(path: &Path) -> Option<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Some(text),
+        Err(_) => {
+            let bytes = fs::read(path).ok()?;
+            match bytes.get(0..2) {
+                Some([0xFF, 0xFE]) => decode_utf16(&bytes[2..], u16::from_le_bytes),
+                Some([0xFE, 0xFF]) => decode_utf16(&bytes[2..], u16::from_be_bytes),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// Decode a UTF-16 byte body (BOM already stripped) into a UTF-8 `String`.
+///
+/// Returns `None` on an odd byte length (truncated final unit) or an unpaired
+/// surrogate, so a malformed file falls through to verbatim copy rather than
+/// producing mojibake the scanner would mis-handle.
+fn decode_utf16(body: &[u8], to_u16: fn([u8; 2]) -> u16) -> Option<String> {
+    if body.len() % 2 != 0 {
+        return None;
+    }
+    let units = body.chunks_exact(2).map(|c| to_u16([c[0], c[1]]));
+    char::decode_utf16(units)
+        .collect::<Result<String, _>>()
+        .ok()
 }
 
 /// Walk the source repository under the same rules as [`sync_with_scanner`]
@@ -328,10 +375,12 @@ pub fn sync_with_scanner_into<W: io::Write>(
             fs::create_dir_all(parent)?;
         }
 
-        // Branch on UTF-8 readability:
-        //   UTF-8 → scan + on_hit branching (Warn / Skip / Mask)
-        //   non-UTF-8 → fall through to verbatim copy (no scan, no warn)
-        let utf8_content = fs::read_to_string(path).ok();
+        // Branch on scannability:
+        //   valid UTF-8         → scan + on_hit branching (Warn / Skip / Mask)
+        //   BOM-marked UTF-16   → decode to UTF-8, then scan (Decision 3)
+        //   undecodable binary  → fall through to verbatim copy (no scan, no
+        //                         warn) + `unscanned_files` counter (Decision 4)
+        let utf8_content = read_scannable_text(path);
         let matches = match &utf8_content {
             Some(content) => scanner.scan(content, &rel_str),
             None => Vec::new(),
@@ -368,7 +417,14 @@ pub fn sync_with_scanner_into<W: io::Write>(
 
         // Decide what to write to dst based on on_hit + match presence.
         if matches.is_empty() {
-            // No matches (or non-UTF-8): byte-identical copy.
+            // No matches: byte-identical copy of the ORIGINAL bytes. Covers
+            // clean UTF-8, clean (decoded) UTF-16, and undecodable binary
+            // alike. A file we could not decode for scanning is counted on
+            // `unscanned_files` so an un-scanned mirror entry stays observable
+            // in aggregate (Decision 4) — without per-file manifest noise.
+            if utf8_content.is_none() {
+                summary.unscanned_files += 1;
+            }
             fs::copy(path, &dst)?;
             summary.files += 1;
             continue;
@@ -1137,26 +1193,60 @@ mod tests {
         );
     }
 
-    /// `OnHit::Mask` against non-UTF-8 file: fall through to verbatim copy.
-    /// No warn lines (regex scanner produces zero matches against non-UTF-8
-    /// because we skipped the scan when read_to_string failed).
+    /// `OnHit::Mask` against an undecodable binary file (not valid UTF-8 and
+    /// carrying no UTF-16/UTF-8 BOM): fall through to verbatim copy, emit no
+    /// warn lines, AND count it on `unscanned_files` so an un-scanned file is
+    /// observable in aggregate (pii-mirror-completeness Decision 4).
     #[test]
     fn mask_mode_falls_through_to_copy_for_non_utf8() {
         let src = TempDir::new().unwrap();
         let raw = TempDir::new().unwrap();
-        // Bytes that are NOT valid UTF-8 (lone continuation byte 0x80).
-        let bytes = vec![0xFFu8, 0xFE, 0x00, 0x80, 0xC0];
+        // Bytes that are NOT valid UTF-8 and do NOT begin with a UTF-16 BOM
+        // (`0x89` is a typical binary lead byte, e.g. a PNG signature).
+        let bytes = vec![0x89u8, 0xFF, 0x00, 0xC0, 0x80];
         write(&src.path().join("blob.bin"), &bytes);
         let scanner = RegexBasicScanner::new(&[]).unwrap();
         let (summary, warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Mask);
         assert_eq!(summary.pii_matches, 0);
         assert_eq!(summary.pii_masked_matches, 0);
         assert_eq!(summary.files, 1);
+        assert_eq!(summary.unscanned_files, 1, "binary file must be counted");
         let mirrored = fs::read(raw.path().join("blob.bin")).unwrap();
         assert_eq!(mirrored, bytes);
         assert!(
             warns.is_empty(),
             "no warn lines for non-UTF-8 input: {warns:?}"
+        );
+    }
+
+    /// `OnHit::Mask` against a BOM-marked UTF-16 LE text file containing a
+    /// secret: the content is decoded to UTF-8, scanned, and the Critical
+    /// match masked (pii-mirror-completeness Decision 3). The original key
+    /// characters SHALL NOT survive into the mirror, and the file is NOT
+    /// counted as unscanned.
+    #[test]
+    fn mask_decodes_bom_utf16_le_and_masks_secret() {
+        let src = TempDir::new().unwrap();
+        let raw = TempDir::new().unwrap();
+        let text = "aws_key = AKIAIOSFODNN7EXAMPLE  # do not commit";
+        let mut bytes = vec![0xFFu8, 0xFE]; // UTF-16 LE BOM
+        for unit in text.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        write(&src.path().join("secrets.txt"), &bytes);
+        let scanner = RegexBasicScanner::new(&[]).unwrap();
+        let (summary, _warns) = run_sync(src.path(), raw.path(), &scanner, OnHit::Mask);
+        assert_eq!(summary.files, 1);
+        assert_eq!(summary.unscanned_files, 0, "decoded file is not unscanned");
+        assert_eq!(summary.pii_masked_matches, 1);
+        let mirrored = fs::read_to_string(raw.path().join("secrets.txt")).unwrap();
+        assert!(
+            mirrored.contains("[REDACTED:aws-access-key]"),
+            "expected redaction, got {mirrored:?}"
+        );
+        assert!(
+            !mirrored.contains("AKIAIOSFODNN7EXAMPLE"),
+            "raw key must not survive, got {mirrored:?}"
         );
     }
 

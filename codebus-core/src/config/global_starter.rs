@@ -42,9 +42,11 @@ pub const STARTER_CONFIG: &str = r#"# codebus global config — ~/.codebus/confi
 
 # PII scanner behavior during raw mirror sync.
 pii:
-  # Scanner implementation: "regex_basic" runs the built-in 4-pattern regex
-  # set (AWS access key, Anthropic API key, email, IPv4); "none" disables
-  # PII scanning entirely. (Note: do NOT use the bare YAML literal `null`
+  # Scanner implementation: "regex_basic" runs the built-in regex set covering
+  # common secret shapes (AWS / Anthropic / GitHub / Slack / Google / OpenAI /
+  # Stripe keys, PEM private keys, JWTs, DB connection strings) plus email and
+  # IPv4; "none" disables PII scanning entirely. (Note: do NOT use the bare
+  # YAML literal `null`
   # here — that parses as the YAML null literal and falls through to the
   # default `regex_basic`. Use the string `none` instead.)
   scanner: regex_basic

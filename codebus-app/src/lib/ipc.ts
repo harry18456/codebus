@@ -58,6 +58,14 @@ export interface GlobalConfig {
     locale_override?: "zh" | "en" | null
     [key: string]: unknown
   }
+  /**
+   * Backend-derived count of the active scanner's built-in PII patterns,
+   * injected by the `load_global_config` IPC (key `__pii_pattern_count`) so
+   * the Settings UI renders `regex_basic · N patterns` without hard-coding N.
+   * Not user config: the save IPC strips it, so it never persists to disk.
+   * Absent until the config has loaded — callers degrade to a placeholder.
+   */
+  __pii_pattern_count?: number
   [key: string]: unknown
 }
 

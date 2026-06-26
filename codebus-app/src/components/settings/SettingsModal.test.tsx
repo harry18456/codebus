@@ -55,7 +55,7 @@ describe("SettingsModal", () => {
 
   it("renders the required top-level fields including the endpoint section", () => {
     render(
-      <SettingsModal open onClose={() => {}} piiPatternCount={14} />,
+      <SettingsModal open onClose={() => {}} piiPatternCount={13} />,
     )
     expect(screen.getByText("AI Provider")).toBeInTheDocument()
     // The legacy OAuth "Authentication" field is replaced by a real CLI
@@ -92,7 +92,7 @@ describe("SettingsModal", () => {
 
   it("sub-labels avoid the forbidden vocabulary", () => {
     render(
-      <SettingsModal open onClose={() => {}} piiPatternCount={14} />,
+      <SettingsModal open onClose={() => {}} piiPatternCount={13} />,
     )
     const modal = screen.getByTestId("settings-modal")
     const text = modal.textContent ?? ""
@@ -107,7 +107,7 @@ describe("SettingsModal", () => {
     const onClose = vi.fn()
     useSettingsStore.setState({ dirty: true })
     render(
-      <SettingsModal open onClose={onClose} piiPatternCount={14} />,
+      <SettingsModal open onClose={onClose} piiPatternCount={13} />,
     )
     fireEvent.click(screen.getByTestId("settings-save"))
     await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 1000 })
@@ -122,7 +122,7 @@ describe("SettingsModal", () => {
     const onClose = vi.fn()
     useSettingsStore.setState({ dirty: true })
     render(
-      <SettingsModal open onClose={onClose} piiPatternCount={14} />,
+      <SettingsModal open onClose={onClose} piiPatternCount={13} />,
     )
     fireEvent.click(screen.getByTestId("settings-save"))
     await waitFor(() =>
@@ -139,7 +139,7 @@ describe("SettingsModal", () => {
       if (cmd === "get_endpoint_key") return Promise.resolve({ kind: "unset" })
       return Promise.resolve(useSettingsStore.getState().config)
     })
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     // Eventually flips to installed.
     await waitFor(() =>
       expect(screen.getByTestId("cli-status")).toHaveAttribute(
@@ -183,7 +183,7 @@ describe("SettingsModal", () => {
       saving: false,
       error: null,
     })
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     await waitFor(() => screen.getByTestId("settings-save"))
     expect(screen.getByTestId("settings-save")).toBeDisabled()
   })
@@ -228,7 +228,7 @@ describe("SettingsModal", () => {
         return Promise.resolve({ kind: "installed", version: "x" })
       return Promise.resolve(fullConfig)
     })
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     // The on-open `load()` resets dirty; flip dirty back to simulate a
     // post-load user edit (the actual edit content doesn't matter for
     // this test — only that validation passes).
@@ -269,7 +269,7 @@ describe("SettingsModal", () => {
       saving: false,
       error: null,
     })
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     const save = await waitFor(() => screen.getByTestId("settings-save"))
     expect(save).toBeDisabled()
     const trigger = screen.getByTestId("system-effort-goal")
@@ -292,7 +292,7 @@ describe("SettingsModal", () => {
 
   it("threshold slider value renders with % unit, length renders with `questions` unit", () => {
     render(
-      <SettingsModal open onClose={() => {}} piiPatternCount={14} />,
+      <SettingsModal open onClose={() => {}} piiPatternCount={13} />,
     )
     expect(screen.getByTestId("quiz-threshold-value")).toHaveTextContent("80%")
     expect(screen.getByTestId("quiz-length-value")).toHaveTextContent(
@@ -331,7 +331,7 @@ describe("SettingsModal", () => {
       saving: false,
       error: null,
     })
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
 
     // Legacy app.quiz.default_length is read via the fallback path.
     expect(screen.getByTestId("quiz-length-value")).toHaveTextContent(
@@ -356,7 +356,7 @@ describe("SettingsModal", () => {
     }
 
     it("pii.on_hit select offers warn/skip/mask and writes the chosen value", () => {
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       const sel = screen.getByTestId("pii-on-hit-select") as HTMLSelectElement
       const opts = Array.from(sel.options).map((o) => o.value)
       expect(opts).toEqual(["warn", "skip", "mask"])
@@ -365,14 +365,14 @@ describe("SettingsModal", () => {
     })
 
     it("pii.on_hit field states the Critical security floor", () => {
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       expect(screen.getByTestId("pii-on-hit-critical-note")).toHaveTextContent(
         /always masked/i,
       )
     })
 
     it("lint.fix.enabled toggles default-true and writes false when unchecked", () => {
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       const tog = screen.getByTestId("lint-fix-toggle") as HTMLInputElement
       expect(tog.checked).toBe(true)
       fireEvent.click(tog)
@@ -382,7 +382,7 @@ describe("SettingsModal", () => {
     })
 
     it("quiz/goal content_verify default off, enable writes true, cost hint shown", () => {
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       const q = screen.getByTestId("quiz-content-verify-toggle") as HTMLInputElement
       const g = screen.getByTestId("goal-content-verify-toggle") as HTMLInputElement
       expect(q.checked).toBe(false)
@@ -411,7 +411,7 @@ describe("SettingsModal", () => {
     // - Adjacent warning copy mentions the PII safety trade-off.
 
     it("read_image_block toggle defaults ON when no hooks section is present", () => {
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       const tog = screen.getByTestId("read-image-block-toggle") as HTMLInputElement
       expect(tog.checked).toBe(true)
     })
@@ -425,13 +425,13 @@ describe("SettingsModal", () => {
         saving: false,
         error: null,
       })
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       const tog = screen.getByTestId("read-image-block-toggle") as HTMLInputElement
       expect(tog.checked).toBe(false)
     })
 
     it("read_image_block toggle off writes hooks.read_image_block=false and dirties", () => {
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       fireEvent.click(screen.getByTestId("read-image-block-toggle"))
       expect(
         (cfg().hooks as { read_image_block?: boolean }).read_image_block,
@@ -440,20 +440,20 @@ describe("SettingsModal", () => {
     })
 
     it("read_image_block toggle row renders security warning copy", () => {
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       expect(
         screen.getByTestId("read-image-block-warning"),
       ).toHaveTextContent(/PII filter/i)
     })
 
     it("disable-logging control writes log.sink = none", () => {
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       fireEvent.click(screen.getByTestId("log-disable-toggle"))
       expect((cfg().log as { sink?: string }).sink).toBe("none")
     })
 
     it("pii.patterns_extra add/remove writes a plain string array", () => {
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       fireEvent.click(screen.getByTestId("pii-patterns-add"))
       fireEvent.change(screen.getByTestId("pii-patterns-input-0"), {
         target: { value: "EMP-\\d{6}" },
@@ -474,7 +474,7 @@ describe("SettingsModal", () => {
 
     it("invalid extra pattern shows inline error and disables Save until fixed", () => {
       useSettingsStore.setState({ dirty: true })
-      render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+      render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
       fireEvent.click(screen.getByTestId("pii-patterns-add"))
       fireEvent.change(screen.getByTestId("pii-patterns-input-0"), {
         target: { value: "[" },

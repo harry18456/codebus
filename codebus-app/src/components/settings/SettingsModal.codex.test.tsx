@@ -48,7 +48,7 @@ describe("SettingsModal — codex provider", () => {
   })
 
   it("renders the codex editor (not the claude one) when codex is active", () => {
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     expect(screen.getByTestId("codex-endpoint-section")).toBeInTheDocument()
     expect(screen.getByText("OpenAI Codex endpoint settings")).toBeInTheDocument()
     // Claude editor must NOT be mounted simultaneously.
@@ -56,19 +56,19 @@ describe("SettingsModal — codex provider", () => {
   })
 
   it("labels the CLI status row with the codex provider", () => {
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     expect(screen.getByText("OpenAI Codex CLI")).toBeInTheDocument()
   })
 
   it("offers both providers in the AI Provider selector", () => {
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     expect(screen.getByTestId("ai-provider-select")).toBeInTheDocument()
   })
 
   it("Save sends a config carrying the codex provider block to the IPC", async () => {
     useSettingsStore.setState({ dirty: true })
     const onClose = vi.fn()
-    render(<SettingsModal open onClose={onClose} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={onClose} piiPatternCount={13} />)
     fireEvent.click(screen.getByTestId("settings-save"))
     await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 1000 })
     const call = mockedInvoke.mock.calls.find((c) => c[0] === "save_global_config")
@@ -122,7 +122,7 @@ describe("SettingsModal — switching provider must not revert", () => {
   })
 
   it("stays on codex after selecting it (does not reload disk config and revert)", async () => {
-    render(<SettingsModal open onClose={() => {}} piiPatternCount={14} />)
+    render(<SettingsModal open onClose={() => {}} piiPatternCount={13} />)
     // Initial load resolves the claude (disk) config → claude editor.
     await waitFor(() => expect(screen.getByTestId("endpoint-section")).toBeInTheDocument())
 

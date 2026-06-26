@@ -27,7 +27,13 @@ import { version as appVersion } from "../package.json"
 // every bump). Imported (not hardcoded) so the BottomStrip label can never
 // drift from the real version again; works in build/dev/test alike.
 const APP_VERSION = `v${appVersion}`
-const PII_PATTERN_COUNT = 14
+
+// Neutral placeholder shown only in the brief window before global config has
+// loaded (settings are preloaded on mount, so the Settings modal — opened
+// later by the user — always renders the real backend count). The live count
+// comes from `__pii_pattern_count`, injected by the backend, NOT hard-coded
+// here — see the app-shell "PII pattern count is dynamic" spec scenario.
+const PII_PATTERN_COUNT_PLACEHOLDER = 0
 
 export function App() {
   if (
@@ -58,6 +64,10 @@ function AppShell() {
   useEffect(() => {
     void settingsLoad().catch(() => {})
   }, [settingsLoad])
+
+  // Live built-in PII pattern count from the backend (`__pii_pattern_count`),
+  // degrading to a neutral placeholder until the config has loaded.
+  const piiPatternCount = useSettingsStore((s) => s.getPiiPatternCount())
 
   const triggerNewVault = useCallback(async () => {
     try {
@@ -141,7 +151,7 @@ function AppShell() {
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        piiPatternCount={PII_PATTERN_COUNT}
+        piiPatternCount={piiPatternCount ?? PII_PATTERN_COUNT_PLACEHOLDER}
       />
     </div>
   )
