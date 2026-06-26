@@ -236,7 +236,7 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 
 **其他已知 codebus-side 缺口**（細節見 [`BACKLOG.md`](internal/BACKLOG.md)）：
 
-- spawn agent **沒有 `env_clear`** → 父 shell 的機密 env（`GITHUB_TOKEN` / `AWS_*` / `KUBECONFIG`）+ codebus 自己注入的 provider key 都進 agent child env（PII filter 只掃檔案、不掃 env；codex workspace-write 的 shell / subagent 讀得到）。
+- spawn agent **env scrub（已補，`agent-spawn-env-scrub`）**：兩個 backend（claude `compose_claude_cmd` / codex `build_command`）在 spawn 前 `Command::env_clear()`，僅以跨平台 allowlist passthrough 放行系統必需 env（`PATH` / locale / 平台系統目錄，逐項論證見該 change 的 design），再疊加 provider 注入（順序 `env_clear → passthrough → provider`）。→ 父 shell 機密（`GITHUB_TOKEN` / `AWS_*` / `KUBECONFIG`）與 codebus 自身 `CODEBUS_*` key 不再進 agent child env（補上 PII filter 只掃檔案、不掃 env 的盲區，含 codex workspace-write 的 shell / subagent）；父程序 env 不受影響（env_clear 只作用於 child `Command`）。唯一刻意放行的 `CODEBUS_MOCK_` 前綴是整合測試控制變數、production 不設定、不攜機密。
 - child stderr 預設 drain（非 denial 行需 `CODEBUS_FORWARD_AGENT_STDERR=1` 才轉發到終端）；**自 `agent-run-integrity` 起，stderr 每行已過 `is_sandbox_denial` 分類、命中與 stdout 來源相加計入 `sandbox_denial_count`**（獨立於轉發旗標）→ Windows 上只出現在 stderr 的 sandbox denial 不再被漏計（仍 observability-only、不改變 outcome）。
 - vault 自己的 `.codebus/.claude/settings.json`（hook 註冊檔）在 workspace Write 可及範圍內 → 被 inject 的 goal/fix agent 可改寫掉自己的 check-bash/check-read hook（下一輪 spawn 才生效）；**自 `agent-run-integrity` 起，`codebus lint` 新增 `vault-gate-integrity` 規則偵測必要 hook 被移除/改空**（`check-read-vault-containment` 起為四條：`Bash`/`Read`/`Glob`/`Grep`；`fix` 既有 lint precheck/final 自動帶到）。偵測非預防：竄改在下次 lint/fix 才報出、vault git diff 亦可見可還原。
 

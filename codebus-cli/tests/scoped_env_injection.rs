@@ -12,8 +12,12 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use codebus_core::agent::{ClaudeBackend, EnvOverrides, Permission, SpawnSpec, invoke};
-use codebus_core::config::{ClaudeCodeConfig, Verb};
+use codebus_core::agent::{
+    AgentBackend, ClaudeBackend, CodexBackend, EnvOverrides, Permission, SpawnSpec, invoke,
+};
+use codebus_core::config::{
+    ActiveProfile, ClaudeCodeConfig, CodexAzureProfile, CodexConfig, CodexVerbConfig, Verb,
+};
 use tempfile::TempDir;
 
 const MOCK_CLAUDE: &str = env!("CARGO_BIN_EXE_mock-claude");
@@ -34,6 +38,9 @@ fn invoke_passes_env_overrides_to_command() {
     unsafe {
         std::env::set_var("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE);
         std::env::set_var("CODEBUS_MOCK_LOG", &log_path);
+        // A parent-shell secret that the spawn env scrub MUST drop: it is not
+        // an allowlist member, so the child SHALL NOT see it.
+        std::env::set_var("CODEBUS_SCRUB_SENTINEL", "leaked-secret-value");
     }
 
     // The azure env is held by the backend; this test only asserts env
@@ -81,6 +88,17 @@ fn invoke_passes_env_overrides_to_command() {
         "child missing CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 injection:\n{log}"
     );
 
+    // Spawn env scrub: the allowlist member PATH passes through, the parent
+    // secret CODEBUS_SCRUB_SENTINEL is dropped from the child.
+    assert!(
+        log.contains("env_PATH="),
+        "PATH (allowlist) must pass through to the child:\n{log}"
+    );
+    assert!(
+        !log.contains("CODEBUS_SCRUB_SENTINEL") && !log.contains("leaked-secret-value"),
+        "parent secret CODEBUS_SCRUB_SENTINEL must be scrubbed from the child:\n{log}"
+    );
+
     // Spec: parent shell env unchanged.
     assert!(
         std::env::var("ANTHROPIC_BASE_URL").is_err(),
@@ -99,6 +117,7 @@ fn invoke_passes_env_overrides_to_command() {
     unsafe {
         std::env::remove_var("CODEBUS_CLAUDE_BIN");
         std::env::remove_var("CODEBUS_MOCK_LOG");
+        std::env::remove_var("CODEBUS_SCRUB_SENTINEL");
     }
     scoped_var_restore("ANTHROPIC_BASE_URL", saved_url);
     scoped_var_restore("ANTHROPIC_API_KEY", saved_key);
@@ -116,6 +135,9 @@ fn for_system_does_not_inject_env() {
     unsafe {
         std::env::set_var("CODEBUS_CLAUDE_BIN", MOCK_CLAUDE);
         std::env::set_var("CODEBUS_MOCK_LOG", &log_path);
+        // A parent-shell secret that the spawn env scrub MUST drop even for
+        // the system profile (which injects no provider env of its own).
+        std::env::set_var("CODEBUS_SCRUB_SENTINEL", "leaked-secret-value");
     }
 
     let backend = ClaudeBackend::new(ClaudeCodeConfig::default(), EnvOverrides::for_system());
@@ -139,19 +161,101 @@ fn for_system_does_not_inject_env() {
     assert!(report.exit.success());
 
     let log = fs::read_to_string(&log_path).expect("mock-claude wrote log");
-    // None of the three azure env vars should appear with values we set
-    // (system profile never calls `cmd.env(...)` for them). Parent shell
-    // env may still legitimately leak them in if the developer running
-    // tests has them exported — that's expected inheritance behavior.
-    // We assert the codebus-injected sentinel value is absent.
+    // System profile injects no provider env vars of its own, so the azure
+    // sentinel value never appears.
     assert!(
         !log.contains("sk-injection-test"),
         "system profile leaked an api key value into child:\n{log}"
+    );
+    // Spawn env scrub: even with no provider injection, the child is built
+    // with `env_clear` + allowlist passthrough, so a parent secret is dropped
+    // while the allowlist member PATH passes through.
+    assert!(
+        !log.contains("CODEBUS_SCRUB_SENTINEL") && !log.contains("leaked-secret-value"),
+        "parent secret CODEBUS_SCRUB_SENTINEL must be scrubbed from the child:\n{log}"
+    );
+    assert!(
+        log.contains("env_PATH="),
+        "PATH (allowlist) must pass through to the child:\n{log}"
     );
 
     unsafe {
         std::env::remove_var("CODEBUS_CLAUDE_BIN");
         std::env::remove_var("CODEBUS_MOCK_LOG");
+        std::env::remove_var("CODEBUS_SCRUB_SENTINEL");
+    }
+}
+
+/// Spec `Spawn Environment Scrub` (codex side): `CodexBackend::build_command`
+/// `env_clear`s and re-injects the shared system-essential allowlist, and the
+/// azure key is injected AFTER the clear. mock-claude doubles as a generic env
+/// dumper here — we spawn the built command directly via `Command::output`
+/// (bypassing the codex stream-parsing loop), then assert from the dumped log
+/// that the child saw `PATH` + the azure key but NOT the parent secret.
+#[test]
+fn codex_build_command_scrubs_env_keeps_path_and_azure_key() {
+    let _guard = serial_lock();
+
+    let tmp = TempDir::new().unwrap();
+    let log_path: PathBuf = tmp.path().join("codex-mock.log");
+    unsafe {
+        // Reuse mock-claude as a generic env dumper for the codex bin slot.
+        std::env::set_var("CODEBUS_CODEX_BIN", MOCK_CLAUDE);
+        std::env::set_var("CODEBUS_MOCK_LOG", &log_path);
+        std::env::set_var("CODEBUS_SCRUB_SENTINEL", "leaked-secret-value");
+    }
+
+    let backend = CodexBackend::new(codex_azure_config(), Some("sk-codex-test".to_string()));
+    let mut cmd = backend.build_command(&SpawnSpec {
+        verb: Verb::Query,
+        resolve_as: None,
+        sub_mode: None,
+        input: "ping".into(),
+        permission: Permission::ReadOnly,
+        command_allowance: None,
+        resume_session_id: None,
+    });
+    let out = cmd.output().expect("spawn mock-claude as codex env dumper");
+    assert!(out.status.success(), "mock should exit 0");
+
+    let log = fs::read_to_string(&log_path).expect("mock wrote log");
+    assert!(
+        log.contains("env_PATH="),
+        "PATH (allowlist) must pass through to the codex child:\n{log}"
+    );
+    assert!(
+        log.contains("env_CODEBUS_CODEX_AZURE_KEY=sk-codex-test"),
+        "azure key must survive env_clear (injected after it):\n{log}"
+    );
+    assert!(
+        !log.contains("CODEBUS_SCRUB_SENTINEL") && !log.contains("leaked-secret-value"),
+        "parent secret CODEBUS_SCRUB_SENTINEL must be scrubbed from the codex child:\n{log}"
+    );
+
+    unsafe {
+        std::env::remove_var("CODEBUS_CODEX_BIN");
+        std::env::remove_var("CODEBUS_MOCK_LOG");
+        std::env::remove_var("CODEBUS_SCRUB_SENTINEL");
+    }
+}
+
+fn codex_azure_config() -> CodexConfig {
+    let vc = |m: &str, e: &str| CodexVerbConfig {
+        model: m.to_string(),
+        effort: e.to_string(),
+    };
+    CodexConfig {
+        active: ActiveProfile::Azure,
+        system: None,
+        azure: Some(CodexAzureProfile {
+            base_url: "https://x.openai.azure.com".to_string(),
+            api_version: "2025-01-01".to_string(),
+            keyring_service: "codebus-codex-azure".to_string(),
+            goal: vc("gpt-5.5", "high"),
+            query: vc("gpt-5.5", "low"),
+            fix: vc("gpt-5.5", "medium"),
+            verify: vc("gpt-5.5", "high"),
+        }),
     }
 }
 

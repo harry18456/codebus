@@ -18,7 +18,7 @@
 //! the closed `Stdio::null()` stdin.
 
 use crate::agent::backend::AgentBackend;
-use crate::agent::env_overrides::EnvOverrides;
+use crate::agent::env_overrides::{EnvOverrides, passthrough_env};
 use crate::agent::process_kill::KillHandle;
 use crate::agent::spawn_spec::SpawnSpec;
 use crate::log::{TokenUsage, apply_token_usage};
@@ -459,6 +459,16 @@ pub(crate) fn compose_claude_cmd(
     let allowed_tools_csv = build_allowed_tools_csv(toolset, bash_whitelist);
 
     let mut cmd = Command::new(claude_bin);
+    // SEC (spawn env scrub): drop the inherited parent environment, then
+    // re-inject ONLY the cross-platform system-essential allowlist. This
+    // keeps parent-shell secrets (`GITHUB_TOKEN` / `AWS_*` / `KUBECONFIG`,
+    // codebus's own `CODEBUS_*` keys) out of the agent child. The provider
+    // injection (`cmd.envs(env.iter()...)` near the end of this fn) runs
+    // AFTER this clear, so the azure keys survive. Order: env_clear →
+    // passthrough → provider. Spec `claude-code-config / Scoped Environment
+    // Injection At Spawn`.
+    cmd.env_clear();
+    cmd.envs(passthrough_env());
     cmd.arg("-p").arg(slash_command);
     // v3-chat-verb: when caller supplies a session id, append `--resume <id>`
     // BEFORE the toolset flags so the spawned claude process resumes the

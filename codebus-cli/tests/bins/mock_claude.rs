@@ -47,10 +47,20 @@ fn main() -> ExitCode {
         // azure profile. `claude-code-endpoint-profiles` change uses this
         // to assert `Command::envs` actually carries the 3 vars without
         // leaking to the parent shell. Missing var → omit line.
+        //
+        // `agent-spawn-env-scrub` additionally dumps `CODEBUS_SCRUB_SENTINEL`
+        // (a parent-set secret that MUST be scrubbed → absent here), `PATH`
+        // (an allowlist member that MUST pass through → present here), and
+        // `CODEBUS_CODEX_AZURE_KEY` (the codex provider key, present on the
+        // codex spawn path). The dump is additive — existing azure assertions
+        // are unaffected.
         for key in [
             "ANTHROPIC_BASE_URL",
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_DISABLE_ADVISOR_TOOL",
+            "CODEBUS_SCRUB_SENTINEL",
+            "PATH",
+            "CODEBUS_CODEX_AZURE_KEY",
         ] {
             if let Ok(v) = env::var(key) {
                 log.push_str(&format!("env_{key}={v}\n"));

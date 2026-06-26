@@ -141,6 +141,20 @@ mod tests {
         args.get(pos + 1).map(String::as_str)
     }
 
+    /// Whether the command has an explicitly-set env var named `key` (case
+    /// -insensitive, so it works whether Windows reports `PATH` or `Path`).
+    fn has_env(cmd: &Command, key: &str) -> bool {
+        cmd.get_envs()
+            .any(|(k, v)| v.is_some() && k.to_string_lossy().eq_ignore_ascii_case(key))
+    }
+
+    /// Value of an explicitly-set env var named `key`, if present.
+    fn env_val(cmd: &Command, key: &str) -> Option<String> {
+        cmd.get_envs()
+            .find(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case(key))
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+    }
+
     fn backend() -> ClaudeBackend {
         ClaudeBackend::new(ClaudeCodeConfig::default(), EnvOverrides::for_system())
     }
@@ -308,6 +322,26 @@ mod tests {
         assert_eq!(arg_after(&args, "--setting-sources"), Some("project,local"));
         assert_eq!(arg_after(&args, "--model"), Some("claude-opus-4-6"));
         assert_eq!(arg_after(&args, "--effort"), Some("high"));
+    }
+
+    /// Spawn env scrub (claude side of `Scoped Environment Injection At
+    /// Spawn`): `build_command` `env_clear`s and re-injects the
+    /// system-essential allowlist, and the azure provider key is injected
+    /// AFTER the clear so it survives. Asserts the child env carries the
+    /// passthrough member `PATH` and the azure `ANTHROPIC_API_KEY`.
+    #[test]
+    fn build_command_scrubs_env_keeps_path_and_provider_key() {
+        let azure_backend = ClaudeBackend::new(
+            ClaudeCodeConfig::default(),
+            EnvOverrides::for_azure("https://x.example.com/anthropic", "sk-wire-test"),
+        );
+        let cmd = azure_backend.build_command(&spec(Verb::Query, Permission::ReadOnly, None));
+        assert!(has_env(&cmd, "PATH"), "PATH must pass through the scrub");
+        assert_eq!(
+            env_val(&cmd, "ANTHROPIC_API_KEY").as_deref(),
+            Some("sk-wire-test"),
+            "azure provider key must survive env_clear (injected after it)"
+        );
     }
 
     // Phase 3 / prompt-surface-layer-3-spawnspec-restructure: assembly tests.

@@ -22,6 +22,7 @@ use crate::config::endpoint::ActiveProfile;
 use crate::stream::{StreamEvent, parse_codex_stream_line};
 
 use super::backend::AgentBackend;
+use super::env_overrides::passthrough_env;
 use super::spawn_spec::{Permission, SpawnSpec, verb_bundle_name};
 
 /// Env var carrying the Azure OpenAI API key into the codex child process.
@@ -91,6 +92,17 @@ impl AgentBackend for CodexBackend {
         let codex_bin =
             std::env::var("CODEBUS_CODEX_BIN").unwrap_or_else(|_| default_codex_bin().to_string());
         let mut cmd = Command::new(codex_bin);
+        // SEC (spawn env scrub): drop the inherited parent environment, then
+        // re-inject ONLY the cross-platform system-essential allowlist — the
+        // SAME `passthrough_env` shared with the claude path. Keeps parent
+        // secrets (`GITHUB_TOKEN` / `AWS_*` / `KUBECONFIG`, codebus's own
+        // `CODEBUS_*` keys) out of the codex child. The Azure key injection
+        // (`cmd.env(CODEX_AZURE_KEY_ENV, key)` in the azure branch below) runs
+        // AFTER this clear, so `CODEBUS_CODEX_AZURE_KEY` survives. Order:
+        // env_clear → passthrough → provider. Spec `codex-backend / Spawn
+        // Environment Scrub`.
+        cmd.env_clear();
+        cmd.envs(passthrough_env());
         cmd.arg("exec");
 
         // Resume the prior thread when continuing a multi-turn conversation.
@@ -363,6 +375,36 @@ mod tests {
             .collect()
     }
 
+    fn azure_config() -> CodexConfig {
+        CodexConfig {
+            active: ActiveProfile::Azure,
+            system: None,
+            azure: Some(CodexAzureProfile {
+                base_url: "https://x.openai.azure.com".to_string(),
+                api_version: "2025-01-01".to_string(),
+                keyring_service: "codebus-codex-azure".to_string(),
+                goal: verb_cfg("gpt-5.5", "high"),
+                query: verb_cfg("gpt-5.5", "low"),
+                fix: verb_cfg("gpt-5.5", "medium"),
+                verify: verb_cfg("gpt-5.5", "high"),
+            }),
+        }
+    }
+
+    /// Whether the command has an explicitly-set env var named `key` (case
+    /// -insensitive, so it works whether Windows reports `PATH` or `Path`).
+    fn has_env(cmd: &Command, key: &str) -> bool {
+        cmd.get_envs()
+            .any(|(k, v)| v.is_some() && k.to_string_lossy().eq_ignore_ascii_case(key))
+    }
+
+    /// Value of an explicitly-set env var named `key`, if present.
+    fn env_val(cmd: &Command, key: &str) -> Option<String> {
+        cmd.get_envs()
+            .find(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case(key))
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+    }
+
     /// codex declares Cumulative token usage semantics (turn.completed.usage
     /// is a running total), so `invoke` takes the latest snapshot, not the sum.
     #[test]
@@ -397,6 +439,23 @@ mod tests {
         assert_eq!(
             cmd.get_program().to_string_lossy(),
             default_codex_bin(),
+        );
+    }
+
+    /// Spawn env scrub (`Spawn Environment Scrub`): `build_command`
+    /// `env_clear`s and re-injects the shared system-essential allowlist, and
+    /// the Azure key is injected AFTER the clear so it survives. Asserts the
+    /// codex child env carries the passthrough member `PATH` and the azure
+    /// `CODEBUS_CODEX_AZURE_KEY`.
+    #[test]
+    fn build_command_scrubs_env_keeps_path_and_azure_key() {
+        let azure_backend = CodexBackend::new(azure_config(), Some("sk-codex-test".to_string()));
+        let cmd = azure_backend.build_command(&spec(Verb::Query, Permission::ReadOnly));
+        assert!(has_env(&cmd, "PATH"), "PATH must pass through the scrub");
+        assert_eq!(
+            env_val(&cmd, CODEX_AZURE_KEY_ENV).as_deref(),
+            Some("sk-codex-test"),
+            "azure key must survive env_clear (injected after it)"
         );
     }
 
