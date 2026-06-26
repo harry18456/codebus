@@ -113,10 +113,10 @@
 
 ### 🛠️ 工具 / 流程
 
-- **TOOL-1 · spectra archive 對 `@trace` 的污染（系統性，每 change 都要手修）** — workflow 複利成本 · 工程量：中（驗證/還原腳本）/ 輕（若可關 auto-trace）
+- **TOOL-1 · spectra archive 對 `@trace` 的污染（系統性，每 change 都要手修）** — workflow 複利成本 · 工程量：偵測 MVP ✅ / 還原仍半手動
   - **問題**：每次 `spectra archive` 套用 MODIFIED / ADDED requirement 時，把該 requirement 的 `@trace` `code:` 清單**平攤成整個 dirty 工作樹的檔**（含無關檔）、多 requirement **交叉污染**（互塞對方的檔）、`source:` 被覆寫、原 provenance + `tests:` 丟失；ADDED 新 capability 的 trace 也被平攤。每個 change archive 後都要逐條手動還原。
-  - **現況**（2026-06-26 review 實證、無緩解）：`scripts/` 無 trace 驗證/還原工具、`.spectra.yaml` 無關閉 auto-trace 的開關、無根治計畫；活體污染可見——`openspec/specs/app-workspace/spec.md` 把 `docs/2026-05-14-mycoder-cli-backlog.md` 平攤進 6 個與 mycoder 無關的 requirement `@trace`。這 session 三條 Tier 0 archive 全踩、手修三次。
-  - **方案**：(a) post-archive 驗證 + 還原腳本（archive 後逐條 grep `@trace`、抓平攤污染檔、還原成每-req 相關檔 + 原 provenance(append 本次) + 原 tests）；或 (b) 評估關閉 spectra auto-trace（若工具支援）；或 (c) 回報 spectra upstream。註：spectra 是外部工具、多半只能側面緩解；SOP「archive 前先 commit 實作成 clean tree」可減少「平攤無關髒檔」，但 MODIFIED 刪不重生 / ADDED 不生成仍要手補。
+  - **進度（2026-06-26）**：偵測 MVP 已完成——`scripts/check-trace-pollution.mjs`（純 node、無第三方依賴）掃 `openspec/specs/**/spec.md` 每個 `@trace`，標記高信心污染（`code:`/`tests:` 指向 `docs/` 或 lockfile）、SUSPECT（manifest，需人工確認版號 bump vs 真實依賴）、空 trace（刪不重生）；`--strict` 有高信心污染即 exit 1。**存量掃描：16/22 spec 受污染、63 高信心 block / 411 refs、5 空 trace、36 manifest 待確認**。用法：archive 後跑 `node scripts/check-trace-pollution.mjs` 拿精準污染清單再還原。
+  - **剩餘**：(a) 還原仍半手動（依清單還原成每-req 相關檔 + 原 provenance(append 本次) + 原 tests）；進階可做 archive 前 snapshot + 後 restore 半自動化。(b) 關閉 auto-trace **已確認不可行**（`.spectra.yaml` 僅 `tdd`/`audit`/`parallel_tasks`，無 trace 開關）。(c) 回報 spectra upstream 待辦。SOP「archive 前先 commit 實作成 clean tree」仍可減少平攤無關髒檔。
   - **備註（低風險觀察，暫不開條）**：`codebus-app/src/components/workspace/GoalsTab.test.tsx:261` 的「`keyDown` 開 modal → 立即 `getByTestId`（非 `findBy`）」同 QuizTab/QuizReview 已修的 Radix Dialog mount race，CI 慢時理論上可能撞（目前穩定過、RTL 同步 flush）；未來 CI 真撞再改 `findBy`。
   - 源自 2026-06-26 backlog review；完整 SOP 見 memory `project_spectra_archive_drops_trace_on_modified_requirement`（無 in-repo detail doc）。
 
