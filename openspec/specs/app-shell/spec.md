@@ -388,7 +388,7 @@ tests:
 The Settings modal SHALL be invoked by the bottom-left gear in either Lobby or Workspace state. The modal SHALL display, in addition to the CLI Status row (see "Settings UI CLI Status Field") and the Endpoint Section (see "Settings UI Endpoint Section"), the following editable configuration fields:
 
 1. AI Provider (read-only label: "Claude CLI (only option for now)")
-2. PII scanner (dropdown showing scanner name and dynamic pattern count, e.g. `regex_basic · 14 patterns`)
+2. PII scanner (dropdown showing scanner name and dynamic pattern count, e.g. `regex_basic · 13 patterns`)
 3. PII on-hit policy (dropdown: `warn` / `skip` / `mask`) mapping to `pii.on_hit`
 4. PII extra patterns (`pii.patterns_extra`): an editable list of raw regex strings with add and remove controls, no display label per entry
 5. Lint fix enabled (toggle) mapping to `lint.fix.enabled`
@@ -471,34 +471,17 @@ The `save_global_config` IPC SHALL preserve every known and unknown subkey under
 - **WHEN** the Settings modal renders the Language dropdown
 - **THEN** the option labels for the two non-Auto values SHALL appear as "中文" and "English" verbatim, identical to how they appear when the active locale is `"zh"`
 
-
 <!-- @trace
-source: settings-language-switcher
-updated: 2026-05-26
+source: settings-language-switcher, pii-mirror-completeness
+updated: 2026-06-26
 code:
-  - codebus-app/scripts/.lang-switcher-smoke/step-4-back-to-auto.png
-  - codebus-app/src/lib/ipc.ts
-  - codebus-app/src/components/settings/LanguageSection.tsx
-  - codebus-app/scripts/.lang-switcher-smoke/step-2-switch-en.png
-  - codebus-app/src/components/settings/SettingsModal.tsx
   - codebus-app/src/App.tsx
-  - codebus-app/src-tauri/src/config.rs
+  - codebus-app/src/store/settings.ts
+  - codebus-app/src/lib/ipc.ts
   - codebus-app/src-tauri/src/ipc/config.rs
-  - codebus-app/scripts/.lang-switcher-smoke/step-1-default-zh.png
-  - codebus-app/scripts/.lang-switcher-smoke/step-5-backend-error-en.png
-  - codebus-app/src/i18n/messages.ts
-  - codebus-app/scripts/.lang-switcher-smoke/step-3-restart-en.png
-  - codebus-app/src/hooks/useLocale.ts
+  - codebus-app/src/components/settings/SettingsModal.tsx
 tests:
-  - codebus-app/src/App.test.tsx
   - codebus-app/src/components/settings/SettingsModal.test.tsx
-  - codebus-app/src/test/forbidden-behaviors.test.tsx
-  - codebus-app/src/i18n/errors.test.tsx
-  - codebus-app/src/lib/ipc.localeOverride.test.ts
-  - codebus-app/src/store/settings.localeOverride.test.ts
-  - codebus-app/src/hooks/useLocale.test.tsx
-  - codebus-app/src/components/settings/LanguageSection.test.tsx
-  - codebus-app/src/i18n/settings.test.ts
 -->
 
 ---
