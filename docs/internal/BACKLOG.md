@@ -25,12 +25,6 @@
   - **方案**（待研究）：separate-user / ACL deny / AppContainer / container；+ macOS/Linux 等價 PoC。AppContainer 留升級路徑。
   - 詳細：[Windows PoC](2026-05-28-codex-windows-sandbox-read-poc.md) + [§10 discussion](2026-05-23-bash-hook-and-codex-sandbox-discussion.md) + [hard-gate spike](2026-05-28-codex-hook-hard-gate-spike.md) + [cli-applicability](2026-05-30-cli-capability-applicability-backlog.md)
 
-- **SEC-4 · PII mirror 完整性** — 嚴重度：中 · 工程量：中
-  - **問題**：scanner 只 **4 pattern**（AWS/Anthropic Critical + email/ipv4 Warn）→ GitHub PAT/GCP/Slack/JWT/PEM body/DB URL pw 不遮；非 UTF-8（UTF-16）檔讀失敗→byte-identical copy 不掃（連 Critical floor 不 fire）；gitignored/oversized 不進 mirror 也不掃。
-  - **起點**：`pii/scanners/regex_basic.rs:22-55`（`BUILTIN_PATTERNS` 恰 4 條）、`vault/raw_sync.rs:331-338`（非 UTF-8 `read_to_string().ok()`→不掃）、`:301-325`（oversized 跳過）。
-  - **方案**：擴充 pattern + 非 UTF-8 fail-closed/decode-scan + gitignored/oversized 企業可見 manifest。
-  - 源自 2026-06-02 agent-study review、security.md §4/§6（無 detail doc）。
-
 ### 🎯 正確性 / telemetry
 
 - **COR-1 · RunId source-of-truth 統一（剩 quiz/chat）** — 邊緣正確性 · 工程量：輕-中
@@ -156,6 +150,7 @@
 | 2026-06-16 | codex token usage parser 空快照守衛（cumulative 全 0/None snapshot 不覆蓋既有累計 + parser 四欄全不可解碼時 warn）— 原開放 COR-3 | `codex-usage-parser-zero-guard`（commit `1bad5e1`；specs agent-backend + codex-backend） | 無 backlog detail doc；artifacts 見 `archive/2026-06-15-codex-usage-parser-zero-guard/` |
 | 2026-06-16 | in-vault 機密讀取邊界硬化：vault `settings.json` 加 sensitive-basename `permissions.deny`（bracket-class、case-insensitive、跨 Read/Glob/Grep）+ `vault-gate-integrity` lint 擴驗 deny + 單一來源 rule set — 原開放 SEC-3 | `vault-sensitive-basename-deny`（commit `41bb21f`；spec lint-feedback-loop） | 無 backlog detail doc；artifacts 見 `archive/2026-06-16-vault-sensitive-basename-deny/` |
 | 2026-06-16 | GitHub push/PR CI（windows-latest、cargo test + clippy baseline guard + npm test/typecheck）+ issue/PR templates；連同既有 `windows-release-ci` 讓「GitHub 倉庫設定」整條 close — 原開放 REL-1 | `github-ci-and-templates`（commit `0a3c753`；spec ci-automation new capability） | 無 backlog detail doc；artifacts 見 `archive/2026-06-16-github-ci-and-templates/` |
+| 2026-06-26 | PII mirror 完整性：builtin pattern 4→13（GitHub PAT / Slack / Google / OpenAI / Stripe / PEM / JWT / DB 連線字串，OpenAI alternation 不吞 `sk-ant-`）+ 非 UTF-8 改 UTF-16 BOM decode-scan（命中遮罩、真二進位 verbatim + `unscanned_files` counter）+ 前端 pattern 數由後端 `builtin_pattern_count()` 動態驅動（不再 hardcode 14）。實機 CDP smoke 驗 Settings 顯示「13 條規則」。gitignored 透明度未做（非破口、gitignored 不進 mirror 屬正確設計） — 原開放 SEC-4 | `pii-mirror-completeness`（實作 `75018df` + archive `7f789fe`；specs pii-filter / vault / app-shell） | 無 backlog detail doc；artifacts 見 `archive/2026-06-26-pii-mirror-completeness/` |
 
 ---
 
