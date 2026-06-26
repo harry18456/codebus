@@ -13,12 +13,6 @@
 
 ### 🔒 安全
 
-- **SEC-1 · Agent spawn env scrub** — 嚴重度：高 · 工程量：中
-  - **問題**：spawn agent child 時只 `.envs()/.env()` 疊加 provider key，**無 `env_clear()`** → child 完整繼承父 shell 機密（`GITHUB_TOKEN`/`AWS_*`/`KUBECONFIG`）+ codebus 自注入的 provider key（PII filter 不掃 env；codex `workspace-write` 的 shell/subagent 讀得到）。
-  - **起點**：`agent/claude_cli.rs:527-530`、`agent/codex_backend.rs:246-248`（全 repo grep `env_clear` 程式碼 0 命中）。
-  - **方案**：env allowlist（清空後只注入 PATH/HOME/locale/provider key）或 provider key broker。
-  - 源自 2026-06-02 agent-study review、security.md §6（無 detail doc）。
-
 - **SEC-2 · Codex 端 hard read + 命令/工具隔離** — 嚴重度：高（Windows confirmed）· 工程量：重（待研究）
   - **問題**：codex `workspace-write` 設計上可讀 workspace 外任意檔（含 `~/.ssh`/`~/.aws`），只靠 `-s` OS sandbox + AGENTS.md soft constraint，**無硬性 read enforcement**。2026-05-28 Windows PoC 確認 threat C OPEN；macOS/Linux 未測。PII raw_sync mirror 框住實際嚴重度（agent 讀 redacted 鏡像、非 live repo）。
   - **起點**：`agent/codex_backend.rs:146-169`（isolation flags）、`:187-192`（sandbox flag `-s` / `-c sandbox_mode`）；全 `src` grep `AppContainer|icacls|LowBox|separate-user` 0 命中。
@@ -151,6 +145,7 @@
 | 2026-06-16 | in-vault 機密讀取邊界硬化：vault `settings.json` 加 sensitive-basename `permissions.deny`（bracket-class、case-insensitive、跨 Read/Glob/Grep）+ `vault-gate-integrity` lint 擴驗 deny + 單一來源 rule set — 原開放 SEC-3 | `vault-sensitive-basename-deny`（commit `41bb21f`；spec lint-feedback-loop） | 無 backlog detail doc；artifacts 見 `archive/2026-06-16-vault-sensitive-basename-deny/` |
 | 2026-06-16 | GitHub push/PR CI（windows-latest、cargo test + clippy baseline guard + npm test/typecheck）+ issue/PR templates；連同既有 `windows-release-ci` 讓「GitHub 倉庫設定」整條 close — 原開放 REL-1 | `github-ci-and-templates`（commit `0a3c753`；spec ci-automation new capability） | 無 backlog detail doc；artifacts 見 `archive/2026-06-16-github-ci-and-templates/` |
 | 2026-06-26 | PII mirror 完整性：builtin pattern 4→13（GitHub PAT / Slack / Google / OpenAI / Stripe / PEM / JWT / DB 連線字串，OpenAI alternation 不吞 `sk-ant-`）+ 非 UTF-8 改 UTF-16 BOM decode-scan（命中遮罩、真二進位 verbatim + `unscanned_files` counter）+ 前端 pattern 數由後端 `builtin_pattern_count()` 動態驅動（不再 hardcode 14）。實機 CDP smoke 驗 Settings 顯示「13 條規則」。gitignored 透明度未做（非破口、gitignored 不進 mirror 屬正確設計） — 原開放 SEC-4 | `pii-mirror-completeness`（實作 `75018df` + archive `7f789fe`；specs pii-filter / vault / app-shell） | 無 backlog detail doc；artifacts 見 `archive/2026-06-26-pii-mirror-completeness/` |
+| 2026-06-26 | Agent spawn env scrub：兩 backend（claude `compose_claude_cmd` / codex `build_command`）spawn 前 `Command::env_clear()` + 共用跨平台 allowlist passthrough（通用 5 / Windows 18 含 `PATHEXT`/`ComSpec`/`SystemRoot` / Unix 4 + `LC_`/`CODEBUS_MOCK_` 前綴），父 shell 機密（`GITHUB_TOKEN`/`AWS_*`/`KUBECONFIG` + codebus 自身 `CODEBUS_*`）不再進 agent child env；`OsString`/`vars_os` 防非 UTF-8 panic；注入順序 env_clear→passthrough→provider；spawn-based sentinel 測試坐實。實機驗真 claude（system）+ 真 codex（`.cmd`→node→`codex.exe` 鏈 + PowerShell shell-out）scrub 後皆正常 spawn — 原開放 SEC-1 | `agent-spawn-env-scrub`（實作 `e16542d` + archive `e7af798`；spec claude-code-config MODIFIED + codex-backend ADDED） | 無 backlog detail doc；artifacts 見 `archive/2026-06-26-agent-spawn-env-scrub/` |
 
 ---
 
