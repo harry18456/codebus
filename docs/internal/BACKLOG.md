@@ -44,10 +44,6 @@
   - **剩 C2**：codex parser 保真度——`stream/codex_parser.rs:51` 仍寫死 `name:"Shell"`、`tool_kind` 永遠 None（codex wire 不送）、無 reasoning/格式保真度擴充。卡 ground-truth 樣本。
   - 詳細：[provider-prompt-engineering](2026-05-22-provider-prompt-engineering-backlog.md)、loop PE1/PE2（`2026-05-22-provider-prompt-diagnosis.md` / `-design.md`）
 
-- **CAP-3 · codebus 作為 MCP Server（query-only）** — 擴充性 / 生態整合 · 工程量：中-重
-  - **現況**：CLI 無 `mcp` 子命令；所有 mcp 命中都是 client 隔離（`--strict-mcp-config`），無「自身作為 server 對外暴露 wiki query 工具」。原設計 after F+RAG，但有 incremental MVP 路線（先做三件唯讀 wiki 工具、不必全卡）。
-  - 詳細：[mcp-server](2026-05-14-mcp-server-backlog.md)
-
 - **CAP-4 · 新能力候選（deferred，有具體需求再接）** — new-capability · 工程量：中-重（各別 spike 後定）
   - (a) structured output `--json-schema`/`--output-schema` 跨 provider 對等；(b) codex `--oss` 本地模型 profile；(c) 泛化既有 `content_verify` 成多 spawn orchestrator（現 `verb/content_verify.rs:172` 只被 `goal.rs:557`/`quiz.rs:773` 兩處固定呼叫）。不投機抽象。
   - 詳細：[cli-applicability T3](2026-05-30-cli-capability-applicability-backlog.md)
@@ -146,6 +142,7 @@
 | 2026-06-16 | GitHub push/PR CI（windows-latest、cargo test + clippy baseline guard + npm test/typecheck）+ issue/PR templates；連同既有 `windows-release-ci` 讓「GitHub 倉庫設定」整條 close — 原開放 REL-1 | `github-ci-and-templates`（commit `0a3c753`；spec ci-automation new capability） | 無 backlog detail doc；artifacts 見 `archive/2026-06-16-github-ci-and-templates/` |
 | 2026-06-26 | PII mirror 完整性：builtin pattern 4→13（GitHub PAT / Slack / Google / OpenAI / Stripe / PEM / JWT / DB 連線字串，OpenAI alternation 不吞 `sk-ant-`）+ 非 UTF-8 改 UTF-16 BOM decode-scan（命中遮罩、真二進位 verbatim + `unscanned_files` counter）+ 前端 pattern 數由後端 `builtin_pattern_count()` 動態驅動（不再 hardcode 14）。實機 CDP smoke 驗 Settings 顯示「13 條規則」。gitignored 透明度未做（非破口、gitignored 不進 mirror 屬正確設計） — 原開放 SEC-4 | `pii-mirror-completeness`（實作 `75018df` + archive `7f789fe`；specs pii-filter / vault / app-shell） | 無 backlog detail doc；artifacts 見 `archive/2026-06-26-pii-mirror-completeness/` |
 | 2026-06-26 | Agent spawn env scrub：兩 backend（claude `compose_claude_cmd` / codex `build_command`）spawn 前 `Command::env_clear()` + 共用跨平台 allowlist passthrough（通用 5 / Windows 18 含 `PATHEXT`/`ComSpec`/`SystemRoot` / Unix 4 + `LC_`/`CODEBUS_MOCK_` 前綴），父 shell 機密（`GITHUB_TOKEN`/`AWS_*`/`KUBECONFIG` + codebus 自身 `CODEBUS_*`）不再進 agent child env；`OsString`/`vars_os` 防非 UTF-8 panic；注入順序 env_clear→passthrough→provider；spawn-based sentinel 測試坐實。實機驗真 claude（system）+ 真 codex（`.cmd`→node→`codex.exe` 鏈 + PowerShell shell-out）scrub 後皆正常 spawn — 原開放 SEC-1 | `agent-spawn-env-scrub`（實作 `e16542d` + archive `e7af798`；spec claude-code-config MODIFIED + codex-backend ADDED） | 無 backlog detail doc；artifacts 見 `archive/2026-06-26-agent-spawn-env-scrub/` |
+| 2026-06-27 | codebus 作為 MCP Server v1（single-vault、query-only）：`codebus mcp --vault <path>` stdio MCP server（rmcp 1.8、default-on `mcp` feature）暴露 3 個唯讀 tool — `wiki_list` / `wiki_read`（char 分頁 12000、clamp 20000、防 CJK 切壞）/ `wiki_search`（大小寫不敏感子字串 grep、cap 20、RAG 未做先 grep）。抽 wiki 讀取到 `codebus-core::wiki::read`（app IPC 改薄包裝、行為不變、unknown slug 仍 `AppError::Invalid`）；安全 vault 釘定 + 只讀 `wiki/`（`raw/code` 不可達：file_stem + canonicalize）；MSRV 1.85→1.88（rmcp-macros→darling 0.23 硬要 1.88，實測 1.85 編不過 / 1.88 剛好，CI `@stable` 不 break、`--no-default-features` 退 1.85）。實機驗真 Claude Code + 真 codex 0.142.2 都發掘+呼叫 3 tool（17 頁、CJK title）。**v2 follow-up（未做）**：multi-vault、RAG 升 `wiki_search`、`run_list`、寫操作、macOS/Linux 實機；`codebus mcp --help` 列了無關 global flag 待清 — 原開放 CAP-3（v1 query-only 部分） | `mcp-server-single-vault`（實作 `9d0cccc` + archive `14ad256`；spec mcp-server new + cli MODIFIED） | 詳細 [mcp-server](2026-05-14-mcp-server-backlog.md) + [spike](2026-05-22-mcp-server-spike.md) |
 
 ---
 
