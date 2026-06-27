@@ -146,8 +146,8 @@ pub fn spawn_quiz_plan(
         move |payload| {
             let _ = app_terminal.emit("quiz-plan-terminal", payload);
         },
-        move |repo, options, mut on_event, cancel| {
-            run_quiz_plan(repo, options, |e| on_event(e), cancel, run_timeout)
+        move |repo, options, on_event, cancel| {
+            run_quiz_plan(repo, options, on_event, cancel, run_timeout)
         },
     )
 }
@@ -288,8 +288,8 @@ pub fn spawn_quiz_generate(
         move |payload| {
             let _ = app_terminal.emit("quiz-generate-terminal", payload);
         },
-        move |repo, options, mut on_event, cancel| {
-            run_quiz_generate(repo, options, |e| on_event(e), cancel, run_timeout)
+        move |repo, options, on_event, cancel| {
+            run_quiz_generate(repo, options, on_event, cancel, run_timeout)
         },
     )
 }
@@ -562,7 +562,7 @@ pub fn read_quiz_events(
             message: "events file does not exist".into(),
         });
     }
-    Ok(crate::ipc::goals::read_events_jsonl(target)?)
+    crate::ipc::goals::read_events_jsonl(target)
 }
 
 // ---- quiz-attempt-progress: read/write_quiz_progress ----------------------

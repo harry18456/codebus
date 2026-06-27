@@ -120,8 +120,8 @@ pub fn spawn_chat_turn(
         move |payload| {
             let _ = app_for_terminal.emit("chat-terminal", payload);
         },
-        move |repo, options, mut on_event, cancel| {
-            run_chat_turn(repo, options, |e| on_event(e), cancel, run_timeout)
+        move |repo, options, on_event, cancel| {
+            run_chat_turn(repo, options, on_event, cancel, run_timeout)
         },
     )
 }

@@ -155,11 +155,10 @@ pub fn invoke(
     // Feed the optional stdin payload (codex multi-line prompt workaround for
     // Windows .cmd batch-file argv validation) and immediately close stdin so
     // the child does not block waiting on more input.
-    if let Some(payload) = stdin_payload {
-        if let Some(mut stdin) = child.stdin.take() {
+    if let Some(payload) = stdin_payload
+        && let Some(mut stdin) = child.stdin.take() {
             io::Write::write_all(&mut stdin, payload.as_bytes())?;
         }
-    }
 
     // Background cancel watcher: the main loop below reads stdout with a
     // blocking `BufReader::lines()`. When the child stops emitting stdout
@@ -251,11 +250,10 @@ pub fn invoke(
         // own provider's session/thread line (Claude `system`/`init`). First
         // hit wins, never overwrites. Chat verb needs it to drive resume on
         // the next turn.
-        if session_id.is_none() {
-            if let Some(id) = backend.extract_session_id(&line) {
+        if session_id.is_none()
+            && let Some(id) = backend.extract_session_id(&line) {
                 session_id = Some(id);
             }
-        }
         for event in backend.parse_stream_line(&line) {
             if let StreamEvent::Usage(u) = &event {
                 apply_token_usage(&mut accumulated, u, token_semantics);

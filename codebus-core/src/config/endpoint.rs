@@ -41,16 +41,13 @@ use super::ConfigLoadError;
 /// and env injection at spawn time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ActiveProfile {
+    #[default]
     System,
     Azure,
 }
 
-impl Default for ActiveProfile {
-    fn default() -> Self {
-        ActiveProfile::System
-    }
-}
 
 /// Translate a system-profile `model` alias to the Claude CLI `--model` flag
 /// value. The rule is uniform for known aliases (`opus-4-7`, …) AND any

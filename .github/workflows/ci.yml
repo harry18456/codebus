@@ -52,9 +52,9 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           $baseline = @{
-            "codebus-core" = 8
-            "codebus-cli" = 5
-            "codebus-app-tauri" = 6
+            "codebus-core" = 4
+            "codebus-cli" = 1
+            "codebus-app-tauri" = 1
           }
 
           $counts = @{}

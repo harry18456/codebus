@@ -153,7 +153,7 @@ fn read_scannable_text(path: &Path) -> Option<String> {
 /// surrogate, so a malformed file falls through to verbatim copy rather than
 /// producing mojibake the scanner would mis-handle.
 fn decode_utf16(body: &[u8], to_u16: fn([u8; 2]) -> u16) -> Option<String> {
-    if body.len() % 2 != 0 {
+    if !body.len().is_multiple_of(2) {
         return None;
     }
     let units = body.chunks_exact(2).map(|c| to_u16([c[0], c[1]]));

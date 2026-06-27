@@ -248,14 +248,13 @@ pub(crate) fn plan_no_marker_error(plan_text: &str) -> VerbError {
 /// start and a closing fence exist; otherwise returns the trimmed body.
 pub(crate) fn strip_code_fence(body: &str) -> String {
     let trimmed = body.trim();
-    if let Some(after_open) = trimmed.strip_prefix("```") {
-        if let Some(nl) = after_open.find('\n') {
+    if let Some(after_open) = trimmed.strip_prefix("```")
+        && let Some(nl) = after_open.find('\n') {
             let inner = &after_open[nl + 1..];
             if let Some(close) = inner.rfind("```") {
                 return inner[..close].trim().to_string();
             }
         }
-    }
     trimmed.to_string()
 }
 

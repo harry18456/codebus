@@ -186,11 +186,11 @@ pub fn spawn_goal(
             let _ = app_for_terminal.emit("goal-terminal", payload);
         },
         content_verify,
-        move |repo, options, mut on_event, cancel, started_at| {
+        move |repo, options, on_event, cancel, started_at| {
             run_goal(
                 repo,
                 options,
-                |e| on_event(e),
+                on_event,
                 cancel,
                 run_timeout,
                 Some(started_at),

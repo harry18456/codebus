@@ -66,7 +66,7 @@ pub async fn run(
     // from Obsidian config so the OSC 8 hyperlink emitter can build
     // `obsidian://open?vault=<id>&file=<rel>` URLs. JSON format intentionally
     // skips this — `format_json` MUST stay machine-readable.
-    let wiki_root = vault_paths(&vault_root.parent().unwrap_or(Path::new(""))).wiki;
+    let wiki_root = vault_paths(vault_root.parent().unwrap_or(Path::new(""))).wiki;
     let result = lint_wiki(&vault_root);
 
     match args.format {

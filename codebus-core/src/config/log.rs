@@ -23,17 +23,11 @@ use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub struct LogConfig {
     pub sink: SinkConfig,
 }
 
-impl Default for LogConfig {
-    fn default() -> Self {
-        Self {
-            sink: SinkConfig::default(),
-        }
-    }
-}
 
 #[derive(Debug, Default, Deserialize)]
 struct ConfigFile {

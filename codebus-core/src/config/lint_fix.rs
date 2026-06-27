@@ -89,13 +89,11 @@ pub fn load_lint_fix_config(path: &Path) -> Result<LintFixConfig, super::ConfigL
     let file: ConfigFile =
         serde_yaml::from_str(&body).map_err(super::ConfigLoadError::YamlParse)?;
     let mut cfg = LintFixConfig::default();
-    if let Some(lint) = file.lint {
-        if let Some(fix) = lint.fix {
-            if let Some(e) = fix.enabled {
+    if let Some(lint) = file.lint
+        && let Some(fix) = lint.fix
+            && let Some(e) = fix.enabled {
                 cfg.enabled = e;
             }
-        }
-    }
     Ok(cfg)
 }
 

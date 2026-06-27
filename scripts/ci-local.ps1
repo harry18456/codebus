@@ -39,7 +39,7 @@ if ($LASTEXITCODE -ne 0) { Fail "cargo test --workspace" }
 # 3. Rust clippy with baseline guard (NOT -D warnings; per-package warning count
 #    must stay at or below the accepted baseline).
 Section "cargo clippy --workspace (baseline guard)"
-$baseline = @{ "codebus-core" = 8; "codebus-cli" = 5; "codebus-app-tauri" = 6 }
+$baseline = @{ "codebus-core" = 4; "codebus-cli" = 1; "codebus-app-tauri" = 1 }
 # Capture stdout (the JSON) into a variable rather than redirecting to a file —
 # 5.1's `>` writes UTF-16 which can trip the parse. stderr (progress) stays on
 # the console; $LASTEXITCODE still reflects cargo's exit.

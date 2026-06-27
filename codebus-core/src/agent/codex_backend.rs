@@ -222,8 +222,8 @@ impl AgentBackend for CodexBackend {
         // API with an `api-key` header (not Bearer), api-version query param,
         // and the deployment name carried by `-m` above. The key is injected
         // into the child env and referenced by `env_key` / `env_http_headers`.
-        if self.config.active == ActiveProfile::Azure {
-            if let Some(az) = self.config.azure.as_ref() {
+        if self.config.active == ActiveProfile::Azure
+            && let Some(az) = self.config.azure.as_ref() {
                 // No embedded double-quotes anywhere: codex parses each `-c`
                 // value as TOML and falls back to a literal string when it is
                 // not valid TOML, and TOML bare keys permit hyphens. Quoting
@@ -259,7 +259,6 @@ impl AgentBackend for CodexBackend {
                     cmd.env(CODEX_AZURE_KEY_ENV, key);
                 }
             }
-        }
 
         // `command_allowance` has no codex equivalent (sandbox `-s` governs
         // command execution). Degrade with a single warning — no hard gate.

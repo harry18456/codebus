@@ -56,11 +56,10 @@ use std::path::PathBuf;
 /// Windows, where `dirs::home_dir()` ignores `HOME` / `USERPROFILE`
 /// overrides because it consults `SHGetKnownFolderPath`. v2 carry pattern.
 pub fn default_config_path() -> Option<PathBuf> {
-    if let Ok(custom) = std::env::var("CODEBUS_HOME") {
-        if !custom.is_empty() {
+    if let Ok(custom) = std::env::var("CODEBUS_HOME")
+        && !custom.is_empty() {
             return Some(PathBuf::from(custom).join(".codebus").join("config.yaml"));
         }
-    }
     dirs::home_dir().map(|h| h.join(".codebus").join("config.yaml"))
 }
 

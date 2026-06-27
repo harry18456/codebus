@@ -90,11 +90,10 @@ pub fn validate_quiz_body(
 
         let mut seen: Vec<char> = Vec::new();
         for c in choice_re.captures_iter(block) {
-            if let Some(k) = c.get(1).and_then(|g| g.as_str().chars().next()) {
-                if !seen.contains(&k) {
+            if let Some(k) = c.get(1).and_then(|g| g.as_str().chars().next())
+                && !seen.contains(&k) {
                     seen.push(k);
                 }
-            }
         }
         let have_all = CHOICE_KEYS.iter().all(|k| seen.contains(k));
         if !have_all || seen.len() != 4 {

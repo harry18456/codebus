@@ -143,13 +143,12 @@ fn parse_assistant_content(parsed: &Value) -> Vec<StreamEvent> {
         let item_type = item.get("type").and_then(Value::as_str);
         match item_type {
             Some("text") => {
-                if let Some(text) = item.get("text").and_then(Value::as_str) {
-                    if !text.is_empty() {
+                if let Some(text) = item.get("text").and_then(Value::as_str)
+                    && !text.is_empty() {
                         events.push(StreamEvent::Thought {
                             text: text.to_string(),
                         });
                     }
-                }
             }
             Some("tool_use") => {
                 let name = item

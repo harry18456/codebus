@@ -80,15 +80,14 @@ impl AppRuntimeState {
 /// override (see module docs). Returns `None` if neither the override nor a
 /// system home directory is available.
 pub fn app_state_path() -> Option<PathBuf> {
-    if let Ok(custom) = std::env::var("CODEBUS_HOME") {
-        if !custom.is_empty() {
+    if let Ok(custom) = std::env::var("CODEBUS_HOME")
+        && !custom.is_empty() {
             return Some(
                 PathBuf::from(custom)
                     .join(".codebus")
                     .join("app-state.json"),
             );
         }
-    }
     dirs::home_dir().map(|h| h.join(".codebus").join("app-state.json"))
 }
 

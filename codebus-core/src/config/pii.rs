@@ -36,18 +36,15 @@ use std::path::Path;
 
 /// Active PII scanner selection. Maps to a concrete impl at the call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum PiiScannerKind {
     /// `RegexBasicScanner` with built-in 4 patterns plus any `patterns_extra`.
+    #[default]
     RegexBasic,
     /// `NullScanner` — produces no matches; used to opt-out entirely.
     Null,
 }
 
-impl Default for PiiScannerKind {
-    fn default() -> Self {
-        PiiScannerKind::RegexBasic
-    }
-}
 
 /// Effective PII configuration after merging file + defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]

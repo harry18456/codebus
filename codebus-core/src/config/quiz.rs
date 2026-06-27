@@ -81,13 +81,12 @@ where
     D: serde::Deserializer<'de>,
 {
     let raw = Option::<u8>::deserialize(deserializer)?;
-    if let Some(v) = raw {
-        if !(QUIZ_LENGTH_MIN..=QUIZ_LENGTH_MAX).contains(&v) {
+    if let Some(v) = raw
+        && !(QUIZ_LENGTH_MIN..=QUIZ_LENGTH_MAX).contains(&v) {
             return Err(D::Error::custom(format!(
                 "quiz.default_length must be between {QUIZ_LENGTH_MIN} and {QUIZ_LENGTH_MAX}, got {v}"
             )));
         }
-    }
     Ok(raw)
 }
 

@@ -31,19 +31,13 @@ use std::path::Path;
 
 /// Effective shared goal configuration after merging file + defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub struct GoalConfig {
     /// goal-content-verify (design D5): gate for the optional
     /// model-based content verification + repair stage. Default `false`.
     pub content_verify: bool,
 }
 
-impl Default for GoalConfig {
-    fn default() -> Self {
-        Self {
-            content_verify: false,
-        }
-    }
-}
 
 #[derive(Debug, Default, Deserialize)]
 struct ConfigFile {

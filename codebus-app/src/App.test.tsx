@@ -170,10 +170,10 @@ describe("BottomStrip Lobby-only render + Workspace settings invocation", () => 
     // single SettingsModal instance owned by the app shell.
     const sidebarSettings = screen.getByTestId("workspace-sidebar-settings")
     fireEvent.click(sidebarSettings)
-    await waitFor(() => {
-      // Settings modal renders into a portal; assert by testid.
-      expect(screen.getByTestId("settings-modal")).toBeInTheDocument()
-    })
+    // Settings modal renders into a portal; the Radix mount is non-atomic, so
+    // findBy (retries until present) is used over waitFor+getBy, with a raised
+    // timeout for slow/loaded CI environments.
+    await screen.findByTestId("settings-modal", undefined, { timeout: 4000 })
     // Only one modal instance in the DOM.
     expect(screen.getAllByTestId("settings-modal")).toHaveLength(1)
   })

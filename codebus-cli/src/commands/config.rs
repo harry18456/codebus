@@ -256,11 +256,10 @@ fn read_azure_keyring_service_from_config() -> Result<String, ExitCode> {
             return Err(ExitCode::from(2));
         }
     };
-    if let Some(az) = cfg.azure.as_ref() {
-        if !az.keyring_service.is_empty() {
+    if let Some(az) = cfg.azure.as_ref()
+        && !az.keyring_service.is_empty() {
             return Ok(az.keyring_service.clone());
         }
-    }
     Ok(DEFAULT_AZURE_KEYRING_SERVICE.to_string())
 }
 

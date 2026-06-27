@@ -304,7 +304,7 @@ fn is_codebus_binary(token: &str) -> bool {
     // Strip directory portion — handle both `/` and `\` separators so this
     // works on Unix paths AND Windows mixed paths (e.g. `D:/x/codebus.exe`).
     let basename = token
-        .rsplit(|c| c == '/' || c == '\\')
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or(token);
 
@@ -341,7 +341,7 @@ const IMAGE_BLOCKLIST: &[&str] = &[
 /// mixed-separator paths all yield the same extension.
 fn is_image_path(path: &str) -> bool {
     let basename = path
-        .rsplit(|c| c == '/' || c == '\\')
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or(path);
     let Some(dot_pos) = basename.rfind('.') else {
@@ -452,7 +452,7 @@ fn check_sensitive_path(path: &str, home: Option<&Path>) -> Option<String> {
 /// Strip directory portion using `/` or `\` as separators (mirrors the
 /// existing `is_image_path` basename extraction).
 fn extract_basename(path: &str) -> &str {
-    path.rsplit(|c| c == '/' || c == '\\')
+    path.rsplit(['/', '\\'])
         .next()
         .unwrap_or(path)
 }
@@ -543,11 +543,10 @@ async fn check_read() -> ExitCode {
     // Read-scoped: Glob/Grep carry no image-content-read risk AND are
     // governed by containment alone, so they skip this stage (and must not
     // be failed closed for lacking a `file_path`).
-    if !is_search_tool(&buf) {
-        if let Some(reason) = check_read_inner(&buf, &hooks_cfg, home.as_deref()) {
+    if !is_search_tool(&buf)
+        && let Some(reason) = check_read_inner(&buf, &hooks_cfg, home.as_deref()) {
             return emit_block(&reason);
         }
-    }
     ExitCode::from(0)
 }
 

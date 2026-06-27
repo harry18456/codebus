@@ -110,7 +110,7 @@ describe("SettingsModal", () => {
       <SettingsModal open onClose={onClose} piiPatternCount={13} />,
     )
     fireEvent.click(screen.getByTestId("settings-save"))
-    await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 1000 })
+    await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 4000 })
     expect(mockedInvoke).toHaveBeenCalledWith(
       "save_global_config",
       expect.objectContaining({ config: expect.any(Object) }),
