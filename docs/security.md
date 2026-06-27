@@ -240,6 +240,16 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 - child stderr 預設 drain（非 denial 行需 `CODEBUS_FORWARD_AGENT_STDERR=1` 才轉發到終端）；**自 `agent-run-integrity` 起，stderr 每行已過 `is_sandbox_denial` 分類、命中與 stdout 來源相加計入 `sandbox_denial_count`**（獨立於轉發旗標）→ Windows 上只出現在 stderr 的 sandbox denial 不再被漏計（仍 observability-only、不改變 outcome）。
 - vault 自己的 `.codebus/.claude/settings.json`（hook 註冊檔）在 workspace Write 可及範圍內 → 被 inject 的 goal/fix agent 可改寫掉自己的 check-bash/check-read hook（下一輪 spawn 才生效）；**自 `agent-run-integrity` 起，`codebus lint` 新增 `vault-gate-integrity` 規則偵測必要 hook 被移除/改空**（`check-read-vault-containment` 起為四條：`Bash`/`Read`/`Glob`/`Grep`；`fix` 既有 lint precheck/final 自動帶到）。偵測非預防：竄改在下次 lint/fix 才報出、vault git diff 亦可見可還原。
 
+### 7. MCP server 暴露面（`codebus mcp`）
+
+`codebus mcp --vault <repo>` 把單一 vault 的 wiki 以 stdio MCP server 暴露給外部 agent，是**主動對外開的查詢面**，隔離姿態與上述 verb 不同（它不 spawn agent，而是被別的 agent 當資料來源呼叫）：
+
+- **唯讀、只暴露 tools**：server 只註冊三個 query-only tool（`wiki_list` / `wiki_read` / `wiki_search`），不做 MCP resources / prompts、無任何寫操作。
+- **vault 啟動釘定、tool 不收路徑**：wiki root 在 `--vault` 啟動時固定為 `<repo>/.codebus/wiki/`；三個 tool 都**不接受** vault 或檔案路徑參數，呼叫端無法重導到別的目錄（整合測試斷言每個 tool 的 input schema 都不含 `vault`/`path`）。
+- **只讀 `.codebus/wiki/`，`raw/code/` 不可達**：slug 解析走「遞迴比對 `file_stem`」（`codebus_core::wiki::read::find_page_by_slug`），slug 不參與路徑拼接；解析出的路徑再經 canonicalize 確認落在 wiki root 之下才讀。`<repo>/.codebus/raw/code/`（PII 去識別化鏡像）不在 wiki 子樹內，**永遠不會被列舉、讀取或搜尋到**（整合測試 `codebus-cli/tests/mcp_server.rs` 以 traversal slug ＋ raw/code 內容 query 雙向驗證）。
+- **stdout 純 JSON-RPC**：所有 log / 診斷走 stderr，stdout 只承載協定訊息；阻塞 fs 走 `spawn_blocking`、真錯誤回 MCP `ErrorData`（不吞成空結果）。
+- **殘留與界線**：MCP 面的防護是 wiki **位置**邊界（擋「讀逃出 wiki 子樹」），**不**保護 wiki **內**已寫入的敏感內容——若敏感字串已落進某 wiki 頁，呼叫端能透過 `wiki_read` / `wiki_search` 讀到它（與 §6 的 in-vault 機密界線同源，靠 PII mirror §4 ＋ vault write-policy，不靠這層）。stdio transport 僅本機 client 連接、無網路監聽，且只在你主動啟動 `codebus mcp` 時對外。
+
 ---
 
 ## 怎麼還原（如果出事）

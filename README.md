@@ -106,6 +106,35 @@ The design follows [Karpathy's "LLM Wiki" pattern](https://gist.github.com/karpa
 
 ---
 
+## MCP server
+
+`codebus mcp --vault <repo>` runs codebus as a **read-only [MCP](https://modelcontextprotocol.io) server** over stdio, exposing one vault's wiki to any MCP client (Claude Code, OpenAI Codex, …) as three query-only tools:
+
+| Tool | What it returns |
+|---|---|
+| `wiki_list` | every page's slug + title |
+| `wiki_read(slug, offset?, limit?)` | one page's body, paginated by character (`has_more` / `next_offset` to page through long documents) |
+| `wiki_search(query)` | pages matching a keyword (case-insensitive substring), each with a snippet — pass a **keyword**, not a sentence |
+
+One server process serves **one** vault (pinned by `--vault`); point a client at several codebus repos by adding one entry per vault. The server only ever reads `<repo>/.codebus/wiki/` — it never exposes the PII-redacted `raw/code/` mirror, and no tool accepts a path argument.
+
+Wire it into a client's MCP config, e.g. Claude Code's `.mcp.json` (one entry per vault):
+
+```json
+{
+  "mcpServers": {
+    "codebus-myproject": {
+      "command": "codebus",
+      "args": ["mcp", "--vault", "/abs/path/to/myproject"]
+    }
+  }
+}
+```
+
+The `mcp` subcommand ships in the default build; a `cargo install --path codebus-cli --no-default-features` build omits it (and the rmcp dependency).
+
+---
+
 ## Desktop app
 
 Alongside the CLI there is a Tauri desktop app — a GUI for goal / chat / quiz / wiki preview, and the place to configure the codex / Azure provider.

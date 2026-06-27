@@ -8,10 +8,14 @@
 pub mod fix;
 pub mod frontmatter;
 pub mod lint;
+pub mod read;
 pub mod types;
 
 pub use frontmatter::{FrontmatterError, parse_page, serialize_page};
 pub use lint::lint_wiki;
+pub use read::{
+    WikiPageMeta, find_page_by_slug, frontmatter_title, list_pages, strip_frontmatter,
+};
 pub use types::{
     LintIssue, LintResult, LintSeverity, PageFrontmatter, PageType, ParsedPage, SourceRef,
 };

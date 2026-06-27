@@ -20,36 +20,20 @@
 
 use std::fmt::Write as _;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use codebus_core::vault::obsidian_register::{
     lookup_vault_id_at, obsidian_json_path, register_at,
 };
-use serde::{Deserialize, Serialize};
+pub use codebus_core::wiki::read::WikiPageMeta;
+use codebus_core::wiki::read::{find_page_by_slug, strip_frontmatter};
 
 use super::IpcResult;
 use crate::error::AppError;
 
-/// One row in the wiki page index. `slug` is the filename without the
-/// `.md` extension; `path` is absolute; `title` is the frontmatter
-/// title with the slug as a fallback.
-///
-/// `goals` and `updated` are projected from the leading YAML frontmatter
-/// so the Wiki page reader's WP2 metadata bar (design v1.1 spec lock)
-/// can render `Last updated by <goal>` and a time-ago string without
-/// re-parsing the page body client-side. Both default to empty values
-/// when the frontmatter is missing or malformed, so pages without
-/// frontmatter still surface in the tree.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WikiPageMeta {
-    pub slug: String,
-    pub path: String,
-    pub title: String,
-    #[serde(default)]
-    pub goals: Vec<String>,
-    #[serde(default)]
-    pub updated: String,
-}
+// `WikiPageMeta` is re-exported from `codebus_core::wiki::read` (see imports);
+// its serde shape (slug/path/title/goals/updated) and the WP2 metadata-bar
+// contract are unchanged after the core extraction.
 
 // ---- list_wiki_pages ------------------------------------------------------
 
@@ -60,95 +44,7 @@ pub async fn list_wiki_pages(vault_path: String) -> IpcResult<Vec<WikiPageMeta>>
 }
 
 pub(crate) fn list_wiki_pages_impl(wiki_root: &Path) -> Result<Vec<WikiPageMeta>, AppError> {
-    if !wiki_root.exists() {
-        return Ok(Vec::new());
-    }
-    let mut out = Vec::new();
-    walk_md_files(wiki_root, &mut |path| {
-        let slug = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => return,
-        };
-        let body = match fs::read_to_string(path) {
-            Ok(b) => b,
-            Err(_) => return,
-        };
-        let yaml = parse_frontmatter_yaml(&body);
-        let title = yaml
-            .as_ref()
-            .and_then(|y| y.get("title"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| slug.clone());
-        let goals = yaml
-            .as_ref()
-            .and_then(|y| y.get("goals"))
-            .and_then(|v| v.as_sequence())
-            .map(|seq| {
-                seq.iter()
-                    .filter_map(|entry| entry.as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let updated = yaml
-            .as_ref()
-            .and_then(|y| y.get("updated"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-        out.push(WikiPageMeta {
-            slug,
-            path: path.display().to_string(),
-            title,
-            goals,
-            updated,
-        });
-    })?;
-    Ok(out)
-}
-
-/// Recurse `dir`, invoking `visit(file)` for each `*.md` file found.
-/// Errors from individual `fs::read_dir` calls (permission denied on a
-/// subfolder, etc.) are tolerated — we surface a top-level error only
-/// when the root itself cannot be read.
-fn walk_md_files(dir: &Path, visit: &mut dyn FnMut(&Path)) -> Result<(), AppError> {
-    let entries = fs::read_dir(dir)?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            // Tolerate subdirectory failures so a single unreadable
-            // taxonomy folder doesn't sink the whole listing.
-            let _ = walk_md_files(&path, visit);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            visit(&path);
-        }
-    }
-    Ok(())
-}
-
-/// Parse the leading YAML frontmatter block into a `serde_yaml::Value`.
-/// Returns `None` when:
-/// - the file does not start with `---\n` / `---\r\n`
-/// - the closing delimiter is missing (function consumes lines until EOF)
-/// - the YAML cannot be parsed
-///
-/// Callers project individual keys (`title`, `goals`, `updated`, ...) off
-/// the returned value; missing keys SHALL be tolerated per WP2's
-/// "graceful suppression" contract — a page without frontmatter still
-/// renders.
-fn parse_frontmatter_yaml(content: &str) -> Option<serde_yaml::Value> {
-    let after_open = content
-        .strip_prefix("---\n")
-        .or_else(|| content.strip_prefix("---\r\n"))?;
-    let mut yaml_text = String::new();
-    for line in after_open.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\r', '\n']);
-        if trimmed == "---" {
-            break;
-        }
-        yaml_text.push_str(line);
-    }
-    serde_yaml::from_str(&yaml_text).ok()
+    codebus_core::wiki::read::list_pages(wiki_root).map_err(AppError::from)
 }
 
 // ---- read_wiki_page -------------------------------------------------------
@@ -171,42 +67,11 @@ pub(crate) fn read_wiki_page_impl(
     Ok(strip_frontmatter(&body).to_string())
 }
 
-fn find_page_by_slug(wiki_root: &Path, page_slug: &str) -> Option<PathBuf> {
-    let mut found: Option<PathBuf> = None;
-    let _ = walk_md_files(wiki_root, &mut |path| {
-        if found.is_some() {
-            return;
-        }
-        if path.file_stem().and_then(|s| s.to_str()) == Some(page_slug) {
-            found = Some(path.to_path_buf());
-        }
-    });
-    found
-}
-
-/// Strip a leading `---\n...\n---\n` frontmatter block. When there is
-/// no opening delimiter or no closing delimiter, the original content
-/// is returned unchanged so the Milkdown preview still has something
-/// to render.
-fn strip_frontmatter(content: &str) -> &str {
-    let rest = match content
-        .strip_prefix("---\n")
-        .or_else(|| content.strip_prefix("---\r\n"))
-    {
-        Some(r) => r,
-        None => return content,
-    };
-    let mut idx = 0;
-    for line in rest.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\r', '\n']);
-        if trimmed == "---" {
-            let end = idx + line.len();
-            return &rest[end..];
-        }
-        idx += line.len();
-    }
-    content
-}
+// `find_page_by_slug` + `strip_frontmatter` now live in
+// `codebus_core::wiki::read` (re-imported above), shared with the MCP server.
+// `read_wiki_page_impl` keeps its original control flow: an unknown slug maps
+// to `AppError::Invalid` (find returns `None`), while an I/O failure on a
+// resolved file maps to `AppError::Io` (the `?` on `fs::read_to_string`).
 
 // ---- Open in Obsidian -----------------------------------------------------
 //
@@ -357,6 +222,7 @@ fn percent_encode_segment(s: &str) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
 
     fn write_file(dir: &Path, rel: &str, content: &str) -> PathBuf {
         let path = dir.join(rel);

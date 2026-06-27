@@ -7,6 +7,8 @@ use clap::{Parser, Subcommand};
 use codebus_core::render::RenderOptions;
 
 mod commands;
+#[cfg(feature = "mcp")]
+mod mcp;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -64,6 +66,9 @@ enum Command {
     Quiz(commands::quiz::QuizArgs),
     /// Manage the Azure API key in the OS keyring.
     Config(commands::config::ConfigArgs),
+    /// Start a stdio MCP server exposing this vault's wiki to external agents (query-only).
+    #[cfg(feature = "mcp")]
+    Mcp(commands::mcp::McpArgs),
     /// Internal: PreToolUse hook for fix sandbox (called by Claude Code, not users).
     #[command(hide = true, subcommand)]
     Hook(commands::hook::HookArgs),
@@ -122,6 +127,8 @@ async fn main() -> ExitCode {
             commands::quiz::run(&repo_default, args, cli.debug, &render_opts).await
         }
         Some(Command::Config(args)) => commands::config::run(args).await,
+        #[cfg(feature = "mcp")]
+        Some(Command::Mcp(args)) => commands::mcp::run(args).await,
         Some(Command::Hook(args)) => commands::hook::run(args).await,
     }
 }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-codebus is a CLI (`codebus`) + Tauri desktop app that drives an **agent CLI** (Claude Code or OpenAI Codex) to build and maintain an Obsidian-compatible wiki of an unfamiliar codebase, persisted under the target repo's `.codebus/` vault. The verbs the agent is driven through are `init` / `goal` / `query` / `fix` / `chat` / `quiz` / `lint`. Rust workspace, edition 2024, rust 1.85+.
+codebus is a CLI (`codebus`) + Tauri desktop app that drives an **agent CLI** (Claude Code or OpenAI Codex) to build and maintain an Obsidian-compatible wiki of an unfamiliar codebase, persisted under the target repo's `.codebus/` vault. The verbs the agent is driven through are `init` / `goal` / `query` / `fix` / `chat` / `quiz` / `lint`. Rust workspace, edition 2024, rust 1.88+ (the default-on `mcp` feature pulls rmcp 1.8 → darling 0.23, which requires 1.88; `--no-default-features` drops back to 1.85).
 
 ## Commands
 

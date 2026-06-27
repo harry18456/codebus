@@ -5,6 +5,8 @@ pub mod goal;
 pub mod hook;
 pub mod init;
 pub mod lint;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod query;
 pub mod quiz;
 

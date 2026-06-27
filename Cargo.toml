@@ -13,7 +13,7 @@ description = "Drive an AI coding agent (Claude Code or OpenAI Codex) to build a
 readme = "README.md"
 keywords = ["cli", "wiki", "codebase", "claude", "codex"]
 categories = ["command-line-utilities", "development-tools"]
-rust-version = "1.85"
+rust-version = "1.88"
 
 [workspace.dependencies]
 codebus-core = { path = "codebus-core" }
@@ -40,6 +40,11 @@ tauri-plugin-fs = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 notify = "6"
+# MCP server SDK (codebus mcp). Pinned to =1.8.0: the GitHub `main` examples
+# have drifted ahead of this release's macro API (unit-struct +
+# tool_router(server_handler) auto-handler), so pinning keeps the compiler as
+# the arbiter of the explicit tool_router template this workspace uses.
+rmcp = { version = "=1.8.0", features = ["server", "macros", "transport-io", "schemars"] }
 
 [profile.release]
 lto = "thin"

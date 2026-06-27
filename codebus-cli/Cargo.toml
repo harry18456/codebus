@@ -39,6 +39,15 @@ rpassword = { workspace = true }
 # (spike-verified: claude CLI has a built-in handshake when --resume after
 # cancel, so this trap just flips an AtomicBool that run_chat_turn polls).
 ctrlc = "3"
+# MCP server (codebus mcp). Optional + behind the default-on `mcp` feature so a
+# `--no-default-features` build drops rmcp/schemars from the main binary.
+rmcp = { workspace = true, optional = true }
+
+[features]
+default = ["mcp"]
+# `codebus mcp` stdio server. Pulls in rmcp and enables tokio's io-std
+# (stdin/stdout) transport, neither of which the other verbs need.
+mcp = ["dep:rmcp", "tokio/io-std"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

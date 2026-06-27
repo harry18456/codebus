@@ -59,7 +59,9 @@ fn help_lists_exactly_the_six_subcommands() {
             "help missing `{verb}`:\n{combined}"
         );
     }
-    for forbidden in ["mcp", "ingest"] {
+    // `mcp` is now a registered subcommand (mcp-server change); only `ingest`
+    // remains reserved-but-unregistered.
+    for forbidden in ["ingest"] {
         assert!(
             !combined.contains(&format!(" {forbidden} ")),
             "help unexpectedly contains `{forbidden}`:\n{combined}"
@@ -172,10 +174,42 @@ fn unknown_subcommand_is_rejected_by_clap() {
     );
 }
 
+/// mcp-server change: `mcp` is now a registered (feature-gated, default-on)
+/// subcommand. Without `--vault` clap rejects it (missing required arg); with
+/// a `--vault` whose `.codebus/wiki/` doesn't exist the server refuses to
+/// start and exits non-zero with an explanatory stderr message.
 #[test]
-fn mcp_subcommand_is_rejected_specifically() {
-    let out = Command::new(BIN).arg("mcp").output().expect("run binary");
-    assert!(!out.status.success());
+fn mcp_requires_vault_and_rejects_missing_wiki() {
+    let no_vault = Command::new(BIN).arg("mcp").output().expect("run binary");
+    assert!(!no_vault.status.success(), "mcp without --vault must fail");
+
+    let tmp = TempDir::new().unwrap();
+    let bad = Command::new(BIN)
+        .args(["mcp", "--vault"])
+        .arg(tmp.path())
+        .output()
+        .expect("run binary");
+    assert!(!bad.status.success(), "mcp with no wiki dir must fail");
+    let stderr = String::from_utf8_lossy(&bad.stderr);
+    assert!(
+        stderr.contains("no wiki"),
+        "stderr should explain the missing wiki: {stderr}"
+    );
+}
+
+/// mcp-server change: `codebus --help` lists the feature-gated `mcp`
+/// subcommand (default build) — the cli spec's Subcommand Registration now
+/// covers nine subcommands.
+#[test]
+fn help_lists_mcp_subcommand() {
+    let out = Command::new(BIN).arg("--help").output().expect("run binary");
+    assert!(out.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(combined.contains("mcp"), "help must list mcp:\n{combined}");
 }
 
 // === No-Arg Defaults to Init Dispatch ===
