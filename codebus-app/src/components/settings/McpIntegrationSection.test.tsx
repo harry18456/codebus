@@ -59,6 +59,13 @@ describe("McpIntegrationSection", () => {
     expect(screen.getByTestId("mcp-status-codex")).toHaveTextContent("Connected")
   })
 
+  it("discloses that enabling also writes a codebus block to the client's global instructions", async () => {
+    mockClients({ claude_code: "not_registered", codex: "not_registered" })
+    render(<McpIntegrationSection />)
+    const note = await screen.findByTestId("mcp-global-md-note")
+    expect(note).toHaveTextContent(/global instructions/i)
+  })
+
   it("disables only the absent client's row, leaving the other independent", async () => {
     mockClients({ claude_code: "client_missing", codex: "not_registered" })
     render(<McpIntegrationSection />)

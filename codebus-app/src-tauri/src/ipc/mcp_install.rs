@@ -20,6 +20,7 @@ use tauri::{AppHandle, Manager};
 
 use super::IpcResult;
 use super::cli_status::{CliStatus, binary_for_provider, probe_binary};
+use super::global_md;
 use crate::error::AppError;
 
 /// Registration status of codebus in a given client. Mirrors the `CliStatus`
@@ -174,6 +175,43 @@ fn cli_exe_name() -> &'static str {
     }
 }
 
+/// The client's GLOBAL instruction file (claude `CLAUDE.md`, codex `AGENTS.md`),
+/// resolved by [`global_md`] honoring `CLAUDE_CONFIG_DIR` / `CODEX_HOME`.
+fn global_md_path(client: Client) -> Option<PathBuf> {
+    match client {
+        Client::Claude => global_md::claude_md_path(),
+        Client::Codex => global_md::codex_md_path(),
+    }
+}
+
+/// Keep the codebus guidance block in the resolved global instruction file in
+/// sync with the registration: upsert on enable, remove on disable. Best-effort
+/// and SUBORDINATE to the MCP registration — any failure (including an
+/// unresolvable home directory) warns to stderr and is swallowed, so it can
+/// never fail the install/remove IPC. The atomic write in [`global_md`] keeps a
+/// failed write from corrupting the file.
+fn sync_guidance_at(path: Option<PathBuf>, enabled: bool) {
+    let Some(path) = path else {
+        eprintln!("warning: codebus mcp guidance: home directory unavailable, skipping");
+        return;
+    };
+    let res = if enabled {
+        global_md::upsert_block_at(&path)
+    } else {
+        global_md::remove_block_at(&path)
+    };
+    if let Err(e) = res {
+        eprintln!(
+            "warning: codebus mcp guidance: failed to update {}: {e}",
+            path.display()
+        );
+    }
+}
+
+fn sync_guidance(client: Client, enabled: bool) {
+    sync_guidance_at(global_md_path(client), enabled);
+}
+
 /// Compute the registration status: detect the client via the shared
 /// `--version` probe, then query its own `mcp list` for a codebus entry.
 fn compute_status(provider: &str) -> McpClientStatus {
@@ -220,7 +258,11 @@ pub async fn mcp_client_install(app: AppHandle, provider: String) -> IpcResult<(
     };
     let codebus = resolve_codebus_path(&app);
     let args = install_args(client, &codebus.to_string_lossy());
-    run_client(client_bin(client), args).await
+    run_client(client_bin(client), args).await?;
+    // Subordinate to the registration above: add the global-md guidance block.
+    // Non-fatal — a failure warns but does not undo the registration.
+    sync_guidance(client, true);
+    Ok(())
 }
 
 #[tauri::command]
@@ -228,7 +270,10 @@ pub async fn mcp_client_remove(provider: String) -> IpcResult<()> {
     let Some(client) = parse_client(&provider) else {
         return Err(AppError::io("unknown MCP client provider"));
     };
-    run_client(client_bin(client), remove_args(client)).await
+    run_client(client_bin(client), remove_args(client)).await?;
+    // Subordinate to the unregistration above: remove the guidance block.
+    sync_guidance(client, false);
+    Ok(())
 }
 
 /// Spawn the client command on a blocking worker, then map its exit status.
@@ -245,6 +290,7 @@ async fn run_client(bin: String, args: Vec<String>) -> IpcResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn provider_parsing_is_closed_over_the_two_clients() {
@@ -318,5 +364,39 @@ mod tests {
             assert_eq!(cli_exe_name(), "codebus");
             assert_eq!(cli_resource_rel(), "bin/codebus");
         }
+    }
+
+    /// mcp-usage-guidance: enable adds the guidance block to the client's global
+    /// instruction file, disable removes it, hand-written content survives both.
+    /// Drives the guidance path directly (no client spawn, no env mutation).
+    #[test]
+    fn sync_guidance_at_upserts_then_removes_block() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("CLAUDE.md");
+        std::fs::write(&path, "# my rules\n").unwrap();
+
+        sync_guidance_at(Some(path.clone()), true);
+        let after_enable = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after_enable.contains("codebus:mcp:start"),
+            "enable must add the guidance block: {after_enable}"
+        );
+        assert!(after_enable.contains("# my rules"), "hand-written content kept on enable");
+
+        sync_guidance_at(Some(path.clone()), false);
+        let after_disable = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !after_disable.contains("codebus:mcp:start"),
+            "disable must remove the guidance block: {after_disable}"
+        );
+        assert!(after_disable.contains("# my rules"), "hand-written content kept on disable");
+    }
+
+    /// An unresolvable home directory is best-effort: it warns and is swallowed,
+    /// never panicking — so it can never fail the install/remove IPC.
+    #[test]
+    fn sync_guidance_at_none_is_noop_not_panic() {
+        sync_guidance_at(None, true);
+        sync_guidance_at(None, false);
     }
 }

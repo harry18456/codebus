@@ -508,6 +508,8 @@ const en = {
   "settings.mcp.label": "Coding agents (MCP)",
   "settings.mcp.description":
     "Register codebus as an MCP server so an agent can query your vault wikis.",
+  "settings.mcp.globalMdNote":
+    "Enabling a client also adds a short codebus usage note to that client's global instructions (claude CLAUDE.md / codex AGENTS.md); disabling removes it.",
   "settings.mcp.status.checking": "Checking…",
   "settings.mcp.status.connected": "Connected",
   "settings.mcp.status.notConnected": "Not connected",
@@ -1056,6 +1058,8 @@ const zh: Record<keyof typeof en, string> = {
   "settings.mcp.label": "編碼 agent（MCP）",
   "settings.mcp.description":
     "把 codebus 註冊成 MCP server，讓 agent 能查詢你的 vault wiki。",
+  "settings.mcp.globalMdNote":
+    "啟用某個 client 會同時在它的全域指令（claude CLAUDE.md／codex AGENTS.md）加入一段 codebus 使用說明，停用時移除。",
   "settings.mcp.status.checking": "檢查中…",
   "settings.mcp.status.connected": "已連接",
   "settings.mcp.status.notConnected": "未連接",

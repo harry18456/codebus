@@ -192,6 +192,32 @@ fn mcp_server_serves_wiki_over_stdio() {
         }
     }
 
+    // --- mcp-usage-guidance: tool descriptions convey the cross-project
+    // wiki-library use case while keeping the keyword mechanic ---
+    let desc = |n: &str| -> String {
+        tools
+            .iter()
+            .find(|t| t["name"].as_str() == Some(n))
+            .unwrap()["description"]
+            .as_str()
+            .unwrap()
+            .to_lowercase()
+    };
+    let vl = desc("vault_list");
+    assert!(
+        vl.contains("cross-project") && vl.contains("library"),
+        "vault_list must frame the cross-project library: {vl}"
+    );
+    let ws = desc("wiki_search");
+    assert!(
+        ws.contains("keyword"),
+        "wiki_search must keep the keyword instruction: {ws}"
+    );
+    assert!(
+        ws.contains("across") && ws.contains("indexed"),
+        "wiki_search must convey searching across indexed wikis: {ws}"
+    );
+
     // --- wiki_list: lists the 3 wiki pages (incl. no-frontmatter), not the secret ---
     let listed = client.call_ok(3, "wiki_list", json!({}));
     let slugs: Vec<&str> = listed

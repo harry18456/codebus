@@ -28,6 +28,12 @@ export function McpIntegrationSection() {
       <div className="text-meta text-fg-tertiary">
         {t("settings.mcp.description")}
       </div>
+      <div
+        data-testid="mcp-global-md-note"
+        className="text-meta text-fg-tertiary"
+      >
+        {t("settings.mcp.globalMdNote")}
+      </div>
       {Object.values(PROVIDERS).map((p) => (
         <McpClientRow
           key={p.id}

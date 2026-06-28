@@ -164,7 +164,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "List the codebus vaults this server can query. Returns each vault's `vault` (its absolute path — pass this as the `vault` argument to the other tools) and `name` (display label). In multi-vault mode you can also just omit `vault` on wiki_list / wiki_search to explore across every vault at once."
+        description = "List the codebus wiki vaults available — your cross-project library of wikis for codebases you've indexed. Returns each vault's `vault` (its absolute path — pass this as the `vault` argument to the other tools) and `name` (display label). Reach for this when a pattern or design from another indexed codebase would help; in multi-vault mode omit `vault` on wiki_list / wiki_search to explore across every vault at once."
     )]
     async fn vault_list(&self) -> Result<String, ErrorData> {
         let mode = self.mode.clone();
@@ -179,7 +179,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "List wiki pages. Optional `vault` selects one vault (the `vault` path from vault_list); omit it to list pages across ALL registered vaults at once. Each entry carries slug + title, plus its source `vault` in multi-vault mode. Call this (or wiki_search) first to discover pages, then wiki_read a slug."
+        description = "List wiki pages across your library of indexed codebase wikis. Optional `vault` selects one vault (the `vault` path from vault_list); omit it to list pages across ALL registered vaults at once. Each entry carries slug + title, plus its source `vault` in multi-vault mode. Call this (or wiki_search) first to discover pages, then wiki_read a slug."
     )]
     async fn wiki_list(
         &self,
@@ -215,7 +215,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Read one wiki page's body (frontmatter stripped), paginated by character. Args: vault (the page's source vault from wiki_list/wiki_search — required when more than one vault is registered), slug (required), offset (default 0), limit (default 12000, max 20000). When has_more is true, call again with offset = next_offset to continue."
+        description = "Read one wiki page's body (frontmatter stripped), paginated by character. The wiki is a reference — verify load-bearing details against current source. Args: vault (the page's source vault from wiki_list/wiki_search — required when more than one vault is registered), slug (required), offset (default 0), limit (default 12000, max 20000). When has_more is true, call again with offset = next_offset to continue."
     )]
     async fn wiki_read(
         &self,
@@ -256,7 +256,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Search wiki pages for a keyword (case-insensitive substring over title and body). Optional `vault` limits the search to one vault; omit it to search across ALL registered vaults at once. Returns matching pages with slug, title, snippet, plus the source `vault` in multi-vault mode. Pass a single keyword like `authentication`, NOT a full sentence — this is literal substring matching, not semantic search."
+        description = "Search across your library of indexed codebase wikis for a keyword (case-insensitive substring over title and body) — for applying a pattern from one codebase to another, or how-does-X-work on an indexed codebase. Optional `vault` limits the search to one vault; omit it to search across ALL registered vaults at once. Returns matching pages with slug, title, snippet, plus the source `vault` in multi-vault mode. Pass a single keyword like `authentication`, NOT a full sentence — this is literal substring matching, not semantic search. Treat results as reference; verify specifics against current source."
     )]
     async fn wiki_search(
         &self,

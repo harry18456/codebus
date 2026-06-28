@@ -18,6 +18,7 @@ use crate::error::AppError;
 pub mod chats;
 pub mod cli_status;
 pub mod config;
+pub mod global_md;
 pub mod goals;
 pub mod keyring;
 pub mod mcp_install;
