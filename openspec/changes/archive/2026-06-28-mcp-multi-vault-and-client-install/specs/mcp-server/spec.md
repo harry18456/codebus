@@ -1,10 +1,12 @@
-# mcp-server Specification
+## RENAMED Requirements
 
-## Purpose
+- FROM: `### Requirement: Single-vault stdio MCP server lifecycle`
+- TO: `### Requirement: Stdio MCP server lifecycle and startup modes`
 
-Expose codebus vault wikis to external MCP-compatible agents (Claude Code, Codex) over a stdio Model Context Protocol server — query-only, tools-only. `codebus mcp` (no `--vault`) serves every app-state-registered vault from a single process (registry mode); `codebus mcp --vault <path>` pins exactly one vault (pinned mode, v1-compatible). Tools: vault_list + wiki_list/wiki_read/wiki_search, with cross-vault aggregation when `vault` is omitted.
+- FROM: `### Requirement: Tools-only query surface without path parameters`
+- TO: `### Requirement: Tools-only query surface with registry-scoped vault selection`
 
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Single-vault stdio MCP server lifecycle
 
@@ -30,19 +32,6 @@ The system SHALL provide a `codebus mcp` subcommand that starts a Model Context 
 - **WHEN** the server emits any log, warning, or diagnostic output in either mode
 - **THEN** it SHALL write that output to stderr only, leaving stdout exclusively for JSON-RPC frames
 
-<!-- @trace
-source: mcp-multi-vault-and-client-install
-updated: 2026-06-28
-code:
-  - codebus-cli/src/commands/mcp.rs
-  - codebus-cli/src/mcp/mod.rs
-  - codebus-cli/src/mcp/registry.rs
-tests:
-  - codebus-cli/tests/mcp_multi_vault.rs
-  - codebus-cli/tests/mcp_server.rs
--->
-
----
 ### Requirement: Tools-only query surface without path parameters
 
 The server SHALL expose exactly four query-only tools — `vault_list`, `wiki_list`, `wiki_read`, and `wiki_search`. No tool SHALL mutate the vault and no write tool SHALL be exposed. The three wiki tools (`wiki_list` / `wiki_read` / `wiki_search`) SHALL accept an OPTIONAL `vault` argument that selects which registered vault to query; the `vault` value is a registry-member identifier — the normalized absolute path returned by `vault_list` (or carried on a `wiki_list` / `wiki_search` result) — and SHALL NOT be treated as an arbitrary filesystem path. A `vault` outside the registry SHALL be rejected per the `Vault selection across startup modes` requirement. `vault_list` SHALL NOT accept any argument. The per-tool query behavior — page index, character pagination, keyword search — is defined by the `wiki_list returns the page index`, `wiki_read returns the paginated page body`, and `wiki_search performs keyword substring search` requirements; in registry mode `wiki_list` and `wiki_search` aggregate across present vaults when `vault` is omitted and tag each result with its source vault, while `wiki_read` requires an unambiguous vault, all per the `Vault selection across startup modes` requirement.
@@ -62,18 +51,6 @@ The server SHALL expose exactly four query-only tools — `vault_list`, `wiki_li
 - **WHEN** a client enumerates and invokes any exposed tool
 - **THEN** no tool SHALL create, modify, or delete any file under any vault
 
-<!-- @trace
-source: mcp-multi-vault-and-client-install
-updated: 2026-06-28
-code:
-  - codebus-cli/src/mcp/server.rs
-  - codebus-cli/src/mcp/registry.rs
-tests:
-  - codebus-cli/tests/mcp_multi_vault.rs
-  - codebus-cli/tests/mcp_server.rs
--->
-
----
 ### Requirement: wiki_list returns the page index
 
 `wiki_list(vault?)` SHALL return the slug and title of every Markdown page under the resolved vault's `<vault>/.codebus/wiki/` tree. The `vault` argument is OPTIONAL and is resolved per the `Vault selection across startup modes` requirement; when omitted in registry mode with more than one present vault, `wiki_list` SHALL aggregate pages across ALL present registered vaults. In registry mode each returned entry SHALL additionally carry its source `vault` (the normalized absolute path) and `name` (the display name) alongside `slug` and `title`, so a caller can pass the correct `vault` to `wiki_read`. It SHALL tolerate pages whose frontmatter is missing or malformed by using the filename stem as both slug and title fallback.
@@ -93,17 +70,6 @@ tests:
 - **WHEN** a client calls `wiki_list` in registry mode with no `vault` argument AND two or more present vaults are registered
 - **THEN** the result SHALL contain pages from every present vault, and each entry SHALL carry its source `vault` and `name`
 
-<!-- @trace
-source: mcp-multi-vault-and-client-install
-updated: 2026-06-28
-code:
-  - codebus-cli/src/mcp/server.rs
-  - codebus-cli/src/mcp/registry.rs
-tests:
-  - codebus-cli/tests/mcp_multi_vault.rs
--->
-
----
 ### Requirement: wiki_read returns the paginated page body
 
 `wiki_read(vault?, slug, offset, limit)` SHALL return the page body with the leading frontmatter block stripped, paginated by Unicode character (`char`) count over the stripped body. `offset` SHALL default to 0; `limit` SHALL default to 12000 and SHALL be clamped to a maximum of 20000. Slicing SHALL occur on character boundaries so multi-byte UTF-8 / CJK characters are never split. The result SHALL include the returned `content`, the `offset` used, a `next_offset` (null when fully read), a `has_more` boolean, and `total_chars`. Because the same slug can occur in more than one vault, `wiki_read` SHALL locate a single page unambiguously: the `vault` argument is resolved per the `Vault selection across startup modes` requirement, EXCEPT that in registry mode with more than one present vault and `vault` omitted, `wiki_read` SHALL return an MCP error instructing the caller to specify a vault and SHALL NOT aggregate. The normal caller path supplies the `vault` carried on a prior `wiki_list` / `wiki_search` result.
@@ -138,18 +104,6 @@ tests:
 - **WHEN** a client calls `wiki_read` in registry mode with no `vault` argument AND two or more present vaults are registered
 - **THEN** the tool SHALL return an MCP error instructing the caller to specify a `vault` (the one carried on the `wiki_list` / `wiki_search` result), and SHALL NOT read any page
 
-<!-- @trace
-source: mcp-multi-vault-and-client-install
-updated: 2026-06-28
-code:
-  - codebus-cli/src/mcp/server.rs
-  - codebus-cli/src/mcp/registry.rs
-  - codebus-cli/src/mcp/tools.rs
-tests:
-  - codebus-cli/tests/mcp_multi_vault.rs
--->
-
----
 ### Requirement: wiki_search performs keyword substring search
 
 `wiki_search(query, vault?)` SHALL perform case-insensitive substring matching of `query` against each page's title and body across the resolved vault(s), treating `query` as a single needle (no tokenization). The `vault` argument is OPTIONAL and resolved per the `Vault selection across startup modes` requirement; when omitted in registry mode with more than one present vault, `wiki_search` SHALL search across ALL present registered vaults. For each matched page it SHALL return its source `vault` (normalized absolute path) and `name` (display name) alongside slug, title, and a snippet of up to 100 characters on each side of the first match (on character boundaries). Results SHALL be capped at 20 results IN TOTAL across all searched vaults (a global cap, one snippet per page); when more pages match than are returned, the result SHALL set `truncated` to true. The tool description SHALL instruct callers to pass a keyword rather than a full sentence. RAG / semantic search is out of scope; this grep fallback is the implemented behavior.
@@ -174,18 +128,6 @@ tests:
 - **WHEN** a client calls `wiki_search` in registry mode with no `vault` argument AND two or more present vaults are registered AND the combined matches exceed 20 pages
 - **THEN** the result SHALL contain at most 20 hits drawn from across the present vaults, each tagged with its source `vault` and `name`, AND `truncated` SHALL be true
 
-<!-- @trace
-source: mcp-multi-vault-and-client-install
-updated: 2026-06-28
-code:
-  - codebus-cli/src/mcp/server.rs
-  - codebus-cli/src/mcp/registry.rs
-  - codebus-cli/src/mcp/tools.rs
-tests:
-  - codebus-cli/tests/mcp_multi_vault.rs
--->
-
----
 ### Requirement: Read-only security boundary
 
 The server SHALL read only from the resolved vault's `<vault>/.codebus/wiki/` subtree and SHALL NOT expose `<vault>/.codebus/raw/` (the PII-redacted code mirror) or any path outside the wiki subtree. In registry mode the resolved vault SHALL be a member of the app-state registry: a supplied `vault` argument SHALL be accepted only when its canonicalized path equals the canonicalized path of a registered, present (non-missing) vault entry; any other `vault` — including a path outside the registry such as a home-directory secret path — SHALL be rejected with an MCP error. When `vault` is omitted and a tool aggregates across vaults, the server SHALL iterate ONLY the registered present vaults, so aggregation never reaches a path outside the registry. The server SHALL treat the registry as READ-ONLY and SHALL NOT write `app-state.json`. Slug resolution SHALL match pages by filename stem rather than by path joining, so a slug containing `../` or path separators cannot escape the wiki subtree. The resolved page path SHALL be verified to remain within the wiki subtree before reading.
@@ -215,42 +157,8 @@ The server SHALL read only from the resolved vault's `<vault>/.codebus/wiki/` su
 - **WHEN** the server resolves vaults from `~/.codebus/app-state.json` over its lifetime
 - **THEN** it SHALL only read the file AND SHALL NOT create, modify, or delete `app-state.json`
 
-<!-- @trace
-source: mcp-multi-vault-and-client-install
-updated: 2026-06-28
-code:
-  - codebus-cli/src/mcp/registry.rs
-  - codebus-cli/src/mcp/server.rs
-  - codebus-cli/src/mcp/tools.rs
-tests:
-  - codebus-cli/tests/mcp_multi_vault.rs
--->
+## ADDED Requirements
 
----
-### Requirement: Error-versus-empty semantics and non-blocking filesystem access
-
-Real failures SHALL surface as MCP `ErrorData` and SHALL NOT be silently coerced into empty successful results; legitimately empty outcomes SHALL return success. Blocking filesystem work (directory recursion, file reads) SHALL run off the async runtime's main threads so a slow read cannot stall the server.
-
-#### Scenario: Filesystem read failure surfaces as an error
-
-- **WHEN** a tool's underlying filesystem read fails (for example, a permission error on a resolved page)
-- **THEN** the tool SHALL return an MCP error result rather than an empty success
-
-#### Scenario: Empty outcomes are successes
-
-- **WHEN** `wiki_list` finds no pages OR `wiki_search` finds no matches
-- **THEN** the tool SHALL return an empty result as success, distinguishable by the client from an error
-
-<!-- @trace
-source: mcp-server-single-vault
-updated: 2026-06-27
-code:
-  - codebus-cli/src/mcp/tools.rs
-tests:
-  - codebus-cli/tests/mcp_server.rs
--->
-
----
 ### Requirement: vault_list enumerates registry vaults
 
 `vault_list` SHALL return one entry per vault that is both registered in `~/.codebus/app-state.json` and present on disk. Each entry SHALL carry `vault` — the normalized absolute path, which is the stable identifier the wiki tools accept — and `name` — the display name, for human readability only and NOT used for addressing. Entries whose path is missing or unreadable SHALL be omitted. In pinned mode (`--vault`), `vault_list` SHALL return exactly the single pinned vault. The registry SHALL be re-read on each resolution so a vault added while the server runs becomes visible without restarting the server. An empty or absent registry SHALL yield an empty list returned as success, not an error. `vault_list` is a discovery aid, not a required first call — a caller can also omit `vault` on `wiki_list` / `wiki_search` to explore across all present vaults.
@@ -280,17 +188,6 @@ tests:
 - **WHEN** the server was started with `--vault <path>` AND a client calls `vault_list`
 - **THEN** the result SHALL contain exactly one entry for the pinned vault
 
-<!-- @trace
-source: mcp-multi-vault-and-client-install
-updated: 2026-06-28
-code:
-  - codebus-cli/src/mcp/server.rs
-  - codebus-cli/src/mcp/registry.rs
-tests:
-  - codebus-cli/tests/mcp_multi_vault.rs
--->
-
----
 ### Requirement: Vault selection across startup modes
 
 When a wiki tool (`wiki_list` / `wiki_read` / `wiki_search`) is invoked, the served vault(s) SHALL be resolved deterministically from the startup mode, the supplied `vault` argument, the registry contents, and the tool's nature: `wiki_list` and `wiki_search` are exploratory and aggregate across vaults on omission, while `wiki_read` locates a single page and requires an unambiguous vault. In pinned mode the pinned vault SHALL be used; a supplied `vault` that differs from the pinned path SHALL be rejected with an MCP error (fail-loud, NOT silently ignored). In registry mode: when `vault` is supplied it SHALL be resolved against the registry whitelist (per the `Read-only security boundary` requirement); when `vault` is omitted AND exactly one present vault is registered, that vault SHALL be used; when `vault` is omitted AND more than one present vault is registered, `wiki_list` and `wiki_search` SHALL query ALL present registered vaults and tag each result with its source `vault`, while `wiki_read` SHALL return an MCP error instructing the caller to specify a vault; when no present vault is registered, the tool SHALL return an MCP error stating that no vault is registered.
@@ -326,13 +223,3 @@ When a wiki tool (`wiki_list` / `wiki_read` / `wiki_search`) is invoked, the ser
 | registry     | 0                          | omitted or supplied | MCP error: no vault registered | MCP error: no vault registered |
 | pinned       | n/a                        | omitted          | use the pinned vault | use the pinned vault |
 | pinned       | n/a                        | supplied ≠ pinned | MCP error: vault mismatch | MCP error: vault mismatch |
-
-<!-- @trace
-source: mcp-multi-vault-and-client-install
-updated: 2026-06-28
-code:
-  - codebus-cli/src/mcp/registry.rs
-  - codebus-cli/src/mcp/server.rs
-tests:
-  - codebus-cli/tests/mcp_multi_vault.rs
--->
