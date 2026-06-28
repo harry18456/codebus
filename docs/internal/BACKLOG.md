@@ -4,7 +4,7 @@
 
 本檔分三段：**開放項目**（真正還沒做、按主題分組，每條附「起點」可直接定位要改哪）、**已完成 / Archived**（曾是開放項目、後來做掉的，留對應 change 當脈絡）、**已決定不做**（評估後放棄、留決策理由）。詳述見各自的 `docs/internal/<date>-<slug>-backlog.md`。新發現的 design smell / UX 缺陷 / feature gap 先記成開放項目，之後再決定要不要 `/spectra-propose` 起 change。
 
-> **最後校正：2026-06-26** —— 對 19 條開放 + 3 個 session todo 逐條 grep 真實程式碼 review，確認全部仍真開放（無 stale）、新增 TOOL-1（spectra archive `@trace` 污染）。（2026-06-16：Tier 0 三條完成移入已完成段。2026-06-14：逐條 grep 驗證、移除 check-read / Windows 打包、標註部分完成項。）
+> **最後校正：2026-06-28** —— multi-vault MCP（`mcp-multi-vault-and-client-install`，v3.1.0）archive；新增開放 CAP-7（MCP v2 好用度 + agentic query）/ UX-6（MCP 整合 UX），現 **19 條**開放。（2026-06-27：SEC-1（agent spawn env scrub）/ SEC-4（PII mirror 完整性）/ CAP-3（MCP server v1，single-vault query-only）三條完成、移入已完成段。2026-06-26：對 19 條開放 + 3 個 session todo 逐條 grep 真實程式碼 review，確認全部仍真開放（無 stale）、新增 TOOL-1（spectra archive `@trace` 污染）。2026-06-16：Tier 0 三條完成移入已完成段。2026-06-14：逐條 grep 驗證、移除 check-read / Windows 打包、標註部分完成項。）
 > 嚴重度／工程量為相對估值；組內由上而下大致為建議優先序。
 
 ---
@@ -56,6 +56,17 @@
   - **現況**：Cargo.toml 零 LanceDB/embedding/ONNX 依賴、無實作。ONNX runtime 與 MCP 唯讀工具可共用基礎設施；注入路徑要 provider-neutral。
   - 詳細：[rag-index-search](2026-05-14-rag-index-search-backlog.md)
 
+- **CAP-7 · MCP server v2（好用度 + agentic query）** — capability enhancement · 工程量：中-重（agentic query 先 discuss）
+  - **背景**：v1（`mcp-multi-vault-and-client-install`，2026-06-28 archived）覆蓋 multi-vault retrieval + 一鍵接入，但站在外部 agent（claude/codex）角度有幾個好用度天花板（agent 本身就是 agent，要的是「精準原料自己組裝」非「黑箱成品」）。
+  - **方向（按優先）**：
+    - **(1) `wiki_search` 語意化**（最該動、在價值命脈上）：現為子字串文字搜尋（`mcp/tools.rs::search_pages`），詞彙不匹配即 miss、agent 期待語意。＝ CAP-6 RAG 的 MCP 應用面；search 決定「agent 找不找得到對的頁」，找不到就退化成不如自己 grep。
+    - **(2) cwd 默認定位當前 vault**：v1 省略 vault ＝ 跨全部查；但 agent 主場景是「在 repo X 工作、想懂 X」，跨全部給雜訊。改「cwd 落在某 vault → 默認該 vault、跨全部當顯式」。`mcp/registry.rs`。
+    - **(3) wikilink / related-pages 導航**：v1 把 Obsidian 連結圖譜壓平成 flat list/search/read，`[[wikilink]]` 沒暴露、agent 不能跟連結跳。`wiki_read` 回相關頁 / 新 tool。
+    - **(4) agentic query tool「A」**：`wiki_query(question)` → codebus 內部 spawn agent 讀 wiki 綜合答案（＝暴露 `query` verb）。**重大定位轉變**（MCP server 從唯讀資料源 → 會 spawn agent 的服務），**5 個待談問題先 `/spectra-discuss`**：① provider/key 從哪來（要讀 config + keyring）② 對哪個 vault ③ 延遲 / MCP tool 超時 ④ 成本（每 query ＝ 一個 agent run、燒 API 額度）⑤ agent-in-agent 安全（toolset / sandbox / cancel / timeout 搬進 MCP）。傾向獨立 tool（回答案 vs `wiki_search` 回頁、型別/語意不同）；B（語意 search）優先於 A。
+  - **v1 低 severity follow-up（review 抓、非 blocker）**：① `wiki_list` 跨多 vault 聚合無 cap（大型多 vault 回很大 JSON，`mcp/server.rs::wiki_list`）② `wiki_search` 全域 cap 20 先到先得（先 iterate 的 vault 可能淹沒後者，`server.rs::wiki_search`）③ pinned `path_id` 沒 normalize（`registry.rs::path_id`，canonicalize 比對吸收、功能正確）。
+  - **起點**：`codebus-cli/src/mcp/{server,tools,registry}.rs`；方向 (4) agentic query 需先 `/spectra-discuss`。
+  - 詳細：[mcp-server](2026-05-14-mcp-server-backlog.md) + CAP-6（RAG）
+
 ### 🎨 UX
 
 - **UX-1 · Settings 可編輯 chat verb 的 model/effort（方案 B）** — UX gap · 工程量：1-2 半天
@@ -78,6 +89,12 @@
 - **UX-5 · CLI `[[slug]]` 可點連結 + 連結目標 + CLI chat markdown polish** — regression 補回 + capability + UX · 工程量：重
   - **現況**：CLI chat 輸出 raw `println!`（`commands/chat.rs:195-198`），`[[slug]]` 不可點、無 GFM 表格 / markdown 樣式；CLI 唯一 OSC 8 在 lint 輸出（`render/lint_text.rs`），不涵蓋 chat。**注意**：app 端 `markdown-rendering-fidelity`（已完成）是 GUI surface，與本 CLI 條不同、別誤判已完成。`codebus://` 協定吃掉大半工。
   - 詳細：[cli-wikilink-link-target](2026-05-21-cli-wikilink-link-target-backlog.md)
+
+- **UX-6 · MCP 整合的 UX（discoverability + Settings 一致性）** — UX gap · 工程量：中
+  - 源自 v1（`mcp-multi-vault-and-client-install`）packaged 實機測試（2026-06-28）。根因＝MCP 接入本質是 **action**（對外部 client 執行）卻被當 **setting** 放，衍生兩症狀。
+  - **(a) discoverability**：installer 刻意不設 MCP（不碰第三方 config、脆弱）、且首次引導 onboarding 延後（design Non-Goal）→ 使用者裝完不知道有「接 claude/codex」功能。方案：裝完首次開 app 的輕量引導提示。
+  - **(b) Settings 開關 Save/Cancel 不一致**：`McpIntegrationSection`（`SettingsModal.tsx:687`）toggle **立即生效**（直接 `mcpClientInstall/Remove`），但夾在「改 → `dirty` → `Save`」的 modal 第 8 項；其他 7 項要 Save、它不用，且 `Cancel` 也不 undo 它（已真改 `.claude.json`）。方案：改 action 語意（`Connect/Disconnect` 按鈕 + 移出 config grid + 「即時生效」說明），跟「要 Save 的設定值」視覺區分。
+  - **起點**：`codebus-app/src/components/settings/McpIntegrationSection.tsx`、`SettingsModal.tsx:687`。
 
 ### 📦 發佈 / release readiness
 
