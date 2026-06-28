@@ -44,12 +44,12 @@ fn serial_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// Spec: `IPC Command Registry` — 29 commands total AND the three keyring
+/// Spec: `IPC Command Registry` — 32 commands total AND the three keyring
 /// command names are part of the registered set.
 #[test]
 fn registered_commands_includes_three_keyring_names() {
     let names: std::collections::HashSet<&str> = REGISTERED_COMMANDS.iter().copied().collect();
-    assert_eq!(names.len(), 29);
+    assert_eq!(names.len(), 32);
     for required in ["set_endpoint_key", "get_endpoint_key", "delete_endpoint_key"] {
         assert!(names.contains(required), "missing command: {required}");
     }

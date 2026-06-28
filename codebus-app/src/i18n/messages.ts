@@ -504,6 +504,16 @@ const en = {
   "settings.providerCli.installHint":
     "Install {name} first; then reopen Settings.",
 
+  // ---- Settings · MCP integration (mcp-multi-vault-and-client-install) ----
+  "settings.mcp.label": "Coding agents (MCP)",
+  "settings.mcp.description":
+    "Register codebus as an MCP server so an agent can query your vault wikis.",
+  "settings.mcp.status.checking": "Checking…",
+  "settings.mcp.status.connected": "Connected",
+  "settings.mcp.status.notConnected": "Not connected",
+  "settings.mcp.status.missing": "{name} not installed",
+  "settings.mcp.error": "Couldn't update {name}: {message}",
+
   // ---- Settings · Language dropdown ----
   // The two non-Auto options identify the language they select; their
   // displayed strings ("中文" / "English") are deliberately identical in
@@ -1041,6 +1051,16 @@ const zh: Record<keyof typeof en, string> = {
   // ---- Settings provider CLI field label ----
   "settings.providerCli.fieldLabel": "{name} CLI",
   "settings.providerCli.installHint": "請先安裝 {name}，再重新開啟設定。",
+
+  // ---- Settings · MCP integration ----
+  "settings.mcp.label": "編碼 agent（MCP）",
+  "settings.mcp.description":
+    "把 codebus 註冊成 MCP server，讓 agent 能查詢你的 vault wiki。",
+  "settings.mcp.status.checking": "檢查中…",
+  "settings.mcp.status.connected": "已連接",
+  "settings.mcp.status.notConnected": "未連接",
+  "settings.mcp.status.missing": "{name} 未安裝",
+  "settings.mcp.error": "更新 {name} 失敗：{message}",
 
   // ---- Settings · Language dropdown ----
   // "中文" / "English" 在兩個 locale 文字相同（identifier 性質，Cat D）。

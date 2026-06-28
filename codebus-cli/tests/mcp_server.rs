@@ -2,10 +2,13 @@
 //! real temp vault and drive it with bare newline-delimited JSON-RPC (no rmcp
 //! client dependency, mirroring the Phase 0 spike's `mcp_verify` path).
 //!
-//! Covers: initialize advertises tools-only; tools/list returns exactly the
-//! three query tools with no path parameter; tools/call for wiki_list /
-//! wiki_read (with pagination) / wiki_search against real data; unknown slug
-//! and blank query surface as errors; and `raw/code/` is unreachable.
+//! Pinned mode (`--vault`): covers initialize advertises tools-only; tools/list
+//! returns the four query tools (vault_list + wiki_list / wiki_read /
+//! wiki_search), where the wiki tools expose an optional `vault` selector and
+//! no raw path arg; tools/call for wiki_list / wiki_read (with pagination) /
+//! wiki_search against real data; unknown slug and blank query surface as
+//! errors; and `raw/code/` is unreachable. Multi-vault registry behavior is
+//! covered by `mcp_multi_vault.rs`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -157,25 +160,36 @@ fn mcp_server_serves_wiki_over_stdio() {
     assert!(caps["prompts"].is_null(), "prompts must NOT be advertised: {init}");
     client.notify("notifications/initialized");
 
-    // --- tools/list: exactly the three query tools, none takes a path ---
+    // --- tools/list: the four query tools; wiki tools expose an optional
+    // vault selector, vault_list takes none, and no tool takes a raw path ---
     let list = client.request(2, "tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().expect("tools array");
     let names: Vec<&str> = tools
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names.len(), 3, "exactly three tools: {names:?}");
-    for expected in ["wiki_list", "wiki_read", "wiki_search"] {
+    assert_eq!(names.len(), 4, "exactly four tools: {names:?}");
+    for expected in ["vault_list", "wiki_list", "wiki_read", "wiki_search"] {
         assert!(names.contains(&expected), "missing tool {expected}: {names:?}");
     }
-    // No tool exposes a vault/path argument.
     for tool in tools {
+        let name = tool["name"].as_str().unwrap();
         let schema = serde_json::to_string(&tool["inputSchema"]).unwrap();
         assert!(
-            !schema.contains("vault") && !schema.contains("\"path\""),
-            "tool {} must not accept a path arg: {schema}",
-            tool["name"]
+            !schema.contains("\"path\""),
+            "tool {name} must not accept a raw filesystem path arg: {schema}"
         );
+        if name == "vault_list" {
+            assert!(
+                !schema.contains("vault"),
+                "vault_list takes no argument: {schema}"
+            );
+        } else {
+            assert!(
+                schema.contains("vault"),
+                "wiki tool {name} must expose the optional vault selector: {schema}"
+            );
+        }
     }
 
     // --- wiki_list: lists the 3 wiki pages (incl. no-frontmatter), not the secret ---

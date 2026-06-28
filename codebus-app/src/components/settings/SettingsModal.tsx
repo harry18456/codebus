@@ -29,6 +29,7 @@ import { PROVIDERS, type ProviderId } from "@/lib/providers"
 import { EndpointSection } from "./EndpointSection"
 import { CodexEndpointSection } from "./CodexEndpointSection"
 import { LanguageSection } from "./LanguageSection"
+import { McpIntegrationSection } from "./McpIntegrationSection"
 import type { Locale } from "@/hooks/useLocale"
 
 /**
@@ -681,6 +682,9 @@ export function SettingsModal({
               />
             </div>
           </Field>
+
+          {/* 8. MCP integration — one independent row per client (claude/codex). */}
+          <McpIntegrationSection />
         </div>
         {error && (
           <div

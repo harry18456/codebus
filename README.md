@@ -108,30 +108,36 @@ The design follows [Karpathy's "LLM Wiki" pattern](https://gist.github.com/karpa
 
 ## MCP server
 
-`codebus mcp --vault <repo>` runs codebus as a **read-only [MCP](https://modelcontextprotocol.io) server** over stdio, exposing one vault's wiki to any MCP client (Claude Code, OpenAI Codex, …) as three query-only tools:
+`codebus mcp` runs codebus as a **read-only [MCP](https://modelcontextprotocol.io) server** over stdio, exposing your codebus vault wikis to any MCP client (Claude Code, OpenAI Codex, …) as four query-only tools:
 
 | Tool | What it returns |
 |---|---|
-| `wiki_list` | every page's slug + title |
-| `wiki_read(slug, offset?, limit?)` | one page's body, paginated by character (`has_more` / `next_offset` to page through long documents) |
-| `wiki_search(query)` | pages matching a keyword (case-insensitive substring), each with a snippet — pass a **keyword**, not a sentence |
+| `vault_list` | every registered vault's `vault` (its path — the id you pass to the other tools) + `name` |
+| `wiki_list(vault?)` | every page's slug + title; omit `vault` to list across all vaults at once |
+| `wiki_read(vault?, slug, offset?, limit?)` | one page's body, paginated by character (`has_more` / `next_offset` to page through long documents) |
+| `wiki_search(query, vault?)` | pages matching a keyword (case-insensitive substring), each with a snippet — pass a **keyword**, not a sentence; omit `vault` to search across all vaults |
 
-One server process serves **one** vault (pinned by `--vault`); point a client at several codebus repos by adding one entry per vault. The server only ever reads `<repo>/.codebus/wiki/` — it never exposes the PII-redacted `raw/code/` mirror, and no tool accepts a path argument.
+Two modes:
 
-Wire it into a client's MCP config, e.g. Claude Code's `.mcp.json` (one entry per vault):
+- **Multi-vault (default)** — `codebus mcp` serves every vault you've opened in the codebus app (read from `~/.codebus/app-state.json`, re-read on each request, so a vault added in the app shows up without restarting the server). Omit `vault` on `wiki_list` / `wiki_search` to explore across all vaults at once — each result is tagged with its source `vault`, which you then pass into `wiki_read`. One client entry covers every project. (A vault created purely via the CLI without ever opening the app isn't in this registry — pin it with `--vault`.)
+- **Single-vault** — `codebus mcp --vault <repo>` pins one vault (backward-compatible).
+
+The server only ever reads each vault's `<repo>/.codebus/wiki/` — it never exposes the PII-redacted `raw/code/` mirror — a `vault` argument must name a **registered** vault (an arbitrary path is rejected), and the registry itself is read **read-only** (never written).
+
+Wire it into a client's MCP config, e.g. Claude Code's `.mcp.json` — one entry for all your vaults:
 
 ```json
 {
   "mcpServers": {
-    "codebus-myproject": {
+    "codebus": {
       "command": "codebus",
-      "args": ["mcp", "--vault", "/abs/path/to/myproject"]
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-The `mcp` subcommand ships in the default build; a `cargo install --path codebus-cli --no-default-features` build omits it (and the rmcp dependency).
+(Or pin a single vault with `"args": ["mcp", "--vault", "/abs/path/to/myproject"]`.) The `mcp` subcommand ships in the default build; a `cargo install --path codebus-cli --no-default-features` build omits it (and the rmcp dependency).
 
 ---
 

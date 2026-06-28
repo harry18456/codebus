@@ -156,6 +156,9 @@ export type IpcCommandName =
   | "read_quiz_events"
   | "read_quiz_progress"
   | "write_quiz_progress"
+  | "mcp_client_status"
+  | "mcp_client_install"
+  | "mcp_client_remove"
 
 /**
  * Endpoint profile selector. Currently only `"azure"` is wired up; future
@@ -573,6 +576,44 @@ export async function checkCliInstalled(
   provider: AgenticProvider,
 ): Promise<CliStatus> {
   return invokeTyped<CliStatus>("check_cli_installed", { provider })
+}
+
+/**
+ * Registration status of codebus as an MCP server inside an agent client.
+ * `installed` = codebus is registered; `not_registered` = client present but
+ * codebus is not wired up; `client_missing` = the client CLI isn't installed
+ * (or an unknown provider). Mirrors `McpClientStatus` in the Rust backend.
+ */
+export type McpClientStatus =
+  | { kind: "installed" }
+  | { kind: "not_registered" }
+  | { kind: "client_missing" }
+
+/**
+ * Query whether codebus is registered in the given client (derived from the
+ * client's own `mcp list`). A missing client resolves to `client_missing`.
+ */
+export async function mcpClientStatus(
+  provider: AgenticProvider,
+): Promise<McpClientStatus> {
+  return invokeTyped<McpClientStatus>("mcp_client_status", { provider })
+}
+
+/**
+ * Register codebus as a user-scope MCP server in the given client by shelling
+ * out to its native CLI. A non-zero client exit rejects with an `AppError::Io`.
+ */
+export async function mcpClientInstall(
+  provider: AgenticProvider,
+): Promise<void> {
+  return invokeTyped<void>("mcp_client_install", { provider })
+}
+
+/** Remove codebus from the given client's MCP servers (symmetric to install). */
+export async function mcpClientRemove(
+  provider: AgenticProvider,
+): Promise<void> {
+  return invokeTyped<void>("mcp_client_remove", { provider })
 }
 
 // ===========================================================================

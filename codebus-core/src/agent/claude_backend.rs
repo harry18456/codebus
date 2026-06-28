@@ -62,10 +62,17 @@ impl ClaudeBackend {
     }
 }
 
+/// Resolve the claude CLI binary name: the `CODEBUS_CLAUDE_BIN` override when
+/// set, otherwise the bare `claude` (found via `PATH`). Shared by
+/// `build_command` and the app's one-click MCP client install so detection and
+/// invocation agree on which binary is used.
+pub fn claude_bin() -> String {
+    std::env::var("CODEBUS_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string())
+}
+
 impl AgentBackend for ClaudeBackend {
     fn build_command(&self, spec: &SpawnSpec) -> Command {
-        let claude_bin =
-            std::env::var("CODEBUS_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string());
+        let claude_bin = claude_bin();
 
         let toolset = Self::base_toolset(spec.permission);
 

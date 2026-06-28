@@ -242,13 +242,13 @@ codebus 的 sandbox 建立在 Claude Code CLI 的 `--tools` / `--allowedTools` /
 
 ### 7. MCP server 暴露面（`codebus mcp`）
 
-`codebus mcp --vault <repo>` 把單一 vault 的 wiki 以 stdio MCP server 暴露給外部 agent，是**主動對外開的查詢面**，隔離姿態與上述 verb 不同（它不 spawn agent，而是被別的 agent 當資料來源呼叫）：
+`codebus mcp` 把 codebus vault 的 wiki 以 stdio MCP server 暴露給外部 agent，是**主動對外開的查詢面**，隔離姿態與上述 verb 不同（它不 spawn agent，而是被別的 agent 當資料來源呼叫）。兩種啟動模式：**registry 模式**（`codebus mcp`，讀 `~/.codebus/app-state.json` 服務所有已登錄 vault）與 **pinned 模式**（`codebus mcp --vault <repo>`，釘定單一 vault、向後相容）：
 
-- **唯讀、只暴露 tools**：server 只註冊三個 query-only tool（`wiki_list` / `wiki_read` / `wiki_search`），不做 MCP resources / prompts、無任何寫操作。
-- **vault 啟動釘定、tool 不收路徑**：wiki root 在 `--vault` 啟動時固定為 `<repo>/.codebus/wiki/`；三個 tool 都**不接受** vault 或檔案路徑參數，呼叫端無法重導到別的目錄（整合測試斷言每個 tool 的 input schema 都不含 `vault`/`path`）。
-- **只讀 `.codebus/wiki/`，`raw/code/` 不可達**：slug 解析走「遞迴比對 `file_stem`」（`codebus_core::wiki::read::find_page_by_slug`），slug 不參與路徑拼接；解析出的路徑再經 canonicalize 確認落在 wiki root 之下才讀。`<repo>/.codebus/raw/code/`（PII 去識別化鏡像）不在 wiki 子樹內，**永遠不會被列舉、讀取或搜尋到**（整合測試 `codebus-cli/tests/mcp_server.rs` 以 traversal slug ＋ raw/code 內容 query 雙向驗證）。
-- **stdout 純 JSON-RPC**：所有 log / 診斷走 stderr，stdout 只承載協定訊息；阻塞 fs 走 `spawn_blocking`、真錯誤回 MCP `ErrorData`（不吞成空結果）。
-- **殘留與界線**：MCP 面的防護是 wiki **位置**邊界（擋「讀逃出 wiki 子樹」），**不**保護 wiki **內**已寫入的敏感內容——若敏感字串已落進某 wiki 頁，呼叫端能透過 `wiki_read` / `wiki_search` 讀到它（與 §6 的 in-vault 機密界線同源，靠 PII mirror §4 ＋ vault write-policy，不靠這層）。stdio transport 僅本機 client 連接、無網路監聽，且只在你主動啟動 `codebus mcp` 時對外。
+- **唯讀、只暴露 tools**：server 只註冊四個 query-only tool（`vault_list` / `wiki_list` / `wiki_read` / `wiki_search`），不做 MCP resources / prompts、無任何寫操作。
+- **registry 唯讀 + vault 白名單**：registry 模式對 `~/.codebus/app-state.json` **只讀不寫**（以 `read_app_state`，連檔案不存在也不建立；寫是 app 的職責）。三個 wiki tool 收 optional `vault`，但該值必須是 registry 內、且 path 存在（非 `is_missing`）的成員——傳入值與每個 registry entry **都 canonicalize 後比對**，命中才放行；清單外的任意路徑（如 `~/.ssh`）一律拒（回 MCP `invalid_params`）。pinned 模式收到 ≠ 釘定的 `vault` 同樣 fail-loud 報錯。省略 `vault` 時，`wiki_list` / `wiki_search` 只 iterate registry 內 present vault（聚合天然落在白名單內、不逸出 registry），`wiki_read` 則要求明確指定 vault。
+- **只讀 `.codebus/wiki/`，`raw/code/` 不可達**：slug 解析走「遞迴比對 `file_stem`」（`codebus_core::wiki::read::find_page_by_slug`），slug 不參與路徑拼接；解析出的路徑再經 canonicalize 確認落在該 vault 的 wiki root 之下才讀。`<repo>/.codebus/raw/code/`（PII 去識別化鏡像）不在 wiki 子樹內，**永遠不會被列舉、讀取或搜尋到**（整合測試 `codebus-cli/tests/mcp_server.rs` ＋ `mcp_multi_vault.rs` 以 traversal slug ＋ raw/code 內容 query ＋ registry 外 path 三向驗證）。
+- **stdout 純 JSON-RPC**：所有 log / 診斷走 stderr，stdout 只承載協定訊息；阻塞 fs（含每次請求的 registry 重讀）走 `spawn_blocking`、真錯誤回 MCP `ErrorData`（不吞成空結果）。
+- **暴露面與界線**：(1) `vault_list` 會把**已登錄 vault 的絕對路徑清單**回給連線的 client——這些 client 本就是你自己的 agent、且只給 path 不給內容，但仍是一個新的暴露面。(2) MCP 面的防護是 wiki **位置**邊界（擋「讀逃出 wiki 子樹」與「跳到 registry 外的 vault」），**不**保護 wiki **內**已寫入的敏感內容——若敏感字串已落進某 wiki 頁，呼叫端能透過 `wiki_read` / `wiki_search` 讀到它（與 §6 的 in-vault 機密界線同源，靠 PII mirror §4 ＋ vault write-policy，不靠這層）。stdio transport 僅本機 client 連接、無網路監聽，且只在你主動啟動 `codebus mcp` 時對外。
 
 ---
 

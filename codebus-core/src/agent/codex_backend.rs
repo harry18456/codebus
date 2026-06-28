@@ -87,10 +87,17 @@ fn default_codex_bin() -> &'static str {
     }
 }
 
+/// Resolve the codex CLI binary: the `CODEBUS_CODEX_BIN` override when set,
+/// otherwise the platform default ([`default_codex_bin`] — `codex.cmd` on
+/// Windows, `codex` elsewhere). Shared by `build_command` and the app's
+/// one-click MCP client install so detection and invocation agree.
+pub fn codex_bin() -> String {
+    std::env::var("CODEBUS_CODEX_BIN").unwrap_or_else(|_| default_codex_bin().to_string())
+}
+
 impl AgentBackend for CodexBackend {
     fn build_command(&self, spec: &SpawnSpec) -> Command {
-        let codex_bin =
-            std::env::var("CODEBUS_CODEX_BIN").unwrap_or_else(|_| default_codex_bin().to_string());
+        let codex_bin = codex_bin();
         let mut cmd = Command::new(codex_bin);
         // SEC (spawn env scrub): drop the inherited parent environment, then
         // re-inject ONLY the cross-platform system-essential allowlist — the
