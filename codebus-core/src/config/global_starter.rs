@@ -3,8 +3,12 @@
 //! `~/.codebus/config.yaml` is never created automatically by the loaders
 //! (they fall through to defaults on `NotFound`), so users have no way to
 //! discover what knobs exist. The starter writer fixes that: `codebus init`
-//! invokes [`write_starter_config_if_missing`] to drop a fully-commented
-//! template containing every key with its default value.
+//! invokes [`write_starter_config_if_missing`] to drop a starter file — a
+//! short shared header comment pointing at the field reference doc, followed
+//! by every key with its default value. The body is pure values: per-field
+//! teaching lives in `docs/config-reference.md`, not in inline comments,
+//! because `serde_yaml` strips comments the moment the app re-serializes the
+//! config on save (so inline teaching would silently vanish on first save).
 //!
 //! The starter content is hardcoded — it is the source of truth for what
 //! defaults look like in YAML form. Round-tripping it through the per-section
@@ -28,149 +32,67 @@ pub enum StarterOutcome {
     AlreadyPresent,
 }
 
-/// Hardcoded starter config content. Every section is fully populated with
-/// inline-comment defaults so a user reading the file knows what each knob
-/// does without consulting docs. The string MUST round-trip through every
-/// section loader to yield `Default::default()` — verified by
-/// `starter_round_trips_to_defaults` below.
-pub const STARTER_CONFIG: &str = r#"# codebus global config — ~/.codebus/config.yaml
-#
-# Edit this file to customize codebus behavior. Every key below is optional;
-# omitting a key applies its default. Unknown keys are silently ignored
-# (forward-compat) so future codebus versions can extend this schema without
-# breaking your config.
+/// Shared config-file header text. A `macro_rules!` rather than a `const` so
+/// it can be fed to `concat!` at compile time — a `const &str` cannot — which
+/// lets [`CONFIG_HEADER`] and [`STARTER_CONFIG`] share one source of header
+/// text with no duplicated literal. Kept deliberately short: it points at the
+/// field reference doc instead of embedding per-field teaching.
+macro_rules! config_header {
+    () => {
+        "# codebus config (~/.codebus/config.yaml)\n# Managed by the codebus app Settings, or hand-edit. Every key is optional;\n# omit it to use the default. Full field reference: docs/config-reference.md\n"
+    };
+}
 
-# PII scanner behavior during raw mirror sync.
+/// The shared config-file header (see [`config_header`]). The app's
+/// `save_global_config` path prepends this exact text after serializing, so a
+/// CLI-written starter and an app-saved config share one header-plus-values
+/// shape. Single source of truth — do not duplicate the literal elsewhere.
+pub const CONFIG_HEADER: &str = config_header!();
+
+/// Hardcoded starter config content: [`CONFIG_HEADER`] followed by every
+/// section populated with its default value as pure YAML (no inline per-field
+/// comments — see `docs/config-reference.md` for what each knob does). The
+/// body MUST round-trip through every section loader to yield
+/// `Default::default()` — verified by `starter_round_trips_to_defaults` below.
+pub const STARTER_CONFIG: &str = concat!(
+    config_header!(),
+    r#"
 pii:
-  # Scanner implementation: "regex_basic" runs the built-in regex set covering
-  # common secret shapes (AWS / Anthropic / GitHub / Slack / Google / OpenAI /
-  # Stripe keys, PEM private keys, JWTs, DB connection strings) plus email and
-  # IPv4; "none" disables PII scanning entirely. (Note: do NOT use the bare
-  # YAML literal `null`
-  # here — that parses as the YAML null literal and falls through to the
-  # default `regex_basic`. Use the string `none` instead.)
   scanner: regex_basic
-
-  # Extra regex patterns appended to the built-in set. Each entry is a regex
-  # source string; compile failures fall back to the built-in set with a
-  # stderr warning.
   patterns_extra: []
-
-  # Action on Warn-severity PII match (email, ipv4):
-  #   warn — copy file to mirror as-is, emit stderr warning per match (default)
-  #   skip — do NOT copy the file to the mirror; emit stderr warning per match
-  #   mask — copy file with each Warn match replaced by [REDACTED:<pattern_name>]
-  #
-  # NOTE: this setting only governs Warn-severity matches. Critical-severity
-  # matches (AWS access keys, Anthropic API keys) are ALWAYS masked
-  # regardless of this value — the security floor that prevents real
-  # credentials from entering the raw mirror in a recoverable form is
-  # non-negotiable. Set to `mask` for the legacy v3-config behavior of
-  # masking everything (Warn matches included).
   on_hit: warn
 
-# Agent provider + endpoint + per-verb config.
-#
-# `active_provider` selects which agent CLI drives spawns. Each provider lives
-# under `providers.<name>` and carries its own endpoint profiles. (Currently
-# the only supported provider is `claude`; more land as pure additions.)
-#
-# For the `claude` provider, two endpoint profiles are supported:
-#   system — use the user's globally configured Claude CLI endpoint (no env
-#            injection). `model` is a closed enum: opus-4-7 / opus-4-6 /
-#            haiku-4-5 / sonnet-4-6 (codebus translates to the right --model
-#            flag).
-#   azure  — talk to an Azure AI Foundry Anthropic-compatible endpoint.
-#            `model` is the Azure deployment name (a free string, passed
-#            verbatim). API key is read from the OS keyring; codebus
-#            injects ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY /
-#            CLAUDE_CODE_DISABLE_ADVISOR_TOOL into the child process only —
-#            never modifies the parent shell environment.
-#
-# The provider's `active` selector picks which endpoint profile drives the
-# spawn. The other profile is cold storage: codebus does NOT validate its
-# fields, so you can park half-edited config there while iterating.
 agent:
   active_provider: claude
-
   providers:
     claude:
       active: system
-
       system:
         goal:
-          # Reasoning-heavy ingest into the wiki — v2-verified default.
           model: opus-4-6
           effort: high
         query:
-          # Read-only retrieval — fast turnaround.
           model: haiku-4-5
           effort: low
         fix:
-          # Lint-and-edit loop — balanced choice.
           model: sonnet-4-6
           effort: medium
         verify:
-          # Content-verify spawn for quiz / goal verbs — judges whether the
-          # generated content is grounded in the source mirror / planned
-          # pages. Defaults to opus-4-6 + high effort: the "expensive
-          # verification" half of the "cheap generation + expensive
-          # verification" pattern. Override to haiku-4-5 + low to share the
-          # cheap profile of your main spawn (defeats the cost design but
-          # valid).
           model: opus-4-6
           effort: high
 
-      # Uncomment + fill in to use Azure endpoints. Run
-      #   codebus config set-key azure
-      # to store the API key in your OS keyring.
-      # azure:
-      #   base_url: https://<your-resource>.cognitiveservices.azure.com/anthropic
-      #   keyring_service: codebus-azure
-      #   goal:   { model: <your-opus-deployment-name>,   effort: high   }
-      #   query:  { model: <your-haiku-deployment-name>,  effort: low    }
-      #   fix:    { model: <your-sonnet-deployment-name>, effort: medium }
-      #   verify: { model: <your-opus-deployment-name>,   effort: high   }
-
-# PreToolUse hook gates. Default behaviors are safe (block image / binary
-# reads to keep the regex_basic PII filter effective); flip individual
-# knobs to false at your own risk.
 hooks:
-  # Controls `codebus hook check-read` — the PreToolUse hook that blocks
-  # the agent from reading image / PDF / binary files (extensions like
-  # png / jpg / pdf / gif / webp / bmp / tiff / ico / heic / heif / avif).
-  # Default true (block). Set false to let the agent ingest these files;
-  # doing so bypasses the regex_basic PII filter (which only scans text).
   read_image_block: true
-
-  # Controls the vault-root containment boundary in `codebus hook
-  # check-read`: confines the agent's Read / Glob / Grep to inside the
-  # vault (raw/code, wiki). A read whose path canonicalizes outside the
-  # vault root is blocked. Default true (contain). Set false ONLY as an
-  # emergency escape hatch — disabling it re-opens reads of the parent
-  # repo and user-home files.
   read_path_containment: true
 
-# Lint subsystem.
 lint:
   fix:
-    # Whether the post-goal lint-and-fix phase runs (and whether `codebus fix`
-    # is allowed to run when invoked directly). Set false to disable both.
     enabled: true
 
-# Run-log persistence (per-verb-invocation jsonl history).
 log:
-  # Sink implementation:
-  #   jsonl  — append one JSON line per run to <dir>/runs-YYYY-MM-DD.jsonl
-  #   none   — opt out, no log written. (Use the literal `none`; a bare YAML
-  #            null literal returns a parse error and falls back to default.
-  #            Same foot-gun avoidance as `pii.scanner: none`.)
   sink: jsonl
-
-  # Output directory. Omit (or comment out) to use the per-vault default
-  # <vault>/.codebus/log/. Tilde-prefixed paths expand to the home directory.
-  # dir: ~/codebus-history
-"#;
+"#
+);
 
 /// Write [`STARTER_CONFIG`] to `path` if the file does not already exist.
 /// Creates the parent directory if necessary. Returns [`StarterOutcome::AlreadyPresent`]
@@ -290,5 +212,30 @@ mod tests {
     #[test]
     fn starter_config_includes_read_path_containment() {
         assert!(STARTER_CONFIG.contains("read_path_containment: true"));
+    }
+
+    /// config-save-robustness: the starter begins with the shared CONFIG_HEADER
+    /// (single source of truth reused by the app's save path).
+    #[test]
+    fn starter_starts_with_shared_header() {
+        assert!(STARTER_CONFIG.starts_with(CONFIG_HEADER));
+        assert!(CONFIG_HEADER.starts_with("# codebus config"));
+        assert!(CONFIG_HEADER.contains("docs/config-reference.md"));
+    }
+
+    /// config-save-robustness: past the shared header the starter body carries
+    /// NO inline per-field teaching comments — pure values only, so the app's
+    /// comment-stripping save round-trip cannot diverge from the starter shape.
+    #[test]
+    fn starter_body_has_no_inline_comments_beyond_header() {
+        let body = STARTER_CONFIG
+            .strip_prefix(CONFIG_HEADER)
+            .expect("starter must start with CONFIG_HEADER");
+        for line in body.lines() {
+            assert!(
+                !line.trim_start().starts_with('#'),
+                "starter body must carry no inline comments, found: {line:?}"
+            );
+        }
     }
 }

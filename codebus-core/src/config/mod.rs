@@ -36,7 +36,7 @@ pub use endpoint::{
     ActiveProfile, AzureProfile, AzureVerbConfig, ClaudeCodeConfig, SystemProfile,
     SystemVerbConfig, parse_codex_yaml, system_model_to_cli_flag,
 };
-pub use global_starter::{StarterOutcome, write_starter_config_if_missing};
+pub use global_starter::{CONFIG_HEADER, StarterOutcome, write_starter_config_if_missing};
 pub use hooks::{HooksConfig, load_hooks_config};
 pub use keyring::KeyringError;
 pub use lifecycle::{LifecycleConfig, load_lifecycle_config};

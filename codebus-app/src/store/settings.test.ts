@@ -42,6 +42,26 @@ describe("settings store", () => {
     })
   })
 
+  it("drops empty / whitespace pii.patterns_extra from the save payload", async () => {
+    mockedInvoke.mockResolvedValueOnce(undefined)
+    useSettingsStore.setState({
+      config: {
+        pii: { scanner: "regex_basic", patterns_extra: ["", "  ", "real-pattern"] },
+        app: { quiz: { pass_threshold: 80, default_length: 5 } },
+      },
+      initialConfig: {},
+      dirty: true,
+    })
+    await useSettingsStore.getState().save()
+    const sentConfig = (
+      mockedInvoke.mock.calls[0]?.[1] as {
+        config: { pii: { patterns_extra: string[] } }
+      }
+    ).config
+    // Blank rows the user never filled in are not persisted; the real one stays.
+    expect(sentConfig.pii.patterns_extra).toEqual(["real-pattern"])
+  })
+
   it("resets to initial config", () => {
     useSettingsStore.setState({
       config: { app: { quiz: { pass_threshold: 70 } } },

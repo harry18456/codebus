@@ -11,7 +11,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use codebus_core::config::default_config_path;
+use codebus_core::config::{CONFIG_HEADER, default_config_path};
 use codebus_core::config::endpoint::{
     parse_claude_code_yaml, parse_codex_yaml, read_active_provider,
 };
@@ -120,6 +120,19 @@ pub(crate) fn save_global_config_at(path: &Path, payload: &GlobalConfig) -> IpcR
         // Strip the synthetic pattern-count key the load path injects — it is
         // backend-derived metadata, never user config, and SHALL NOT persist.
         obj.remove(PII_PATTERN_COUNT_KEY);
+        // config-save-robustness: drop empty / whitespace-only patterns_extra
+        // before write. A blank PII rule (an unfilled Settings row) is an empty
+        // regex that matches zero-width at every character — left on disk it
+        // would make the next mirror scan pathologically slow. The scanner has
+        // its own guards, but keeping the file clean stops the bad value at the
+        // source.
+        if let Some(pii) = obj.get_mut("pii").and_then(serde_json::Value::as_object_mut)
+            && let Some(extras) = pii
+                .get_mut("patterns_extra")
+                .and_then(serde_json::Value::as_array_mut)
+        {
+            extras.retain(|v| v.as_str().is_none_or(|s| !s.trim().is_empty()));
+        }
         obj.insert("app".to_string(), enriched_app);
         // Merge the resolved `quiz.default_length` into the existing `quiz`
         // object rather than replacing the whole namespace — replacing
@@ -141,7 +154,12 @@ pub(crate) fn save_global_config_at(path: &Path, payload: &GlobalConfig) -> IpcR
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(AppError::from)?;
     }
-    let yaml_text = json_to_yaml(&enriched)?;
+    // config-save-robustness: prepend the shared CONFIG_HEADER so an app-saved
+    // config and a CLI-written starter share one header-plus-values shape. The
+    // header is a YAML comment, so it does not affect the next load. (serde_yaml
+    // strips comments on serialize, which is why the header is re-applied here
+    // rather than carried through the payload.)
+    let yaml_text = format!("{CONFIG_HEADER}\n{}", json_to_yaml(&enriched)?);
     let tmp: PathBuf = path.with_extension("yaml.tmp");
     fs::write(&tmp, yaml_text).map_err(AppError::from)?;
     fs::rename(&tmp, path).map_err(AppError::from)?;
@@ -664,6 +682,45 @@ mod tests {
             matches!(err, AppError::ConfigParse { .. }),
             "expected ConfigParse, got {err:?}"
         );
+    }
+
+    /// config-save-robustness: an empty / whitespace-only `pii.patterns_extra`
+    /// entry (e.g. a blank Settings row) MUST be dropped before write so it
+    /// never lands on disk.
+    #[test]
+    fn save_drops_empty_patterns_extra() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        let payload = json!({
+            "pii": { "scanner": "regex_basic", "patterns_extra": ["", "   ", "real-pattern"] },
+            "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } }
+        });
+        save_global_config_at(&path, &payload).unwrap();
+        let reloaded = load_global_config_at(&path).unwrap();
+        assert_eq!(
+            reloaded["pii"]["patterns_extra"],
+            json!(["real-pattern"]),
+            "empty / whitespace patterns must be dropped, got {:?}",
+            reloaded["pii"]["patterns_extra"]
+        );
+    }
+
+    /// config-save-robustness: the saved YAML begins with the shared
+    /// `CONFIG_HEADER` (same constant the CLI starter uses) and still loads
+    /// back cleanly because the header is a comment.
+    #[test]
+    fn save_prepends_shared_config_header() {
+        let tmp = TempDir::new().unwrap();
+        let path = config_path(&tmp);
+        let payload = json!({ "app": { "quiz": { "pass_threshold": 80, "default_length": 5 } } });
+        save_global_config_at(&path, &payload).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.starts_with(codebus_core::config::CONFIG_HEADER),
+            "saved YAML must begin with CONFIG_HEADER, got: {:?}",
+            &on_disk[..on_disk.len().min(160)]
+        );
+        load_global_config_at(&path).expect("reloads cleanly with header prepended");
     }
 
     #[test]

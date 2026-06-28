@@ -203,9 +203,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   async save() {
     set({ saving: true, error: null })
     try {
-      const cfg = get().config
+      // config-save-robustness: strip blank PII rules before persisting (see
+      // sanitizeForSave). The backend save_global_config filters too; doing it
+      // here keeps the sent payload and the post-save in-memory state honest.
+      const cfg = sanitizeForSave(get().config)
       await saveGlobalConfigIpc(cfg)
-      set({ initialConfig: cfg, dirty: false, saving: false })
+      set({ config: cfg, initialConfig: cfg, dirty: false, saving: false })
     } catch (err) {
       set({ saving: false, error: toLocalizedError(err) })
       throw err
@@ -361,4 +364,26 @@ function mergeDeep<T extends Record<string, unknown>>(target: T, patch: Partial<
     }
   }
   return out as T
+}
+
+/**
+ * config-save-robustness: strip empty / whitespace-only `pii.patterns_extra`
+ * entries before persisting. A blank PII rule (an unfilled editor row) is an
+ * empty regex; left in the saved file it makes the next mirror scan match
+ * zero-width at every character. Mirrors the backend `save_global_config`
+ * filter. Returns a new object when it removes anything; never mutates input.
+ */
+function sanitizeForSave(config: GlobalConfig): GlobalConfig {
+  const pii = config.pii
+  if (!pii || typeof pii !== "object") return config
+  const extras = (pii as { patterns_extra?: unknown }).patterns_extra
+  if (!Array.isArray(extras)) return config
+  const filtered = extras.filter(
+    (p) => typeof p !== "string" || p.trim().length > 0,
+  )
+  if (filtered.length === extras.length) return config
+  return {
+    ...config,
+    pii: { ...(pii as Record<string, unknown>), patterns_extra: filtered },
+  }
 }

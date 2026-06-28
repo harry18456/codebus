@@ -11,6 +11,11 @@
 //!   - The `regex` crate is RE2-style, no catastrophic backtracking.
 //!   - User-supplied `patterns_extra` is rejected at construction if any
 //!     entry fails to compile — fail fast, do not silently drop.
+//!   - Empty / whitespace-only `patterns_extra` entries are skipped at
+//!     construction (an empty source is not a typo to fail on); zero-width
+//!     matches (start == end) are dropped at scan time. Together these stop an
+//!     empty / `a*`-style pattern from flooding one match per character on a
+//!     large file.
 
 use crate::pii::provider::{PiiMatch, PiiScanner, PiiSeverity};
 use regex::Regex;
@@ -158,7 +163,18 @@ impl RegexBasicScanner {
             })
             .collect::<Result<_, _>>()?;
 
-        for (idx, src) in patterns_extra.iter().enumerate() {
+        // Skip empty / whitespace-only extras before numbering: an empty
+        // source is not a typo to fail-fast on (it compiles fine), it is just
+        // an unfinished rule — most often a blank row the Settings UI let the
+        // user add. Filtering before `enumerate` keeps `custom-N` labels
+        // contiguous over the retained entries (first non-empty stays
+        // `custom-0`). The scan-time zero-width guard above is the root defense;
+        // this keeps a useless empty rule out of the set entirely.
+        for (idx, src) in patterns_extra
+            .iter()
+            .filter(|src| !src.trim().is_empty())
+            .enumerate()
+        {
             rules.push(CompiledRule {
                 label: format!("custom-{idx}"),
                 severity: PiiSeverity::Critical,
@@ -179,6 +195,14 @@ impl PiiScanner for RegexBasicScanner {
         let mut matches: Vec<PiiMatch> = Vec::new();
         for rule in &self.rules {
             for m in rule.re.find_iter(content) {
+                // Drop zero-width matches (start == end). They carry no text
+                // and, for any zero-width-capable pattern (an empty source,
+                // `a*`, `\b`, `.*` against an empty region), the regex engine
+                // reports one at every character position — a per-character
+                // flood that makes scanning a large file pathologically slow.
+                if m.start() == m.end() {
+                    continue;
+                }
                 matches.push(PiiMatch {
                     pattern_name: rule.label.clone(),
                     start: m.start(),
@@ -446,5 +470,51 @@ mod tests {
         // Host-only URI with no `user:password@` userinfo → no credential leak.
         let m = scanner().scan("postgres://db.internal:5432/app", "src/db.rs");
         assert_eq!(count_named(&m, "db-connection-string"), 0, "got {m:?}");
+    }
+
+    // --- config-save-robustness: empty / zero-width extra pattern safety ---
+
+    #[test]
+    fn zero_width_capable_extra_pattern_emits_no_matches() {
+        // `x*` is non-empty (so it survives construction) but matches
+        // zero-width at every position when `x` is absent. The scan-time
+        // start == end guard must drop those so there is no per-character flood.
+        let s = RegexBasicScanner::new(&["x*".to_string()]).expect("compiles");
+        let m = s.scan("bbbb", "f.txt");
+        assert!(m.is_empty(), "zero-width matches must be dropped, got {m:?}");
+    }
+
+    #[test]
+    fn empty_extra_pattern_is_skipped_at_construction() {
+        // An empty / whitespace-only extra pattern is NOT a compile error; it
+        // is skipped and never becomes a rule.
+        let s = RegexBasicScanner::new(&["".to_string(), "   ".to_string()])
+            .expect("empty extras are skipped, not errors");
+        assert_eq!(
+            s.rules.len(),
+            builtin_pattern_count(),
+            "empty / whitespace-only extras must not add rules"
+        );
+    }
+
+    #[test]
+    fn empty_extra_pattern_does_not_flood_large_content() {
+        // pii-filter "Empty and Zero-Width Extra Pattern Safety" example:
+        // [""] over 250k chars yields zero matches, not one per character.
+        let big = "a".repeat(250_000);
+        let s = RegexBasicScanner::new(&["".to_string()]).expect("compiles");
+        let m = s.scan(&big, "big.txt");
+        assert!(m.is_empty(), "expected 0 matches, got {}", m.len());
+    }
+
+    #[test]
+    fn non_empty_custom_keeps_contiguous_numbering_after_skipping_empty() {
+        // The empty entry is skipped; the real pattern is still custom-0
+        // (numbering counts only retained, non-empty entries).
+        let extras = vec!["".to_string(), r"\bINTERNAL-\d{6}\b".to_string()];
+        let s = RegexBasicScanner::new(&extras).expect("compiles");
+        let m = s.scan("ticket INTERNAL-123456 closed", "n.md");
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].pattern_name, "custom-0");
     }
 }
