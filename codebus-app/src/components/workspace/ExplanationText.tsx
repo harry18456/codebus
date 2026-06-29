@@ -93,14 +93,25 @@ function renderInline(input: string, ctx: RenderContext): ReactNode[] {
       const end = input.indexOf("`", i + 1)
       if (end > i + 1) {
         flushText()
-        nodes.push(
-          <code
-            key={ctx.nextKey()}
-            className="rounded border border-border bg-bg-sunken px-1 py-0.5 font-mono text-meta text-fg"
-          >
-            {input.slice(i + 1, end)}
-          </code>,
-        )
+        const inner = input.slice(i + 1, end)
+        // A lone `[[slug]]` wrapped in inline-code backticks is a
+        // mis-formatted citation (agents occasionally monospace the slug),
+        // not literal code: render it as the citation it is so the backticks
+        // don't suppress the link. Real code — and a wikilink mixed with
+        // other text inside backticks — stays literal.
+        const citation = inner.trim().match(/^\[\[([^\]]+)\]\]$/)
+        if (citation) {
+          nodes.push(renderWikiLink(citation[1].trim(), ctx))
+        } else {
+          nodes.push(
+            <code
+              key={ctx.nextKey()}
+              className="rounded border border-border bg-bg-sunken px-1 py-0.5 font-mono text-meta text-fg"
+            >
+              {inner}
+            </code>,
+          )
+        }
         i = end + 1
         continue
       }

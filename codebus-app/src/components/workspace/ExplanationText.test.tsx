@@ -66,4 +66,50 @@ describe("InlineMarkdownText", () => {
     ).toBeNull()
     expect(screen.getByTestId("inline-text")).toHaveTextContent("```rust")
   })
+
+  it("renders a backtick-wrapped lone citation `[[slug]]` as a clickable wikilink, not literal code", () => {
+    const onOpenWikiPage = vi.fn()
+    render(
+      <InlineMarkdownText
+        text={"See `[[vault-model]]` for the vault layout."}
+        pages={{
+          "vault-model": {
+            slug: "vault-model",
+            path: "wiki/concepts/vault-model.md",
+            title: "Vault Model",
+          },
+        }}
+        onOpenWikiPage={onOpenWikiPage}
+      />,
+    )
+
+    const link = screen.getByTestId("wikilink-vault-model")
+    expect(link.tagName).toBe("A")
+    expect(link).toHaveClass("cite-link")
+    expect(link).toHaveTextContent("Vault Model")
+    expect(link.closest("code")).toBeNull()
+    fireEvent.click(link)
+    expect(onOpenWikiPage).toHaveBeenCalledWith("vault-model")
+  })
+
+  it("unwraps a backtick-wrapped citation even when unresolvable (dimmed span, not code)", () => {
+    render(<InlineMarkdownText text={"`[[missing-page]]`"} pages={{}} />)
+
+    const link = screen.getByTestId("wikilink-missing-page")
+    expect(link.tagName).toBe("SPAN")
+    expect(link).toHaveAttribute("data-state", "unresolvable")
+    expect(link.closest("code")).toBeNull()
+  })
+
+  it("leaves genuine inline code untouched and does not unwrap a wikilink mixed with other text", () => {
+    render(
+      <InlineMarkdownText
+        text={"Call `foo()`; `see [[x]]` stays code."}
+        pages={{ x: { slug: "x", path: "wiki/x.md", title: "X" } }}
+      />,
+    )
+
+    expect(screen.getByText("foo()").tagName).toBe("CODE")
+    expect(screen.queryByTestId("wikilink-x")).toBeNull()
+  })
 })
